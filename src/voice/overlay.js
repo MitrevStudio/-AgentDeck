@@ -24,11 +24,15 @@ const STATES = new Set(["listening", "transcribing", "success", "error", "prepar
 // States that go away by themselves unless something replaced them.
 const AUTO_HIDE = { notice: NOTICE_MS, success: SUCCESS_MS };
 
+// A notice: {title, detail, preview?, actions?: [{id, label, primary}], durationMs?}; preview is a line of quoted
+// text, and each action is a button that reports {type: "notice-action", id}.
+//
 // events: "action" {type: "retry", jobId} | {type: "close"} | {type: "pause"} | {type: "stop"} | {type: "speed", speed}
-//                   | {type: "mode", mode} (the mode chip while recording)
+//                   | {type: "mode", mode} (the mode chip while recording) | {type: "notice-action", id}
 //                   | {type: "run"} | {type: "cancel"} | {type: "choose", index} | {type: "hold", on} (a command's card;
 //                     hold: the pointer rests on it) | {type: "finish"} (a click on the pill while a command is spoken)
 //         "player" {id, type: "started" | "ended" | "error", message?}
+//         "hidden" - the panel went away: closed, timed out, or about to show something fresh
 function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-preload.js"), onAction } = {}) {
   const emitter = new EventEmitter();
   if (onAction) emitter.on("action", onAction);
@@ -43,6 +47,7 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
   let revealSeq = 0;
   let revealTimer = null;
   let autoHideTimer = null;
+  let autoHide = null; // {left, since}: what the auto-hide has left; since is null while the pointer holds it
   let exitTimer = null;
   let playerId = null;
   let destroyed = false;
@@ -123,10 +128,22 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
       }
     }
     send("voice:overlay-state", { seq: id, state: next, data });
-    if (AUTO_HIDE[next]) {
-      const ms = Number(d.durationMs) > 0 ? Number(d.durationMs) : AUTO_HIDE[next];
-      autoHideTimer = setTimeout(() => { if (state === next) hide(); }, ms);
-    }
+    autoHide = null;
+    if (AUTO_HIDE[next]) armAutoHide(Number(d.durationMs) > 0 ? Number(d.durationMs) : AUTO_HIDE[next]);
+  }
+
+  function armAutoHide(ms) {
+    clearTimeout(autoHideTimer);
+    autoHide = { left: ms, since: Date.now() };
+    autoHideTimer = setTimeout(hide, ms);
+  }
+  // The pointer resting on the panel holds it (the page stops the notice's hairline too); it goes on from there.
+  function holdAutoHide(on) {
+    if (!autoHide || on === (autoHide.since == null)) return;
+    if (!on) return armAutoHide(autoHide.left);
+    clearTimeout(autoHideTimer);
+    autoHide.left = Math.max(0, autoHide.left - (Date.now() - autoHide.since));
+    autoHide.since = null;
   }
 
   // Partial update of the current state: {level, elapsed} / {mode} while listening; {rewriting: mode} while
@@ -139,6 +156,7 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
 
   function hide() {
     clearTimeout(autoHideTimer);
+    autoHide = null;
     clearTimeout(revealTimer);
     revealSeq = 0;
     if (!visible && !state) return;
@@ -147,6 +165,7 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
     data = {};
     clickThrough();
     send("voice:overlay-state", { seq: ++seq, state: null, data: {} });
+    emitter.emit("hidden");
     // The page plays its exit animation first; a show() in the meantime keeps the window.
     clearTimeout(exitTimer);
     exitTimer = setTimeout(() => {
@@ -183,6 +202,7 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
     if (type === "mode") ev.mode = String(arg);
     if (type === "choose") ev.index = Number(arg);
     if (type === "hold") ev.on = Boolean(arg);
+    if (type === "notice-action") ev.id = String(arg);
     if (type === "close") hide();
     emitter.emit("action", ev);
   }
@@ -191,6 +211,7 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
   function onInteractive(e, on) {
     if (!isOurs(e)) return;
     win.setIgnoreMouseEvents(!(on && visible), { forward: true });
+    holdAutoHide(Boolean(on && visible));
   }
 
   function onPlayer(e, msg) {

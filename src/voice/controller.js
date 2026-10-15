@@ -27,12 +27,26 @@ const { t, tn, formatNumber, locale } = require("../i18n");
 // Stand in for a job id while the panel belongs to a reading, or to a voice command.
 const READ_ALOUD = "read-aloud";
 const COMMAND = "command";
+// "Nothing selected" offering the clipboard instead: its button, how long it stays, how much of the text it shows.
+const READ_CLIPBOARD = "read-clipboard";
+const OFFER_MS = 8000;
+const PREVIEW_CHARS = 80;
+const CLIPBOARD_CHARS = 2 * MAX_CHARACTERS + 1; // one past what tts.limitText looks at, so a longer text is reported as cut
 const VOICETRAY_MUTEX = "Local\\VoiceTray.SingleInstance";
 // Text is looked up when it is shown, so it is always in the language of the moment.
 const keepRecording = () => t("voice.notice.keepRecording");
 
 const menuText = s => String(s).replace(/&/g, "&&"); // a single & is a mnemonic marker in Windows menus
 const logError = what => e => console.error(`${what}:`, e);
+function shortAge(ms) {
+  const s = Math.max(1, Math.round(ms / 1000));
+  if (s < 60) return t("time.short.sec", { n: s });
+  return s < 3600 ? t("time.short.min", { n: Math.round(s / 60) }) : t("time.short.hour", { n: Math.round(s / 3600) });
+}
+function previewOf(text) {
+  const chars = [...text.slice(0, 4 * PREVIEW_CHARS).replace(/\s+/g, " ").trim()];
+  return chars.length > PREVIEW_CHARS ? `${chars.slice(0, PREVIEW_CHARS - 1).join("").trimEnd()}…` : chars.join("");
+}
 
 // balloon(text, {iconType, jobId}) shows a tray balloon; clicking one that carries a jobId should call retry(jobId).
 // onTrayChanged() asks main to rebuild the tray menu and badge. prefs (../prefs.js) and general (the Settings
@@ -58,6 +72,7 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
   let owner = null;       // what the panel is reporting on: a job id, READ_ALOUD or null
   let toldOnPanel = null; // the dictation whose "copied - press Ctrl+V" the panel showed
   let retryText = null;   // what Retry on a failed reading reads again
+  let offer = null;       // {text, copiedAt}: the clipboard that "nothing selected" offers to read, while it is shown
   let registered = {};    // hotkey id -> accelerator held
   let editingHotkeys = false; // the Settings page is recording a new combination
   let trayTimer = null;
@@ -71,6 +86,7 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
   const q = createQueue({ notify, vocabulary: terms });
   const recorder = createRecorder();
   const overlay = createOverlay({ onAction });
+  overlay.on("hidden", dropOffer);
   const saveSettings = patch => settings.save(patch).catch(logError("Could not save the voice settings"));
   const tts = createReadAloud({ overlay, getSettings: settings.load, getApiKey: settings.getApiKey, saveSettings });
   const windows = createVoiceWindows({
@@ -82,6 +98,7 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
   // RegisterHotKey needs a window that lives as long as the hotkeys; a hidden one is enough.
   const hotkeyWin = new BrowserWindow({ show: false, width: 1, height: 1, skipTaskbar: true, title: "AgentDeck hotkeys" });
   const hotkeys = win32.createHotkeys(hotkeyWin);
+  const clip = win32.watchClipboard(hotkeyWin);
 
   // A dictation emits several events within milliseconds; the menu is rebuilt once.
   function trayChanged() {
@@ -90,13 +107,14 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
 
   // ---------- panel ----------
   const busy = () => Boolean(rec || capturing) || tts.isActive() || commands.active;
-  function panel(state, data, who) { owner = who; overlay.show(state, data); }
+  function panel(state, data, who) { dropOffer(); owner = who; overlay.show(state, data); }
   // A fresh panel at the cursor (VoiceTray closed and re-created its window).
   function freshPanel(state, data, who) { overlay.hide(); panel(state, data, who); }
   function closePanel() { overlay.hide(); owner = null; }
 
   function onAction(a) {
     if (["run", "finish", "cancel", "choose", "hold"].includes(a.type)) return commands.onAction(a);
+    if (a.type === "notice-action") { if (a.id === READ_CLIPBOARD) readOffer("button"); return; }
     if (a.type === "retry") {
       closePanel();
       // A failed reading has no record to retry - it is read again from its text.
@@ -323,6 +341,7 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
   function onReadAloudKey() {
     if (rec) return balloon(keepRecording());
     if (commands.active) return commands.cancel(); // the reading would take the panel from the command's card
+    if (offer) return readOffer("hotkey");
     // Pressed during a reading it stops: the selection is usually still highlighted, and reading it would restart
     // the same passage instead of silencing it.
     if (capturing || tts.isActive()) { capturing = null; tts.stop(); return; }
@@ -335,10 +354,16 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
   // Nothing is shown while the selection is copied: in VS Code it vanished the moment a panel appeared.
   async function readSelection(target) {
     const token = capturing = {};
+    const copied = clip.last(); // before the capture, which may copy and then put the clipboard back
     let sel;
     try { sel = await selection.capture(target); } catch (e) { sel = { text: "", failure: "Error", message: e.message }; }
     if (capturing !== token) return; // stopped, or a recording started, while copying
+    // Apps that draw their own selection (Claude Code in a terminal) hide it from Windows but copy it on mouse-up:
+    // what the clipboard holds is offered, and read only when asked for.
+    const clipText = sel.failure === "NothingSelected" ? await selection.clipboardText(CLIPBOARD_CHARS).catch(() => null) : null;
+    if (capturing !== token) return;
     capturing = null;
+    if (clipText?.trim()) return offerClipboard(clipText, copied);
     if (sel.failure !== "None" || !sel.text.trim()) return readAloudNotice(...selectionProblem(sel));
     tts.start(sel.text);
     if (!sel.clipboardRestored) readAloudNotice(t("voice.notice.clipboardNotRestored.title"), t("voice.notice.clipboardNotRestored.detail"));
@@ -355,10 +380,37 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
     }
   }
 
-  function readAloudNotice(title, detail) {
+  function readAloudNotice(title, detail, extra) {
     // Mid-reading it must not replace the panel that is playing.
-    if (tts.isActive()) return balloon(t("voice.balloon.notice", { title, detail }), { iconType: "warning" });
-    freshPanel("notice", { title, detail }, READ_ALOUD);
+    if (tts.isActive()) { balloon(t("voice.balloon.notice", { title, detail }), { iconType: "warning" }); return false; }
+    freshPanel("notice", { title, detail, ...extra }, READ_ALOUD);
+    return true;
+  }
+
+  // copied: the clipboard's last change before the capture; its age is told only while it is still that change.
+  function offerClipboard(text, copied) {
+    const copiedAt = copied && copied.seq === win32.clipboardSeq() ? copied.at : null;
+    const key = keyLabel(registered.readAloud) || t("voice.notice.readHotkey");
+    const detail = copiedAt == null ? t("voice.notice.clipboard.held", { key })
+      : t("voice.notice.clipboard.copied", { key, time: shortAge(Date.now() - copiedAt) });
+    const actions = [{ id: READ_CLIPBOARD, label: t("voice.notice.clipboard.read"), primary: true }];
+    if (!readAloudNotice(t("voice.notice.nothingSelected.title"), detail, { preview: previewOf(text), actions, durationMs: OFFER_MS })) return;
+    offer = { text, copiedAt };
+    hotkeys.register("cancel", "Escape", dismissOffer);
+  }
+  function dismissOffer() { closePanel(); }
+  // Whatever replaces or closes the notice ends the offer, and gives Esc back unless a recording has taken it since.
+  function dropOffer() {
+    if (!offer) return;
+    offer = null;
+    hotkeys.unregister("cancel", dismissOffer);
+  }
+  function readOffer(via) {
+    const o = offer;
+    if (!o) return;
+    dropOffer();
+    selection.logClipboardRead({ via, chars: o.text.length, ageMs: o.copiedAt == null ? null : Date.now() - o.copiedAt });
+    try { readText(o.text); } catch (e) { balloon(e.message); }
   }
 
   // Re-read from History, Retry after a failure.
@@ -505,6 +557,8 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
     edge?.keys.release();
     clearTimeout(trayTimer);
     hotkeys.unregisterAll();
+    clip.dispose();
+    offer = null;
     capturing = null;
     tts.stop();
     rec = null;

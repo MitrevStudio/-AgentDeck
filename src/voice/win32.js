@@ -42,6 +42,8 @@ const f = {
   CreateWindowExW: user32.func("HWND __stdcall CreateWindowExW(uint32_t exStyle, str16 cls, str16 name, uint32_t style, int x, int y, int w, int h, HWND parent, HANDLE menu, HANDLE inst, HANDLE param)"),
   DestroyWindow: user32.func("bool __stdcall DestroyWindow(HWND hWnd)"),
   GetClipboardSequenceNumber: user32.func("uint32_t __stdcall GetClipboardSequenceNumber()"),
+  AddClipboardFormatListener: user32.func("bool __stdcall AddClipboardFormatListener(HWND hWnd)"),
+  RemoveClipboardFormatListener: user32.func("bool __stdcall RemoveClipboardFormatListener(HWND hWnd)"),
   OpenClipboard: user32.func("bool __stdcall OpenClipboard(HWND owner)"),
   CloseClipboard: user32.func("bool __stdcall CloseClipboard()"),
   EmptyClipboard: user32.func("bool __stdcall EmptyClipboard()"),
@@ -309,6 +311,24 @@ async function writeClipboardText(text) {
   return r.ok && !!r.value;
 }
 
+// When the clipboard last changed, as seen by one of our windows: {at, seq}, or null before the first change since
+// the start. Windows posts WM_CLIPBOARDUPDATE to listeners; nothing is polled.
+const WM_CLIPBOARDUPDATE = 0x031d;
+function watchClipboard(browserWindow) {
+  const hwnd = hwndOf(browserWindow);
+  let last = null;
+  browserWindow.hookWindowMessage(WM_CLIPBOARDUPDATE, () => { last = { at: Date.now(), seq: clipboardSeq() }; });
+  const listening = f.AddClipboardFormatListener(hwnd);
+  return {
+    last: () => last,
+    dispose() {
+      if (browserWindow.isDestroyed()) return;
+      if (listening) f.RemoveClipboardFormatListener(hwnd);
+      browserWindow.unhookWindowMessage(WM_CLIPBOARDUPDATE);
+    }
+  };
+}
+
 // ---------- hotkeys ----------
 
 const WM_HOTKEY = 0x0312;
@@ -379,9 +399,10 @@ function createHotkeys(browserWindow) {
   });
   browserWindow.once("closed", () => { alive = false; held.clear(); });
 
-  function unregister(name) {
+  // With onPress: only while that handler still holds the name - another one may have taken it over since.
+  function unregister(name, onPress) {
     const num = nums.get(name);
-    if (num === undefined || !held.delete(num)) return;
+    if (num === undefined || (onPress && held.get(num) !== onPress) || !held.delete(num)) return;
     if (alive) f.UnregisterHotKey(hwnd, num);
   }
   // False when the accelerator is invalid or another application already owns the combination.
@@ -405,6 +426,6 @@ module.exports = {
   foreground, foregroundHwnd, isAlive, focus, className, hwndOf, isTerminalClass, mutexExists,
   waitModifiersUp, sendCtrlV, sendCopy, typeUnicode, clipboardSeq,
   withClipboard, listFormats, readFormat, writeFormat, emptyClipboard, decodeText, encodeText,
-  readClipboardText, writeClipboardText, CF,
+  readClipboardText, writeClipboardText, watchClipboard, CF,
   createHotkeys, parseAccelerator, keyHeld, exclusive, waitUntil
 };

@@ -280,22 +280,27 @@ function refreshPlayback() {
 
 const textTip = text => (text ? `<span class="t">${esc(text)}</span>` : "");
 
-// buttons: "close" (an error: Close, and Retry when it can), "command" (Cancel, Run now), "choices" (Cancel) or none.
-function showMsg({ tone, ico, title, detail, sub = "", buttons = null, retry, autoHideMs, choices = [] }) {
+// buttons: "close" (an error: Close, and Retry when it can), "command" (Cancel, Run now), "choices" (Cancel),
+// "notice" (Close and the notice's own actions) or none.
+function showMsg({ tone, ico, title, detail, quote = "", sub = "", buttons = null, retry, autoHideMs, choices = [], actions = [] }) {
   setTone(tone);
   $("msgIco").innerHTML = ico === "ring" ? RING : icon(ico);
   setText("msgTitle", title || "");
+  setText("msgQuote", quote || "");
   setText("msgDetail", detail || "");
   setText("msgSub", sub || "");
   $("msgChoices").innerHTML = choices.map((c, i) => `<button class="mchoice" type="button" data-i="${i}"><span class="ct">${esc(c.label)}</span>` +
     `<span class="cs">${esc(c.sub || "")}</span></button>`).join("");
   $("msgActions").hidden = !buttons;
-  $("dismiss").hidden = buttons !== "close";
+  $("dismiss").hidden = buttons !== "close" && buttons !== "notice";
   $("retry").hidden = buttons !== "close" || !retry;
   $("cmdCancel").hidden = buttons !== "command" && buttons !== "choices";
   $("cmdRun").hidden = buttons !== "command";
   $("retry").innerHTML = `${icon("refresh")}<span>${esc(t("voice.overlay.retry"))}</span>`;
   $("cmdRun").innerHTML = `${icon("play")}<span>${esc(t("voice.command.runNow"))}</span>`;
+  for (const b of $("msgActions").querySelectorAll("[data-action]")) b.remove();
+  $("msgActions").insertAdjacentHTML("beforeend", actions.map(a => `<button class="mbtn${a.primary ? " primary" : ""}" type="button" ` +
+    `data-action="${esc(a.id)}">${a.primary ? icon("play") : ""}<span>${esc(a.label)}</span></button>`).join(""));
   if (autoHideMs) msg.style.setProperty("--notice-ms", `${autoHideMs}ms`);
 }
 
@@ -333,6 +338,7 @@ function render(next, d, animate) {
   data = { ...(d || {}) };
   body.dataset.state = next;
   body.classList.toggle("command", Boolean(data.command));
+  body.classList.remove("actions");
   delete body.dataset.paused;
   clearInterval(playbackTimer);
   playbackTimer = null;
@@ -396,11 +402,15 @@ function render(next, d, animate) {
       showMsg({ tone: "", ico: "ask", title: data.title, detail: data.detail ? t("voice.command.quoted", { text: data.detail }) : "", buttons: "choices",
         choices: Array.isArray(data.choices) ? data.choices.slice(0, 3) : [] });
       break;
-    case "notice":
-      showMsg({ tone: "", ico: "info", title: data.title, detail: data.detail, autoHideMs: Number(data.durationMs) || 3500 });
+    case "notice": {
+      const actions = Array.isArray(data.actions) ? data.actions.slice(0, 2) : [];
+      body.classList.toggle("actions", actions.length > 0);
+      showMsg({ tone: "", ico: "info", title: data.title, detail: data.detail, quote: data.preview, buttons: actions.length ? "notice" : null,
+        actions, autoHideMs: Number(data.durationMs) || 3500 });
       // Restart the countdown for a notice that replaces another one.
       $("countdown").style.animation = "none"; void msg.offsetWidth; $("countdown").style.animation = "";
       break;
+    }
   }
   if (layer === "row") wave.resize();
 }
@@ -482,6 +492,10 @@ $("pause").addEventListener("click", () => api.action("pause"));
 $("stop").addEventListener("click", () => api.action("stop"));
 $("cmdRun").addEventListener("click", () => api.action("run"));
 $("cmdCancel").addEventListener("click", () => api.action("cancel"));
+$("msgActions").addEventListener("click", e => {
+  const b = e.target.closest("[data-action]");
+  if (b) api.action("notice-action", b.dataset.action);
+});
 $("msgChoices").addEventListener("click", e => {
   const b = e.target.closest(".mchoice");
   if (b) api.action("choose", Number(b.dataset.i));

@@ -178,6 +178,13 @@ body.hover .tip.on { opacity: 1; transform: translate(-50%, 0); transition-delay
 body[data-state="notice"] .msg-detail { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 body.hover .msg-detail { white-space: pre-line; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 7; }
 .msg-detail:empty { display: none; }
+/* A line of someone else's text, quoted (what the clipboard holds). */
+.msg-quote {
+  margin-top: 4px; padding-left: 7px; border-left: 2px solid var(--hairline-2); font-size: 12px; line-height: 1.4;
+  color: var(--text); opacity: .86; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.msg-quote:empty { display: none; }
+body.actions[data-state="notice"] .msg { min-width: 268px; max-width: 320px; }
 .msg-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 9px; }
 .mbtn {
   display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 10px; border: 0; border-radius: var(--r-sm);
@@ -229,6 +236,7 @@ body.hover .ring-arc { animation-play-state: paused; }
 .countdown i { display: block; height: 100%; background: color-mix(in srgb, var(--tone) 60%, transparent); transform-origin: left; }
 body[data-state="notice"] .countdown { opacity: 1; }
 body[data-state="notice"] .countdown i { animation: drain var(--notice-ms, 3500ms) linear both; }
+body.hover .countdown i { animation-play-state: paused; } /* main holds the notice meanwhile */
 @keyframes drain { to { transform: scaleX(0); } }
 
 /* ---------- reduced motion ----------

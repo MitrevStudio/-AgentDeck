@@ -183,7 +183,9 @@ function ensureWorker() {
   return t;
 }
 
-function inWorker(hwnd) {
+// msg: {hwnd} for a capture, {op: "text", max} for the clipboard's text. A thread that dies settles with a failed
+// capture, whose empty text also serves as "no text".
+function inWorker(msg, timedOut) {
   const t = ensureWorker();
   const id = nextCall++;
   return new Promise(resolve => {
@@ -192,10 +194,10 @@ function inWorker(hwnd) {
       // gets a new one.
       if (worker === t) { worker = null; t.terminate().catch(() => {}); }
       pending.delete(id);
-      resolve({ text: "", failure: "CopyFailed", message: i18n.t("voice.errors.copyHung"), clipboardRestored: false });
+      resolve(timedOut);
     }, CAPTURE_TIMEOUT_MS);
     pending.set(id, result => { clearTimeout(timer); resolve(result); });
-    t.postMessage({ id, hwnd });
+    t.postMessage({ id, ...msg });
   });
 }
 
@@ -222,9 +224,17 @@ async function capture(target) {
   const t0 = Date.now();
   const uia = UIA_CLASSES.has(target?.className) ? await readUia(target.hwnd) : null;
   const r = uia?.text.trim() ? { text: uia.text, failure: "None", clipboardRestored: true }
-    : await w.exclusive(() => inWorker(target?.hwnd ?? null));
+    : await w.exclusive(() => inWorker({ hwnd: target?.hwnd ?? null },
+      { text: "", failure: "CopyFailed", message: i18n.t("voice.errors.copyHung"), clipboardRestored: false }));
   logCapture(target, uia, r, Date.now() - t0);
   return r;
+}
+
+// The clipboard's text as it is (at most maxChars characters), or null. On the capture's thread, for the same
+// reason as the capture: the application that copied it may render it only now.
+async function clipboardText(maxChars) {
+  const r = await w.exclusive(() => inWorker({ op: "text", max: maxChars }, { text: null }));
+  return r.text || null;
 }
 
 // userData/logs/selection.log: one line per capture, how it went - never what was selected.
@@ -240,6 +250,14 @@ function logCapture(target, uia, r, totalMs) {
     `result=${r.failure}`, `chars=${r.text.length}`,
     ...(uia?.error ? [`uiaError=${JSON.stringify(uia.error)}`] : [])
   ].join(" ");
+  writeLog(line);
+}
+// The "nothing selected" notice's fallback, taken: the clipboard was read instead. via: "button" | "hotkey".
+function logClipboardRead({ via, chars, ageMs }) {
+  writeLog([new Date().toISOString(), "method=clipboard", `via=${via}`, `chars=${chars}`,
+    `age=${ageMs == null ? "-" : `${Math.round(ageMs / 1000)}s`}`].join(" "));
+}
+function writeLog(line) {
   logging = logging.then(() => appendLog(line)).catch(e => console.error("Writing selection.log failed:", e.message));
 }
 async function appendLog(line) {
@@ -259,4 +277,4 @@ function dispose() {
   t?.terminate().catch(() => {});
 }
 
-module.exports = { capture, captureHere, warmUp, dispose, snapshotClipboard, restoreClipboard };
+module.exports = { capture, captureHere, clipboardText, logClipboardRead, warmUp, dispose, snapshotClipboard, restoreClipboard };
