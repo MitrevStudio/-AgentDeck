@@ -1,0 +1,4 @@
+/* Settings -> Commands (settings-commands.js): only what settings.css does not already give every tab. */
+body:not([data-tab="commands"]) [data-for="commands"] { display: none; }
+#commands .seg > button:disabled { opacity: .45; cursor: default; }
+#commands .vs-err:empty { display: none; }

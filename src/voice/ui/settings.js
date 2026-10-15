@@ -1,7 +1,9 @@
-// The app's Settings page, in three tabs. General (language, theme, edge menu, updates) applies at once through
-// window.prefs; Voice is a port of VoiceTray's SettingsWindow plus the two hotkeys, saved with Save; Network (the
-// proxy) has a Save of its own. Secrets never come here: the page knows only whether an API key or the proxy password
-// is saved, and an empty field keeps it - removing one takes the explicit button.
+// The app's Settings page. General (language, theme, edge menu, updates) applies at once through window.prefs; the
+// voice settings - a port of VoiceTray's SettingsWindow plus the two hotkeys, the modes and the dictionary - are one
+// record over three tabs (Dictation, Dictionary, Read aloud) saved by one Save; Commands applies at once
+// (settings-commands.js); Network (the proxy) has a Save of its own. Secrets never come here: the page knows only
+// whether an API key or the proxy password is saved, and an empty field keeps it - removing one takes the explicit
+// button.
 // Uses $, esc, icon, t and tn from common.js.
 
 const PSEUDO_DEVICES = ["default", "communications"];
@@ -33,14 +35,17 @@ function resolveMic(devices, id, name) {
 }
 
 // The window is sized to what is shown (VoiceTray: SizeToContent), so each tab gets its own height.
-const fit = () => window.voiceSettings.fit(Math.ceil(document.body.getBoundingClientRect().height));
+const fit = () => window.voiceSettings.fit();
 
 // ---------- tabs ----------
-// The last one shown comes back next time, and after the reload a language switch causes.
+// The last one shown comes back next time, and after the reload a language switch causes. body[data-pane] is the
+// tab shown, body[data-tab] its group (general, voice, commands or network): the footer and Save go by the group.
 const TAB_KEY = "settingsTab";
+const VOICE_PANES = ["dictation", "dictionary", "readaloud"];
 function showTab(name, focus = false) {
   const tabs = [...document.querySelectorAll('[role="tab"]')];
-  const tab = tabs.find(b => b.dataset.value === name) || tabs[0];
+  const want = name === "voice" ? "dictation" : name; // remembered from before Voice was split
+  const tab = tabs.find(b => b.dataset.value === want) || tabs[0];
   for (const b of tabs) {
     const on = b === tab;
     b.classList.toggle("on", on);
@@ -48,23 +53,25 @@ function showTab(name, focus = false) {
     b.tabIndex = on ? 0 : -1;
     $(b.getAttribute("aria-controls")).classList.toggle("on", on);
   }
-  document.body.dataset.tab = tab.dataset.value;
-  try { localStorage.setItem(TAB_KEY, tab.dataset.value); } catch {}
+  const pane = $(tab.getAttribute("aria-controls"));
+  document.body.dataset.pane = pane.id;
+  document.body.dataset.tab = pane.dataset.group || pane.id;
+  try { localStorage.setItem(TAB_KEY, pane.id); } catch {}
   if (focus) tab.focus();
   if (st.data) fit(); // before that, the first fit comes once the voice part is in
 }
 // The tab `step` places after (or before) the one shown, round the end.
 function nextTab(step) {
   const list = [...document.querySelectorAll('[role="tab"]:not([hidden])')].map(b => b.dataset.value);
-  return list[(list.indexOf(document.body.dataset.tab) + step + list.length) % list.length];
+  return list[(list.indexOf(document.body.dataset.pane) + step + list.length) % list.length];
 }
 
 // ---------- General ----------
 const THEMES = ["system", "dark", "light"];
 let general = { ...window.prefs };
-const dirty = { voice: false, network: false }; // unsaved edits per tab: a language switch reloads the window
+const dirty = new Set(); // tabs with unsaved edits: a language switch reloads the window
 function setDirty(tab, on) {
-  dirty[tab] = on;
+  if (on) dirty.add(tab); else dirty.delete(tab);
   const button = document.querySelector(`[role="tab"][data-value="${tab}"]`);
   button.classList.toggle("dirty", on);
   button.title = on ? t("settings.voice.unsaved") : "";
@@ -84,7 +91,7 @@ function renderGeneral() {
 }
 async function setPref(key, value) {
   if (value === undefined || value === general[key]) return;
-  if (key === "language" && (dirty.voice || dirty.network) && !confirm(t("settings.general.languageReload"))) return;
+  if (key === "language" && dirty.size && !confirm(t("settings.general.languageReload"))) return;
   general = { ...general, [key]: value };
   renderGeneral();
   await window.voiceSettings.setPrefs({ [key]: value });
@@ -115,10 +122,22 @@ for (const [id, key] of [["uiLanguage", "language"], ["uiTheme", "theme"]]) {
 }
 $("edgeHandle").addEventListener("change", e => setPref("edgeHandle", e.target.checked));
 $("autoUpdate").addEventListener("change", e => setPref("autoUpdate", e.target.checked));
+// Start with Windows, applied at once: the installed app only - a copy run from source shows it off and says why.
+function renderAutostart(a) {
+  if (!a) return;
+  $("autostart").checked = a.enabled;
+  $("autostart").disabled = !a.supported;
+  $("autostartHint").textContent = t(a.supported ? "settings.general.autostartHint" : "settings.general.autostartSource");
+}
+$("autostart").addEventListener("change", async e => renderAutostart(await window.voiceSettings.autostart(e.target.checked)));
+window.voiceSettings.autostart().then(renderAutostart).catch(() => {});
 // The tray changes the same settings; a language change reloads this page anyway.
 window.prefs.onChanged(p => { general = p; renderGeneral(); });
-for (const type of ["input", "change"]) $("voice").addEventListener(type, () => setDirty("voice", true));
-$("voice").addEventListener("click", e => { if (e.target.closest("button")) setDirty("voice", true); });
+// Each voice tab marks its own edits; Save stores all three.
+for (const id of VOICE_PANES) {
+  for (const type of ["input", "change"]) $(id).addEventListener(type, () => setDirty(id, true));
+  $(id).addEventListener("click", e => { if (e.target.closest("button")) setDirty(id, true); });
+}
 $("tabs").addEventListener("click", e => { const b = e.target.closest('[role="tab"]'); if (b) showTab(b.dataset.value); });
 $("tabs").addEventListener("keydown", e => segKey(e, v => showTab(v, true)));
 // Ctrl+Tab, as in any tabbed dialog. A focused hotkey field records it instead (its handler stops the event).
@@ -260,6 +279,9 @@ function showErrors(errors, warn = false, form = "form") {
     slot.textContent = loose.join(" ");
     slot.classList.toggle("warn", warn);
   }
+  // Save covers three tabs: the first message on another one brings that tab up.
+  const first = [...document.querySelectorAll(".vs-pane [data-err]")].find(el => el.textContent)?.closest(".vs-pane");
+  if (first && !first.classList.contains("on")) showTab(first.id);
   fit(); // messages add lines; the window grows with them
 }
 
@@ -350,7 +372,13 @@ document.addEventListener("keydown", e => { if (e.key === "Escape" && !e.default
 
 $("form").addEventListener("submit", async e => {
   e.preventDefault();
-  if (document.body.dataset.tab === "network") return saveNetwork();
+  // Enter in any field submits the one form that holds every tab (through its first Save, whichever tab is shown):
+  // only Enter in a field of the tab shown, or that tab's own Save, saves - and General and Commands have nothing to
+  // save, they apply at once.
+  const tab = document.body.dataset.tab;
+  if (!$(document.body.dataset.pane)?.contains(document.activeElement) && e.submitter?.dataset.for !== tab) return;
+  if (tab === "network") return saveNetwork();
+  if (tab !== "voice") return;
   stash();
   clearErrors();
   const dev = st.devices[Number($("mic").value)] || st.devices[0];
@@ -371,6 +399,7 @@ $("form").addEventListener("submit", async e => {
     readAloudModel: $("raModel").value,
     readAloudVoice: $("raVoice").value,
     hotkeys: { dictate: $("hkDictate").value.trim(), readAloud: $("hkRead").value.trim() },
+    ...dictationUi.payload(), // mode, prompt language, key behaviour, dictionary (settings-dictation.js)
     apiKeys
   };
   $("save").disabled = true;
@@ -378,7 +407,7 @@ $("form").addEventListener("submit", async e => {
     const r = await window.voiceSettings.save(payload);
     if (!r?.ok) return showErrors(r?.errors || { form: t("voice.settings.notSaved") });
     // Saved. The typed keys are gone from the page; only whether one exists remains.
-    setDirty("voice", false);
+    for (const id of VOICE_PANES) setDirty(id, false);
     st.data.hasKey = r.hasKey;
     st.data.settings = r.settings;
     for (const p of st.data.providers) st.keys[p] = { typed: "", clear: false };
@@ -581,9 +610,12 @@ async function init() {
   $("hkRead").value = s.hotkeys.readAloud;
   renderCaps($("hkDictate")); renderCaps($("hkRead"));
   renderReadAloudHint();
+  dictationUi.fill(s, d);
 
   await fit();
-  $({ voice: "provider", network: "netMode" }[document.body.dataset.tab] || "uiLanguage").querySelector(".on")?.focus();
+  // The tab's first control where it has an obvious one, otherwise the tab itself.
+  const first = { general: "#uiLanguage .on", dictation: "#provider .on", readaloud: "#raModel", network: "#netMode .on" }[document.body.dataset.pane];
+  ((first && document.querySelector(first)) || document.querySelector('[role="tab"].on'))?.focus();
 }
 
 init().catch(err => showErrors({ form: t("voice.settings.loadFailed", { error: err?.message || err }) }));

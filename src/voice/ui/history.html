@@ -36,6 +36,14 @@
       </div>
       <div class="vh-dbody">
         <div class="vh-err" id="dErr" hidden></div>
+        <div class="vh-note" id="dNote" hidden></div>
+        <!-- A rewritten dictation (clean, prompt) keeps the transcript as recognised too. -->
+        <div class="vh-versions" id="dVersions" hidden>
+          <div class="seg" id="dVersion" role="radiogroup" data-i18n-aria-label="voice.history.version">
+            <button type="button" role="radio" data-version="result" data-i18n="voice.history.version.result"></button>
+            <button type="button" role="radio" data-version="raw" data-i18n="voice.history.version.raw"></button>
+          </div>
+        </div>
         <textarea id="dText" class="vh-dtext" readonly spellcheck="false" data-i18n-aria-label="voice.history.text"></textarea>
       </div>
       <div class="vh-dfoot">

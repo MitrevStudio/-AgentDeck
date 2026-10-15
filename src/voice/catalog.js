@@ -27,7 +27,11 @@ const VOICE_STYLES = Object.freeze({
 
 const defaultModelFor = provider => (TRANSCRIPTION_MODELS[provider] || TRANSCRIPTION_MODELS.OpenAI)[0];
 
+// The text model that rewrites a transcript (clean-up, prompt) on each provider: fast and cheap, since it runs after
+// every such dictation, before anything is pasted.
+const REWRITE_MODELS = Object.freeze({ Gemini: "gemini-3.1-flash-lite", OpenAI: "gpt-4.1-mini" });
+
 module.exports = {
-  TRANSCRIPTION_MODELS, SPEECH_MODELS, VOICES, VOICE_STYLES, defaultModelFor,
+  TRANSCRIPTION_MODELS, SPEECH_MODELS, VOICES, VOICE_STYLES, REWRITE_MODELS, defaultModelFor,
   DEFAULT_SPEECH_MODEL: SPEECH_MODELS[0], DEFAULT_VOICE: VOICES[0]
 };

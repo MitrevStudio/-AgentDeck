@@ -40,7 +40,9 @@ function attemptTimeoutMs(wavPath) {
   return Math.min(BASE_TIMEOUT_MS + 2 * ms, MAX_TIMEOUT_MS);
 }
 
-async function transcribeFile({ wavPath, provider, model, language, getApiKey, signal }) {
+// vocabulary: the user's terms (dictionary.js), read at every attempt like the key, so a term added after a failure
+// helps its retry.
+async function transcribeFile({ wavPath, provider, model, language, vocabulary = [], getApiKey, signal }) {
   const name = providerName(provider);
   if (!name) throw configuration(t("voice.errors.unknownProvider", { provider }));
   const apiKey = String((await getApiKey(name)) || "").trim();
@@ -50,7 +52,7 @@ async function transcribeFile({ wavPath, provider, model, language, getApiKey, s
   const timeout = AbortSignal.timeout(attemptTimeoutMs(wavPath));
   const attempt = signal ? AbortSignal.any([signal, timeout]) : timeout;
   try {
-    const text = await PROVIDERS[name].transcribe({ wavPath, model, language: language || "auto", apiKey, signal: attempt });
+    const text = await PROVIDERS[name].transcribe({ wavPath, model, language: language || "auto", vocabulary, apiKey, signal: attempt });
     return String(text || "").trim();
   } catch (error) {
     throw classify({ error, provider: name, signal });
@@ -59,7 +61,7 @@ async function transcribeFile({ wavPath, provider, model, language, getApiKey, s
 
 // `job` uses VoiceTray's record shape (AudioPath, Provider, Model, Language) and carries everything an attempt needs;
 // `_settings` only keeps the spec'd signature. `getApiKey` defaults to the stored (encrypted) keys.
-const transcribeJob = (job, _settings, { getApiKey = p => require("./settings").getApiKey(p), signal, wavPath } = {}) =>
-  transcribeFile({ wavPath: wavPath || job.AudioPath, provider: job.Provider, model: job.Model, language: job.Language, getApiKey, signal });
+const transcribeJob = (job, _settings, { getApiKey = p => require("./settings").getApiKey(p), signal, wavPath, vocabulary } = {}) =>
+  transcribeFile({ wavPath: wavPath || job.AudioPath, provider: job.Provider, model: job.Model, language: job.Language, vocabulary, getApiKey, signal });
 
 module.exports = { transcribeJob, transcribeFile, providerByteCap, maxRecordingMinutesFor, maxRecordingBytes };

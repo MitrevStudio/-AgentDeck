@@ -1,0 +1,50 @@
+/* Settings -> Dictionary: terms as chips in one field, replacements as "spoken -> written" rows; and the start with
+   Windows switch (General), which can be shown off and disabled (a copy run from source). Tokens from ../../theme.css. */
+
+/* ---------- terms ---------- */
+.vd-terms {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 5px; min-height: 34px; padding: 4px 6px;
+  border: 1px solid var(--line-2); border-radius: var(--r-md); background: var(--bg); cursor: text;
+  transition: border-color var(--dur-fast), box-shadow var(--dur-fast);
+}
+.vd-terms:hover:not(:focus-within) { border-color: var(--line-3); }
+.vd-terms:focus-within { border-color: var(--accent); box-shadow: var(--ring); }
+.vd-chip {
+  display: inline-flex; align-items: center; gap: 2px; max-width: 100%; height: 24px; padding: 0 2px 0 9px;
+  border-radius: var(--r-pill); background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--line-2);
+  font-size: 12.5px; color: var(--text); user-select: text;
+}
+.vd-chip-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vd-chip button {
+  width: 20px; height: 20px; flex: none; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%;
+  background: transparent; color: var(--faint); transition: color var(--dur-fast), background-color var(--dur-fast);
+}
+.vd-chip button:hover { color: var(--danger); background: var(--danger-bg); }
+.vd-chip button .i { width: 11px; height: 11px; }
+.vd-terms input {
+  flex: 1; min-width: 120px; height: 24px; padding: 0 4px; border: 0; outline: none; background: transparent;
+  font-size: 13.5px; user-select: text;
+}
+.vd-terms input::placeholder { color: var(--faint); }
+
+/* ---------- replacements ---------- */
+.vd-reps { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
+.vd-rep { display: grid; grid-template-columns: minmax(0, 1fr) 16px minmax(0, 1fr) 32px; align-items: center; gap: 6px; }
+.vs .vd-rep .input { height: 32px; font-size: 13.5px; user-select: text; }
+.vd-arrow { display: grid; place-items: center; color: var(--faint); }
+.vd-arrow .i { width: 14px; height: 14px; }
+.vd-rep .icon-btn { width: 32px; height: 32px; border-radius: var(--r-md); }
+.vd-rep .icon-btn:hover { color: var(--danger); border-color: var(--danger-line); }
+.vd-add {
+  display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px 0 8px; border: 1px dashed var(--line-2);
+  border-radius: var(--r-md); background: transparent; color: var(--muted); font-size: 12.5px; font-weight: 600;
+  transition: color var(--dur-fast), border-color var(--dur-fast), background-color var(--dur-fast);
+}
+.vd-add:hover { color: var(--accent); border-color: var(--accent-line); background: var(--accent-weak); }
+.vd-add .i { width: 13px; height: 13px; }
+
+/* ---------- a switch that cannot be used here ---------- */
+.vs-toggle:has(.switch:disabled) { cursor: default; }
+.vs-toggle:has(.switch:disabled):hover { border-color: var(--line); }
+.vs-toggle:has(.switch:disabled) b { color: var(--muted); }
+.switch:disabled { opacity: .5; cursor: default; }

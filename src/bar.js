@@ -3,8 +3,10 @@ let raw = { registry: { projects: [] }, sessions: [], agents: [] };
 let model = { projects: [], sessions: [] };
 let live = new Map(), liveSig = "";
 let tiles = [], rows = [];
-// tile: selected tile key; row: highlighted row (-1 = none); confirm: session key awaiting "open again"; dir: typed directory
-const st = { tile: "", row: -1, confirm: "", dir: "", shown: false };
+let shownDetail = ""; // the list #detail shows: which opening of the menu, tile and query
+// tile: selected tile key; row: highlighted row (-1 = none); confirm: session key awaiting "open again"; dir: typed directory;
+// opened: counts the times the menu came out
+const st = { tile: "", row: -1, confirm: "", dir: "", shown: false, opened: 0 };
 const q = $("q");
 const liveOf = s => live.get(sessionKey(s));
 
@@ -70,8 +72,8 @@ function tileHtml(tile, toks) {
   const mono = tile.kind === "project"
     ? `<span class="mono" style="--h:${hue(tile.p.n)}">${esc(initials(tile.label))}${badge}</span>`
     : `<span class="mono special ${tile.kind}">${icon(tile.kind === "live" ? "pulse" : "search")}</span>`;
-  return `<button class="tile ${tile.key === st.tile ? "sel" : ""}" data-key="${esc(tile.key)}" title="${esc(tile.kind === "project" ? `${tile.label}\n${tile.p.path}` : tile.label)}">
-    ${mono}<span class="tname">${tile.kind === "project" ? hl(tile.label, toks) : esc(tile.label)}</span><span class="tcount">${tile.count}</span></button>`;
+  return `<button class="tile ${tile.key === st.tile ? "sel" : ""}" data-key="${esc(tile.key)}" title="${esc(tile.kind === "project" ? `${tile.label}\n${tile.p.path}${gitTip(tile.p.path)}` : tile.label)}">
+    ${mono}<span class="tname">${tile.kind === "project" ? hl(tile.label, toks) : esc(tile.label)}</span><span class="tcount">${tile.count}</span>${tile.kind === "project" ? gitTile(tile.p.path) : ""}</button>`;
 }
 function renderStrip(toks) {
   $("strip").innerHTML = tiles.length ? tiles.map(tile => tileHtml(tile, toks)).join("") : `<div class="none">${esc(t("bar.noProjects", { q: q.value }))}</div>`;
@@ -97,7 +99,7 @@ function renderDetail(tile, toks) {
   }
   const head = tile.kind === "project"
     ? `<div class="dhead"><span class="mono sm" style="--h:${hue(tile.p.n)}">${esc(initials(tile.label))}</span>
-        <div class="dtitle"><div class="dname">${hl(tile.label, toks)}</div>${pathHtml(tile.p.path, toks)}</div>
+        <div class="dtitle"><div class="dname">${hl(tile.label, toks)}${usageTotal(tile.p.sessions)}${gitLine(tile.p.path)}</div>${pathHtml(tile.p.path, toks)}</div>
         <button class="icon-btn" data-act="copy" data-path="${esc(tile.p.path)}" title="${esc(t("action.copyPath"))}">${icon("copy")}</button>
         <div class="dactions">${newButtons(tile.p.path)}
           <button class="btn" data-act="terminal" data-path="${esc(tile.p.path)}">${icon("terminal")}${esc(t("action.terminal"))}</button>
@@ -105,8 +107,18 @@ function renderDetail(tile, toks) {
     : `<div class="dhead"><div class="dtitle"><div class="dname">${esc(tile.kind === "live" ? t("bar.live.title") : t("bar.results.title", { q: q.value }))}</div>
         <div class="dsub">${esc(tile.kind === "live" ? t("bar.live.sub") : tn("bar.results.count", tile.count))}</div></div></div>`;
   const empty = t(tile.kind === "project" ? (toks.length ? "bar.empty.projectNoMatch" : "bar.empty.project") : "bar.empty.results");
-  $("detail").innerHTML = head + `<div class="rows" id="rows">${rows.length ? rows.map((r, i) => rowHtml(r, i, toks)).join("") : `<div class="empty">${esc(empty)}</div>`}</div>`;
+  const pane = rows.some(r => r.s) ? `<aside class="pv" id="pv" aria-label="${esc(t("preview.title"))}"></aside>` : "";
+  // New figures or git state redraw the same list: it keeps its scroll, and the preview pane is moved over as it is
+  // (messages opened in full stay open).
+  const view = `${st.opened}|${tile.key}|${q.value}`, same = view === shownDetail, top = $("rows")?.scrollTop || 0, pv = $("pv");
+  $("detail").innerHTML = head + `<div class="dbody"><div class="rows" id="rows">${rows.length ? rows.map((r, i) => rowHtml(r, i, toks)).join("") : `<div class="empty">${esc(empty)}</div>`}</div>${pane}</div>`;
+  shownDetail = view;
+  if (pv && $("pv")) $("pv").replaceWith(pv);
+  if (same) $("rows").scrollTop = top;
+  syncPreview();
 }
+// The preview beside the rows (preview-ui.js) follows the highlighted session, or shows the first one while none is.
+const syncPreview = () => showPreview($("pv"), rows[st.row]?.s || rows.find(r => r.s)?.s);
 function livePill(l, key) {
   if (!l) return "";
   const busy = l.status === "busy";
@@ -127,10 +139,12 @@ function rowHtml(r, i, toks) {
   return `<div class="row ${i === st.row ? "sel" : ""} ${l ? "is-live" : ""}" data-i="${i}">
     <span class="adot ${s.agent.toLowerCase()}" title="${esc(s.agent)}"></span>
     <div class="rmain"><div class="t" title="${esc(s.title)}">${hl(s.title, toks)}</div>${r.showPath && s.cwd ? pathHtml(s.cwd, toks) : ""}</div>
-    ${livePill(l, key)}<span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span>
+    ${livePill(l, key)}${usageCost(s)}<span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span>
     <span class="ract">${s.cwd ? `<button class="icon-btn" data-act="terminal" data-path="${esc(s.cwd)}" title="${esc(t("bar.terminalIn", { path: s.cwd }))}">${icon("terminal")}</button>
       <button class="icon-btn" data-act="copy" data-path="${esc(s.cwd)}" title="${esc(t("action.copyPath"))}">${icon("copy")}</button>` : ""}
-      <button class="icon-btn go" data-act="resume" title="${esc(t(l ? "bar.alreadyOpen" : "action.resume"))}">${icon("play")}</button></span>
+      ${l ? `<button class="icon-btn" data-act="resume" title="${esc(t("bar.alreadyOpen"))}">${icon("play")}</button>
+      <button class="icon-btn go" data-act="show-terminal" title="${esc(t("term.showTitle", { pid: l.pid }))}">${icon("raise")}</button>`
+        : `<button class="icon-btn go" data-act="resume" title="${esc(t("action.resume"))}">${icon("play")}</button>`}</span>
   </div>${confirm}`;
 }
 function renderLiveSum() {
@@ -151,6 +165,7 @@ function updateLiveTexts() {
 function markRows() {
   document.querySelectorAll(".row").forEach(el => el.classList.toggle("sel", Number(el.dataset.i) === st.row));
   document.querySelector(".row.sel")?.scrollIntoView({ block: "nearest" });
+  syncPreview();
 }
 
 let toastTimer;
@@ -171,10 +186,28 @@ async function resume(s) {
   if (liveOf(s)) { st.confirm = sessionKey(s); return render({ strip: false }); }
   await launch(() => window.manager.launchAgent(s.agent, s.id, s.cwd));
 }
+// A running session's terminal comes up and the menu goes. The terminal taking the focus would close the menu at
+// once, so it is held open until the outcome is known: when only the window was found, it stays a moment to say so.
+async function showTerminal(s) {
+  if (!s) return;
+  window.manager.barCommand("hold", true);
+  let r;
+  try { r = await window.manager.focusTerminal(s.agent, s.id); } finally { window.manager.barCommand("hold", false); }
+  const note = focusNote(r);
+  if (!note) return hide();
+  toast(note, !r.ok);
+  // The terminal may have taken the focus meanwhile (even when Windows kept it from the front): with nothing left to
+  // lose the focus to, the menu would stay. It goes once the note has been read, unless it is in use again.
+  const shown = st.opened;
+  setTimeout(() => { if (st.opened === shown && st.shown && !document.hasFocus()) hide(); }, r.ok ? 1800 : 4500);
+}
+// Clicking a row or pressing Enter on it.
+const openSession = s => (s && liveOf(s) ? showTerminal(s) : resume(s));
 async function act(name, el) {
   const path = el.dataset.path;
   try {
     if (name === "resume") return await resume(rows[Number(el.closest(".row")?.dataset.i)]?.s);
+    if (name === "show-terminal") return await showTerminal(rows[Number(el.closest(".row")?.dataset.i)]?.s);
     if (name === "resume-anyway") {
       const s = rows.find(r => r.s && sessionKey(r.s) === st.confirm)?.s;
       st.confirm = "";
@@ -205,13 +238,13 @@ function moveRow(delta) {
   st.row = st.row < 0 ? (delta > 0 ? 0 : rows.length - 1) : Math.max(0, Math.min(rows.length - 1, st.row + delta));
   markRows();
 }
-// Enter: resume the highlighted session, or start the first available agent in a typed directory.
+// Enter: open the highlighted session, or start the first available agent in a typed directory.
 function activateRow() {
   const r = rows[st.row >= 0 ? st.row : 0];
   if (!r) return;
   const run = r.type === "dir"
     ? launch(() => window.manager.launchNew((raw.agents?.length ? raw.agents : AGENTS)[0], r.path))
-    : resume(r.s);
+    : openSession(r.s);
   run.catch(e => toast(e.message, true));
 }
 
@@ -271,9 +304,11 @@ function openHint({ hotkey, handle }) {
 
 // ---------- events ----------
 window.manager.onDataChanged(applyData);
+watchUsage(() => { if (st.shown) render({ strip: false }); });
+watchGit(() => { if (st.shown) render(); });
 window.manager.onBarEvent(ev => {
   if (ev.type === "show") {
-    st.shown = true; st.tile = ""; st.row = -1; st.confirm = ""; st.dir = ""; q.value = "";
+    st.shown = true; st.opened++; st.tile = ""; st.row = -1; st.confirm = ""; st.dir = ""; q.value = "";
     $("hotkey").textContent = openHint(ev);
     model = buildData(raw, live);
     render();
@@ -309,11 +344,11 @@ document.addEventListener("click", e => {
   const btn = e.target.closest("button[data-act]");
   if (btn) { e.stopPropagation(); return act(btn.dataset.act, btn); }
   const row = e.target.closest(".row:not(.dir)");
-  if (row) resume(rows[Number(row.dataset.i)]?.s).catch(err => toast(err.message, true));
+  if (row) openSession(rows[Number(row.dataset.i)]?.s).catch(err => toast(err.message, true));
 });
 $("detail").addEventListener("mousemove", e => {
   const row = e.target.closest(".row");
-  if (row && Number(row.dataset.i) !== st.row) { st.row = Number(row.dataset.i); document.querySelectorAll(".row").forEach(el => el.classList.toggle("sel", el === row)); }
+  if (row && Number(row.dataset.i) !== st.row) { st.row = Number(row.dataset.i); document.querySelectorAll(".row").forEach(el => el.classList.toggle("sel", el === row)); syncPreview(); }
 });
 
 document.addEventListener("keydown", e => {

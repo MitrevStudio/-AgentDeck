@@ -14,6 +14,10 @@
 Инсталаторът не е подписан, затова Windows SmartScreen го спира: **More info → Run anyway**
 (*Повече информация → Изпълни въпреки това*).
 
+**Start with Windows** (**Settings → General → Startup**): the installed app starts in the tray when you sign in,
+without opening its window. It is turned on once after installing; turning it off sticks. A copy run from source
+cannot use it (the switch is shown off and says why).
+
 ## Updates
 
 Инсталираното приложение се обновява само от [GitHub Releases](https://github.com/MitrevStudio/-AgentDeck/releases):
@@ -75,6 +79,35 @@ Node.js, затова следват прокси настройките на Wi
 - Клавиши: `↑`/`↓` сесия, `←`/`→` проект, `Enter` отвори, `Esc` изчисти/затвори.
 - Приложението остава в трея, след като затвориш основния прозорец. Оттам (и от **Настройки → Общи**) се скрива дръжката – тогава менюто се отваря само с клавишната комбинация и от иконата – и се излиза.
 
+## Sessions: show terminal, preview, git status
+
+- **Show terminal** – a running Claude Code session (one with a live status) gets **Show terminal** in place of
+  Resume: on its card in the manager, and in the edge menu as the highlighted button of its row (clicking the row or
+  `Enter` does the same). AgentDeck brings that session's terminal to the front – in Windows Terminal the very tab,
+  otherwise the window of the app it runs in (VS Code, Git Bash, a classic console). **Open again** still starts a
+  second instance on the same conversation, after a warning.
+- **Preview** – the edge menu shows the highlighted session (or the first one) in a pane beside its rows; in the
+  manager, resting the pointer on a session card for a moment opens the same preview beside the list. It has the
+  last prompts and replies, the first prompt, the model, how many prompts, replies and subagents there are, and when
+  the session started and was last active. Transcripts are only read.
+- **Git status** – the branch of a project or session folder, a dot when it has changes (red with conflicts) and
+  ↑/↓ for commits ahead of/behind its upstream: on the edge menu's tiles, in its header for the chosen project (with
+  the staged / changed / untracked counts) and beside projects and session folders in the manager; the tooltip has
+  the details. Strictly read-only: `git status` runs without optional locks and nothing is ever fetched, so ↑/↓ are
+  as of your last fetch.
+
+## Usage and cost
+
+**Usage** in the manager's header opens the tokens and the **API-equivalent cost** of the Claude Code, OpenCode and
+Codex sessions on this computer: totals for today, the last 7 and 30 days and all time, a chart per day (cost or
+tokens), and the top projects, sessions and models. Session cards and edge-menu rows show the session's cost as a
+small chip, and the edge menu's header the project's total.
+
+*API-equivalent* is what these tokens would cost at the providers' public pay-as-you-go API prices (as of the date
+the view names; `src/usage-prices.js`). Subscription plans (Claude Pro/Max, ChatGPT, Copilot) are not billed per
+token, so it is not what you paid. Models without a known price show tokens only. Transcripts and OpenCode's
+database are only read; a cache in `userData` keeps later passes quick.
+
 ## Език и тема
 
 - Интерфейсът е на **български** или **английски**; темата е **тъмна**, **светла** или **системна** (следва Windows).
@@ -92,8 +125,41 @@ Node.js, затова следват прокси настройките на Wi
 - **Диктуване – `Ctrl+Space`**: първото натискане започва запис (плаващ панел долу в средата на екрана с живата вълна на гласа и таймер), второто го спира. `Esc` отказва записа (заета е само докато се записва). Текстът се поставя в прозореца, който беше отпред при старта на записа; ако той вече не може да бъде върнат отпред, текстът остава в клипборда („натиснете Ctrl+V“). Записът може да се пусне и от менюто на иконата в трея („Запиши“) – тогава текстът отива в клипборда.
 - **Четене на глас – `Ctrl+Shift+Space`**: прочита маркирания текст (Gemini TTS). Повторно натискане спира; панелът има пауза, стоп и скорост. Клипбордът се връща какъвто беше.
 - **Неуспешни записи** не се губят: панелът показва грешката с „Опитай отново“, иконата в трея получава оранжева точка, а менюто ѝ предлага повторен опит, „Опитай всички отново“ и „Изхвърли всички“. Щракване върху известие за грешка също опитва отново.
-- **История** и **Настройки → Глас** (доставчик OpenAI/Gemini, модел, език, микрофон, максимална дължина, глас и модел за четене, API ключове, клавишни комбинации): от менюто в трея или от бутоните в горната лента на основния прозорец.
+- **История** и **Настройки → Диктовка / Речник / Четене на глас** (доставчик OpenAI/Gemini, модел, език, микрофон, максимална дължина, режим, речник, глас и модел за четене, API ключове, клавишни комбинации): от менюто в трея или от бутоните в горната лента на основния прозорец.
 - При първото стартиране настройките, API ключовете и историята се пренасят еднократно от `%APPDATA%\VoiceTray` (само се четат). Записи, направени във VoiceTray след това, не се пренасят.
+
+### Dictation modes, dictionary, push-to-talk
+
+- **Modes** (**Settings → Dictation → Text**): *Verbatim* – the text as recognized; *Clean* – without fillers, false
+  starts and repetitions, same language and meaning; *Prompt* – free speech becomes a clear prompt for a coding agent
+  (in the language spoken or in English). Clean and Prompt send the transcript once more to the provider's fast text
+  model (Gemini `gemini-3.1-flash-lite`, OpenAI `gpt-4.1-mini`) with your key. The chip on the voice panel switches
+  the mode for one dictation; should the rewrite fail, the text is pasted as recognized. **History** keeps both
+  versions (*Result* / *As recognized*).
+- **Dictionary** (**Settings → Dictionary**): *terms* (names, technical words) steer recognition and the rewrite;
+  *replacements* fix what still comes out wrong (“сигноз” → “SigNoz”; whole words, any case); the project names can
+  count as terms too.
+- **Push-to-talk** (**Settings → Dictation → Hotkey**): *Tap or hold* (default) – tap to start and tap again to
+  finish, or hold the keys while you speak and let go to finish; or only *Tap*, or only *Hold*.
+
+### Voice commands
+
+Hold the edge menu's hotkey (usually `` Alt+` ``), say what to do and let go – the menu opens at the press as always,
+and stays open while you speak. The microphone in the edge menu's header does the same with clicks (click it again,
+click the voice panel or press the dictation key to finish). For example:
+
+- “new session in BDD: fix the login bug” – a new Claude session in that project, started on a prompt written from
+  what you said;
+- “open the session about the logs” – brings that session back: its terminal if it is running, otherwise resumed;
+- “codex in bdd-web: add tests” – a new session with another agent.
+
+What you say is recognized like a dictation and matched against your projects and recent sessions. Before anything
+runs, a card on the voice panel says what will happen and counts down (3 s by default): **Run now** starts it at
+once, **Esc** or **Cancel** stops it, the pointer resting on the card pauses it; when it is unclear, the card offers
+up to three choices. **Settings → Commands**: on or off, holding the hotkey or the menu's microphone only, the agent
+of a new session, how its prompt is written (Prompt / Clean / Verbatim) and the countdown. Every command is kept in
+**History** (kind *Commands*). To understand a command, the selected provider gets what you said, the names of your
+projects and their folders and the titles and first prompts of recent sessions – never full paths.
 
 Данни (в Electron `userData`): `%APPDATA%\ai-session-manager`, ако тази папка съществува (останала от предишното име –
 не се мести, защото ключът, с който са шифровани API ключовете, е в нейния `Local State`), иначе `%APPDATA%\AgentDeck`.

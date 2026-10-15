@@ -1,0 +1,66 @@
+/* Session preview (preview-ui.js): the edge menu's pane beside the session list and the manager's hover card. Linked
+   after the page's own stylesheet; colours from theme.css tokens only. Nothing in the edge menu's pane moves. */
+.pv { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.pv-title { display: flex; align-items: center; gap: 8px; padding: 11px 14px 0; font-size: 13px; font-weight: 650; }
+.pv-title .adot { width: 8px; height: 8px; flex: none; border-radius: 50%; }
+.pv-title .adot.claude { background: var(--claude); }
+.pv-title .adot.opencode { background: var(--opencode); }
+.pv-title .adot.codex { background: var(--codex); }
+.pv-title .t { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pv-head { padding: 3px 14px 9px 30px; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+.pv-facts { display: flex; flex-wrap: wrap; align-items: baseline; gap: 1px 6px; }
+.pv-model { font: 11.5px var(--mono); color: var(--text); }
+.pv-sep { color: var(--faint); }
+.pv-times { margin-top: 1px; color: var(--faint); }
+/* Anchored at the bottom: the newest message is in view, earlier ones are above it. */
+.pv-scroll { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column-reverse; }
+/* The older messages run out under the head: they fade there instead of being cut mid-line. */
+.pv-scroll { -webkit-mask-image: linear-gradient(180deg, transparent, #000 14px); mask-image: linear-gradient(180deg, transparent, #000 14px); }
+.pv-list { display: flex; flex-direction: column; gap: 9px; padding: 10px 12px 12px; }
+
+/* messages */
+.pv-msg, .pv-first { flex: none; min-width: 0; }
+.pv-who { display: flex; align-items: baseline; gap: 7px; margin: 0 2px 2px; font-size: 11.5px; }
+.pv-role { font-weight: 700; color: var(--muted); }
+.pv-msg.user .pv-role { color: var(--accent); }
+.pv-msg.claude .pv-role { color: var(--claude); }
+.pv-msg.opencode .pv-role { color: var(--opencode); }
+.pv-msg.codex .pv-role { color: var(--codex); }
+.pv-at { color: var(--faint); }
+.pv-text {
+  max-height: calc(12.5px * 1.45 * 7); overflow: hidden; padding: 0 2px;
+  font-size: 12.5px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text;
+}
+.pv-msg.user .pv-text, .pv-first .pv-text { padding: 6px 10px; border-radius: var(--r-md); background: var(--accent-weak); }
+.pv-text.clipped { cursor: pointer; -webkit-mask-image: linear-gradient(180deg, #000 62%, transparent); mask-image: linear-gradient(180deg, #000 62%, transparent); }
+.pv-text.clipped.open { max-height: none; -webkit-mask-image: none; mask-image: none; }
+.pv-text code { font: 11.5px var(--mono); padding: 0 4px; border-radius: 4px; background: var(--panel-2); }
+.pv-text b { font-weight: 650; }
+.pv-code {
+  margin: 4px 0; padding: 6px 9px; overflow: hidden; white-space: pre;
+  font: 11.5px/1.4 var(--mono); color: var(--path-parent); background: var(--path-bg);
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+}
+.pv-first .pv-text { max-height: calc(12.5px * 1.45 * 3); }
+.pv-label, .pv-gap { font-size: 10.5px; font-weight: 650; letter-spacing: .07em; text-transform: uppercase; color: var(--faint); }
+.pv-label { margin: 0 2px 3px; }
+.pv-gap { display: flex; align-items: center; gap: 10px; }
+.pv-gap::before, .pv-gap::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.pv-empty { padding: 26px 8px; text-align: center; font-size: 12.5px; color: var(--muted); }
+/* Shown only for the moment the answer takes: static, no shimmer. */
+.pv-skel { flex: none; height: 11px; margin: 4px 2px; border-radius: 6px; background: var(--panel-2); }
+.pv-head .pv-skel { margin: 4px 0 1px; }
+
+/* ---------- edge menu: the pane beside the rows ---------- */
+.dbody { flex: 1; min-height: 0; display: flex; }
+.dbody > .rows { min-width: 0; }
+.dbody > .pv { flex: none; width: clamp(300px, 33%, 440px); border-left: 1px solid var(--line); }
+
+/* ---------- manager: the hover card ---------- */
+.pv-card {
+  position: fixed; z-index: 30; overflow: hidden;
+  border-radius: var(--r-lg); border: 1px solid var(--line-2); background: var(--raised); box-shadow: var(--shadow-pop);
+  animation: rise var(--dur) var(--ease-out);
+}
+.pv-card .pv-title { padding-top: 12px; }
+@media (prefers-reduced-motion: reduce) { .pv-card { animation: none; } }

@@ -6,20 +6,31 @@
 <title data-i18n="settings.title"></title>
 <link rel="stylesheet" href="../../theme.css">
 <link rel="stylesheet" href="settings.css">
+<link rel="stylesheet" href="settings-dictation.css">
+<link rel="stylesheet" href="settings-commands.css">
 <script src="../../i18n.js"></script>
 </head>
 <body>
 <form id="form" class="vs" autocomplete="off" novalidate>
-  <header class="vs-head">
-    <div class="logo" id="logo"></div>
-    <div class="grow"><h1 data-i18n="settings.title"></h1><p data-i18n="settings.subtitle"></p></div>
-    <div class="seg vs-tabs" id="tabs" role="tablist">
-      <button type="button" role="tab" id="tabGeneral" data-value="general" aria-controls="general" data-i18n="settings.general"></button>
-      <button type="button" role="tab" id="tabVoice" data-value="voice" aria-controls="voice" data-i18n="settings.voice"></button>
-      <button type="button" role="tab" id="tabNetwork" data-value="network" aria-controls="network" data-i18n="settings.network"></button>
+  <!-- The tabs down the left: the app's own, then the voice group. Dictation, Dictionary and Read aloud are one
+       settings record with one Save (data-group="voice" on their panes); each marks its own unsaved edits. -->
+  <nav class="vs-side">
+    <div class="vs-brand">
+      <div class="logo" id="logo"></div>
+      <div class="grow"><h1 data-i18n="settings.title"></h1><p data-i18n="settings.subtitle"></p></div>
     </div>
-  </header>
+    <div class="vs-tabs" id="tabs" role="tablist" aria-orientation="vertical">
+      <button type="button" role="tab" id="tabGeneral" data-value="general" aria-controls="general"><span data-icon="window"></span><span data-i18n="settings.general"></span></button>
+      <button type="button" role="tab" id="tabNetwork" data-value="network" aria-controls="network"><span data-icon="globe"></span><span data-i18n="settings.network"></span></button>
+      <div class="vs-group" aria-hidden="true" data-i18n="settings.voice"></div>
+      <button type="button" role="tab" id="tabDictation" data-value="dictation" aria-controls="dictation"><span data-icon="mic"></span><span data-i18n="voice.settings.dictation"></span></button>
+      <button type="button" role="tab" id="tabDictionary" data-value="dictionary" aria-controls="dictionary"><span data-icon="book"></span><span data-i18n="settings.dictionary"></span></button>
+      <button type="button" role="tab" id="tabReadAloud" data-value="readaloud" aria-controls="readaloud"><span data-icon="speaker"></span><span data-i18n="voice.settings.readAloud"></span></button>
+      <button type="button" role="tab" id="tabCommands" data-value="commands" aria-controls="commands"><span data-icon="bolt"></span><span data-i18n="settings.commands"></span></button>
+    </div>
+  </nav>
 
+  <div class="vs-main">
   <div class="vs-panes">
     <!-- General: applied at once, outside Save/Cancel (which are the voice tab's). -->
     <div class="vs-pane" id="general" role="tabpanel" aria-labelledby="tabGeneral">
@@ -52,6 +63,20 @@
       </section>
 
       <section class="vs-sec">
+        <h2><span data-icon="power"></span><span data-i18n="settings.general.startup"></span></h2>
+        <div class="vs-grid">
+          <span class="vs-label" data-i18n="settings.general.startupLabel"></span>
+          <div class="vs-field">
+            <label class="vs-toggle" for="autostart">
+              <span><b data-i18n="settings.general.autostart"></b></span>
+              <input type="checkbox" id="autostart" class="switch">
+            </label>
+            <div class="vs-hint" id="autostartHint"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="vs-sec">
         <h2><span data-icon="download"></span><span data-i18n="settings.updates"></span></h2>
         <div class="vs-grid">
           <span class="vs-label" data-i18n="settings.updates.version"></span>
@@ -80,9 +105,9 @@
       </section>
     </div>
 
-    <div class="vs-pane" id="voice" role="tabpanel" aria-labelledby="tabVoice">
+    <div class="vs-pane" id="dictation" data-group="voice" role="tabpanel" aria-labelledby="tabDictation">
       <section class="vs-sec">
-        <h2><span data-icon="mic"></span><span data-i18n="voice.settings.dictation"></span></h2>
+        <h2><span data-icon="mic"></span><span data-i18n="voice.settings.recognition"></span></h2>
         <div class="vs-grid">
           <span class="vs-label" id="providerLabel" data-i18n="voice.settings.provider"></span>
           <div class="seg" id="provider" role="radiogroup" aria-labelledby="providerLabel"></div>
@@ -117,14 +142,22 @@
         </div>
       </section>
 
+      <!-- Modes, the key's behaviour and the dictionary: settings-dictation.js. -->
       <section class="vs-sec">
-        <h2><span data-icon="speaker"></span><span data-i18n="voice.settings.readAloud"></span></h2>
+        <h2><span data-icon="pencil"></span><span data-i18n="voice.settings.text"></span></h2>
         <div class="vs-grid">
-          <label class="vs-label" for="raModel" data-i18n="voice.settings.raModel"></label>
-          <select id="raModel" class="select"></select>
+          <span class="vs-label" id="dictModeLabel" data-i18n="voice.settings.mode"></span>
+          <div class="vs-field">
+            <div class="seg" id="dictMode" role="radiogroup" aria-labelledby="dictModeLabel"></div>
+            <div class="vs-hint" id="dictModeHint"></div>
+            <div class="vs-err" data-err="dictationMode"></div>
+          </div>
 
-          <label class="vs-label" for="raVoice" data-i18n="voice.settings.raVoice"></label>
-          <div class="vs-field"><select id="raVoice" class="select"></select><div class="vs-hint" id="raHint"></div></div>
+          <span class="vs-label" id="promptLangLabel" data-i18n="voice.settings.promptLanguage"></span>
+          <div class="vs-field">
+            <div class="seg" id="promptLang" role="radiogroup" aria-labelledby="promptLangLabel"></div>
+            <div class="vs-err" data-err="promptLanguage"></div>
+          </div>
         </div>
       </section>
 
@@ -144,6 +177,61 @@
             <div class="vs-err" data-err="hotkeys.dictate"></div>
           </div>
 
+          <span class="vs-label" id="talkModeLabel" data-i18n="voice.settings.talk"></span>
+          <div class="vs-field">
+            <div class="seg" id="talkMode" role="radiogroup" aria-labelledby="talkModeLabel"></div>
+            <div class="vs-hint" id="talkModeHint"></div>
+            <div class="vs-err" data-err="pushToTalk"></div>
+          </div>
+
+          <span></span>
+          <div class="vs-hint" data-i18n="voice.settings.hotkey.hint"></div>
+        </div>
+      </section>
+    </div>
+
+    <div class="vs-pane" id="dictionary" data-group="voice" role="tabpanel" aria-labelledby="tabDictionary">
+      <section class="vs-sec">
+        <h2><span data-icon="book"></span><span data-i18n="settings.dictionary"></span></h2>
+        <div class="vs-grid">
+          <label class="vs-label" for="termInput" data-i18n="voice.settings.dict.terms"></label>
+          <div class="vs-field">
+            <div class="vd-terms" id="terms"><input id="termInput" type="text" spellcheck="false" autocomplete="off" maxlength="400"></div>
+            <div class="vs-hint" data-i18n="voice.settings.dict.termsHint"></div>
+            <div class="vs-err" data-err="dictionary.terms"></div>
+          </div>
+
+          <span class="vs-label" data-i18n="voice.settings.dict.replacements"></span>
+          <div class="vs-field">
+            <div class="vd-reps" id="reps" hidden></div>
+            <button type="button" class="vd-add" id="repAdd"></button>
+            <div class="vs-hint" data-i18n="voice.settings.dict.replacementsHint"></div>
+            <div class="vs-err" data-err="dictionary.replacements"></div>
+          </div>
+
+          <span class="vs-label" data-i18n="voice.settings.dict.projects"></span>
+          <div class="vs-field">
+            <label class="vs-toggle" for="dictProjects">
+              <span><b data-i18n="voice.settings.dict.projectsToggle"></b><small id="dictProjectsCount"></small></span>
+              <input type="checkbox" id="dictProjects" class="switch">
+            </label>
+            <div class="vs-hint" id="dictProjectsHint"></div>
+          </div>
+        </div>
+        <p class="vs-hint vs-privacy" data-i18n="voice.settings.dict.privacy"></p>
+      </section>
+    </div>
+
+    <div class="vs-pane" id="readaloud" data-group="voice" role="tabpanel" aria-labelledby="tabReadAloud">
+      <section class="vs-sec">
+        <h2><span data-icon="speaker"></span><span data-i18n="voice.settings.readAloud"></span></h2>
+        <div class="vs-grid">
+          <label class="vs-label" for="raModel" data-i18n="voice.settings.raModel"></label>
+          <select id="raModel" class="select"></select>
+
+          <label class="vs-label" for="raVoice" data-i18n="voice.settings.raVoice"></label>
+          <div class="vs-field"><select id="raVoice" class="select"></select><div class="vs-hint" id="raHint"></div></div>
+
           <label class="vs-label" for="hkRead" data-i18n="voice.settings.hotkey.readAloud"></label>
           <div class="vs-field">
             <div class="vs-hk">
@@ -162,6 +250,9 @@
         </div>
       </section>
     </div>
+
+    <!-- Voice commands: applied at once; built by settings-commands.js. -->
+    <div class="vs-pane" id="commands" role="tabpanel" aria-labelledby="tabCommands"></div>
 
     <!-- Network: the proxy, saved with its own Save/Cancel. Rows with data-show belong to those modes only. -->
     <div class="vs-pane" id="network" role="tabpanel" aria-labelledby="tabNetwork">
@@ -240,16 +331,21 @@
 
   <footer class="vs-foot">
     <div class="vs-note" data-for="general" data-i18n="settings.general.applied"></div>
+    <div class="vs-note" data-for="commands" data-i18n="settings.general.applied"></div>
     <div class="vs-err vs-form-err" data-for="voice" data-err="form"></div>
     <div class="vs-err vs-form-err" data-for="network" data-err="net.form"></div>
     <button type="button" class="btn" id="close" data-for="general" data-i18n="common.close"></button>
+    <button type="button" class="btn" id="cmdClose" data-for="commands" data-i18n="common.close"></button>
     <button type="button" class="btn" id="cancel" data-for="voice" data-i18n="common.cancel"></button>
     <button type="submit" class="btn primary" id="save" data-for="voice" data-i18n="voice.settings.save"></button>
     <button type="button" class="btn" id="netCancel" data-for="network" data-i18n="common.cancel"></button>
     <button type="submit" class="btn primary" id="netSave" data-for="network" data-i18n="voice.settings.save"></button>
   </footer>
+  </div>
 </form>
 <script src="../../common.js"></script>
+<script src="settings-dictation.js"></script>
+<script src="settings-commands.js"></script>
 <script src="settings.js"></script>
 </body>
 </html>

@@ -9,6 +9,8 @@ const { t } = require("../i18n");
 const path = require("node:path");
 const atomic = require("./atomic-file");
 const { isObj } = require("./util");
+const dictation = require("./dictation-options");
+const commandOptions = require("./command-options");
 
 const PROVIDERS = ["OpenAI", "Gemini"];
 
@@ -25,7 +27,11 @@ const defaults = Object.freeze({
   readAloudVoice: "",
   readAloudSpeed: 1.0, // remembered from the last reading
   hotkeys: Object.freeze({ dictate: "Control+Space", readAloud: "Control+Shift+Space" }),
-  importedFromVoiceTray: null
+  importedFromVoiceTray: null,
+  // dictationMode, promptLanguage, pushToTalk and the dictionary (dictation-options.js).
+  ...dictation.DEFAULTS,
+  // Voice commands (command-options.js).
+  ...commandOptions.DEFAULTS
 });
 
 let userDataDir = null;
@@ -82,6 +88,7 @@ function normalize(v) {
   const speed = Number(v.readAloudSpeed);
   out.readAloudSpeed = Number.isFinite(speed) && speed > 0 ? Math.min(3, Math.max(0.5, speed)) : defaults.readAloudSpeed;
   out.importedFromVoiceTray = str(v.importedFromVoiceTray, null);
+  Object.assign(out, dictation.normalize(v), commandOptions.normalize(v));
   out.apiKeysEnc = isObj(v.apiKeysEnc) ? { ...v.apiKeysEnc } : {};
   return out;
 }

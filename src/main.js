@@ -13,12 +13,18 @@ const formerProfile = path.join(app.getPath("appData"), "ai-session-manager");
 if (testProfile) app.setPath("userData", path.resolve(testProfile));
 else if (fs.existsSync(formerProfile)) app.setPath("userData", formerProfile);
 const { terminalEnv } = require("./terminal-env");
-const { liveSessions } = require("./live");
+const { liveSessions, findTranscript } = require("./live");
+const { focusSession } = require("./terminal-focus");
+const promptLaunch = require("./prompt-launch");
 const { createEdgeBar } = require("./edge-bar");
 const { makeIcon } = require("./app-icon");
 const prefs = require("./prefs");
 const network = require("./network");
 const updater = require("./updater");
+const usage = require("./usage");
+const sessionPreview = require("./session-preview");
+const gitStatus = require("./git-status");
+const autostart = require("./autostart");
 const { t, tn, LANGUAGES } = require("./i18n");
 const { keyLabel } = require("./voice/util");
 const execFileAsync = promisify(execFile);
@@ -27,6 +33,7 @@ const USER = os.homedir();
 const DATA = path.join(app.getPath("userData"), "registry.json");
 const CLAUDE_DIR = path.join(USER, ".claude", "projects");
 const CODEX_DIR = path.join(USER, ".codex", "sessions");
+const OPENCODE_DB = path.join(process.env.XDG_DATA_HOME || path.join(USER, ".local", "share"), "opencode", "opencode.db");
 
 function readRegistry() {
   try {
@@ -54,12 +61,9 @@ function walkFiles(dir, ext, out = [], depth = 0, skipDirs = []) {
   return out;
 }
 function mtime(file) { try { return fs.statSync(file).mtimeMs; } catch { return 0; } }
-// Slash-command echoes, caveats and hook output are not something the user typed as a prompt.
-const NOISE_PROMPT = /^\s*(<(local-command|command-|system-reminder|bash-|user-prompt-submit-hook)|Caveat:)/i;
-function contentText(c) {
-  if (typeof c === "string") return c;
-  return Array.isArray(c) ? c.filter(v => v?.type === "text").map(v => v.text || "").join(" ") : "";
-}
+// Slash-command echoes, caveats and hook output are not something the user typed as a prompt (the previews skip
+// them too).
+const { NOISE_PROMPT, contentText } = sessionPreview;
 function parseClaude(file) {
   let raw;
   try { raw = fs.readFileSync(file, "utf8"); } catch { return null; }
@@ -99,11 +103,29 @@ function parseCodex(file) {
   updatedAt = Math.max(updatedAt, mtime(file));
   return { id, agent: "Codex", cwd, title: title || t("session.untitled", { agent: "Codex", id: id.slice(0, 8) }), updatedAt, file };
 }
-// On Windows `opencode` is an npm .cmd shim, which execFile cannot start without going through cmd.exe.
-function runOpenCode(args, cwd, timeout) {
-  const opts = { cwd, windowsHide: true, timeout, maxBuffer: 8 * 1024 * 1024 };
-  if (process.platform === "win32") return execFileAsync(process.env.ComSpec || "cmd.exe", ["/d", "/c", "opencode", ...args], opts);
-  return execFileAsync("opencode", args, opts);
+// On Windows `opencode` is usually an npm .cmd shim, which execFile cannot start without going through cmd.exe. The
+// scan runs it in project folders, and cmd.exe looks in the current folder before PATH - for `opencode` and for the
+// `node` the shim calls - so it is found on PATH once, by its full path, and cmd.exe is told to skip the folder.
+const openCodeExe = process.platform === "win32" ? findOnPath("opencode") : Promise.resolve("opencode");
+async function runOpenCode(args, cwd, timeout) {
+  const exe = await openCodeExe;
+  if (!exe) throw new Error("opencode is not on PATH");
+  const opts = { cwd, windowsHide: true, timeout, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, NoDefaultCurrentDirectoryInExePath: "1" } };
+  if (!/\.(cmd|bat)$/i.test(exe)) return execFileAsync(exe, args, opts);
+  // /s: the outer quotes go, the rest is taken as typed (args are fixed words).
+  return execFileAsync(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", `""${exe}" ${args.join(" ")}"`], { ...opts, windowsVerbatimArguments: true });
+}
+// The first `name` + PATHEXT extension in a PATH folder (never the current folder), or "".
+async function findOnPath(name) {
+  const exts = (process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean);
+  for (const dir of (process.env.PATH || "").split(path.delimiter)) {
+    if (!dir || !path.isAbsolute(dir.replace(/"/g, ""))) continue;
+    for (const ext of exts) {
+      const file = path.join(dir.replace(/"/g, ""), name + ext.toLowerCase());
+      try { if ((await fs.promises.stat(file)).isFile()) return file; } catch {}
+    }
+  }
+  return "";
 }
 function openCodeSession(s, cwd, projectName) {
   const id = s.id || s.sessionID;
@@ -194,8 +216,11 @@ async function launchTerminal(cwd, command = null) {
   // AgentDeck's proxy too, when the user asked for it in Settings -> Network; a terminal opens without it otherwise.
   const proxy = await network.terminalProxy().catch(e => { console.error("Could not resolve the proxy for the terminal:", e.message); return null; });
   const child = spawn("wt.exe", args, { detached: true, stdio: "ignore", windowsHide: true, env: terminalEnv(process.env, proxy) });
-  child.on("error", err => console.error("Could not launch Windows Terminal:", err.message));
   child.unref();
+  await new Promise((resolve, reject) => {
+    child.once("spawn", resolve);
+    child.once("error", err => { console.error("Could not launch Windows Terminal:", err.message); reject(err); });
+  });
 }
 function agentCommand(agent, id) {
   if (agent === "OpenCode") return ["opencode", "--session", id];
@@ -203,17 +228,38 @@ function agentCommand(agent, id) {
   if (agent === "Codex") return ["codex", "resume", id];
   throw new Error(t("errors.unknownAgent"));
 }
-function psQuote(s) { return "'" + String(s).replace(/'/g, "''") + "'"; }
+const { psQuote } = promptLaunch;
+const NEW_SESSION = { Claude: "claude", OpenCode: "opencode", Codex: "codex" };
+// Every launcher checks its own arguments, whoever calls it (IPC, voice commands): an inherited key such as
+// "constructor" is no agent, and a ";" in a session id would split wt.exe's command line.
+const isAgent = agent => typeof agent === "string" && Object.hasOwn(NEW_SESSION, agent);
+function checkAgent(agent) { if (!isAgent(agent)) throw new Error(t("errors.unknownAgent")); }
+function checkSessionId(id) { if (typeof id !== "string" || !SESSION_ID.test(id)) throw new Error(t("errors.invalidSession")); }
 function launchAgent(agent, id, cwd) {
+  checkAgent(agent);
+  checkSessionId(id);
   if (!cwd || !fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory())
     throw new Error(t("errors.sessionFolderUnknown"));
   const cmd = agentCommand(agent, id).map(psQuote).join(" ");
   return launchTerminal(cwd, "& " + cmd);
 }
-const NEW_SESSION = { Claude: "claude", OpenCode: "opencode", Codex: "codex" };
 function launchNew(agent, cwd) {
-  if (!NEW_SESSION[agent]) throw new Error(t("errors.unknownAgent"));
+  checkAgent(agent);
   return launchTerminal(cwd, "& " + psQuote(NEW_SESSION[agent]));
+}
+// A new session that starts on a prompt (voice commands): the prompt travels in a file, never on a command line. The
+// terminal deletes the file once read; one whose terminal never started goes at once.
+const PROMPTS_DIR = path.join(app.getPath("userData"), "prompts");
+async function launchNewWithPrompt(agent, cwd, prompt) {
+  checkAgent(agent);
+  const file = promptLaunch.writePrompt(PROMPTS_DIR, prompt);
+  try {
+    await launchTerminal(cwd, promptLaunch.command(agent, NEW_SESSION[agent], file, t("voice.command.error.noLauncher", { exe: NEW_SESSION[agent] })));
+  } catch (e) {
+    promptLaunch.remove(file);
+    promptLaunch.sweep(PROMPTS_DIR);
+    throw e;
+  }
 }
 // Which agent CLIs are on PATH, so the menu only offers new sessions that can actually start.
 const agentsReady = Promise.all(Object.entries(NEW_SESSION).map(([agent, exe]) => new Promise(resolve =>
@@ -232,6 +278,9 @@ function scan() {
     // Scan first: it auto-indexes projects into the registry, which must be read afterwards.
     cache = { registry: readRegistry(), sessions, agents: await agentsReady, at: Date.now() };
     broadcast("data:changed", cache);
+    // Transcripts may have grown too, and there may be new folders: their results are broadcast on their own.
+    usage.refresh().catch(err => console.error("Usage scan failed:", err.message));
+    gitStatus.refresh().catch(err => console.error("Git status failed:", err.message));
     return cache;
   }).finally(() => { scanning = null; });
   return scanning;
@@ -395,20 +444,39 @@ function registerIpc() {
     writeRegistry(data); return registryChanged(data);
   });
   handle("launch:folder", async p => { await launchTerminal(text(p)); return true; });
-  handle("launch:agent", async (agent, id, cwd) => {
-    if (!SESSION_ID.test(text(id))) throw new Error(t("errors.invalidSession"));
-    await launchAgent(text(agent), id, text(cwd));
-    return true;
-  });
+  handle("launch:agent", async (agent, id, cwd) => { await launchAgent(text(agent), text(id), text(cwd)); return true; });
   handle("launch:new", async (agent, cwd) => { await launchNew(text(agent), text(cwd)); return true; });
   // Folders only: shell.openPath() on a file runs it.
   handle("open:path", p => (isDir(p) ? shell.openPath(p) : t("errors.folderMissing")));
   handle("clipboard:write", async value => { await clipboard.writeText(text(value, 1_000_000)); return true; });
   handle("live:get", () => liveSessions());
+  // Tokens and API-equivalent cost (usage.js): the last result at once, or a fresh pass over the transcripts.
+  handle("usage:get", () => usage.get());
+  // The figures themselves come as "usage:changed" when they changed; the answer only says when they were checked.
+  handle("usage:refresh", async () => { const u = await usage.refresh(); return u && { at: u.at, stats: u.stats, version: u.version }; });
+  // A session's last messages and a few facts about it (session-preview.js). The transcript is the one the scan
+  // found; one started since is looked up by its id.
+  handle("session:preview", (agent, id) => {
+    if (!SESSION_ID.test(text(id)) || !isAgent(agent)) throw new Error(t("errors.invalidSession"));
+    const s = cache?.sessions.find(x => x.agent === agent && x.id === id)
+      ?? { agent, id, file: agent === "Claude" ? findTranscript(id) : "" };
+    return sessionPreview.preview(s, { openCodeDb: OPENCODE_DB });
+  });
+  // Branch and changes of the projects' and sessions' folders (git-status.js); a refresh is answered by "git:changed".
+  handle("git:get", () => gitStatus.get());
+  handle("git:refresh", () => { gitStatus.refresh().catch(err => console.error("Git status failed:", err.message)); return true; });
+  // Brings a running session's own terminal (tab) to the front; pid and folder come from the live registry.
+  handle("terminal:focus", (agent, id) => {
+    if (!SESSION_ID.test(text(id))) throw new Error(t("errors.invalidSession"));
+    return focusSession({ agent: text(agent), id });
+  });
   // A path typed into the menu's search: offer a new session there if it is an existing directory.
   handle("fs:is-dir", p => (isDir(p) ? path.resolve(p) : ""));
   handle("voice:open-history", () => { voice?.openHistory(); return Boolean(voice); });
   handle("voice:open-settings", () => { voice?.openSettings(); return Boolean(voice); });
+  // The edge menu's microphone: a voice command by click; its state is also pushed as "voice:command-state".
+  handle("voice:command", () => voice?.command.toggle() ?? { ok: false });
+  handle("voice:command-state", () => voice?.command.state() ?? { enabled: false, state: "idle" });
   // Every page, voice ones included, reads the language and theme from its preload before it renders.
   ipcMain.on("prefs:get", e => { e.returnValue = prefs.get(); });
 }
@@ -443,7 +511,9 @@ if (!app.requestSingleInstanceLock()) {
       handle: { shown: () => prefs.get().edgeHandle, position: prefs.handlePosition, savePosition: prefs.setHandlePosition }
     });
     tray = new Tray(makeIcon(32, 2));
-    hotkey = HOTKEYS.find(k => globalShortcut.register(k, () => bar.toggle())) || "";
+    // A press opens or closes the menu at once (here, where Windows lets it take the focus); held down after opening
+    // it, the same hotkey speaks a voice command while the menu stays open (voice/controller.js edgeKey()).
+    hotkey = HOTKEYS.find(k => globalShortcut.register(k, () => { if (!voice?.edgeKey(k, () => bar.toggle())) bar.toggle(); })) || "";
     if (!hotkey) console.error(`None of the hotkeys is free: ${HOTKEYS.join(", ")}`);
     // Double-click would also fire this click, so recording is offered in the menu instead (VoiceTray: double-click).
     tray.on("click", () => bar.show("hotkey"));
@@ -453,14 +523,40 @@ if (!app.requestSingleInstanceLock()) {
     updater.start({ auto: prefs.get().autoUpdate });
     buildTrayMenu();
 
-    showManager();
+    // Started with Windows: the tray and the edge menu only, until the user asks for the window.
+    if (!autostart.startedAtLogin()) showManager();
+    autostart.applyDefault().catch(err => console.error("Could not set up starting with Windows:", err.message));
+    promptLaunch.sweep(PROMPTS_DIR); // prompts of voice commands whose terminal never started
+    usage.start({ claudeDir: CLAUDE_DIR, codexDir: CODEX_DIR, openCodeDb: OPENCODE_DB, userData: app.getPath("userData"), onChange: u => broadcast("usage:changed", u) })
+      .catch(err => console.error("Usage scan failed:", err.message));
+    // Git: refreshed after each scan, when the edge menu opens or the manager window gets the focus (the pages ask),
+    // and every two minutes while either is in view.
+    gitStatus.start({
+      dirs: () => (cache ? [...cache.registry.projects.map(p => p.path), ...cache.sessions.map(s => s.cwd)] : []),
+      onChange: g => broadcast("git:changed", g),
+      active: () => Boolean(bar?.isVisible() || (managerWin && !managerWin.isDestroyed() && managerWin.isVisible() && !managerWin.isMinimized()))
+    });
     scan().catch(err => console.error("Initial scan failed:", err.message));
     // Started once the windows are up: the first run copies VoiceTray's history first, and a voice part that cannot
     // start (native module, broken data) must not take the session manager down with it.
     voiceStarting = Promise.resolve()
       .then(() => require("./voice/controller").initVoice({
         balloon, onTrayChanged: buildTrayMenu, icon: makeIcon(64), prefs,
-        general: { set: patch => prefs.set(patch), hotkey: () => ({ current: hotkeyLabel(), candidates: HOTKEYS.map(k => keyLabel(k, " + ")) }), updates: updater, network }
+        // The dictionary may include the projects' names.
+        projectNames: () => readRegistry().projects.map(p => p.name),
+        general: { set: patch => prefs.set(patch), hotkey: () => ({ current: hotkeyLabel(), candidates: HOTKEYS.map(k => keyLabel(k, " + ")) }), updates: updater, network,
+          autostart },
+        // Voice commands open sessions with the menu's own launchers; a project is shown in the menu itself.
+        commands: {
+          data: async () => cache ?? await scan(), live: liveSessions, focus: focusSession, launchAgent,
+          launchNew: (agent, cwd, prompt) => (prompt ? launchNewWithPrompt(agent, cwd, prompt) : launchNew(agent, cwd)),
+          showProject: dir => { bar.show("hotkey"); bar.win.webContents.send("voice:command-state", { select: dir }); },
+          // While a command is being spoken the menu stays, wherever the pointer or the focus goes (edge-bar.js).
+          onState: s => {
+            bar.keepOpen(s.state === "recording");
+            if (!bar.win.isDestroyed()) bar.win.webContents.send("voice:command-state", s);
+          }
+        }
       }))
       .then(v => { voice = v; buildTrayMenu(); }, e => console.error("Voice features could not start:", e));
   });
@@ -471,7 +567,7 @@ if (!app.requestSingleInstanceLock()) {
     if (quitting) return;
     quitting = true;
     e.preventDefault();
-    const shutdown = (async () => { await voiceStarting; await voice?.dispose(); })();
+    const shutdown = Promise.all([(async () => { await voiceStarting; await voice?.dispose(); })(), usage.flush()]);
     Promise.race([shutdown, new Promise(r => setTimeout(r, QUIT_GRACE_MS))])
       .catch(err => console.error("Voice shutdown failed:", err))
       .finally(() => app.quit());

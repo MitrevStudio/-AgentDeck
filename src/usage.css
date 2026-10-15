@@ -1,0 +1,98 @@
+/* Usage and cost: the manager's Usage view and the figures on session cards and in the edge menu. Linked after the
+   page's own stylesheet; colours come from theme.css tokens only. Nothing here animates (the edge menu has no
+   motion of its own). */
+
+/* ---------- figures beside sessions ---------- */
+/* A card's footer is full of buttons: in a narrower sessions panel the chip keeps the cost only (and the secondary
+   buttons become icons, styles.css); in the narrowest it is left out (the Usage view has the figures), and in between
+   it gives way (ellipsis) rather than push them out. */
+.usage-chip {
+  flex: 0 1 auto; min-width: 0; height: 24px; display: inline-block; line-height: 22px; padding: 0 9px;
+  border-radius: var(--r-pill); border: 1px solid var(--line); background: var(--panel-2);
+  font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+#sessions { container-type: inline-size; }
+@container (max-width: 760px) { .usage-chip .uc-tokens { display: none; } }
+@container (max-width: 440px) { .usage-chip { display: none; } }
+/* Right-aligned in a column of its own, so the live pills before it line up from row to row. */
+.rusage { flex: none; min-width: 52px; text-align: right; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dusage { margin-left: 8px; font-size: 12.5px; font-weight: 550; color: var(--muted); white-space: nowrap; }
+
+/* ---------- manager: header button and view ---------- */
+#usage.on { border-color: var(--accent); background: var(--accent-weak); }
+body.usage-open main { display: none; }
+.usage-view { flex: 1; min-height: 0; overflow: auto; padding: 16px 20px 8px; outline: none; }
+.uv-head, .uv-body { max-width: 1320px; margin: 0 auto; }
+.uv-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.uv-titles h2 { margin: 0; font-size: 18px; font-weight: 650; }
+.uv-titles p { margin: 2px 0 0; font-size: 12.5px; color: var(--muted); }
+.uv-updated { font-size: 12px; color: var(--faint); white-space: nowrap; }
+.uv-body { display: flex; flex-direction: column; gap: 16px; }
+.uv-body > .empty .spinner { width: 22px; height: 22px; margin: 0 auto 14px; }
+
+/* period tiles and the metric switch: one row of filters above everything they scope */
+.uv-filters { display: flex; align-items: center; gap: 14px; }
+.uv-tiles { flex: 1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.uv-tile {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0; padding: 11px 14px 12px;
+  border-radius: var(--r-lg); border: 1px solid var(--line); background: var(--panel); text-align: left;
+}
+.uv-tile:hover { border-color: var(--line-3); }
+.uv-tile.on { border-color: var(--accent); box-shadow: var(--ring); }
+.uv-tile-label { font-size: 12px; font-weight: 600; color: var(--muted); }
+.uv-tile.on .uv-tile-label { color: var(--accent); }
+.uv-tile-value { font-size: 24px; font-weight: 650; line-height: 1.25; color: var(--text); }
+.uv-tile-sub { font-size: 12.5px; color: var(--muted); }
+.uv-metric { flex: none; }
+
+.uv-panel-head { display: flex; align-items: center; gap: 10px; padding: 11px 14px 6px 16px; }
+.uv-panel-head h3 { margin: 0; font-size: 13.5px; font-weight: 650; }
+
+/* daily chart */
+.uv-plot { position: relative; margin: 0 10px 10px; border-radius: var(--r-md); outline: none; }
+.uv-plot:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.uv-plot svg { display: block; }
+.uv-grid { stroke: var(--line); stroke-width: 1; shape-rendering: crispEdges; }
+.uv-base { stroke: var(--line-3); stroke-width: 1; shape-rendering: crispEdges; }
+.uv-axis { fill: var(--faint); font-size: 11px; font-variant-numeric: tabular-nums; }
+.uv-peak { fill: var(--text); font-size: 11.5px; font-weight: 600; }
+.uv-bar { fill: color-mix(in srgb, var(--accent) 30%, transparent); }
+.uv-bar.in { fill: var(--accent); }
+.uv-bar.hot { fill: var(--accent-strong); }
+.uv-hit { fill: transparent; }
+.uv-tip {
+  position: absolute; top: 0; left: 0; z-index: 2; display: flex; flex-direction: column; gap: 1px; padding: 7px 11px;
+  border-radius: var(--r-md); border: 1px solid var(--line-2); background: var(--raised); box-shadow: var(--shadow-pop);
+  font-size: 12px; color: var(--muted); white-space: nowrap; pointer-events: none;
+}
+.uv-tip b { font-size: 14px; font-weight: 650; color: var(--text); }
+.uv-tip span:empty { display: none; }
+.uv-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* ranked lists */
+.uv-lists { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.uv-rows { padding: 2px 8px 8px; }
+.uv-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 14px; row-gap: 6px; width: 100%;
+  padding: 7px 8px 9px; border: 0; border-radius: var(--r-md); background: transparent; color: inherit; text-align: left;
+}
+button.uv-row:hover { background: var(--panel-2); }
+.uv-name { display: flex; flex-direction: column; min-width: 0; }
+.uv-label { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.uv-meta { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; }
+.uv-meta .dot { flex: none; width: 7px; height: 7px; }
+.uv-val { display: flex; flex-direction: column; align-items: flex-end; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.uv-val b { font-size: 13.5px; font-weight: 650; }
+.uv-val span { font-size: 12px; color: var(--muted); }
+.uv-meter { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: var(--panel-2); overflow: hidden; }
+.uv-meter span { display: block; height: 100%; border-radius: 2px; background: var(--accent); }
+
+.uv-note { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 0 2px 10px; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.uv-note .i { width: 14px; height: 14px; margin-top: 2px; color: var(--faint); }
+
+@media (max-width: 1180px) { .uv-lists { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 1020px) {
+  .uv-filters { flex-direction: column; align-items: stretch; }
+  .uv-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

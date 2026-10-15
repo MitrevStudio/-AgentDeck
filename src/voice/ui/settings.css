@@ -1,22 +1,38 @@
-/* The app's Settings: three tabs, General, Voice and Network. Tokens and shared components (buttons, fields, selects, switch,
-   segmented control, tags, kbd) come from ../../theme.css. The window is sized to the tab shown; should the screen
-   be too short for it, the header and the footer stay put while the tab scrolls. */
+/* The app's Settings: the tabs down the left (General, Network, then the voice group: Dictation, Dictionary, Read
+   aloud, Commands), the tab's sections and its footer to the right. Tokens and shared components (buttons, fields,
+   selects, switch, segmented control, tags, kbd) come from ../../theme.css. The window is sized to the tab shown and
+   every tab fits a 1080p screen; should a screen be too short, the tabs and the footer stay put while the tab
+   scrolls. */
 body { user-select: none; }
 
-.vs-head {
-  position: sticky; top: 0; z-index: 2;
-  display: flex; align-items: center; gap: 12px; padding: 12px 14px 12px 18px;
-  border-bottom: 1px solid var(--line); background: var(--panel);
+/* Not a fixed height: the window is sized to this, so the taller of the two columns sets it. */
+.vs {
+  --side: 196px;
+  display: grid; grid-template-columns: var(--side) minmax(0, 1fr);
+  background: linear-gradient(90deg, var(--panel) calc(var(--side) - 1px), var(--line) calc(var(--side) - 1px) var(--side), transparent var(--side));
 }
-.vs-head .logo { width: 36px; height: 36px; flex: none; border-radius: 10px; }
-.vs-head .logo .i { width: 18px; height: 18px; }
-.vs-head h1 { margin: 0; font-size: 16px; font-weight: 650; }
-.vs-head p { margin: 0; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vs-side { position: sticky; top: 0; align-self: start; display: flex; flex-direction: column; gap: 14px; padding: 14px 10px 16px; }
+.vs-brand { display: flex; align-items: center; gap: 10px; padding: 0 4px; }
+.vs-brand .logo { width: 34px; height: 34px; flex: none; border-radius: 10px; }
+.vs-brand .logo .i { width: 17px; height: 17px; }
+.vs-brand h1 { margin: 0; font-size: 15px; font-weight: 650; }
+.vs-brand p { margin: 1px 0 0; font-size: 11.5px; line-height: 1.35; color: var(--muted); }
+.vs-main { min-width: 0; display: flex; flex-direction: column; }
+.vs-panes { flex: 1; }
 
-/* ---------- tabs: General, Voice, Network ---------- */
-.vs-tabs { flex: none; }
-.vs .vs-tabs > button { min-width: 96px; height: 30px; padding: 0 14px; font-size: 13.5px; }
-.vs-tabs > .dirty::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+/* ---------- tabs ---------- */
+.vs-tabs { display: flex; flex-direction: column; gap: 2px; }
+.vs-tabs > button {
+  display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border: 0; border-radius: var(--r-md);
+  background: transparent; color: var(--muted); font-size: 13.5px; font-weight: 600; text-align: left; white-space: nowrap;
+}
+.vs-tabs > button .i { width: 16px; height: 16px; flex: none; color: var(--faint); }
+.vs-tabs > button:hover { color: var(--text); background: var(--panel-2); }
+.vs-tabs > button.on { color: var(--text); background: var(--accent-weak); }
+.vs-tabs > button.on .i { color: var(--accent); }
+.vs-tabs > button:focus-visible { outline-offset: -2px; }
+.vs-tabs > .dirty::after { content: ""; flex: none; width: 7px; height: 7px; margin-left: auto; border-radius: 50%; background: var(--accent); }
+.vs-group { margin: 12px 10px 4px; font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
 .vs-pane:not(.on) { display: none; }
 body:not([data-tab="general"]) [data-for="general"], body:not([data-tab="voice"]) [data-for="voice"],
 body:not([data-tab="network"]) [data-for="network"] { display: none; }
@@ -127,3 +143,6 @@ body:not([data-tab="network"]) [data-for="network"] { display: none; }
 .vs-foot .btn { min-width: 100px; justify-content: center; }
 .vs-form-err, .vs-note { flex: 1; margin: 0 !important; }
 .vs-note { font-size: 12px; color: var(--faint); }
+
+/* What goes to the provider (Dictionary, Commands): a quiet line under the section's fields. */
+.vs-privacy { margin: 0 0 10px; padding-top: 8px; border-top: 1px solid var(--line); }

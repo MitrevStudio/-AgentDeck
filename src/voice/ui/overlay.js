@@ -5,8 +5,13 @@
 Object.assign(ICONS, {
   pause: '<rect x="6.5" y="5" width="3.6" height="14" rx="1.2" fill="currentColor" stroke="none"/><rect x="13.9" y="5" width="3.6" height="14" rx="1.2" fill="currentColor" stroke="none"/>',
   stop: '<rect x="6" y="6" width="12" height="12" rx="2.6" fill="currentColor" stroke="none"/>',
-  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.6h.01"/>'
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.6h.01"/>',
+  ask: '<circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.1-2.4 3.7M12 16.9h.01"/>'
 });
+// A voice command's countdown: a ring that drains around the seconds left.
+const RING = '<svg class="ring" viewBox="0 0 24 24" aria-hidden="true"><circle class="ring-track" cx="12" cy="12" r="10"/>' +
+  '<circle class="ring-arc" cx="12" cy="12" r="10" pathLength="100"/></svg><span class="ring-n" id="ringN"></span>';
+const CARD_STATES = new Set(["error", "notice", "confirm", "choices"]);
 
 const api = window.voiceOverlay;
 const body = document.body, stage = $("stage"), pill = $("pill"), row = $("row"), msg = $("msg"), tip = $("tip");
@@ -17,6 +22,7 @@ const MAX_WARN_SECONDS = 30; // never start the countdown earlier than this, how
 const WARN_FRACTION = 0.25; // on a short cap, 30 s of warning would be most of the recording
 const URGENT_SECONDS = 10;
 const SPEEDS = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
+const MODES = VOICE_MODES;
 const EXIT_MS = 240; // matches overlay.js (main): the window is hidden after this
 
 let seq = 0;
@@ -195,6 +201,7 @@ function setTip(html) {
 function keyHints() {
   const key = (k, word) => `<span class="h"><kbd>${esc(k)}</kbd>${esc(word)}</span>`;
   const cancel = key(data.cancelKey || "Esc", t("voice.overlay.keys.cancel"));
+  if (data.command) return `<span class="h">${esc(data.hint || "")}</span>${cancel}`;
   if (data.hotkey) return key(data.hotkey, t("voice.overlay.keys.finish")) + cancel;
   return data.hint ? `<span class="h">${esc(data.hint)}</span>` : cancel;
 }
@@ -214,6 +221,28 @@ function updateRecording(elapsed) {
   $("timer").innerHTML = warn
     ? t("voice.overlay.timeLeft").split("{time}").map(s => (s ? `<span class="w">${esc(s)}</span>` : "")).join(time)
     : time;
+}
+
+// The dictation mode of this recording, as a chip that cycles through the modes when clicked.
+function setMode(mode) {
+  const b = $("mode");
+  // A voice command has no mode: the chip only says what is being recorded.
+  if (data.command) {
+    setText("mode", t("voice.command.chip"));
+    b.dataset.mode = "command";
+    b.title = "";
+    return;
+  }
+  data.mode = MODES.includes(mode) ? mode : MODES[0];
+  setText("mode", t(`voice.mode.${data.mode}`));
+  b.dataset.mode = data.mode;
+  b.title = t("voice.overlay.modeTip");
+}
+// While transcribing: what comes after the recognition, and once the rewrite runs, that it does.
+function transcribingText() {
+  const mode = MODES.includes(data.mode) && data.mode !== "verbatim" ? data.mode : "";
+  setText("title", data.rewriting ? t(`voice.overlay.rewriting.${data.rewriting}`) : t("voice.overlay.recognizing"));
+  setText("sub", mode && !data.rewriting ? t(`voice.mode.${mode}`) : "");
 }
 
 function setSpeed(x) {
@@ -251,15 +280,50 @@ function refreshPlayback() {
 
 const textTip = text => (text ? `<span class="t">${esc(text)}</span>` : "");
 
-function showMsg({ tone, ico, title, detail, actions, retry, autoHideMs }) {
+// buttons: "close" (an error: Close, and Retry when it can), "command" (Cancel, Run now), "choices" (Cancel) or none.
+function showMsg({ tone, ico, title, detail, sub = "", buttons = null, retry, autoHideMs, choices = [] }) {
   setTone(tone);
-  $("msgIco").innerHTML = icon(ico);
+  $("msgIco").innerHTML = ico === "ring" ? RING : icon(ico);
   setText("msgTitle", title || "");
   setText("msgDetail", detail || "");
-  $("msgActions").hidden = !actions;
-  $("retry").hidden = !retry;
+  setText("msgSub", sub || "");
+  $("msgChoices").innerHTML = choices.map((c, i) => `<button class="mchoice" type="button" data-i="${i}"><span class="ct">${esc(c.label)}</span>` +
+    `<span class="cs">${esc(c.sub || "")}</span></button>`).join("");
+  $("msgActions").hidden = !buttons;
+  $("dismiss").hidden = buttons !== "close";
+  $("retry").hidden = buttons !== "close" || !retry;
+  $("cmdCancel").hidden = buttons !== "command" && buttons !== "choices";
+  $("cmdRun").hidden = buttons !== "command";
   $("retry").innerHTML = `${icon("refresh")}<span>${esc(t("voice.overlay.retry"))}</span>`;
+  $("cmdRun").innerHTML = `${icon("play")}<span>${esc(t("voice.command.runNow"))}</span>`;
   if (autoHideMs) msg.style.setProperty("--notice-ms", `${autoHideMs}ms`);
+}
+
+// The command card's countdown, kept here only for the number in the ring: main runs the command when its own timer
+// ends. Both stop while the pointer rests on the card (main hears it as a "hold" action).
+let countdown = null; // {left, since, paused, timer}
+function startCountdown(seconds) {
+  stopCountdown();
+  msg.style.setProperty("--cd-ms", `${seconds * 1000}ms`);
+  countdown = { left: seconds * 1000, since: performance.now(), paused: false, timer: setInterval(showSecondsLeft, 100) };
+  showSecondsLeft();
+}
+function showSecondsLeft() {
+  const c = countdown;
+  if (!c) return;
+  const left = c.paused ? c.left : c.left - (performance.now() - c.since);
+  setText("ringN", I18N.formatNumber(Math.max(1, Math.ceil(left / 1000))));
+}
+function pauseCountdown(on) {
+  const c = countdown;
+  if (!c || c.paused === on) return;
+  if (on) c.left -= performance.now() - c.since;
+  else c.since = performance.now();
+  c.paused = on;
+}
+function stopCountdown() {
+  if (countdown) clearInterval(countdown.timer);
+  countdown = null;
 }
 
 let playbackTimer = null;
@@ -268,6 +332,7 @@ function render(next, d, animate) {
   state = next;
   data = { ...(d || {}) };
   body.dataset.state = next;
+  body.classList.toggle("command", Boolean(data.command));
   delete body.dataset.paused;
   clearInterval(playbackTimer);
   playbackTimer = null;
@@ -278,8 +343,9 @@ function render(next, d, animate) {
   shownWarn = null;
   setTone("");
   setTip("");
+  stopCountdown();
 
-  const layer = next === "error" || next === "notice" ? "msg" : "row";
+  const layer = CARD_STATES.has(next) ? "msg" : "row";
   stage.dataset.layer = layer;
   if (layer === "row") showParts(next, animate && prev !== null);
 
@@ -288,13 +354,13 @@ function render(next, d, animate) {
       limitSeconds = Number(data.limitSeconds) || 0;
       warnAt = Math.min(MAX_WARN_SECONDS, limitSeconds * WARN_FRACTION);
       setTip(keyHints());
+      setMode(data.mode);
       updateRecording(Number(data.elapsed) || 0);
       if (prev !== "listening") wave.reset();
       wave.setMode("live");
       break;
     case "transcribing":
-      setText("title", t("voice.overlay.recognizing"));
-      setText("sub", "");
+      transcribingText();
       setTip(data.provider ? textTip(t("voice.overlay.provider", { provider: data.provider })) : "");
       wave.setMode("think");
       break;
@@ -319,10 +385,19 @@ function render(next, d, animate) {
       wave.setMode("flat");
       break;
     case "error":
-      showMsg({ tone: "danger", ico: "alert", title: data.title || t("voice.overlay.error"), detail: data.detail, actions: true, retry: data.canRetry !== false });
+      showMsg({ tone: "danger", ico: "alert", title: data.title || t("voice.overlay.error"), detail: data.detail, buttons: "close", retry: data.canRetry !== false });
+      break;
+    case "confirm":
+      // What a voice command will do: a new session's prompt, the session or the folder; it runs when the ring is empty.
+      showMsg({ tone: "", ico: "ring", title: data.title, detail: data.detail, sub: data.sub, buttons: "command" });
+      startCountdown(Number(data.seconds) || 3);
+      break;
+    case "choices":
+      showMsg({ tone: "", ico: "ask", title: data.title, detail: data.detail ? t("voice.command.quoted", { text: data.detail }) : "", buttons: "choices",
+        choices: Array.isArray(data.choices) ? data.choices.slice(0, 3) : [] });
       break;
     case "notice":
-      showMsg({ tone: "", ico: "info", title: data.title, detail: data.detail, actions: false, autoHideMs: Number(data.durationMs) || 3500 });
+      showMsg({ tone: "", ico: "info", title: data.title, detail: data.detail, autoHideMs: Number(data.durationMs) || 3500 });
       // Restart the countdown for a notice that replaces another one.
       $("countdown").style.animation = "none"; void msg.offsetWidth; $("countdown").style.animation = "";
       break;
@@ -354,6 +429,7 @@ function show(next, d) {
 function hide() {
   state = null;
   hidden = true;
+  stopCountdown();
   setInteractive(false);
   stage.classList.add("out");
   clearInterval(playbackTimer);
@@ -390,6 +466,8 @@ api.onUpdate(d => {
     if ("level" in d) wave.setLevel(d.level);
     updateRecording(Number(d.elapsed) || 0);
   }
+  if (state === "listening" && "mode" in d) setMode(d.mode);
+  if (state === "transcribing" && "rewriting" in d) transcribingText();
   if (state === "speaking") {
     if ("speed" in d) setSpeed(d.speed);
     if ("paused" in d) setPaused(Boolean(d.paused));
@@ -402,6 +480,20 @@ $("retry").addEventListener("click", () => api.action("retry", data.jobId ?? nul
 $("dismiss").addEventListener("click", () => api.action("close"));
 $("pause").addEventListener("click", () => api.action("pause"));
 $("stop").addEventListener("click", () => api.action("stop"));
+$("cmdRun").addEventListener("click", () => api.action("run"));
+$("cmdCancel").addEventListener("click", () => api.action("cancel"));
+$("msgChoices").addEventListener("click", e => {
+  const b = e.target.closest(".mchoice");
+  if (b) api.action("choose", Number(b.dataset.i));
+});
+// A voice command being spoken is finished by a click anywhere on the pill (the menu that started it may be gone).
+pill.addEventListener("click", () => { if (state === "listening" && data.command) api.action("finish"); });
+$("mode").addEventListener("click", () => {
+  if (data.command) return;
+  const next = MODES[(MODES.indexOf(data.mode) + 1) % MODES.length];
+  setMode(next); // at once; main confirms with an update
+  api.action("mode", next);
+});
 $("speed").addEventListener("click", () => {
   // The next speed above the current one, wrapping to the slowest.
   const next = SPEEDS.find(s => s > speed + 0.001) ?? SPEEDS[0];
@@ -419,6 +511,7 @@ function setInteractive(on) {
   interactive = on;
   body.classList.toggle("hover", on);
   api.interactive(on);
+  if (state === "confirm") { pauseCountdown(on); api.action("hold", on); }
 }
 const overPill = el => Boolean(state) && !hidden && Boolean(el) && pill.contains(el);
 function recheckPointer() {

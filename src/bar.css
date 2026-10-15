@@ -50,11 +50,14 @@ kbd { font-size: 10.5px; border-bottom-width: 1px; border-radius: 4px; padding: 
 .strip-wrap { position: relative; border-bottom: 1px solid var(--line); }
 /* Scrolled with the wheel or the edge arrows; a scrollbar would only add noise. */
 .strip { display: flex; gap: 6px; overflow-x: auto; overflow-y: hidden; padding: 6px 16px 10px; scrollbar-width: none; }
+/* Three bands in 98 px, the same in every tile: a badge line at the top (the branch on the left, git.css; the
+   session count on the right), the monogram, the name. */
 .tile {
-  position: relative; flex: none; width: 98px; height: 98px; padding: 10px 6px 8px;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px;
+  position: relative; flex: none; width: 98px; height: 98px; padding: 23px 6px 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 6px;
   border-radius: 13px; border: 1px solid transparent; background: transparent;
 }
+.tile > .mono { width: 44px; height: 44px; }
 .tile:hover { background: var(--panel-2); }
 .tile.sel { background: var(--accent-weak); border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
 .mono {
@@ -68,7 +71,7 @@ kbd { font-size: 10.5px; border-bottom-width: 1px; border-radius: 4px; padding: 
 .mono.special .i { width: 22px; height: 22px; }
 .badge { position: absolute; right: -5px; bottom: -5px; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; background: var(--glass); }
 .tname { max-width: 100%; font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tcount { position: absolute; top: 6px; right: 8px; font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.tcount { position: absolute; top: 5px; right: 8px; font-size: 11px; line-height: 14px; color: var(--faint); font-variant-numeric: tabular-nums; }
 .strip .none { padding: 30px 6px; color: var(--muted); }
 .nav {
   position: absolute; top: 0; bottom: 8px; z-index: 2; width: 38px; display: grid; place-items: center;
@@ -101,7 +104,8 @@ kbd { font-size: 10.5px; border-bottom-width: 1px; border-radius: 4px; padding: 
 .rmain .t { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rmain .path { font-size: 12.5px; margin-top: 1px; }
 .row.dir .path { font-size: 14px; }
-.when { flex: none; font-size: 12px; color: var(--muted); white-space: nowrap; }
+/* A column of its own (as the cost before it, usage.css), so the live pills line up from row to row. */
+.when { flex: none; min-width: 88px; text-align: right; font-size: 12px; color: var(--muted); white-space: nowrap; }
 .ract { flex: none; display: flex; gap: 2px; opacity: 0; }
 .row:hover .ract, .row.sel .ract, .ract.show { opacity: 1; }
 .ract .go { color: var(--accent); }

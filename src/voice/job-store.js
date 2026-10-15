@@ -11,7 +11,8 @@ const { SAFE_ID } = require("./util");
 const { t } = require("../i18n");
 
 const STATUSES = ["Pending", "Transcribing", "ReadyForDelivery", "Delivering", "Failed", "Done", "Abandoned"];
-const KINDS = ["Dictation", "ReadAloud"];
+// Command: a voice command (command-runner.js), kept for History only - never transcribed again or delivered.
+const KINDS = ["Dictation", "ReadAloud", "Command"];
 const IN_FLIGHT = new Set(["Transcribing", "Delivering"]);
 
 // Transcripts outlive their audio: they are kilobytes, audio is megabytes.
@@ -24,9 +25,13 @@ const LIMITS = Object.freeze({
   maxFailed: 50
 });
 
-// Property order as VoiceTray serializes TranscriptionJob.
+// Property order as VoiceTray serializes TranscriptionJob, then AgentDeck's own: the dictation mode, the transcript
+// as recognised when the delivered text differs from it, why a rewrite fell back to that transcript, and for a voice
+// command what it was taken to mean and how it ended ({action, summary, agent, project, path, session, prompt,
+// rewriteError, outcome, note}).
 const FIELDS = ["Id", "Kind", "AudioPath", "CreatedAt", "CompletedAt", "DurationSeconds", "Provider", "Model", "Language",
-  "Voice", "Status", "AttemptCount", "LastError", "LastErrorShort", "LastStatusCode", "LastErrorTransient", "ResultText"];
+  "Voice", "Status", "AttemptCount", "LastError", "LastErrorShort", "LastStatusCode", "LastErrorTransient", "ResultText",
+  "Mode", "RawText", "RewriteError", "Command"];
 
 let root = null;
 let jobs = null; // Map id -> record, loaded by recoverOnStartup()
@@ -61,7 +66,8 @@ function stamp(d = new Date()) {
 const blank = () => ({
   Id: "", Kind: "Dictation", AudioPath: "", CreatedAt: stamp(), CompletedAt: null, DurationSeconds: 0,
   Provider: "", Model: "", Language: "auto", Voice: "", Status: "Pending", AttemptCount: 0,
-  LastError: null, LastErrorShort: null, LastStatusCode: null, LastErrorTransient: false, ResultText: null
+  LastError: null, LastErrorShort: null, LastStatusCode: null, LastErrorTransient: false, ResultText: null,
+  Mode: "verbatim", RawText: null, RewriteError: null
 });
 
 function pick(obj) {
@@ -183,7 +189,8 @@ function list({ query = "", status, kind } = {}) {
   const has = s => typeof s === "string" && s.toLocaleLowerCase().includes(q);
   return [...map().values()]
     .filter(j => (!status || j.Status === status) && (!kind || j.Kind === kind))
-    .filter(j => !q || has(j.ResultText) || has(j.LastErrorShort) || has(j.Provider) || has(j.Model))
+    .filter(j => !q || has(j.ResultText) || has(j.RawText) || has(j.LastErrorShort) || has(j.Provider) || has(j.Model)
+      || has(j.Command?.summary) || has(j.Command?.prompt))
     .sort((a, b) => time(b.CreatedAt) - time(a.CreatedAt))
     .map(j => ({ ...j, HasAudio: hasAudio(j), HasText: hasText(j) }));
 }

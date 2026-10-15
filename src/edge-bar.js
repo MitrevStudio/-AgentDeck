@@ -29,7 +29,10 @@ function createEdgeBar({ preload, handle: handlePrefs, onOpenManager, hotkeyLabe
 
   // mode: "hover" closes when the cursor leaves; "hotkey" (the hotkey, the tray, a click on the handle) stays until
   // Esc, a click elsewhere or an action.
-  let visible = false, mode = "", pinned = false, focused = false, leftAt = 0, watch = null;
+  // held: a terminal is being brought up from the menu; it takes the focus, which must not close the menu yet.
+  // kept: a voice command is being spoken; neither the pointer leaving nor a click elsewhere closes the menu then, and
+  // once it is over, a menu that lost the focus meanwhile goes.
+  let visible = false, mode = "", pinned = false, held = false, kept = false, blurred = false, focused = false, leftAt = 0, watch = null;
   const send = ev => { if (!win.isDestroyed()) win.webContents.send("bar:event", ev); };
 
   const handle = createEdgeHandle({
@@ -60,7 +63,7 @@ function createEdgeBar({ preload, handle: handlePrefs, onOpenManager, hotkeyLabe
       return;
     }
     const origin = place(how);
-    visible = true; mode = how; pinned = false; focused = false; leftAt = 0;
+    visible = true; mode = how; pinned = false; held = false; blurred = false; focused = false; leftAt = 0;
     // Tell the page first so it starts rendering while the window is being shown.
     send({ type: "show", mode: how, hotkey: hotkeyLabel(), handle: handlePrefs.shown(), origin, motion: desktop.motionAllowed() });
     // On hover the menu must not steal keyboard focus from what the user was doing; a click inside activates it.
@@ -81,7 +84,7 @@ function createEdgeBar({ preload, handle: handlePrefs, onOpenManager, hotkeyLabe
   // Hover mode: the menu goes once the cursor has been off it and off the handle for a moment. While something is
   // typed into the search, leaving with the mouse must not throw it away.
   function watchPointer() {
-    if (win.isDestroyed() || mode !== "hover" || pinned) return;
+    if (win.isDestroyed() || mode !== "hover" || pinned || kept) return;
     const p = screen.getCursorScreenPoint();
     if (within(p, win.getBounds(), 12) || within(p, handle.bounds())) leftAt = 0;
     else if (!leftAt) leftAt = Date.now();
@@ -90,18 +93,31 @@ function createEdgeBar({ preload, handle: handlePrefs, onOpenManager, hotkeyLabe
 
   // Activating the menu brings it to the front; the handle stays on top of it as its grip.
   win.on("focus", () => { focused = true; handle.raise(); });
-  win.on("blur", () => { if (focused && visible) hide(); });
+  win.on("blur", () => {
+    if (!focused || !visible) return;
+    if (held || kept) blurred = true;
+    else hide();
+  });
+  function keepOpen(on) {
+    if (kept === Boolean(on)) return;
+    kept = Boolean(on);
+    if (!kept && visible && blurred && !win.isFocused()) hide();
+    if (kept) blurred = false;
+  }
 
   ipcMain.on("bar:command", (e, cmd, arg) => {
     if (e.sender !== win.webContents) return;
     if (cmd === "hide") hide();
     if (cmd === "pin") pinned = Boolean(arg);
+    if (cmd === "hold") held = Boolean(arg);
     if (cmd === "open-manager") { hide(); onOpenManager(); }
   });
 
   return {
-    win, handleWin: handle.win, show, hide, syncHandle: handle.sync,
-    toggle: () => (visible ? hide() : show("hotkey")), isVisible: () => visible
+    win, handleWin: handle.win, show, hide, keepOpen, syncHandle: handle.sync,
+    // -> whether the menu is open now.
+    toggle: () => { if (visible) hide(); else show("hotkey"); return visible; },
+    isVisible: () => visible
   };
 }
 

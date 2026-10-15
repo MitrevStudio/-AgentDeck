@@ -43,6 +43,7 @@ main {
 .proj-name { flex: 1; min-width: 0; font-size: 14.5px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .proj > .path { margin: 5px 0 0 26px; }
 .proj-meta { display: flex; align-items: center; gap: 6px; margin: 4px 0 0 26px; min-height: 30px; font-size: 12px; color: var(--faint); }
+.proj-meta > :first-child { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .proj-tools { margin-left: auto; display: flex; gap: 1px; opacity: 0; transition: opacity var(--dur-fast); }
 .proj:hover .proj-tools, .proj.active .proj-tools, .proj:focus-within .proj-tools { opacity: 1; }
 .proj.all { padding-bottom: 11px; margin-bottom: 8px; }
@@ -81,6 +82,19 @@ main {
 .sess-prompt { margin: 5px 0 0; color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sess-foot { display: flex; align-items: center; gap: 8px; margin-top: 11px; }
 .sid { flex: 1; min-width: 0; font: 12px var(--mono); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sess-foot .btn { flex: none; }
+/* A narrower sessions panel (#sessions is a size container, usage.css): the main action keeps its label; "Open again",
+   then Terminal and Explorer become icon buttons with their tooltip; the session id gives way first. A live pill
+   leaves out its activity time, so the title keeps its words whole. */
+@container (max-width: 760px) {
+  .sess-foot .ghost .bl { display: none; }
+  .sess-foot .btn.ghost:has(.bl) { width: 32px; padding: 0; justify-content: center; border-color: var(--line); }
+}
+@container (max-width: 640px) {
+  .sess-foot .bl { display: none; }
+  .sess-foot .btn:has(.bl) { width: 32px; padding: 0; justify-content: center; }
+  .sess-head .live .live-t { display: none; }
+}
 
 /* ---------- live status ---------- */
 .sess.live-busy { border-color: color-mix(in srgb, var(--busy) 40%, transparent); box-shadow: inset 3px 0 0 var(--busy); }
@@ -91,8 +105,10 @@ main {
 .sess.active.live-stale { box-shadow: inset 3px 0 0 var(--muted), var(--ring); }
 .proj-live { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 650; color: var(--muted); }
 .proj-live .pulse { margin-left: 3px; }
+/* The sessions header: in a narrow panel the agent chips go to a line of their own rather than out of the panel. */
+.panel-head:has(#agentChips) { flex-wrap: wrap; row-gap: 8px; }
 .live-filter {
-  display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; margin-left: 4px;
+  display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; margin-left: 4px; white-space: nowrap;
   border-radius: var(--r-pill); border: 1px solid var(--line-2); background: var(--bg); font-size: 12.5px; font-weight: 600;
 }
 .live-filter:hover { border-color: var(--accent); }
@@ -108,9 +124,17 @@ main {
 .keys { margin-left: auto; display: flex; align-items: center; gap: 5px; white-space: nowrap; }
 .keys span { margin-right: 10px; }
 
+/* Narrower windows: the search keeps room for its whole placeholder - first the tagline goes, then the secondary
+   header buttons keep only their icon (and tooltip). */
+@media (max-width: 1400px) { .brand p { display: none; } }
 @media (max-width: 1180px) {
-  .brand p, .keys { display: none; }
+  .keys { display: none; }
+  .top-actions .btn:not(.primary) .label { display: none; }
   main { grid-template-columns: 310px 1fr; }
+  /* The narrower project list: a project's branch is in its tooltip, its name keeps the room, and the tools take
+     their place only while they show (pointed at, chosen or focused), so the time is not cut short. */
+  .proj-row .git-chip .gb { display: none; }
+  .proj:not(:hover, .active, :focus-within) .proj-tools { display: none; }
 }
 @media (max-width: 1020px) {
   .brand h1 { display: none; }

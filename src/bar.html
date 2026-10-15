@@ -6,6 +6,10 @@
 <title>AgentDeck</title>
 <link rel="stylesheet" href="theme.css">
 <link rel="stylesheet" href="bar.css">
+<link rel="stylesheet" href="usage.css">
+<link rel="stylesheet" href="preview.css">
+<link rel="stylesheet" href="git.css">
+<link rel="stylesheet" href="bar-voice.css">
 <script src="i18n.js"></script>
 </head>
 <body>
@@ -17,6 +21,7 @@
       <input id="q" type="search" data-i18n-placeholder="bar.search.placeholder" data-i18n-aria-label="common.search" autocomplete="off" spellcheck="false">
     </div>
     <div id="liveSum"></div>
+    <button class="icon-btn voice-cmd" id="voiceCmd" hidden><span data-icon="mic"></span></button>
     <button class="icon-btn" id="openManager" data-i18n-title="common.openManager"><span data-icon="window"></span></button>
   </div>
   <div class="strip-wrap">
@@ -29,6 +34,10 @@
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 </div>
 <script src="common.js"></script>
+<script src="usage-ui.js"></script>
+<script src="git-ui.js"></script>
+<script src="preview-ui.js"></script>
 <script src="bar.js"></script>
+<script src="bar-voice.js"></script>
 </body>
 </html>

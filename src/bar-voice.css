@@ -1,0 +1,4 @@
+/* The edge menu's microphone for voice commands (bar-voice.js). No transitions: the menu reacts at once. */
+.icon-btn.voice-cmd .i { width: 16px; height: 16px; }
+.icon-btn.voice-cmd.rec { color: var(--danger); background: var(--danger-bg); border-color: var(--danger-line); }
+.icon-btn.voice-cmd.busy { color: var(--accent); background: var(--accent-weak); border-color: var(--accent-line); }

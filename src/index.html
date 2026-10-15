@@ -7,6 +7,9 @@
 <title>AgentDeck</title>
 <link rel="stylesheet" href="theme.css">
 <link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="usage.css">
+<link rel="stylesheet" href="preview.css">
+<link rel="stylesheet" href="git.css">
 <script src="i18n.js"></script>
 </head>
 <body>
@@ -22,6 +25,7 @@
     <kbd>Ctrl K</kbd>
   </div>
   <div class="top-actions">
+    <button id="usage" class="btn" data-i18n-title="usage.button.title" aria-pressed="false"><span data-icon="chart"></span><span class="label" data-i18n="usage.button.label"></span></button>
     <button id="voiceHistory" class="btn" data-i18n-title="manager.history.title"><span data-icon="clock"></span><span class="label" data-i18n="manager.history.label"></span></button>
     <button id="settings" class="btn" data-i18n-title="manager.settings.title"><span data-icon="sliders"></span><span class="label" data-i18n="manager.settings.label"></span></button>
     <button id="refresh" class="btn" data-i18n-title="manager.refresh.title"><span data-icon="refresh"></span><span class="label" data-i18n="manager.refresh.label"></span></button>
@@ -39,12 +43,17 @@
     <div class="panel-body" id="sessions"></div>
   </section>
 </main>
+<section id="usageView" class="usage-view" tabindex="-1" data-i18n-aria-label="usage.title" hidden></section>
 <footer class="status">
   <span id="status" data-i18n="manager.status.ready"></span>
   <span class="keys"><kbd>Ctrl K</kbd><span data-i18n="manager.keys.search"></span><kbd>↑</kbd><kbd>↓</kbd><span data-i18n="manager.keys.select"></span><kbd>Enter</kbd><span data-i18n="manager.keys.resume"></span><kbd>Esc</kbd><span data-i18n="manager.keys.clear"></span></span>
 </footer>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <script src="common.js"></script>
+<script src="usage-ui.js"></script>
+<script src="git-ui.js"></script>
+<script src="preview-ui.js"></script>
 <script src="renderer.js"></script>
+<script src="usage-view.js"></script>
 </body>
 </html>

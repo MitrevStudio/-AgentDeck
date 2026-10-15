@@ -10,13 +10,25 @@ contextBridge.exposeInMainWorld("manager", {
   openPath: p => ipcRenderer.invoke("open:path", p),
   copyText: text => ipcRenderer.invoke("clipboard:write", text),
   getLive: () => ipcRenderer.invoke("live:get"),
+  getUsage: () => ipcRenderer.invoke("usage:get"),
+  refreshUsage: () => ipcRenderer.invoke("usage:refresh"),
+  onUsageChanged: cb => ipcRenderer.on("usage:changed", (_e, u) => cb(u)),
+  getPreview: (agent, id) => ipcRenderer.invoke("session:preview", agent, id),
+  getGit: () => ipcRenderer.invoke("git:get"),
+  refreshGit: () => ipcRenderer.invoke("git:refresh"),
+  onGitChanged: cb => ipcRenderer.on("git:changed", (_e, g) => cb(g)),
+  focusTerminal: (agent, id) => ipcRenderer.invoke("terminal:focus", agent, id),
   isDir: p => ipcRenderer.invoke("fs:is-dir", p),
   openVoiceHistory: () => ipcRenderer.invoke("voice:open-history"),
   openSettings: () => ipcRenderer.invoke("voice:open-settings"),
   onDataChanged: cb => ipcRenderer.on("data:changed", (_e, data) => cb(data)),
   // Edge menu only.
   onBarEvent: cb => ipcRenderer.on("bar:event", (_e, ev) => cb(ev)),
-  barCommand: (cmd, arg) => ipcRenderer.send("bar:command", cmd, arg)
+  barCommand: (cmd, arg) => ipcRenderer.send("bar:command", cmd, arg),
+  // Voice commands (edge menu): the microphone button, and {enabled, state} or {select: folder} from main.
+  voiceCommand: () => ipcRenderer.invoke("voice:command"),
+  voiceCommandState: () => ipcRenderer.invoke("voice:command-state"),
+  onVoiceCommand: cb => ipcRenderer.on("voice:command-state", (_e, s) => cb(s))
 });
 // UI language and theme, read before the page renders; i18n.js applies them.
 contextBridge.exposeInMainWorld("prefs", {

@@ -347,6 +347,19 @@ function parseAccelerator(accelerator) {
   return vk ? { mods, vk } : null;
 }
 
+// A reader for "is this combination still held": its key and every modifier it has (either Ctrl, either Win...).
+// For push-to-talk, which polls it; null for an accelerator that is not one.
+function keyHeld(accelerator) {
+  const parsed = parseAccelerator(accelerator);
+  if (!parsed) return null;
+  const { mods, vk } = parsed;
+  return () => isDown(vk)
+    && (!(mods & MOD.CONTROL) || isDown(VK.CONTROL))
+    && (!(mods & MOD.ALT) || isDown(VK.MENU))
+    && (!(mods & MOD.SHIFT) || isDown(VK.SHIFT))
+    && (!(mods & MOD.WIN) || isDown(VK.LWIN) || isDown(VK.RWIN));
+}
+
 // Global hotkeys on one of our windows. RegisterHotKey with MOD_NOREPEAT, not globalShortcut: the latter fires on
 // every auto-repeat of a held key. The window must live as long as the hotkeys (a hidden one is fine) and this
 // registry owns its WM_HOTKEY hook.
@@ -393,5 +406,5 @@ module.exports = {
   waitModifiersUp, sendCtrlV, sendCopy, typeUnicode, clipboardSeq,
   withClipboard, listFormats, readFormat, writeFormat, emptyClipboard, decodeText, encodeText,
   readClipboardText, writeClipboardText, CF,
-  createHotkeys, parseAccelerator, exclusive, waitUntil
+  createHotkeys, parseAccelerator, keyHeld, exclusive, waitUntil
 };

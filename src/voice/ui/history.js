@@ -6,12 +6,16 @@ const WORKING = ["Transcribing", "Delivering"];
 const IN_FLIGHT = [...WORKING, "Pending", "ReadyForDelivery"];
 // The kind filter: value and label key.
 const KINDS = [["", "common.all"], ["Dictation", "voice.history.kind.dictation"], ["ReadAloud", "voice.history.kind.readAloud"],
-  ["Failed", "voice.history.kind.failed"]];
-const TAG = { done: "ok", failed: "danger", work: "warn", read: "read" };
+  ["Command", "voice.history.kind.command"], ["Failed", "voice.history.kind.failed"]];
+const TAG = { done: "ok", failed: "danger", work: "warn", read: "read", quiet: "" };
+// A voice command's outcome -> its tag's tone (the label is voice.history.command.<outcome>).
+const COMMAND_TONE = { launched: "done", resumed: "done", focused: "done", shown: "done", cancelled: "quiet", unclear: "work", failed: "failed" };
+const KIND_LOOK = { Dictation: ["mic", ""], ReadAloud: ["speaker", " read"], Command: ["terminal", " cmd"] }; // icon, class
 const num = n => I18N.formatNumber(n);
 
 // all: every record matching the search; views: those that also pass the kind filter (what the list shows).
-const st = { all: [], views: [], total: 0, query: "", kind: "", sel: null, playing: null };
+const st = { all: [], views: [], total: 0, query: "", kind: "", sel: null, playing: null, version: "result" };
+const MODES = VOICE_MODES;
 const list = $("list"), player = $("player"), dText = $("dText");
 
 // ---------- rows (VoiceTray's HistoryRow.From) ----------
@@ -37,8 +41,26 @@ function shorten(text) {
   return flat.length <= PREVIEW_CHARS ? flat : flat.slice(0, PREVIEW_CHARS) + "…";
 }
 
+// A voice command: what it was taken to mean, what was said, and the prompt a new session got.
+const CARD = { new: "voice.command.card.new", resume: "voice.command.card.resume", show: "voice.command.card.show", project: "voice.command.card.project" };
+function commandView(j) {
+  const c = j.Command || {};
+  const outcome = COMMAND_TONE[c.outcome] ? c.outcome : j.Status === "Failed" ? "failed" : "unclear";
+  const summary = CARD[c.kind] ? t(CARD[c.kind], { agent: c.agent || "", project: c.project || t("voice.command.noProject") }) : c.summary;
+  const body = [[summary, c.session].filter(Boolean).join("\n"), t("voice.history.command.said", { text: j.ResultText || "" }), c.note,
+    c.prompt ? `${t("voice.history.command.prompt")}\n${c.prompt}` : "",
+    c.rewriteError ? t("voice.history.command.rewriteFailed", { reason: c.rewriteError }) : ""].filter(Boolean).join("\n\n");
+  return {
+    status: outcome === "failed" ? t("voice.history.status.failedWith", { reason: j.LastErrorShort || t("voice.history.status.error") })
+      : t(`voice.history.command.${outcome}`),
+    tone: COMMAND_TONE[outcome], body,
+    preview: summary ? `${summary} · ${t("voice.command.quoted", { text: j.ResultText || "" })}` : j.ResultText || ""
+  };
+}
+
 function view(j) {
   const readAloud = j.Kind === "ReadAloud";
+  const command = j.Kind === "Command";
   const working = WORKING.includes(j.Status);
   // A saved error message stays in the language it was written in.
   const [status, tone] =
@@ -54,7 +76,9 @@ function view(j) {
   const length = j.DurationSeconds > 0 ? durationText(j.DurationSeconds) : "";
   const parts = [length, `${j.Provider || ""} ${j.Model || ""}`.trim(),
     readAloud ? t("voice.history.meta.voice", { name: j.Voice || "—" })
-    : j.Language && j.Language !== "auto" ? j.Language : t("voice.history.meta.autoLanguage")].filter(Boolean);
+    : j.Language && j.Language !== "auto" ? j.Language : t("voice.history.meta.autoLanguage"),
+    // Only a rewriting mode is worth a word; verbatim is what every older record was.
+    !readAloud && MODES.includes(j.Mode) && j.Mode !== "verbatim" ? t(`voice.mode.${j.Mode}`) : ""].filter(Boolean);
   const created = Date.parse(j.CreatedAt);
   return {
     ...j, readAloud, status, tone, body, text, working,
@@ -68,7 +92,9 @@ function view(j) {
     // A reading needs only its text, which outlives the audio; retention trimming the audio is exactly when
     // "read again" is wanted.
     canRedo: readAloud ? j.HasText : j.HasAudio && !working,
-    canDelete: !working
+    canDelete: !working,
+    // A voice command is kept to be looked at, never redone (it would act on the sessions again).
+    ...(command ? { ...commandView(j), canRedo: false } : {})
   };
 }
 
@@ -76,7 +102,9 @@ const ofKind = (v, kind) => !kind || (kind === "Failed" ? v.Status === "Failed" 
 const selected = () => st.views.find(v => v.Id === st.sel) || null;
 // In the list a failure says just that; the reason is in its preview and in the detail.
 const statusTag = v => `<span class="tag ${TAG[v.tone]}" title="${esc(v.status)}">${v.working ? '<span class="spinner"></span>' : ""}<span class="t">${esc(v.tone === "failed" ? t("voice.history.status.failed") : v.status)}</span></span>`;
-const kindBadge = v => `<span class="vh-kind${v.readAloud ? " read" : ""}">${icon(v.readAloud ? "speaker" : "mic")}${esc(t(v.readAloud ? "voice.history.badge.read" : "voice.history.badge.dictation"))}</span>`;
+const look = v => KIND_LOOK[v.Kind] || KIND_LOOK.Dictation;
+const BADGE = { Dictation: "voice.history.badge.dictation", ReadAloud: "voice.history.badge.read", Command: "voice.history.badge.command" };
+const kindBadge = v => `<span class="vh-kind${look(v)[1]}">${icon(look(v)[0])}${esc(t(BADGE[v.Kind] || BADGE.Dictation))}</span>`;
 
 // ---------- rendering ----------
 function render() {
@@ -129,9 +157,9 @@ function renderDetail() {
       : `<div class="empty-ico">${icon("mic")}</div><h3>${esc(t("voice.history.detail.start"))}</h3><p>${esc(t("voice.history.detail.startBody"))}</p>`;
     return;
   }
-  $("dKind").className = `vh-dkind${v.readAloud ? " read" : ""}`;
-  $("dKind").innerHTML = icon(v.readAloud ? "speaker" : "mic");
-  $("dKind").title = t(v.readAloud ? "voice.history.detail.read" : "voice.history.detail.dictation");
+  $("dKind").className = `vh-dkind${look(v)[1]}`;
+  $("dKind").innerHTML = icon(look(v)[0]);
+  $("dKind").title = t({ ReadAloud: "voice.history.detail.read", Command: "voice.history.detail.command" }[v.Kind] || "voice.history.detail.dictation");
   $("dTime").textContent = v.fullTime;
   $("dStatus").className = `tag ${TAG[v.tone]}`;
   $("dStatus").innerHTML = `${v.working ? '<span class="spinner"></span>' : ""}<span class="t">${esc(v.status)}</span>`;
@@ -141,8 +169,21 @@ function renderDetail() {
   const err = v.Status === "Failed" && v.HasText && v.LastError ? v.LastError : "";
   $("dErr").innerHTML = err ? `${icon("alert")}<span>${esc(err)}</span>` : "";
   $("dErr").hidden = !err;
+  const note = v.RewriteError && v.HasText ? t("voice.history.rewriteFailed", { mode: t(`voice.mode.${MODES.includes(v.Mode) ? v.Mode : "clean"}`), reason: v.RewriteError }) : "";
+  $("dNote").innerHTML = note ? `${icon("alert")}<span>${esc(note)}</span>` : "";
+  $("dNote").hidden = !note;
+  if (shownId !== v.Id) st.version = "result";
+  const raw = Boolean(v.RawText) && v.HasText;
+  if (!raw) st.version = "result";
+  $("dVersions").hidden = !raw;
+  for (const b of $("dVersion").querySelectorAll("[data-version]")) {
+    const on = b.dataset.version === st.version;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-checked", on);
+  }
+  const shown = st.version === "raw" ? v.RawText : v.body;
   // Live updates must not reset the user's own text selection or scroll.
-  if (dText.value !== v.body) dText.value = v.body;
+  if (dText.value !== shown) dText.value = shown;
   dText.classList.toggle("muted", !v.HasText);
   if (shownId !== v.Id) { dText.scrollTop = 0; shownId = v.Id; }
 }
@@ -255,7 +296,7 @@ player.addEventListener("error", () => { if (st.playing && player.getAttribute("
 async function copyText() {
   const v = selected();
   if (!v?.HasText) return;
-  if (await window.voiceHistory.copy(v.Id)) toast(t("voice.history.toast.copied"));
+  if (await window.voiceHistory.copy(v.Id, st.version)) toast(t("voice.history.toast.copied"));
   else toast(t("voice.history.toast.clipboardBusy"), true);
 }
 
@@ -294,6 +335,12 @@ $("redo").addEventListener("click", run(redo));
 $("del").addEventListener("click", run(removeOne));
 $("clear").addEventListener("click", run(clearAll));
 $("close").addEventListener("click", () => window.close());
+$("dVersion").addEventListener("click", e => {
+  const b = e.target.closest("[data-version]");
+  if (!b || b.dataset.version === st.version) return;
+  st.version = b.dataset.version;
+  renderDetail();
+});
 $("kinds").addEventListener("click", e => {
   const chip = e.target.closest("[data-kind]");
   if (chip && !chip.disabled) setKind(chip.dataset.kind);

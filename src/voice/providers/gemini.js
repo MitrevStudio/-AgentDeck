@@ -63,22 +63,35 @@ function readText(root) {
 }
 
 // No prompt: this model only transcribes. "smart" removes filler words and adds punctuation and capitalisation,
-// which is what dictation wants; no language_codes means auto-detect.
-async function viaInteractions(data, apiKey, model, language, signal) {
+// which is what dictation wants; no language_codes means auto-detect. custom_vocabulary steers it towards the
+// user's names and technical words - and should a revision of the API refuse it (a 400 that names it), the recording
+// is transcribed without it: the dictionary must never cost a dictation.
+async function viaInteractions(data, apiKey, model, language, vocabulary, signal) {
   const tag = language !== "auto" ? LANGUAGE_TAGS[language] : undefined;
+  const config = { mode: "smart" };
+  if (tag) config.language_codes = [tag];
+  if (vocabulary.length) config.custom_vocabulary = vocabulary;
   const body = {
     model,
     input: [{ type: "audio", data, mime_type: "audio/wav" }],
-    generation_config: { transcription_config: tag ? { language_codes: [tag], mode: "smart" } : { mode: "smart" } }
+    generation_config: { transcription_config: config }
   };
-  return readText(await postJson(INTERACTIONS_URL, interactionHeaders(apiKey), body, signal));
+  try {
+    return readText(await postJson(INTERACTIONS_URL, interactionHeaders(apiKey), body, signal));
+  } catch (error) {
+    if (!config.custom_vocabulary || error?.status !== 400 || !/vocabulary/i.test(error.longMessage || "")) throw error;
+    console.error("Gemini refused custom_vocabulary; transcribing without it:", error.longMessage);
+    delete config.custom_vocabulary;
+    return readText(await postJson(INTERACTIONS_URL, interactionHeaders(apiKey), body, signal));
+  }
 }
 
 // The general-purpose models are chat models asked to transcribe, so the instruction is spelled out.
-async function viaGenerateContent(data, apiKey, model, language, signal) {
+async function viaGenerateContent(data, apiKey, model, language, vocabulary, signal) {
   let prompt = "Transcribe this audio recording accurately. " +
     "Respond with ONLY the transcribed text, without any commentary, labels, or quotation marks.";
   if (language && language !== "auto" && LANGUAGE_NAMES[language]) prompt += ` The spoken language is ${LANGUAGE_NAMES[language]}.`;
+  if (vocabulary.length) prompt += ` These names and terms may occur; when they do, spell them exactly like this: ${vocabulary.join(", ")}.`;
 
   const body = {
     contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: "audio/wav", data } }] }],
@@ -91,7 +104,8 @@ async function viaGenerateContent(data, apiKey, model, language, signal) {
   return parts.map(p => (typeof p?.text === "string" ? p.text : "")).join("").trim();
 }
 
-async function transcribe({ wavPath, model, language, apiKey, signal }) {
+// vocabulary: terms the user wants recognised and spelled their way (dictionary.js).
+async function transcribe({ wavPath, model, language, vocabulary = [], apiKey, signal }) {
   try {
     const audio = await fs.promises.readFile(wavPath, { signal });
     if (audio.length > MAX_INLINE_BYTES) {
@@ -99,8 +113,30 @@ async function transcribe({ wavPath, model, language, apiKey, signal }) {
     }
     const data = audio.toString("base64");
     return isTranscribeModel(model)
-      ? await viaInteractions(data, apiKey, model, language, signal)
-      : await viaGenerateContent(data, apiKey, model, language, signal);
+      ? await viaInteractions(data, apiKey, model, language, vocabulary, signal)
+      : await viaGenerateContent(data, apiKey, model, language, vocabulary, signal);
+  } catch (error) {
+    throw classify({ error, provider: PROVIDER, signal });
+  }
+}
+
+// Flash models think unless told not to: Gemini 3 takes a level, 2.5 a budget (0 = off). A rewrite needs no thinking,
+// and every second of it is a second before anything is pasted. Pro models cannot turn it off and are left alone.
+const thinkingOff = model => (!/flash/i.test(model) ? undefined : /^gemini-2\./.test(model) ? { thinkingBudget: 0 } : { thinkingLevel: "minimal" });
+
+// One answer from a text model: `system` holds the instructions, `text` the material. Empty when the model gave no
+// text (blocked, or cut off before any); the caller decides what that means.
+async function generateText({ model, system, text, temperature = 0.2, apiKey, signal }) {
+  const body = {
+    systemInstruction: { parts: [{ text: system }] },
+    contents: [{ role: "user", parts: [{ text }] }],
+    generationConfig: { temperature, thinkingConfig: thinkingOff(model) }
+  };
+  try {
+    const root = await postJson(GENERATE_URL(model), jsonHeaders(apiKey), body, signal);
+    const parts = root?.candidates?.[0]?.content?.parts;
+    if (!Array.isArray(parts)) return "";
+    return parts.filter(p => !p?.thought).map(p => (typeof p?.text === "string" ? p.text : "")).join("").trim();
   } catch (error) {
     throw classify({ error, provider: PROVIDER, signal });
   }
@@ -178,4 +214,4 @@ async function* speak({ text, model, voice, apiKey, signal, timeoutMs }) {
   }
 }
 
-module.exports = { transcribe, speak, isTranscribeModel, MAX_INLINE_BYTES, SPEECH_SAMPLE_RATE };
+module.exports = { transcribe, generateText, speak, isTranscribeModel, LANGUAGE_NAMES, MAX_INLINE_BYTES, SPEECH_SAMPLE_RATE };

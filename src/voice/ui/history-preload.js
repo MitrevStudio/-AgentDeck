@@ -3,7 +3,8 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("voiceHistory", {
   list: query => ipcRenderer.invoke("voice:history:list", String(query ?? "")),
-  copy: id => ipcRenderer.invoke("voice:history:copy", String(id)),
+  // which: "raw" copies the transcript as recognised (a rewritten dictation keeps both), anything else the result.
+  copy: (id, which) => ipcRenderer.invoke("voice:history:copy", String(id), which === "raw" ? "raw" : "result"),
   redo: id => ipcRenderer.invoke("voice:history:redo", String(id)),
   remove: id => ipcRenderer.invoke("voice:history:delete", String(id)),
   clear: () => ipcRenderer.invoke("voice:history:clear"),

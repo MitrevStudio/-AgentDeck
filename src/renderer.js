@@ -64,7 +64,7 @@ function renderProjects(v) {
         ${ui.renaming === p.n
           ? `<input class="rename" value="${esc(p.name)}" maxlength="80" aria-label="${esc(t("manager.project.newName"))}">`
           : `<span class="proj-name" title="${esc(p.name)}">${hl(p.name, v.toks)}</span>`}
-        ${projectLive(p)}
+        ${gitChip(p.path)}${projectLive(p)}
         <span class="count" title="${esc(t(v.toks.length ? "manager.project.countMatching" : "manager.project.countAll"))}">${count}</span>
       </div>
       ${pathHtml(p.path, v.toks)}
@@ -131,12 +131,15 @@ function renderSessions(v) {
 
 function sessionHtml(s, i, toks) {
   const dir = s.cwd
-    ? `<div class="dir">${icon("folder")}${pathHtml(s.cwd, toks)}<button class="icon-btn" data-action="copy" data-path="${esc(s.cwd)}" title="${esc(t("action.copyPath"))}">${icon("copy")}</button></div>`
+    ? `<div class="dir">${icon("folder")}${pathHtml(s.cwd, toks)}${gitChip(s.cwd)}<button class="icon-btn" data-action="copy" data-path="${esc(s.cwd)}" title="${esc(t("action.copyPath"))}">${icon("copy")}</button></div>`
     : `<div class="dir unknown">${icon("alert")}${esc(t("manager.session.noDir"))}</div>`;
   const l = liveOf(s);
   const liveCls = l ? `live-${l.status === "busy" ? (isStale(l) ? "stale" : "busy") : "idle"}` : "";
+  // A running session: its terminal is brought up; a second instance stays possible, but quieter. The secondary
+  // actions' labels (.bl) give way to their icon and tooltip in a narrow panel (styles.css).
   const resumeBtn = l
-    ? `<button class="btn sm" data-action="resume" title="${esc(t("manager.session.openAgainTitle", { pid: l.pid }))}">${icon("play")}${esc(t("action.openAgain"))}</button>`
+    ? `<button class="btn sm primary" data-action="show-terminal" title="${esc(t("term.showTitle", { pid: l.pid }))}">${icon("raise")}${esc(t("term.show"))}</button>
+      <button class="btn sm ghost" data-action="resume" title="${esc(t("manager.session.openAgainTitle", { pid: l.pid }))}" aria-label="${esc(t("action.openAgain"))}">${icon("play")}<span class="bl">${esc(t("action.openAgain"))}</span></button>`
     : `<button class="btn sm primary" data-action="resume" ${s.cwd ? "" : "disabled"}>${icon("play")}${esc(t("action.resume"))}</button>`;
   return `<article class="card sess ${liveCls} ${i === ui.active ? "active" : ""}" data-i="${i}">
     <div class="sess-head"><span class="agent ${s.agent.toLowerCase()}">${esc(s.agent)}</span>
@@ -146,9 +149,10 @@ function sessionHtml(s, i, toks) {
     ${s.prompt ? `<p class="sess-prompt" title="${esc(s.prompt)}">${hl(s.prompt, toks)}</p>` : ""}
     ${dir}
     <div class="sess-foot"><span class="sid" title="${esc(t("manager.session.id"))}">${hl(s.id, toks)}</span>
+      ${usageChip(s)}
       ${resumeBtn}
-      ${s.cwd ? `<button class="btn sm" data-action="terminal" data-path="${esc(s.cwd)}">${icon("terminal")}${esc(t("action.terminal"))}</button>
-      <button class="btn sm" data-action="explorer" data-path="${esc(s.cwd)}">${icon("open")}${esc(t("action.explorer"))}</button>` : ""}
+      ${s.cwd ? `<button class="btn sm" data-action="terminal" data-path="${esc(s.cwd)}" title="${esc(t("action.terminalHere"))}" aria-label="${esc(t("action.terminal"))}">${icon("terminal")}<span class="bl">${esc(t("action.terminal"))}</span></button>
+      <button class="btn sm" data-action="explorer" data-path="${esc(s.cwd)}" title="${esc(t("action.explorerTitle"))}" aria-label="${esc(t("action.explorer"))}">${icon("open")}<span class="bl">${esc(t("action.explorer"))}</span></button>` : ""}
     </div></article>`;
 }
 
@@ -262,6 +266,14 @@ async function resume(s) {
   await window.manager.launchAgent(s.agent, s.id, s.cwd);
   toast(t("manager.toast.resuming", { agent: s.agent, cwd: s.cwd }));
 }
+async function showTerminal(s) {
+  if (!s) return;
+  const r = await window.manager.focusTerminal(s.agent, s.id);
+  const note = focusNote(r);
+  if (note) toast(note, !r.ok);
+}
+// Double-click and Enter: a running session's terminal comes up, any other session is resumed.
+const openSession = s => (s && liveOf(s) ? showTerminal(s) : resume(s));
 
 async function commitRename(input) {
   const path = input.closest(".proj").dataset.path;
@@ -278,6 +290,7 @@ async function runAction(action, btn) {
   const path = btn.dataset.path || btn.closest("[data-path]")?.dataset.path;
   switch (action) {
     case "resume": return resume(visible[Number(btn.closest(".sess").dataset.i)]);
+    case "show-terminal": return showTerminal(visible[Number(btn.closest(".sess").dataset.i)]);
     case "terminal": await window.manager.launchFolder(path); return toast(t("manager.toast.terminal", { path }));
     case "explorer": { const err = await window.manager.openPath(path); if (err) throw new Error(err); return; }
     case "copy": await window.manager.copyText(path); return toast(t("toast.copied", { path }));
@@ -346,7 +359,7 @@ $("sessions").addEventListener("click", async e => {
 });
 $("sessions").addEventListener("dblclick", e => {
   const card = e.target.closest(".sess");
-  if (card && !e.target.closest("button")) resume(visible[Number(card.dataset.i)]).catch(err => toast(err.message, true));
+  if (card && !e.target.closest("button")) openSession(visible[Number(card.dataset.i)]).catch(err => toast(err.message, true));
 });
 
 document.addEventListener("keydown", e => {
@@ -371,7 +384,7 @@ document.addEventListener("keydown", e => {
   }
   if (e.key === "Enter" && ui.active >= 0 && (inSearch || e.target === document.body)) {
     e.preventDefault();
-    resume(visible[ui.active]).catch(err => toast(err.message, true));
+    openSession(visible[ui.active]).catch(err => toast(err.message, true));
   }
 });
 
@@ -382,6 +395,9 @@ window.manager.onDataChanged(d => {
   prepare();
   if (ui.renaming) pendingRender = true; else render();
 });
+// Git branches beside projects and session folders, and a session's last messages on hover (git-ui.js, preview-ui.js).
+watchGit(() => { if (!ui.loaded) return; if (ui.renaming) pendingRender = true; else render(); });
+previewHoverCard($("sessions"), card => visible[Number(card.dataset.i)]);
 
 load();
 setInterval(pollLive, 2000);

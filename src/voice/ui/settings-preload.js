@@ -6,11 +6,14 @@ contextBridge.exposeInMainWorld("voiceSettings", {
   save: payload => ipcRenderer.invoke("voice:settings:save", payload),
   // true while a hotkey field has the focus: main lets go of the voice hotkeys so they reach the field.
   capture: on => ipcRenderer.invoke("voice:settings:capture", on === true),
-  fit: height => ipcRenderer.invoke("voice:settings:fit", Number(height)),
+  // The window takes the page's height (measured here when not given), as every tab's own script asks.
+  fit: height => ipcRenderer.invoke("voice:settings:fit", Number(height ?? Math.ceil(document.body.getBoundingClientRect().height))),
   // General section: applied at once ({language}, {theme}, {edgeHandle} or {autoUpdate}); the edge menu's hotkey,
   // read-only.
   setPrefs: patch => ipcRenderer.invoke("prefs:set", patch),
   edgeHotkey: () => ipcRenderer.invoke("app:edge-hotkey"),
+  // Start with Windows: autostart() reads {supported, enabled}, autostart(true|false) switches it at once.
+  autostart: on => ipcRenderer.invoke("app:autostart", typeof on === "boolean" ? on : null),
   // Updates: the state now and on every change; check, download and install act at once.
   updates: {
     get: () => ipcRenderer.invoke("updates:get"),
@@ -18,6 +21,11 @@ contextBridge.exposeInMainWorld("voiceSettings", {
     download: () => ipcRenderer.invoke("updates:download"),
     install: () => ipcRenderer.invoke("updates:install"),
     onChanged: cb => ipcRenderer.on("updates:changed", (_e, state) => cb(state))
+  },
+  // Voice commands: get() -> {commands, agents, hotkey}; set(patch) applies at once -> {ok, commands} or {ok: false, error}.
+  commands: {
+    get: () => ipcRenderer.invoke("voice:commands:get"),
+    set: patch => ipcRenderer.invoke("voice:commands:set", patch)
   },
   // Network: the proxy settings (a password goes in, never out), saved on their own; test() uses what is entered.
   network: {

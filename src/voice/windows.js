@@ -5,9 +5,10 @@ const { BrowserWindow, ipcMain, screen } = require("electron");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { maxRecordingMinutesFor } = require("./transcription");
-const { TRANSCRIPTION_MODELS, SPEECH_MODELS, VOICES, VOICE_STYLES, DEFAULT_SPEECH_MODEL, DEFAULT_VOICE, defaultModelFor } = require("./catalog");
+const { TRANSCRIPTION_MODELS, SPEECH_MODELS, VOICES, VOICE_STYLES, DEFAULT_SPEECH_MODEL, DEFAULT_VOICE, REWRITE_MODELS, defaultModelFor } = require("./catalog");
 const { SAFE_ID, isObj, sleep } = require("./util");
 const { classify } = require("./errors");
+const dictation = require("./dictation-options");
 const { t } = require("../i18n");
 
 const UI = path.join(__dirname, "ui");
@@ -76,7 +77,7 @@ function normalizeAccelerator(value) {
 // goes to general.set(patch) / general.hotkey() and to general.updates (../updater.js), its Network section to
 // general.network (../network.js); background() is the window colour of the current theme.
 function createVoiceWindows({ settings, store, queue, listDevices, onReread, onSettingsChanged, onHotkeyCapture, copyText, icon,
-  general, background = () => "#0d1015" } = {}) {
+  general, background = () => "#0d1015", projectNames = () => [], commandSettings = null } = {}) {
   if (!settings || !store || !queue) throw new Error("createVoiceWindows: settings, store and queue are required");
   let historyWin = null, settingsWin = null, changedTimer = null;
   const alive = w => Boolean(w && !w.isDestroyed());
@@ -135,6 +136,7 @@ function createVoiceWindows({ settings, store, queue, listDevices, onReread, onS
     Provider: j.Provider, Model: j.Model, Language: j.Language, Voice: j.Voice, Status: j.Status,
     AttemptCount: j.AttemptCount, LastError: j.LastError, LastErrorShort: j.LastErrorShort,
     LastStatusCode: j.LastStatusCode, ResultText: j.ResultText, HasAudio: j.HasAudio, HasText: j.HasText,
+    Mode: j.Mode, RawText: j.RawText, RewriteError: j.RewriteError, Command: j.Command,
     // Always the record's own file beside its sidecar, never the stored AudioPath.
     audioUrl: j.HasAudio ? pathToFileURL(store.wavPath(j.Id)).href : ""
   });
@@ -146,8 +148,9 @@ function createVoiceWindows({ settings, store, queue, listDevices, onReread, onS
     return { total: store.count(), items: store.list({ query: q }).map(row) };
   });
 
-  handle("voice:history:copy", historyOwner, async id => {
-    const text = findJob(id)?.ResultText;
+  handle("voice:history:copy", historyOwner, async (id, which) => {
+    const job = findJob(id);
+    const text = which === "raw" ? job?.RawText : job?.ResultText;
     return Boolean(text && copyText && (await copyText(text)));
   });
 
@@ -173,7 +176,7 @@ function createVoiceWindows({ settings, store, queue, listDevices, onReread, onS
     if (alive(settingsWin)) return focus(settingsWin);
     settingsWin = makeWindow({
       page: "settings.html", preload: "settings-preload.js", title: t("settings.title"),
-      width: 620, height: 760, useContentSize: true, resizable: false, maximizable: false, minimizable: false,
+      width: 840, height: 760, useContentSize: true, resizable: false, maximizable: false, minimizable: false,
       fullscreenable: false, center: true
     });
     // Sized to its content (VoiceTray: SizeToContent) once the page reports its height; shown regardless if it never does.
@@ -208,6 +211,8 @@ function createVoiceWindows({ settings, store, queue, listDevices, onReread, onS
     voices: VOICES.map(name => [name, voiceStyle(name)]),
     defaultVoice: DEFAULT_VOICE,
     hotkeyDefaults: { ...settings.defaults.hotkeys },
+    projectNames: (() => { try { return projectNames() || []; } catch { return []; } })(),
+    rewriteModels: { ...REWRITE_MODELS },
     devices: await devices()
   }));
 
@@ -232,6 +237,12 @@ function createVoiceWindows({ settings, store, queue, listDevices, onReread, onS
   // General section: language, theme and the edge menu, applied at once.
   handle("prefs:set", settingsOwner, patch => general?.set(isObj(patch) ? patch : {}));
   handle("app:edge-hotkey", settingsOwner, () => general?.hotkey() ?? null);
+  // Start with Windows: true/false switches it, anything else asks; answers {supported, enabled} (../autostart.js).
+  handle("app:autostart", settingsOwner, on => {
+    const a = general?.autostart;
+    if (!a) return { supported: false, enabled: false };
+    return typeof on === "boolean" ? a.set(on) : a.state();
+  });
 
   // Updates: the state, pushed again whenever it changes; the actions take no arguments.
   const updates = general?.updates;
@@ -257,6 +268,10 @@ function createVoiceWindows({ settings, store, queue, listDevices, onReread, onS
 
   // The page is recording a new combination while one of its hotkey fields has the focus.
   handle("voice:settings:capture", settingsOwner, on => { onHotkeyCapture?.(on === true); return true; });
+
+  // Voice commands tab: applied at once, like General (commandSettings: the controller's get() / set(patch)).
+  handle("voice:commands:get", settingsOwner, () => commandSettings?.get() ?? null);
+  handle("voice:commands:set", settingsOwner, patch => commandSettings?.set(patch) ?? { ok: false });
 
   handle("voice:settings:save", settingsOwner, async payload => {
     const { patch, keys, errors } = validateSettings(payload, settings.PROVIDERS);
@@ -342,6 +357,11 @@ function validateSettings(p, providers) {
     if (dictate.value === readAloud.value) errors["hotkeys.readAloud"] = t("voice.settings.err.sameHotkeys");
     else patch.hotkeys = { dictate: dictate.value, readAloud: readAloud.value };
   }
+
+  // Dictation mode, prompt language, key behaviour and dictionary (dictation-options.js).
+  const dict = dictation.validate(p);
+  Object.assign(patch, dict.patch);
+  Object.assign(errors, dict.errors);
 
   // {set: "key"} replaces, {clear: true} removes; a provider that is absent keeps whatever is saved.
   for (const [provider, k] of Object.entries(isObj(p.apiKeys) ? p.apiKeys : {})) {

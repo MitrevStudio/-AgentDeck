@@ -3,11 +3,17 @@
 // delivery in flight, in order. Nothing retries on its own - a failure parks and waits for the user.
 //
 // Every change is announced as a "job" event: {type, id, job, outcome?}, `job` being the record as stored now (null
-// once removed). Types: queued, started, ready, delivering, completed (outcome Injected|ClipboardOnly), empty,
-// failed, requeued (cancelled attempt put back), retry, removed, added, pruned.
+// once removed). Types: queued, started, rewriting (the transcript is in, the mode's rewrite is running), ready,
+// delivering, completed (outcome Injected|ClipboardOnly), empty, failed, requeued (cancelled attempt put back),
+// retry, removed, added, pruned.
+//
+// Between transcript and delivery: the dictionary's replacements, then the record's mode (Mode: verbatim, clean,
+// prompt). A rewrite that fails is not a failed dictation: the transcript is delivered as it is and the reason kept
+// in RewriteError.
 const { EventEmitter } = require("node:events");
 const { classify } = require("./errors");
 const { defaultModelFor } = require("./catalog");
+const { applyReplacements } = require("./dictionary");
 const { sleep, hhmm } = require("./util");
 const { t } = require("../i18n");
 
@@ -24,6 +30,9 @@ function createQueue(deps = {}) {
   const toClipboard = deps.toClipboard || (async text => (await require("./delivery").deliverToClipboard(text)).outcome !== "Failed");
   const getSettings = deps.getSettings || (() => require("./settings").load());
   const notify = deps.notify || (() => {});
+  // The terms transcription and rewrite are told about (dictionary.vocabulary()), read at every attempt.
+  const vocabulary = deps.vocabulary || (() => []);
+  const rewrite = deps.rewrite || ((...a) => require("./rewrite").rewrite(...a));
 
   const q = new EventEmitter();
   // Where each job's first delivery goes. In memory only, and dropped the moment a job fails or is retried: a retry
@@ -65,9 +74,9 @@ function createQueue(deps = {}) {
 
   async function processJob(id) {
     const job = store.get(id);
-    // A read-aloud record already has its text and would fall straight through to delivery, typing it into the
-    // focused window. It can only get here through a bug, and this is where it must stop.
-    if (!job || job.Kind === "ReadAloud" || job.Status === "Abandoned" || job.Status === "Done" || job.Status === "Failed") return;
+    // A read-aloud or a voice command record already has its text and would fall straight through to delivery,
+    // typing it into the focused window. It can only get here through a bug, and this is where it must stop.
+    if (!job || job.Kind !== "Dictation" || job.Status === "Abandoned" || job.Status === "Done" || job.Status === "Failed") return;
     if (!job.ResultText && !(await transcribeStep(id))) return;
     const ready = store.get(id);
     if (!ready) return;
@@ -87,9 +96,12 @@ function createQueue(deps = {}) {
     emit("started", id);
     const ac = attempt = new AbortController();
     try {
-      const text = await transcribe(job, getSettings(), { signal: ac.signal });
-      store.update(id, { ResultText: String(text ?? "").trim(), LastError: null, LastErrorShort: null,
-        LastStatusCode: null, LastErrorTransient: false, Status: "ReadyForDelivery" });
+      const s = getSettings();
+      const terms = vocabulary();
+      const raw = String((await transcribe(job, s, { signal: ac.signal, vocabulary: terms })) ?? "").trim();
+      const { text, rewriteError } = await finish(id, job, raw, s, terms, ac.signal);
+      store.update(id, { ResultText: text, RawText: text === raw ? null : raw, RewriteError: rewriteError,
+        LastError: null, LastErrorShort: null, LastStatusCode: null, LastErrorTransient: false, Status: "ReadyForDelivery" });
       emit("ready", id);
       return true;
     } catch (error) {
@@ -106,6 +118,31 @@ function createQueue(deps = {}) {
       return false;
     } finally {
       if (attempt === ac) attempt = null;
+    }
+  }
+
+  // The transcript as the record's mode wants it, written by the provider it was recorded with (a retry included);
+  // only when that one has no key any more, by the one chosen now. Only a cancel (shutdown) escapes; any other rewrite
+  // failure falls back to the transcript, so the dictation is never lost to it.
+  async function finish(id, job, raw, s, terms, signal) {
+    const fixed = applyReplacements(raw, s.dictionary?.replacements);
+    const mode = job.Mode || "verbatim";
+    if (!fixed || mode === "verbatim") return { text: fixed, rewriteError: null };
+    emit("rewriting", id);
+    const attempt = provider => rewrite(fixed, { mode, dictionary: terms, language: job.Language, provider, signal });
+    const provider = job.Provider || s.provider;
+    try {
+      try { return { text: await attempt(provider), rewriteError: null }; } catch (error) {
+        if (error?.kind !== "Configuration" || !s.provider || s.provider === provider) throw error;
+        return { text: await attempt(s.provider), rewriteError: null };
+      }
+    } catch (error) {
+      if (signal.aborted) throw error;
+      let e = error;
+      if (!e?.shortMessage) { try { e = classify({ error, provider, signal }); } catch {} }
+      console.error(`Rewrite (${mode}) failed, delivering the transcript:`, e?.longMessage || e?.message || e);
+      // "No API key is set for Gemini" says more than "Not set up".
+      return { text: fixed, rewriteError: (e?.kind === "Configuration" ? e.longMessage : e?.shortMessage) || String(e?.message || e) };
     }
   }
 
@@ -184,7 +221,7 @@ function createQueue(deps = {}) {
     return job;
   };
 
-  // A finished record that did not come through the queue (a read-aloud, created with store.create("ReadAloud")):
+  // A finished record that did not come through the queue (a read-aloud or a voice command, made with store.create()):
   // announced and pruned like the rest, deliberately never queued - see processJob().
   q.addRecord = id => {
     prune();
@@ -194,7 +231,7 @@ function createQueue(deps = {}) {
   // Tries a failed recording again exactly as recorded - same provider and model.
   q.retry = id => {
     const job = store.get(id);
-    if (!job || job.Status !== "Failed" || job.Kind === "ReadAloud") return false;
+    if (!job || job.Status !== "Failed" || job.Kind !== "Dictation") return false;
     targets.delete(id);
     store.update(id, { Status: job.ResultText ? "ReadyForDelivery" : "Pending" });
     push(id);
@@ -208,9 +245,9 @@ function createQueue(deps = {}) {
   // Transcribes an existing recording again under the settings in force now. Needs the audio.
   q.retranscribe = id => {
     const job = store.get(id);
-    if (!job || job.Kind === "ReadAloud" || IN_FLIGHT.has(job.Status) || !store.hasAudio(job)) return false;
+    if (!job || job.Kind !== "Dictation" || IN_FLIGHT.has(job.Status) || !store.hasAudio(job)) return false;
     targets.delete(id);
-    store.update(id, { ...jobSettings(getSettings()), ResultText: null, CompletedAt: null, Status: "Pending" });
+    store.update(id, { ...jobSettings(getSettings()), ResultText: null, RawText: null, RewriteError: null, CompletedAt: null, Status: "Pending" });
     push(id);
     emit("retry", id);
     return true;

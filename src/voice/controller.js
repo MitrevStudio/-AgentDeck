@@ -1,7 +1,7 @@
 // Voice in the running app: hotkeys, recorder, floating panel, transcription queue and read-aloud wired together.
 // Port of VoiceTray's App.xaml.cs state machine and HotkeyService. The tray itself belongs to main.js: it gets the
 // menu items, the failure count and balloons from here.
-const { BrowserWindow } = require("electron");
+const { BrowserWindow, powerMonitor } = require("electron");
 const fs = require("node:fs");
 const settings = require("./settings");
 const store = require("./job-store");
@@ -14,13 +14,19 @@ const { createRecorder } = require("./recorder");
 const { createOverlay } = require("./overlay");
 const { createReadAloud, MAX_CHARACTERS } = require("./tts");
 const { createVoiceWindows } = require("./windows");
-const { maxRecordingBytes, maxRecordingMinutesFor } = require("./transcription");
+const { createTalkKey, createEdgeHold } = require("./talk-key");
+const { vocabulary } = require("./dictionary");
+const { MODES } = require("./dictation-options");
+const { maxRecordingBytes, maxRecordingMinutesFor, transcribeFile } = require("./transcription");
+const { createCommandRunner } = require("./command-runner");
+const commandOptions = require("./command-options");
 const { HEADER_BYTES } = require("./wav");
 const { hhmm, keyLabel } = require("./util");
 const { t, tn, formatNumber, locale } = require("../i18n");
 
-// Stands in for a job id while the panel belongs to a reading.
+// Stand in for a job id while the panel belongs to a reading, or to a voice command.
 const READ_ALOUD = "read-aloud";
+const COMMAND = "command";
 const VOICETRAY_MUTEX = "Local\\VoiceTray.SingleInstance";
 // Text is looked up when it is shown, so it is always in the language of the moment.
 const keepRecording = () => t("voice.notice.keepRecording");
@@ -30,9 +36,10 @@ const logError = what => e => console.error(`${what}:`, e);
 
 // balloon(text, {iconType, jobId}) shows a tray balloon; clicking one that carries a jobId should call retry(jobId).
 // onTrayChanged() asks main to rebuild the tray menu and badge. prefs (../prefs.js) and general (the Settings
-// window's General section) come from main. Resolves once voice is ready: on the first run that includes copying
-// VoiceTray's history, which the rest of the app does not wait for.
-async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, prefs, general } = {}) {
+// window's General section) come from main; projectNames() lists AgentDeck's projects, which the dictionary may
+// include. commands: what voice commands need of main (command-runner.js, `app`). Resolves once voice is ready: on
+// the first run that includes copying VoiceTray's history, which the rest of the app does not wait for.
+async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, prefs, general, projectNames = () => [], commands: app = null } = {}) {
   // Startup order matters: the import copies VoiceTray's records before recovery re-points their audio paths.
   settings.init();
   store.init();
@@ -44,7 +51,9 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
   const { waiting } = store.recoverOnStartup();
   store.applyRetention();
 
-  let rec = null;         // the recording in progress: {id, target, recordedWith, capMinutes, capIsProvider, stopping}
+  let rec = null;         // the recording in progress: {id, target, recordedWith, mode, capMinutes, capIsProvider, stopping}
+  let held = null;        // the recording the dictation key started and may end by being let go (push-to-talk)
+  let heldReader = null;  // whether the dictation hotkey is still held down (win32.keyHeld)
   let capturing = null;   // token of a selection being copied for read-aloud, before its text is in hand
   let owner = null;       // what the panel is reporting on: a job id, READ_ALOUD or null
   let toldOnPanel = null; // the dictation whose "copied - press Ctrl+V" the panel showed
@@ -57,14 +66,16 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
   // "Copied, press Ctrl+V" goes on the panel when it was watching that dictation, otherwise into a balloon - the
   // choice VoiceTray made between its card and a balloon.
   const notify = n => { if (!(n.type === "clipboard" && n.job?.Id === toldOnPanel)) balloon(n.message, { iconType: "info" }); };
-  const q = createQueue({ notify });
+  const projects = () => { try { return projectNames() || []; } catch { return []; } };
+  const terms = () => vocabulary(settings.load().dictionary, projects());
+  const q = createQueue({ notify, vocabulary: terms });
   const recorder = createRecorder();
   const overlay = createOverlay({ onAction });
   const saveSettings = patch => settings.save(patch).catch(logError("Could not save the voice settings"));
   const tts = createReadAloud({ overlay, getSettings: settings.load, getApiKey: settings.getApiKey, saveSettings });
   const windows = createVoiceWindows({
     settings, store, queue: q, icon, onSettingsChanged, onHotkeyCapture: pauseHotkeys, onReread: readText,
-    general, background: prefs?.background,
+    general, background: prefs?.background, projectNames: projects, commandSettings: { get: commandSettings, set: setCommandSettings },
     copyText: async text => (await delivery.deliverToClipboard(text)).outcome !== "Failed",
     listDevices: () => recorder.listDevices()
   });
@@ -78,13 +89,14 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
   }
 
   // ---------- panel ----------
-  const busy = () => Boolean(rec || capturing) || tts.isActive();
+  const busy = () => Boolean(rec || capturing) || tts.isActive() || commands.active;
   function panel(state, data, who) { owner = who; overlay.show(state, data); }
   // A fresh panel at the cursor (VoiceTray closed and re-created its window).
   function freshPanel(state, data, who) { overlay.hide(); panel(state, data, who); }
   function closePanel() { overlay.hide(); owner = null; }
 
   function onAction(a) {
+    if (["run", "finish", "cancel", "choose", "hold"].includes(a.type)) return commands.onAction(a);
     if (a.type === "retry") {
       closePanel();
       // A failed reading has no record to retry - it is read again from its text.
@@ -94,6 +106,7 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
     else if (a.type === "pause") tts.togglePause();
     else if (a.type === "stop") tts.stop();
     else if (a.type === "speed") tts.setSpeed(a.speed);
+    else if (a.type === "mode") setMode(a.mode);
   }
 
   // ---------- hotkeys ----------
@@ -109,6 +122,7 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
       if (hotkeys.register(id, accel, onPress)) registered[id] = accel;
       else errors[id] = win32.parseAccelerator(accel) ? t("voice.errors.hotkeyTaken", { key: keyLabel(accel) }) : t("voice.errors.hotkeyInvalid", { key: accel });
     }
+    heldReader = registered.dictate ? win32.keyHeld(registered.dictate) : null;
     // Checked, and let go again while the Settings page is still recording keys.
     if (editingHotkeys) releaseHotkeys();
     trayChanged();
@@ -138,13 +152,44 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
     return Object.keys(errors).length ? { hotkeyErrors: errors } : undefined;
   }
 
-  // Hotkey handlers run inside WM_HOTKEY: the foreground window is read there, while it still is the user's.
-  function onDictateKey() { toggleRecording(win32.foreground()); }
+  // Hotkey handlers run inside WM_HOTKEY: the foreground window is read there, while it still is the user's - and
+  // the key is still down, which is where watching for its release (push-to-talk) starts.
+  function onDictateKey() {
+    if (disposed) return;
+    // One recording at a time: during a voice command the dictation key ends it (and does only that) - a command
+    // spoken after a click on the menu's microphone is finished, anything else cancelled.
+    if (commands.active && !rec) return commands.dictateKey();
+    const recording = Boolean(rec);
+    talk.press({ recording, mode: settings.load().pushToTalk });
+    toggleRecording(win32.foreground());
+    held = recording ? null : rec; // startRecording() sets rec before its first await
+  }
+
+  const talk = createTalkKey({
+    isHeld: () => Boolean(heldReader?.()),
+    onRelease: () => {
+      const r = held;
+      held = null;
+      if (r && rec === r && !r.stopping) toggleRecording();
+    }
+  });
+  // A locked session swallows the key-up; the hold is over either way.
+  const onLock = () => { talk.release(); edge?.keys.release(); };
+  powerMonitor.on("lock-screen", onLock);
+
+  // The mode chip on the panel: this recording only.
+  function setMode(mode) {
+    const r = rec;
+    if (!r || r.stopping || !MODES.includes(mode)) return;
+    r.mode = mode;
+    overlay.update({ mode });
+  }
 
   // ---------- dictation ----------
   // target: the window to type into afterwards; null (started from the tray) means "offer it on the clipboard".
   function toggleRecording(target = null) {
     if (disposed) return;
+    if (!rec && commands.active) return commands.cancel(); // the tray's Record during a voice command
     const stopping = rec;
     const run = stopping ? stopRecording() : startRecording(target);
     const r = stopping || rec; // startRecording sets rec before its first await
@@ -162,14 +207,14 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
     const providerCap = maxRecordingMinutesFor(s.provider);
     const r = rec = {
       // Transcribed with what is set now: the length cap below is this provider's, whatever is chosen meanwhile.
-      id: store.newId(), target, recordedWith: jobSettings(s), stopping: false,
+      id: store.newId(), target, recordedWith: jobSettings(s), mode: s.dictationMode, stopping: false,
       capMinutes: Math.min(s.maxRecordingMinutes, providerCap), capIsProvider: providerCap < s.maxRecordingMinutes
     };
     // Nothing may be typed into the window the user is about to dictate into.
     q.setRecording(true);
     hotkeys.register("cancel", "Escape", cancelRecording);
     freshPanel("listening", {
-      hotkey: keyLabel(registered.dictate), cancelKey: "Esc", limitSeconds: r.capMinutes * 60,
+      hotkey: keyLabel(registered.dictate), cancelKey: "Esc", limitSeconds: r.capMinutes * 60, mode: r.mode,
       hint: registered.dictate ? undefined : t("voice.overlay.hintNoHotkey")
     }, r.id);
     trayChanged();
@@ -194,7 +239,7 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
     const r = rec;
     if (!r || r.stopping) return;
     r.stopping = true;
-    if (owner === r.id) overlay.show("transcribing", { provider: r.recordedWith.Provider });
+    if (owner === r.id) overlay.show("transcribing", { provider: r.recordedWith.Provider, mode: r.mode });
     let result = null;
     try { result = await recorder.stop(); } catch (e) { console.error("Stopping the recording failed:", e.message); }
     recordingStopped(r, result);
@@ -211,6 +256,7 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
   function endRecording(r) {
     if (!r || rec !== r) return false;
     rec = null;
+    if (held === r) { held = null; talk.cancel(); }
     hotkeys.unregister("cancel");
     q.setRecording(false);
     trayChanged();
@@ -238,9 +284,10 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
       return;
     }
     // The panel stays up, now showing progress, until the job finishes or fails.
-    if (owner === r.id && overlay.state === "listening") overlay.show("transcribing", { provider: r.recordedWith.Provider });
+    if (owner === r.id && overlay.state === "listening") overlay.show("transcribing", { provider: r.recordedWith.Provider, mode: r.mode });
     q.enqueue(r.id, {
-      deliverTo: r.target, durationSeconds: result.durationMs / 1000, audioBytes: result.bytes + HEADER_BYTES, recordedWith: r.recordedWith
+      deliverTo: r.target, durationSeconds: result.durationMs / 1000, audioBytes: result.bytes + HEADER_BYTES,
+      recordedWith: { ...r.recordedWith, Mode: r.mode }
     });
   }
 
@@ -249,12 +296,16 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
     trayChanged();
     if (type === "started") {
       // Never take the panel away from someone who is mid-sentence - speaking or being spoken to.
-      if (!busy() && !(owner === id && overlay.state === "transcribing")) panel("transcribing", { provider: job.Provider }, id);
+      if (!busy() && !(owner === id && overlay.state === "transcribing")) panel("transcribing", { provider: job.Provider, mode: job.Mode }, id);
+    } else if (type === "rewriting") {
+      if (owner === id && overlay.state === "transcribing") overlay.update({ rewriting: job?.Mode });
     } else if (type === "completed" && owner === id && overlay.state === "transcribing") {
-      // A brief "done" on the panel that was waiting for this dictation; it goes away by itself.
+      // A brief "done" on the panel that was waiting for this dictation; it goes away by itself. A rewrite that
+      // failed says so quietly here (and in History): the transcript went in as it was.
       toldOnPanel = id;
       panel("success", outcome === "ClipboardOnly"
         ? { title: t("voice.overlay.copied"), detail: t("voice.overlay.pressPaste"), durationMs: 2600 }
+        : job?.RewriteError ? { title: t("voice.overlay.pastedRaw"), detail: job.RewriteError, durationMs: 3200 }
         : { title: t("voice.overlay.pasted") }, id);
     } else if (type === "completed" || type === "empty" || type === "removed") {
       if (type === "completed") toldOnPanel = null;
@@ -271,6 +322,7 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
   // ---------- read-aloud ----------
   function onReadAloudKey() {
     if (rec) return balloon(keepRecording());
+    if (commands.active) return commands.cancel(); // the reading would take the panel from the command's card
     // Pressed during a reading it stops: the selection is usually still highlighted, and reading it would restart
     // the same passage instead of silencing it.
     if (capturing || tts.isActive()) { capturing = null; tts.stop(); return; }
@@ -312,6 +364,7 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
   // Re-read from History, Retry after a failure.
   function readText(text) {
     if (rec) throw new Error(keepRecording());
+    if (commands.active) commands.cancel(); // the reading takes the panel, and a card nobody sees must not keep Esc
     capturing = null;
     if (!tts.start(text)) throw new Error(t("voice.errors.nothingToRead"));
   }
@@ -352,6 +405,69 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
     q.addRecord(d.id);
   }
 
+  // ---------- voice commands ----------
+  // command-runner.js does the work; here it gets the recorder, the panel, Esc and History. Project names always
+  // help the recognition of a command, whatever the dictionary says about dictations.
+  const commands = createCommandRunner({
+    recorder, store, settings, balloon,
+    transcribe: opts => transcribeFile(opts),
+    generate: opts => require("./rewrite").generate(opts),
+    rewrite: (text, opts) => require("./rewrite").rewrite(text, opts),
+    vocabulary: () => vocabulary({ ...settings.load().dictionary, projectNames: true }, projects()),
+    panel: {
+      fresh: (state, data) => freshPanel(state, data, COMMAND),
+      show: (state, data) => panel(state, data, COMMAND),
+      update: data => { if (owner === COMMAND) overlay.update(data); },
+      close: () => { if (owner === COMMAND) closePanel(); }
+    },
+    escape: { register: onPress => hotkeys.register("cancel", "Escape", onPress), unregister: () => hotkeys.unregister("cancel") },
+    busy: () => Boolean(rec),
+    stopReading: () => { capturing = null; if (tts.isActive()) tts.stop(); },
+    addRecord: id => q.addRecord(id),
+    holdLabel: () => general?.hotkey?.()?.current || "",
+    app: {
+      data: async () => ({ registry: { projects: [] }, sessions: [] }), live: async () => [],
+      ...app,
+      onState: s => { try { app?.onState?.(s); } catch (e) { console.error("Command state:", e); } }
+    }
+  });
+
+  // The edge menu's hotkey (main asks first, and toggles the menu itself when the answer is false). The menu opens or
+  // closes at once, right here inside the hotkey's callback, where Windows lets it take the keyboard focus; a press
+  // that opened it and is still held a moment later speaks a voice command while the menu stays open (talk-key.js).
+  let edge = null; // {accel, keys}
+  function edgeKey(accel, toggleMenu) {
+    if (disposed) return false;
+    if (edge?.accel !== accel) {
+      const isHeld = win32.keyHeld(accel);
+      if (!isHeld) return false;
+      edge = { accel, keys: createEdgeHold({ isHeld, onHold: holdCommand, onRelease: () => commands.released() }) };
+    }
+    if (edge.keys.watching) return true; // the key repeating while it is held
+    const opened = toggleMenu();
+    const c = settings.load().commands;
+    edge.keys.press(Boolean(opened) && c.enabled && c.trigger === "hold");
+    return true;
+  }
+  // Held down while a dictation records: the open menu says why nothing happens.
+  function holdCommand() {
+    const r = commands.start("hold");
+    if (r?.error) app?.onState?.({ ...commands.state(), error: r.error });
+  }
+
+  // Settings -> Commands, applied at once.
+  function commandSettings() {
+    return { commands: settings.load().commands, agents: [...commandOptions.AGENTS], hotkey: general?.hotkey?.()?.current || "" };
+  }
+  async function setCommandSettings(patch) {
+    const r = commandOptions.validate(patch, settings.load().commands);
+    if (r.error) return { ok: false, error: r.error };
+    try { await settings.save({ commands: r.value }); } catch (e) { return { ok: false, error: "form", message: e.message }; }
+    if (!r.value.enabled) commands.cancel();
+    commands.settingsChanged();
+    return { ok: true, commands: settings.load().commands };
+  }
+
   // ---------- tray ----------
   function describe(j) {
     return menuText(t("voice.tray.failure", {
@@ -383,6 +499,10 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
     if (disposed) return;
     disposed = true;
     prefs?.off("changed", onPrefsChanged);
+    powerMonitor.off("lock-screen", onLock);
+    talk.cancel();
+    commands.dispose();
+    edge?.keys.release();
     clearTimeout(trayTimer);
     hotkeys.unregisterAll();
     capturing = null;
@@ -411,12 +531,15 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
   // The first press then pays neither for loading the capture page nor for starting the selection thread.
   recorder.warmUp();
   selection.warmUp();
+  commands.settingsChanged(); // the edge menu learns whether to offer its microphone
 
   return {
-    trayMenu, dispose,
+    trayMenu, dispose, edgeKey,
     retry: id => q.retry(id),
     openHistory: () => windows.openHistory(),
-    openSettings: () => windows.openSettings()
+    openSettings: () => windows.openSettings(),
+    // The edge menu's microphone: start / finish / stop a command, and what its button shows.
+    command: { toggle: () => commands.toggle(), state: () => commands.state() }
   };
 }
 

@@ -19,11 +19,15 @@ const REVEAL_TIMEOUT_MS = 250; // show anyway if the page has not confirmed the 
 const EXIT_MS = 240;        // the page's exit animation; the window is hidden after it
 const NOTICE_MS = 3500;
 const SUCCESS_MS = 1200;
-const STATES = new Set(["listening", "transcribing", "success", "error", "preparing", "speaking", "notice"]);
+// confirm and choices: a voice command's card (command-runner.js), which goes away only when the command does.
+const STATES = new Set(["listening", "transcribing", "success", "error", "preparing", "speaking", "notice", "confirm", "choices"]);
 // States that go away by themselves unless something replaced them.
 const AUTO_HIDE = { notice: NOTICE_MS, success: SUCCESS_MS };
 
 // events: "action" {type: "retry", jobId} | {type: "close"} | {type: "pause"} | {type: "stop"} | {type: "speed", speed}
+//                   | {type: "mode", mode} (the mode chip while recording)
+//                   | {type: "run"} | {type: "cancel"} | {type: "choose", index} | {type: "hold", on} (a command's card;
+//                     hold: the pointer rests on it) | {type: "finish"} (a click on the pill while a command is spoken)
 //         "player" {id, type: "started" | "ended" | "error", message?}
 function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-preload.js"), onAction } = {}) {
   const emitter = new EventEmitter();
@@ -125,7 +129,8 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
     }
   }
 
-  // Partial update of the current state: {level, elapsed} while listening; {paused} / {speed} / {title} while speaking.
+  // Partial update of the current state: {level, elapsed} / {mode} while listening; {rewriting: mode} while
+  // transcribing; {paused} / {speed} / {title} while speaking.
   function update(d = {}) {
     if (!state) return;
     data = { ...data, ...d };
@@ -175,6 +180,9 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
     const ev = { type };
     if (type === "retry") ev.jobId = arg ?? data.jobId ?? null;
     if (type === "speed") { ev.speed = Number(arg); data.speed = ev.speed; }
+    if (type === "mode") ev.mode = String(arg);
+    if (type === "choose") ev.index = Number(arg);
+    if (type === "hold") ev.on = Boolean(arg);
     if (type === "close") hide();
     emitter.emit("action", ev);
   }

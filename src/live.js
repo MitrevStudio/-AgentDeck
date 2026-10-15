@@ -45,6 +45,7 @@ async function verifyStarts(entries) {
   for (const e of todo) startVerified.set(`${e.pid}:${e.procStart}`, starts.get(String(e.pid)) === String(e.procStart));
 }
 
+// A Claude Code session's transcript, found by its id (remembered once found).
 function findTranscript(id) {
   const known = transcripts.get(id);
   if (known && fs.existsSync(known)) return known;
@@ -91,4 +92,4 @@ async function liveSessions() {
   return claudeLive();
 }
 
-module.exports = { liveSessions };
+module.exports = { liveSessions, findTranscript };
