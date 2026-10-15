@@ -1,8 +1,8 @@
-// App-wide preferences: UI language and theme (`ui` in settings.json) and the edge menu's hover switch
-// (`hoverEdge`). Main process only. Every page gets a snapshot from its preload ("prefs:get") and "prefs:changed"
-// afterwards; i18n.js applies both.
+// App-wide preferences: UI language, theme and automatic updates (`ui` in settings.json) and the edge menu's hover
+// switch (`hoverEdge`). Main process only. Every page gets a snapshot from its preload ("prefs:get") and
+// "prefs:changed" afterwards; i18n.js applies language and theme.
 //
-// events: "changed" (snapshot, keys) - keys lists what changed: "language", "theme", "hoverEdge".
+// events: "changed" (snapshot, keys) - keys lists what changed: "language", "theme", "hoverEdge", "autoUpdate".
 const { app, nativeTheme } = require("electron");
 const { EventEmitter } = require("node:events");
 const settings = require("./voice/settings");
@@ -15,7 +15,7 @@ const THEMES = ["system", "dark", "light"];
 const BACKGROUND = { dark: "#0d1015", light: "#f2f4f8" };
 
 const prefs = new EventEmitter();
-const state = { language: "bg", theme: "dark", hoverEdge: true };
+const state = { language: "bg", theme: "dark", hoverEdge: true, autoUpdate: true };
 
 // themeSource also gives native title bars and dialogs the chosen look; "system" follows Windows.
 const resolvedTheme = () => (nativeTheme.shouldUseDarkColors ? "dark" : "light");
@@ -29,6 +29,7 @@ function load() {
   if (LANGUAGES.includes(ui.language)) state.language = ui.language;
   if (THEMES.includes(ui.theme)) state.theme = ui.theme;
   state.hoverEdge = root.hoverEdge !== false;
+  state.autoUpdate = ui.autoUpdate !== false;
   i18n.setLanguage(state.language, { dev: !app.isPackaged });
   nativeTheme.themeSource = state.theme;
   // Windows switched between light and dark while the theme follows it.
@@ -53,10 +54,14 @@ async function set(patch) {
     state.hoverEdge = patch.hoverEdge;
     keys.push("hoverEdge");
   }
+  if (typeof patch.autoUpdate === "boolean" && patch.autoUpdate !== state.autoUpdate) {
+    state.autoUpdate = patch.autoUpdate;
+    keys.push("autoUpdate");
+  }
   if (!keys.length) return get();
   prefs.emit("changed", get(), keys);
   // In effect at once; a file that cannot be written is only logged.
-  await settings.writeRoot({ ui: { language: state.language, theme: state.theme }, hoverEdge: state.hoverEdge })
+  await settings.writeRoot({ ui: { language: state.language, theme: state.theme, autoUpdate: state.autoUpdate }, hoverEdge: state.hoverEdge })
     .catch(e => console.error("Could not save settings:", e.message));
   return get();
 }

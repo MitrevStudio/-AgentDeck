@@ -17,6 +17,7 @@ const { liveSessions } = require("./live");
 const { createEdgeBar } = require("./edge-bar");
 const { makeIcon } = require("./app-icon");
 const prefs = require("./prefs");
+const updater = require("./updater");
 const { t, tn, LANGUAGES } = require("./i18n");
 const { keyLabel } = require("./voice/util");
 const execFileAsync = promisify(execFile);
@@ -272,12 +273,12 @@ function showManager() {
   });
 }
 // ---------- tray ----------
-// Clicking a balloon about a failed recording retries it (balloons can be swallowed by Focus Assist, so the tray
-// menu offers the same).
-let balloonJobId = null, badged = null;
-function balloon(content, { title = t("app.name"), iconType = "info", jobId = null } = {}) {
+// Clicking a balloon acts on it: one about a failed recording retries it, one about an update downloads or installs
+// it. Balloons can be swallowed by Focus Assist, so the tray menu offers the same.
+let balloonClick = null, badged = null;
+function balloon(content, { title = t("app.name"), iconType = "info", jobId = null, onClick = null } = {}) {
   if (!tray || tray.isDestroyed()) return;
-  balloonJobId = jobId;
+  balloonClick = jobId ? () => voice?.retry(jobId) : onClick;
   const text = String(content);
   tray.displayBalloon({ title, iconType, content: text.length > 240 ? text.slice(0, 239) + "…" : text }); // Windows cuts it silently
 }
@@ -302,9 +303,48 @@ function buildTrayMenu() {
     { label: t("tray.language"), submenu: radio("language", Object.keys(LANGUAGES), l => LANGUAGES[l]) },
     { label: t("tray.theme"), submenu: radio("theme", prefs.THEMES, th => t(`theme.${th}`)) },
     { label: t("tray.settings"), enabled: Boolean(voice), click: () => voice?.openSettings() },
+    updateMenuItem(),
     { type: "separator" },
     { label: t("tray.quit"), click: () => app.quit() }
   ]));
+}
+
+// ---------- updates ----------
+// One tray item that follows the updater: check, download (automatic updates off), progress, restart to install.
+function updateMenuItem() {
+  const u = updater.state();
+  const version = u.next;
+  switch (u.status) {
+    case "checking": return { label: t("tray.update.checking"), enabled: false };
+    case "available": return { label: t("tray.update.download", { version }), click: () => updater.download() };
+    case "downloading": return { label: t("tray.update.downloading", { version }), enabled: false };
+    case "ready": return { label: t("tray.update.restart", { version }), click: () => updater.install() };
+    default: return { label: t("tray.update.check"), enabled: u.supported, click: checkFromTray };
+  }
+}
+// A version is announced once when it is found (automatic updates off) and once when it is ready to install;
+// clicking the balloon downloads or installs it.
+const announced = new Set();
+function announce(u) {
+  announced.add(`${u.status} ${u.next}`);
+  if (u.status === "ready")
+    balloon(t("tray.update.readyBody", { version: u.next }), { title: t("tray.update.readyTitle"), onClick: () => updater.install() });
+  else balloon(t("tray.update.availableBody", { version: u.next }), { title: t("tray.update.foundTitle"), onClick: () => updater.download() });
+}
+let trayCheck = false;
+function onUpdateChanged(u, prev) {
+  if (u.status !== prev.status || u.next !== prev.next) buildTrayMenu();
+  if ((u.status === "ready" || (u.status === "available" && !trayCheck)) && !announced.has(`${u.status} ${u.next}`)) announce(u);
+}
+// Asked for from the tray, so the answer comes as a balloon there, whatever it is.
+async function checkFromTray() {
+  trayCheck = true;
+  const u = await updater.check().finally(() => { trayCheck = false; });
+  if (u.status === "available") announce(u);
+  else if (u.status === "downloading") balloon(t("tray.update.downloadingBody", { version: u.next }), { title: t("tray.update.foundTitle") });
+  else if (u.status === "none") balloon(t("tray.update.latest", { version: u.version }));
+  else if (u.status === "error")
+    balloon(t(`settings.updates.error.${u.error.reason}`, { message: u.error.message }), { title: t("tray.update.failedTitle"), iconType: "warning" });
 }
 
 // ---------- IPC ----------
@@ -377,6 +417,7 @@ function onPrefsChanged(p, keys) {
     cache = null; // fallback session titles are in the old language
     for (const w of [managerWin, bar?.win]) if (w && !w.isDestroyed()) w.webContents.reload();
   }
+  if (keys.includes("autoUpdate")) updater.setAuto(p.autoUpdate);
   buildTrayMenu();
 }
 
@@ -396,7 +437,9 @@ if (!app.requestSingleInstanceLock()) {
     // Double-click would also fire this click, so recording is offered in the menu instead (VoiceTray: double-click).
     tray.on("click", () => bar.show("hotkey"));
     // Not reset on "balloon-closed": replacing a balloon can report the old one closed after the new one is up.
-    tray.on("balloon-click", () => { const id = balloonJobId; balloonJobId = null; if (id) voice?.retry(id); });
+    tray.on("balloon-click", () => { const click = balloonClick; balloonClick = null; click?.(); });
+    updater.on("changed", onUpdateChanged);
+    updater.start({ auto: prefs.get().autoUpdate });
     buildTrayMenu();
 
     showManager();
@@ -406,7 +449,7 @@ if (!app.requestSingleInstanceLock()) {
     voiceStarting = Promise.resolve()
       .then(() => require("./voice/controller").initVoice({
         balloon, onTrayChanged: buildTrayMenu, icon: makeIcon(64), prefs,
-        general: { set: patch => prefs.set(patch), hotkey: () => ({ current: hotkeyLabel(), candidates: HOTKEYS.map(k => keyLabel(k, " + ")) }) }
+        general: { set: patch => prefs.set(patch), hotkey: () => ({ current: hotkeyLabel(), candidates: HOTKEYS.map(k => keyLabel(k, " + ")) }), updates: updater }
       }))
       .then(v => { voice = v; buildTrayMenu(); }, e => console.error("Voice features could not start:", e));
   });

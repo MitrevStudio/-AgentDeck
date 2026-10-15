@@ -27,6 +27,16 @@ body:not([data-tab="general"]) [data-for="general"], body:not([data-tab="voice"]
 .vs-caps .none { color: var(--faint); }
 .vs-caps + .vs-hint { margin-top: 0; }
 
+/* Updates: the version and its state on one line, the actions at its end; a progress bar while downloading. */
+.vs-upd { display: flex; align-items: center; gap: 8px; min-height: 34px; }
+.vs-ver { font: 600 13.5px var(--mono); color: var(--text); user-select: text; }
+.vs-upd .tag { min-width: 0; }
+.vs-upd .tag .spinner { width: 11px; height: 11px; border-width: 2px; border-color: color-mix(in srgb, currentColor 25%, transparent); border-top-color: currentColor; }
+.vs-upd .btn { flex: none; }
+.vs-upd + .vs-hint { margin-top: 0; }
+.vs-progress { height: 4px; margin: 4px 0 2px; border-radius: var(--r-pill); background: var(--panel-2); overflow: hidden; }
+.vs-progress > i { display: block; height: 100%; width: 0; border-radius: inherit; background: var(--accent); transition: width var(--dur) var(--ease-out); }
+
 /* ---------- sections: cards like the manager's panels ---------- */
 .vs-sec {
   margin: 12px 14px 0; padding: 11px 16px 3px;

@@ -46,6 +46,34 @@
           <div class="vs-field"><div class="vs-caps" id="edgeHotkey"></div><div class="vs-hint" id="edgeHotkeyHint"></div></div>
         </div>
       </section>
+
+      <section class="vs-sec">
+        <h2><span data-icon="download"></span><span data-i18n="settings.updates"></span></h2>
+        <div class="vs-grid">
+          <span class="vs-label" data-i18n="settings.updates.version"></span>
+          <div class="vs-field">
+            <div class="vs-upd">
+              <span class="vs-ver" id="appVersion"></span>
+              <span class="tag" id="updateTag"></span>
+              <span class="grow"></span>
+              <button type="button" class="btn sm" id="updateCheck"><span data-icon="refresh"></span><span data-i18n="settings.updates.check"></span></button>
+              <button type="button" class="btn sm primary" id="updateDownload" hidden><span data-icon="download"></span><span data-i18n="settings.updates.download"></span></button>
+              <button type="button" class="btn sm primary" id="updateInstall" hidden><span data-icon="refresh"></span><span data-i18n="settings.updates.install"></span></button>
+            </div>
+            <div class="vs-progress" id="updateProgress" hidden><i></i></div>
+            <div class="vs-hint" id="updateHint" role="status"></div>
+          </div>
+
+          <span class="vs-label" data-i18n="settings.updates.automatic"></span>
+          <div class="vs-field">
+            <label class="vs-toggle" for="autoUpdate">
+              <span><b data-i18n="settings.updates.auto"></b></span>
+              <input type="checkbox" id="autoUpdate" class="switch">
+            </label>
+            <div class="vs-hint" data-i18n="settings.updates.autoHint"></div>
+          </div>
+        </div>
+      </section>
     </div>
 
     <div class="vs-pane" id="voice" role="tabpanel" aria-labelledby="tabVoice">

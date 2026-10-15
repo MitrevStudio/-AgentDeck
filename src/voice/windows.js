@@ -72,7 +72,8 @@ function normalizeAccelerator(value) {
 // ---------- windows ----------
 // copyText(text) -> bool puts text on the clipboard; onHotkeyCapture(on) is told while the Settings page records a
 // new combination (the current ones must not fire meanwhile). The Settings window is the app's: its General section
-// goes to general.set(patch) / general.hotkey(); background() is the window colour of the current theme.
+// goes to general.set(patch) / general.hotkey() and to general.updates (../updater.js); background() is the window
+// colour of the current theme.
 function createVoiceWindows({ settings, store, queue, listDevices, onReread, onSettingsChanged, onHotkeyCapture, copyText, icon,
   general, background = () => "#0d1015" } = {}) {
   if (!settings || !store || !queue) throw new Error("createVoiceWindows: settings, store and queue are required");
@@ -230,6 +231,14 @@ function createVoiceWindows({ settings, store, queue, listDevices, onReread, onS
   // General section: language, theme and the edge menu, applied at once.
   handle("prefs:set", settingsOwner, patch => general?.set(isObj(patch) ? patch : {}));
   handle("app:edge-hotkey", settingsOwner, () => general?.hotkey() ?? null);
+
+  // Updates: the state, pushed again whenever it changes; the actions take no arguments.
+  const updates = general?.updates;
+  handle("updates:get", settingsOwner, () => updates?.state() ?? null);
+  handle("updates:check", settingsOwner, () => updates?.check());
+  handle("updates:download", settingsOwner, () => updates?.download());
+  handle("updates:install", settingsOwner, () => updates?.install());
+  updates?.on("changed", state => { if (alive(settingsWin)) settingsWin.webContents.send("updates:changed", state); });
 
   // The page is recording a new combination while one of its hotkey fields has the focus.
   handle("voice:settings:capture", settingsOwner, on => { onHotkeyCapture?.(on === true); return true; });

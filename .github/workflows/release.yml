@@ -1,6 +1,8 @@
 # Every push to main: check → semantic-release decides the next version from the commit messages
-# (fix: → patch, feat: → minor, BREAKING CHANGE → major), tags it and creates the GitHub release →
-# the Windows installer is built from that tag and attached to the release.
+# (fix: → patch, feat: → minor, BREAKING CHANGE → major), pushes the tag and creates the GitHub release as a draft →
+# the Windows installer is built from that tag, attached to the release, and only then is the release published.
+# The installed app updates itself from the latest published release (electron-updater reads its latest.yml), so a
+# release must never be public without its installer; a failed build leaves a draft nobody sees.
 name: Release
 
 on:
@@ -66,8 +68,11 @@ jobs:
         run: npx electron-builder --win --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-      - name: Attach installer to the release
+      # gh finds a draft by its tag too (and the tag exists: semantic-release pushed it before creating the release).
+      - name: Attach the installer and publish the release
         shell: bash
-        run: gh release upload "v$VERSION" dist/*.exe dist/*.blockmap dist/latest.yml --clobber
+        run: |
+          gh release upload "v$VERSION" dist/*.exe dist/*.blockmap dist/latest.yml --clobber
+          gh release edit "v$VERSION" --draft=false --latest
         env:
           GH_TOKEN: ${{ github.token }}

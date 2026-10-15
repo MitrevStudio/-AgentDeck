@@ -1,6 +1,7 @@
-// The app's Settings page, in two tabs. General (language, theme, edge menu) applies at once through window.prefs;
-// Voice is a port of VoiceTray's SettingsWindow plus the two hotkeys, saved with Save. The API keys never come here:
-// the page knows only whether one is saved, and an empty field keeps it - removing a key takes the explicit button.
+// The app's Settings page, in two tabs. General (language, theme, edge menu, updates) applies at once through
+// window.prefs; Voice is a port of VoiceTray's SettingsWindow plus the two hotkeys, saved with Save. The API keys
+// never come here: the page knows only whether one is saved, and an empty field keeps it - removing a key takes the
+// explicit button.
 // Uses $, esc, icon, t and tn from common.js.
 
 const PSEUDO_DEVICES = ["default", "communications"];
@@ -73,6 +74,7 @@ function renderGeneral() {
   $("uiLanguage").innerHTML = segHtml(Object.entries(I18N.LANGUAGES), general.language);
   $("uiTheme").innerHTML = segHtml(THEMES.map(th => [th, t(`theme.${th}`)]), general.theme);
   $("hoverEdge").checked = general.hoverEdge;
+  $("autoUpdate").checked = general.autoUpdate;
   if (focused === "uiLanguage" || focused === "uiTheme") $(focused).querySelector(".on")?.focus();
 }
 async function setPref(key, value) {
@@ -107,6 +109,7 @@ for (const [id, key] of [["uiLanguage", "language"], ["uiTheme", "theme"]]) {
   $(id).addEventListener("keydown", e => segKey(e, v => setPref(key, v)));
 }
 $("hoverEdge").addEventListener("change", e => setPref("hoverEdge", e.target.checked));
+$("autoUpdate").addEventListener("change", e => setPref("autoUpdate", e.target.checked));
 // The tray changes the same settings; a language change reloads this page anyway.
 window.prefs.onChanged(p => { general = p; renderGeneral(); });
 for (const type of ["input", "change"]) $("voice").addEventListener(type, () => setVoiceDirty(true));
@@ -121,6 +124,58 @@ $("logo").innerHTML = icon("sliders");
 showTab((() => { try { return localStorage.getItem(TAB_KEY); } catch { return null; } })());
 renderGeneral();
 showEdgeHotkey().catch(() => {});
+
+// ---------- updates ----------
+// The state is main's (updater.js), pushed on every change; the buttons only ask main to act.
+const updates = window.voiceSettings.updates;
+const UPDATE_TAG = { // status -> tag colour and icon (none: a spinner)
+  unsupported: ["", "window"], idle: ["", "clock"], checking: ["accent", null], none: ["ok", "check"],
+  available: ["accent", "download"], downloading: ["accent", null], ready: ["ok", "check"], error: ["danger", "alert"]
+};
+let fittedHeight = 0;
+function checkedAt(ms) {
+  const today = new Date(ms).toDateString() === new Date().toDateString();
+  return today ? I18N.formatTime(ms) : I18N.formatDateTime(ms, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+function updateTexts(u) {
+  const version = u.next;
+  switch (u.status) {
+    case "unsupported": return [t("settings.updates.tag.unsupported"), t("settings.updates.hint.unsupported")];
+    case "checking": return [t("settings.updates.tag.checking"), t("settings.updates.hint.checking")];
+    case "none": return [t("settings.updates.tag.none"), t("settings.updates.hint.none", { time: checkedAt(u.checkedAt) })];
+    case "available": return [t("settings.updates.tag.available", { version }), t("settings.updates.hint.available")];
+    case "downloading": return [t("settings.updates.tag.downloading", { percent: I18N.formatNumber(u.percent / 100, { style: "percent" }) }),
+      t("settings.updates.hint.downloading", { version })];
+    case "ready": return [t("settings.updates.tag.ready", { version }), t("settings.updates.hint.ready")];
+    case "error": return [t(u.error.during === "download" ? "settings.updates.tag.downloadFailed" : "settings.updates.tag.checkFailed"),
+      t(`settings.updates.error.${u.error.reason}`, { message: u.error.message })];
+    default: return [t("settings.updates.tag.idle"), t("settings.updates.hint.idle")];
+  }
+}
+function renderUpdates(u) {
+  if (!u) return;
+  const [cls, ic] = UPDATE_TAG[u.status] || UPDATE_TAG.idle;
+  const [tag, hint] = updateTexts(u);
+  $("appVersion").textContent = u.version;
+  $("updateTag").className = `tag ${cls}`;
+  $("updateTag").innerHTML = `${ic ? icon(ic) : '<span class="spinner"></span>'}<span class="t">${esc(tag)}</span>`;
+  $("updateHint").textContent = hint;
+  $("updateProgress").hidden = u.status !== "downloading";
+  $("updateProgress").firstElementChild.style.width = `${u.percent}%`;
+  $("updateCheck").hidden = ["available", "ready"].includes(u.status); // the update's own button takes its place
+  $("updateCheck").disabled = !u.supported || ["checking", "downloading"].includes(u.status);
+  $("updateCheck").classList.toggle("spin", u.status === "checking");
+  $("updateDownload").hidden = u.status !== "available";
+  $("updateInstall").hidden = u.status !== "ready";
+  // Lines come and go with the state (the progress bar, a longer reason): the window follows.
+  const height = Math.ceil(document.body.getBoundingClientRect().height);
+  if (st.data && height !== fittedHeight) { fittedHeight = height; fit(); }
+}
+$("updateCheck").addEventListener("click", () => updates.check());
+$("updateDownload").addEventListener("click", () => updates.download());
+$("updateInstall").addEventListener("click", () => updates.install());
+updates.onChanged(renderUpdates);
+updates.get().then(renderUpdates).catch(() => {});
 
 // ---------- provider: segmented control ----------
 function renderProviders() {

@@ -63,6 +63,7 @@
     "electron-builder": "^26.17.0"
   },
   "dependencies": {
+    "electron-updater": "^6.8.10",
     "koffi": "^3.3.3",
     "soundtouchjs": "^0.3.0"
   }
