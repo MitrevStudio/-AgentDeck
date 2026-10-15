@@ -1,8 +1,9 @@
 // Reads whatever is selected in the foreground application by sending it the copy shortcut, then puts the user's
 // clipboard back. Port of VoiceTray's SelectionCaptureService and ClipboardSnapshot.
 //
-// UI Automation would avoid the clipboard, but Electron apps, PDF readers and terminals mostly do not expose their
-// selection through it; copying works everywhere and the snapshot makes it acceptable. The snapshot works on raw
+// UI Automation would avoid the clipboard, but Electron apps, PDF readers and most terminals do not expose their
+// selection through it; copying works everywhere and the snapshot makes it acceptable. Windows Terminal does expose
+// it, and is read that way first (see UIA_CLASSES). The snapshot works on raw
 // Win32 formats (Electron's clipboard cannot enumerate or write several application formats at once, and its
 // readImage() has crashed the main process), so text, HTML, RTF, images, copied files and application formats
 // are put back together in one go.
@@ -10,6 +11,7 @@
 // The capture runs on a worker thread of its own, as VoiceTray gave it its own thread: reading a format the source
 // application renders on demand (a large Excel range) takes as long as that application needs - seconds, or for
 // ever if it hangs - and the app must stay responsive meanwhile.
+const fs = require("node:fs");
 const path = require("node:path");
 const { Worker } = require("node:worker_threads");
 const w = require("./win32");
@@ -119,30 +121,41 @@ async function waitForClipboardChange(before) {
   return false;
 }
 
-const fail = failure => ({ text: "", failure, clipboardRestored: true });
+// diag (for selection.log): { keysMs, copyMs, seqBefore, seqAfter, read }, as far as the capture got.
+const fail = (failure, diag) => ({ text: "", failure, clipboardRestored: true, diag });
 
 // The capture itself, on the worker thread. targetHwnd: the foreground window when the hotkey was pressed - if the
 // user has switched away by the time the keys are up, nothing is copied from the wrong place.
 async function captureHere(targetHwnd) {
+  const diag = {};
+  let t0 = Date.now();
   // A held Shift turns Ctrl+C into Ctrl+Shift+C (DevTools in Chrome); a held Space types over the selection.
-  if (!(await w.waitModifiersUp(MODIFIER_RELEASE_TIMEOUT_MS, { alsoSpace: true }))) return fail("KeysHeld");
+  const up = await w.waitModifiersUp(MODIFIER_RELEASE_TIMEOUT_MS, { alsoSpace: true });
+  diag.keysMs = Date.now() - t0;
+  if (!up) return fail("KeysHeld", diag);
 
   const fg = w.foregroundHwnd();
-  if (targetHwnd && fg !== targetHwnd) return fail("FocusChanged");
+  if (targetHwnd && fg !== targetHwnd) return fail("FocusChanged", diag);
 
   const snapshot = await snapshotClipboard();
   // Taken after the snapshot, so a format rendered on demand while snapshotting cannot pass for a copy.
-  const before = w.clipboardSeq();
-  if (!w.sendCopy({ terminal: w.isTerminalClass(w.className(fg)) })) return fail("CopyFailed");
+  const before = diag.seqBefore = w.clipboardSeq();
+  t0 = Date.now();
+  if (!w.sendCopy({ terminal: w.isTerminalClass(w.className(fg)) })) return fail("CopyFailed", diag);
 
+  const copied = await waitForClipboardChange(before);
+  diag.copyMs = Date.now() - t0;
+  diag.seqAfter = w.clipboardSeq();
   // Nothing changed means nothing was selected: nothing to restore, and the old content is never read out.
-  if (!(await waitForClipboardChange(before))) return fail("NothingSelected");
+  if (!copied) return fail("NothingSelected", diag);
 
   const text = await w.readClipboardText(MAX_TEXT_CHARS);
+  // null: copied, but the clipboard stayed locked (a clipboard manager reading it) or held no text
+  diag.read = text == null ? "fail" : text.trim() ? "ok" : "blank";
   const restored = await restoreWithRetry(snapshot);
   return text && text.trim()
-    ? { text, failure: "None", clipboardRestored: restored }
-    : { text: "", failure: "NothingSelected", clipboardRestored: restored };
+    ? { text, failure: "None", clipboardRestored: restored, diag }
+    : { text: "", failure: "NothingSelected", clipboardRestored: restored, diag };
 }
 
 // ---------- main thread ----------
@@ -186,15 +199,59 @@ function inWorker(hwnd) {
   });
 }
 
-// target: win32.foreground() taken when the hotkey was pressed.
-// -> { text, failure: "None"|"NothingSelected"|"FocusChanged"|"KeysHeld"|"CopyFailed", clipboardRestored, message? }
-// Never at the same time as a delivery: both borrow the clipboard.
-function capture(target) {
-  return w.exclusive(() => inWorker(target?.hwnd ?? null));
+// Terminals whose selection UI Automation reads: at once, from the hotkey, with no keys and no clipboard. The copy
+// shortcut has to wait until the chord is let go, and a key that reaches the terminal meanwhile (the hotkey's own key
+// repeating once the modifiers are up) dismisses the selection; the copy also needs a clipboard that clipboard
+// managers and RDP's clipboard sync keep locked at times. The classic console has a UI Automation text area too, but
+// reading its selection is untested; mintty, PuTTY and ConEmu do not expose theirs.
+const UIA_CLASSES = new Set(["CASCADIA_HOSTING_WINDOW_CLASS"]);
+const terminalFocus = () => require("../terminal-focus"); // main thread only: it needs Electron
+
+async function readUia(hwnd) {
+  const t0 = Date.now();
+  try {
+    const text = await terminalFocus().terminalSelection(hwnd, MAX_TEXT_CHARS);
+    return { text, ms: Date.now() - t0, status: text.trim() ? "text" : "empty" };
+  } catch (e) { return { text: "", ms: Date.now() - t0, status: "error", error: e.message }; }
 }
 
-// Starts the thread ahead of the first capture; dispose() ends it.
-const warmUp = () => { ensureWorker(); };
+// target: win32.foreground() taken when the hotkey was pressed.
+// -> { text, failure: "None"|"NothingSelected"|"FocusChanged"|"KeysHeld"|"CopyFailed", clipboardRestored, message? }
+// Copying never happens at the same time as a delivery: both borrow the clipboard.
+async function capture(target) {
+  const t0 = Date.now();
+  const uia = UIA_CLASSES.has(target?.className) ? await readUia(target.hwnd) : null;
+  const r = uia?.text.trim() ? { text: uia.text, failure: "None", clipboardRestored: true }
+    : await w.exclusive(() => inWorker(target?.hwnd ?? null));
+  logCapture(target, uia, r, Date.now() - t0);
+  return r;
+}
+
+// userData/logs/selection.log: one line per capture, how it went - never what was selected.
+const LOG_MAX_BYTES = 200 * 1024;
+let logFile = null, logging = Promise.resolve();
+function logCapture(target, uia, r, totalMs) {
+  const d = r.diag || {};
+  const ms = v => (v == null ? "-" : `${v}ms`);
+  const line = [
+    new Date().toISOString(), `class=${target?.className || "-"}`, `method=${uia?.text.trim() ? "uia" : "copy"}`,
+    `uia=${uia ? `${uia.status}/${uia.ms}ms` : "-"}`, `keys=${ms(d.keysMs)}`, `copy=${ms(d.copyMs)}`,
+    `seq=${d.seqBefore ?? "-"}>${d.seqAfter ?? "-"}`, `read=${d.read ?? "-"}`, `total=${totalMs}ms`,
+    `result=${r.failure}`, `chars=${r.text.length}`,
+    ...(uia?.error ? [`uiaError=${JSON.stringify(uia.error)}`] : [])
+  ].join(" ");
+  logging = logging.then(() => appendLog(line)).catch(e => console.error("Writing selection.log failed:", e.message));
+}
+async function appendLog(line) {
+  logFile ??= path.join(require("electron").app.getPath("userData"), "logs", "selection.log");
+  await fs.promises.mkdir(path.dirname(logFile), { recursive: true });
+  const size = await fs.promises.stat(logFile).then(s => s.size, () => 0);
+  if (size > LOG_MAX_BYTES) await fs.promises.rename(logFile, `${logFile}.1`);
+  await fs.promises.appendFile(logFile, line + "\n");
+}
+
+// Starts the thread - and the terminal helper - ahead of the first capture; dispose() ends the thread.
+const warmUp = () => { ensureWorker(); terminalFocus().keepWarm(); };
 function dispose() {
   const t = worker;
   worker = null;

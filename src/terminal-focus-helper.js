@@ -1,7 +1,7 @@
 // Utility process of terminal-focus.js: finds the window - and in Windows Terminal the tab - that shows a console
-// process. It lives in a process of its own for two reasons: it attaches to that process's console (AttachConsole),
-// which the main process must never do (its own console output would land in the user's terminal), and UI
-// Automation calls block for as long as the target window takes to answer.
+// process, and reads what is selected in a terminal for read-aloud. It lives in a process of its own for two reasons:
+// it attaches to that process's console (AttachConsole), which the main process must never do (its own console output
+// would land in the user's terminal), and UI Automation calls block for as long as the target window takes to answer.
 //
 // The console tells most of it: its window is the classic console window itself, or - for a pseudo console - a
 // hidden window that Windows Terminal makes owned by the terminal window currently showing it. The tab is the one
@@ -40,6 +40,7 @@ const f = {
   GetClassNameW: user32.func("int __stdcall GetClassNameW(void *hwnd, _Out_ uint8_t *buf, int chars)"),
   GetWindowTextW: user32.func("int __stdcall GetWindowTextW(void *hwnd, _Out_ uint8_t *buf, int chars)"),
   IsWindowVisible: user32.func("bool __stdcall IsWindowVisible(void *hwnd)"),
+  GetForegroundWindow: user32.func("void * __stdcall GetForegroundWindow()"),
   CoInitializeEx: ole32.func("long __stdcall CoInitializeEx(void *reserved, uint32_t model)"),
   CoCreateInstance: ole32.func("long __stdcall CoCreateInstance(const uint8_t *clsid, void *outer, uint32_t ctx, const uint8_t *iid, _Out_ void **out)"),
   SysFreeString: oleaut32.func("void __stdcall SysFreeString(void *s)")
@@ -173,14 +174,16 @@ function guid(s) {
 const CLSID_CUIAutomation8 = guid("E22AD333-B25F-460C-83D0-0581107395C9");
 const IID_IUIAutomation2 = guid("34723AFF-0C9D-49D0-9896-7AB52DF8CD8A");
 const IID_SelectionItemPattern = guid("A8EFA66A-0FDA-421A-9194-38021F3578EA");
+const IID_TextPattern = guid("32EBA289-3583-42C9-9C59-3B6D9A1E9B6A");
 const UIA = {
-  ControlTypeProperty: 30003, TabItemControlType: 50019, SelectionItemPattern: 10010,
+  ControlTypeProperty: 30003, TabItemControlType: 50019, SelectionItemPattern: 10010, TextPattern: 10014,
   TreeScope_Descendants: 4, VT_I4: 3, RPC_E_CHANGED_MODE: 0x80010106 | 0
 };
-// vtable slots (UIAutomationClient.h). IUIAutomation(2): 2 Release, 6 ElementFromHandle, 23 CreatePropertyCondition,
-// 59 put_AutoSetFocus, 61 put_ConnectionTimeout, 63 put_TransactionTimeout. IUIAutomationElement: 6 FindAll,
-// 14 GetCurrentPatternAs, 23 get_CurrentName. IUIAutomationElementArray: 3 get_Length, 4 GetElement.
-// IUIAutomationSelectionItemPattern: 3 Select, 6 get_CurrentIsSelected.
+// vtable slots (UIAutomationClient.h). IUIAutomation(2): 2 Release, 6 ElementFromHandle, 8 GetFocusedElement,
+// 23 CreatePropertyCondition, 59 put_AutoSetFocus, 61 put_ConnectionTimeout, 63 put_TransactionTimeout.
+// IUIAutomationElement: 6 FindAll, 14 GetCurrentPatternAs, 23 get_CurrentName. IUIAutomationElementArray and
+// IUIAutomationTextRangeArray: 3 get_Length, 4 GetElement. IUIAutomationSelectionItemPattern: 3 Select,
+// 6 get_CurrentIsSelected. IUIAutomationTextPattern: 5 GetSelection. IUIAutomationTextRange: 12 GetText.
 const P = {
   release: koffi.proto("uint32_t __stdcall Release(void *self)"),
   putUint: koffi.proto("long __stdcall PutUint(void *self, uint32_t value)"),
@@ -191,6 +194,7 @@ const P = {
   getElement: koffi.proto("long __stdcall GetElement(void *self, int index, _Out_ void **out)"),
   getPtr: koffi.proto("long __stdcall GetPtr(void *self, _Out_ void **out)"),
   patternAs: koffi.proto("long __stdcall GetCurrentPatternAs(void *self, int pattern, const uint8_t *iid, _Out_ void **out)"),
+  getText: koffi.proto("long __stdcall GetText(void *self, int maxLength, _Out_ void **out)"),
   call: koffi.proto("long __stdcall Call(void *self)")
 };
 function vcall(obj, slot, proto, ...args) {
@@ -206,6 +210,10 @@ function out(obj, slot, proto, what, ...args) {
   return ref[0];
 }
 const release = obj => { if (obj) vcall(obj, 2, P.release); };
+function bstrText(bstr) {
+  if (!bstr) return "";
+  try { return koffi.decode(bstr, "char16_t", -1); } finally { f.SysFreeString(bstr); }
+}
 
 let automation = null, tabCondition = null;
 function uia() {
@@ -235,10 +243,7 @@ function tabsOf(hwnd) {
     const tabs = [];
     for (let i = 0; i < n[0]; i++) {
       const el = out(arr, 4, P.getElement, "GetElement", i);
-      const bstr = out(el, 23, P.getPtr, "get_CurrentName");
-      let name = "";
-      if (bstr) try { name = koffi.decode(bstr, "char16_t", -1); } finally { f.SysFreeString(bstr); }
-      tabs.push({ el, name });
+      tabs.push({ el, name: bstrText(out(el, 23, P.getPtr, "get_CurrentName")) });
     }
     return tabs;
   } finally { release(arr); release(win); }
@@ -299,6 +304,34 @@ function restoreTitle({ pid, title, marker }) {
   return Boolean(withConsole(pid, () => consoleTitle() === marker && f.SetConsoleTitleW(title)));
 }
 
+// ---------- selection ----------
+
+const SELECTION_RAW_CHARS = 1 << 20;
+// Terminals pad every row to their width and end it with CRLF; the copy shortcut would have trimmed both.
+const tidy = text => text.split(/\r?\n/).map(l => l.trimEnd()).join("\n").replace(/^\n+|\n+$/g, "");
+
+// What is selected in terminal window `hwnd` - Windows Terminal's focused pane - read from its UI
+// Automation text: no keys, no clipboard. Only while that window is in front, so the focused element is its own.
+// -> { text }, "" when nothing is selected or the focus is not on terminal text.
+function selectionOf(hwnd, maxChars) {
+  if (f.GetForegroundWindow() !== hwnd) return { text: "" };
+  const el = out(uia(), 8, P.getPtr, "GetFocusedElement");
+  let pattern = null, ranges = null;
+  try {
+    pattern = el && out(el, 14, P.patternAs, "GetCurrentPatternAs", UIA.TextPattern, IID_TextPattern);
+    ranges = pattern && out(pattern, 5, P.getPtr, "GetSelection");
+    if (!ranges) return { text: "" };
+    const n = [0];
+    ok(vcall(ranges, 3, P.getInt, n), "get_Length");
+    const parts = [];
+    for (let i = 0; i < n[0]; i++) {
+      const range = out(ranges, 4, P.getElement, "GetElement", i);
+      try { parts.push(bstrText(out(range, 12, P.getText, "GetText", SELECTION_RAW_CHARS))); } finally { release(range); }
+    }
+    return { text: tidy(parts.join("\n")).slice(0, maxChars).replace(/[\uD800-\uDBFF]$/, "") };
+  } finally { release(ranges); release(pattern); release(el); }
+}
+
 // ---------- requests ----------
 
 // Where console process `pid` is shown. -> { kind: "tab"|"console"|"host"|"none", hwnd, title (tab), host (exe) }
@@ -319,7 +352,9 @@ function locate(pid, cwd) {
 const handlers = {
   locate: ({ pid, cwd }) => locate(pid, cwd),
   selectTab: ({ hwnd, pid, title }) => selectTab(BigInt(hwnd), pid, title),
-  restoreTitle
+  restoreTitle,
+  selection: ({ hwnd, maxChars }) => selectionOf(BigInt(hwnd), maxChars),
+  warm: () => Boolean(uia())
 };
 // BigInt window handles travel as strings.
 const wire = v => JSON.parse(JSON.stringify(v, (_k, x) => (typeof x === "bigint" ? x.toString() : x)));
@@ -338,5 +373,5 @@ if (process.parentPort) {
   });
   tell({ type: "ready" });
 } else {
-  module.exports = { locate, selectTab, restoreTitle, consoleOf, ancestry, tabsOf, release, isSelected, select, bare }; // tests
+  module.exports = { locate, selectTab, restoreTitle, selectionOf, tidy, consoleOf, ancestry, tabsOf, release, isSelected, select, bare }; // tests
 }

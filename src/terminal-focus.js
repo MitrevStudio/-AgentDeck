@@ -10,6 +10,8 @@
 //                                "host" - the app its terminal is part of (VS Code, Git Bash…), named by `app`
 //   how "none", reason:          "notRunning" | "unsupported" (agent without a live registry) | "notFound"
 //   ok false, reason "notFront": found, but Windows kept it from coming to the front (its taskbar button flashes)
+//
+// terminalSelection() reads what is selected in a terminal for read-aloud, through the same helper.
 const path = require("node:path");
 const { app, utilityProcess } = require("electron");
 const { liveSessions } = require("./live");
@@ -17,6 +19,7 @@ const { liveSessions } = require("./live");
 const LOCATE_TIMEOUT_MS = 1500;
 const SELECT_TIMEOUT_MS = 2500;   // UI Automation; a hung terminal is given up on, its window is still raised
 const START_TIMEOUT_MS = 5000;    // loading the helper (koffi, the Win32 bindings) before its first request
+const SELECTION_TIMEOUT_MS = 1000; // UI Automation; a terminal that does not answer has its selection copied instead
 const RESTORE_TIMEOUT_MS = 1500;
 const MARKER_GRACE_MS = 10_000;   // a helper that renamed a console is given this long to put the title back
 const IDLE_EXIT_MS = 10 * 60 * 1000;
@@ -28,6 +31,7 @@ const FRONT_TIMEOUT_MS = 300;
 // console its temporary marker title: it is left to put the title back first, and one that dies with the marker set
 // has the next helper put it back.
 let helper = null, idleTimer = null, nextId = 0, queue = Promise.resolve(), quitting = false;
+let kept = false; // read-aloud keeps the helper running: its hotkey must not wait for one to start
 app.on("will-quit", () => { quitting = true; });
 
 function kill(h) {
@@ -83,7 +87,7 @@ function ask(op, args, timeoutMs) {
 async function askNow(op, args, timeoutMs) {
   const h = startHelper();
   clearTimeout(idleTimer);
-  idleTimer = setTimeout(() => { if (helper === h) retire(h); }, IDLE_EXIT_MS);
+  if (!kept) idleTimer = setTimeout(() => { if (helper === h) retire(h); }, IDLE_EXIT_MS);
   await h.ready;
   return new Promise((resolve, reject) => {
     let timer = null;
@@ -184,4 +188,17 @@ async function focusNow({ agent, id, pid, cwd }) {
   return done(how, reason, extra);
 }
 
-module.exports = { focusSession };
+// Read-aloud: the text selected in terminal window `hwnd` (Windows Terminal) while it is in front,
+// read through UI Automation. "" when nothing is selected or the window does not tell.
+async function terminalSelection(hwnd, maxChars) {
+  return (await ask("selection", { hwnd: String(hwnd), maxChars }, SELECTION_TIMEOUT_MS)).text;
+}
+// Starts the helper (and UI Automation in it) ahead of the first read-aloud, and keeps it from exiting when idle.
+function keepWarm() {
+  if (kept || process.platform !== "win32") return;
+  kept = true;
+  clearTimeout(idleTimer);
+  ask("warm", null, START_TIMEOUT_MS).catch(e => console.error("Starting the terminal helper failed:", e.message));
+}
+
+module.exports = { focusSession, terminalSelection, keepWarm };
