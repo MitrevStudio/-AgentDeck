@@ -326,10 +326,15 @@ const SESSION_ID = /^[\w.:-]{1,200}$/;
 
 function registerIpc() {
   handle("app:get-data", opts => (opts?.cached === true && cache ? cache : scan()));
+  // A picker without defaultPath opens in Downloads (Electron 43+; the last folder is no longer remembered), so it
+  // starts where the last project was picked, or else beside the most recently registered one.
+  let pickedFrom = null;
   handle("project:add", async () => {
-    const result = await dialog.showOpenDialog({ properties: ["openDirectory"] });
+    const last = readRegistry().projects.at(-1)?.path;
+    const result = await dialog.showOpenDialog({ properties: ["openDirectory"], defaultPath: pickedFrom ?? (last && path.dirname(last)) });
     if (result.canceled || !result.filePaths[0]) return readRegistry();
     const p = path.resolve(result.filePaths[0]);
+    pickedFrom = path.dirname(p);
     const data = readRegistry();
     if (!data.projects.some(x => norm(x.path) === norm(p))) data.projects.push({ name: path.basename(p), path: p });
     writeRegistry(data); return registryChanged(data);
@@ -353,7 +358,7 @@ function registerIpc() {
   handle("launch:new", (agent, cwd) => { launchNew(text(agent), text(cwd)); return true; });
   // Folders only: shell.openPath() on a file runs it.
   handle("open:path", p => (isDir(p) ? shell.openPath(p) : t("errors.folderMissing")));
-  handle("clipboard:write", value => { clipboard.writeText(text(value, 1_000_000)); return true; });
+  handle("clipboard:write", async value => { await clipboard.writeText(text(value, 1_000_000)); return true; });
   handle("live:get", () => liveSessions());
   // A path typed into the menu's search: offer a new session there if it is an existing directory.
   handle("fs:is-dir", p => (isDir(p) ? path.resolve(p) : ""));

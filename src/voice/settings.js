@@ -123,23 +123,33 @@ async function save(patch = {}) {
   return load();
 }
 
-function getApiKey(provider) {
+async function getApiKey(provider) {
   const enc = stored().apiKeysEnc[provider];
   if (!enc) return "";
-  try { return safeStorage().decryptString(Buffer.from(enc, "base64")); } catch { return ""; }
+  try {
+    const { result, shouldReEncrypt } = await safeStorage().decryptStringAsync(Buffer.from(enc, "base64"));
+    if (shouldReEncrypt) setApiKey(provider, result, enc).catch(() => {}); // the key store has rotated its key
+    return result;
+  } catch { return ""; }
 }
 
-// Empty key = remove. Rejects when encryption is unavailable rather than falling back to plaintext.
-async function setApiKey(provider, key) {
+// Empty key = remove. Rejects when encryption is unavailable rather than falling back to plaintext. With
+// `replacing`, only if that ciphertext is still the saved one.
+async function setApiKey(provider, key, replacing) {
   if (!PROVIDERS.includes(provider)) throw new Error(`Unknown provider: ${provider}`);
-  const cur = stored();
-  const apiKeysEnc = { ...cur.apiKeysEnc };
   key = String(key || "").trim();
+  let enc = null;
   if (key) {
     const ss = safeStorage();
-    if (!ss.isEncryptionAvailable()) throw new Error(t("voice.errors.encryptionUnavailable"));
-    apiKeysEnc[provider] = ss.encryptString(key).toString("base64");
-  } else delete apiKeysEnc[provider];
+    if (!(await ss.isAsyncEncryptionAvailable())) throw new Error(t("voice.errors.encryptionUnavailable"));
+    enc = (await ss.encryptStringAsync(key)).toString("base64");
+  }
+  // Read after encrypting: a save() meanwhile must not be written back over.
+  const cur = stored();
+  if (replacing && cur.apiKeysEnc[provider] !== replacing) return;
+  const apiKeysEnc = { ...cur.apiKeysEnc };
+  if (enc) apiKeysEnc[provider] = enc;
+  else delete apiKeysEnc[provider];
   await persist({ ...cur, apiKeysEnc });
 }
 

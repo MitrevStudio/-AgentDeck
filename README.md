@@ -65,7 +65,7 @@
 ## Изисквания
 
 - Windows 10/11
-- Node.js 20+ (препоръчително LTS)
+- Node.js 22.12+ (препоръчително 24 LTS – същата версия като в Electron 44)
 - Windows Terminal (`wt.exe`)
 - Инсталиран и конфигуриран CLI за всеки агент, който използваш (`opencode`, `claude`, `codex`)
 
