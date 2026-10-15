@@ -31,6 +31,7 @@ const tooLarge = message => new VoiceError("PayloadTooLarge", t("voice.errors.to
 function parseErrorBody(body) {
   let root;
   try { root = JSON.parse(body); } catch { return {}; }
+  if (Array.isArray(root)) root = root[0]; // a streamed request (TTS) is answered with a one-element array
   const error = root && typeof root === "object" ? root.error : undefined;
   if (typeof error === "string") return { message: error };
   if (!error || typeof error !== "object") return {};
@@ -49,6 +50,10 @@ function classifyResponse({ status, statusText = "", body = "", provider, retryA
   body = String(body ?? "");
   const { message: providerMessage, code: providerCode } = parseErrorBody(body);
 
+  // The proxy itself wants a sign-in (it usually says so with a page of its own).
+  if (status === 407) {
+    return new VoiceError("Network", t("voice.errors.proxy.short"), t("voice.errors.proxy.authRequired", { provider }), { status });
+  }
   // A proxy or captive portal answering with HTML means we never reached the API.
   if (providerMessage == null && body.trimStart().startsWith("<")) {
     return new VoiceError("MalformedResponse", t("voice.errors.malformed.short"), t("voice.errors.malformed.html", { provider, status }),
@@ -114,6 +119,39 @@ function errorCode(error) {
   return "";
 }
 
+// Chromium's network stack (Electron's net, ../network.js) fails with a bare Error("net::ERR_..."); network.js adds
+// PROXY_AUTH_REQUIRED / PROXY_AUTH_REJECTED (as `code`) when the proxy wanted a sign-in it did not get.
+function chromiumCode(error) {
+  for (let e = error, depth = 0; e && depth < 5; e = e.cause, depth++) {
+    if (e.code === "PROXY_AUTH_REQUIRED" || e.code === "PROXY_AUTH_REJECTED") return e.code;
+    const m = /\bnet::(ERR_[A-Z0-9_]+)/.exec(String(e.message || ""));
+    if (m) return m[1];
+  }
+  return "";
+}
+// Chromium codes, by what the user can do about them (net/base/net_error_list.h).
+const CHROMIUM = [
+  ["voice.errors.proxy.authRequired", false, /^(PROXY_AUTH_REQUIRED|ERR_PROXY_AUTH_REQUESTED(_WITH_NO_CONNECTION)?|ERR_UNEXPECTED_PROXY_AUTH)$/],
+  ["voice.errors.proxy.authRejected", false, /^PROXY_AUTH_REJECTED$/],
+  ["voice.errors.proxy.authUnsupported", false, /^ERR_PROXY_AUTH_UNSUPPORTED$/],
+  ["voice.errors.proxy.pac", true, /^ERR_(MANDATORY_PROXY_CONFIGURATION_FAILED|PAC_\w+)$/],
+  ["voice.errors.proxy.unreachable", true, /^ERR_(PROXY_CONNECTION_FAILED|PROXY_CERTIFICATE_INVALID|PROXY_HTTP_1_1_REQUIRED|SOCKS_CONNECTION_FAILED|SOCKS_\w+)$/],
+  ["voice.errors.proxy.refused", true, /^ERR_(TUNNEL_CONNECTION_FAILED|PROXY_UNABLE_TO_CONNECT_TO_DESTINATION|SOCKS_CONNECTION_HOST_UNREACHABLE)$/],
+  ["voice.errors.network.notFound", true, /^ERR_(NAME_NOT_RESOLVED|NAME_RESOLUTION_FAILED|DNS_\w+|ICANN_NAME_COLLISION)$/],
+  ["voice.errors.network.noConnection", true, /^ERR_(INTERNET_DISCONNECTED|CONNECTION_\w+|ADDRESS_UNREACHABLE|NETWORK_CHANGED|NETWORK_ACCESS_DENIED|TIMED_OUT|EMPTY_RESPONSE|SOCKET_NOT_CONNECTED)$/],
+  ["voice.errors.network.tls", true, /^ERR_(CERT_\w+|SSL_\w+|BAD_SSL_CLIENT_AUTH_CERT|CERTIFICATE_\w+)$/]
+];
+// A malformed request rather than a network failure: a bug, which retrying does not fix.
+const CHROMIUM_BUGS = /^ERR_(INVALID_ARGUMENT|INVALID_URL|UNKNOWN_URL_SCHEME|DISALLOWED_URL_SCHEME|UNSAFE_PORT|NOT_IMPLEMENTED)$/;
+
+function classifyChromium(error, code, provider) {
+  if (CHROMIUM_BUGS.test(code)) return new VoiceError("Unknown", t("voice.errors.unexpected.short"), String(error?.message || error), { cause: error });
+  const [key, retryable] = CHROMIUM.find(([, , re]) => re.test(code)) || ["voice.errors.network.failed", true];
+  const short = key.includes(".proxy.") ? t("voice.errors.proxy.short") : t("voice.errors.network.short");
+  const detail = String(error?.cause?.message || error?.message || code);
+  return new VoiceError("Network", short, t(key, { provider, error: detail }), { retryable, cause: error });
+}
+
 function classifyNetwork(error, provider) {
   const code = errorCode(error);
   const net = (detail, retryable) => new VoiceError("Network", t("voice.errors.network.short"), detail, { retryable, cause: error });
@@ -134,7 +172,7 @@ function classifyError({ error, provider, signal }) {
   if (signal?.aborted && signal.reason?.name !== "TimeoutError") {
     return new VoiceError("Cancelled", t("voice.errors.cancelled.short"), t("voice.errors.cancelled.long"), { cause: error });
   }
-  if (name === "AbortError" || name === "TimeoutError") {
+  if (name === "AbortError" || name === "TimeoutError" || signal?.aborted) {
     return new VoiceError("Timeout", t("voice.errors.timeout.short"), t("voice.errors.timeout.long", { provider }), { retryable: true, cause: error });
   }
   if (error instanceof SyntaxError) {
@@ -147,6 +185,8 @@ function classifyError({ error, provider, signal }) {
       ? new VoiceError("AudioUnreadable", t("voice.errors.audioMissing.short"), t("voice.errors.audioMissing.long"), { cause: error })
       : new VoiceError("AudioUnreadable", t("voice.errors.audioUnreadable.short"), t("voice.errors.audioUnreadable.long"), { cause: error });
   }
+  const chromium = chromiumCode(error);
+  if (chromium) return classifyChromium(error, chromium, provider);
   if ((name === "TypeError" && (error.message === "fetch failed" || error.message === "terminated")) || errorCode(error)) {
     return classifyNetwork(error, provider);
   }

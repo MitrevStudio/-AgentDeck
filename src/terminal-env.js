@@ -13,10 +13,18 @@ const AGENT_SHELL_VARS = new Set([
   "corepack_enable_auto_pin", "pythonioencoding", "nodefaultcurrentdirectoryinexepath"
 ]);
 
-function terminalEnv(env = process.env) {
+// With `proxy` ({url, noProxy} from network.js: the user asked for AgentDeck's proxy in the terminals too) the
+// terminal also gets HTTPS_PROXY, HTTP_PROXY and NO_PROXY, replacing whatever spelling of them it inherited (Windows
+// names are case-insensitive, so two spellings would be two contradicting entries), and NODE_USE_ENV_PROXY so that
+// plain Node.js tools (fetch, https) follow them as well.
+const PROXY_VARS = /^(https?_proxy|no_proxy|node_use_env_proxy)$/i;
+
+function terminalEnv(env = process.env, proxy = null) {
   const fromAgent = Object.keys(env).some(k => AGENT_MARKERS.test(k));
-  return Object.fromEntries(Object.entries(env).filter(([k]) =>
-    !SESSION_MARKERS.test(k) && !(fromAgent && AGENT_SHELL_VARS.has(k.toLowerCase()))));
+  const out = Object.fromEntries(Object.entries(env).filter(([k]) =>
+    !SESSION_MARKERS.test(k) && !(fromAgent && AGENT_SHELL_VARS.has(k.toLowerCase())) && !(proxy && PROXY_VARS.test(k))));
+  if (proxy) Object.assign(out, { HTTPS_PROXY: proxy.url, HTTP_PROXY: proxy.url, NO_PROXY: proxy.noProxy, NODE_USE_ENV_PROXY: "1" });
+  return out;
 }
 
 module.exports = { terminalEnv };

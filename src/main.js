@@ -17,6 +17,7 @@ const { liveSessions } = require("./live");
 const { createEdgeBar } = require("./edge-bar");
 const { makeIcon } = require("./app-icon");
 const prefs = require("./prefs");
+const network = require("./network");
 const updater = require("./updater");
 const { t, tn, LANGUAGES } = require("./i18n");
 const { keyLabel } = require("./voice/util");
@@ -183,14 +184,16 @@ async function scanSessions() {
     seen.add(key); return true;
   }).sort((a,b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 1000);
 }
-function launchTerminal(cwd, command = null) {
+async function launchTerminal(cwd, command = null) {
   if (!cwd || !fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) throw new Error(t("errors.folderMissing"));
   // Pass fixed argument arrays to wt.exe. No user-supplied shell command is evaluated.
   const args = ["-w", "0", "new-tab", "-d", cwd];
   if (command) {
     args.push("powershell.exe", "-NoExit", "-Command", command);
   }
-  const child = spawn("wt.exe", args, { detached: true, stdio: "ignore", windowsHide: true, env: terminalEnv() });
+  // AgentDeck's proxy too, when the user asked for it in Settings -> Network; a terminal opens without it otherwise.
+  const proxy = await network.terminalProxy().catch(e => { console.error("Could not resolve the proxy for the terminal:", e.message); return null; });
+  const child = spawn("wt.exe", args, { detached: true, stdio: "ignore", windowsHide: true, env: terminalEnv(process.env, proxy) });
   child.on("error", err => console.error("Could not launch Windows Terminal:", err.message));
   child.unref();
 }
@@ -205,12 +208,12 @@ function launchAgent(agent, id, cwd) {
   if (!cwd || !fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory())
     throw new Error(t("errors.sessionFolderUnknown"));
   const cmd = agentCommand(agent, id).map(psQuote).join(" ");
-  launchTerminal(cwd, "& " + cmd);
+  return launchTerminal(cwd, "& " + cmd);
 }
 const NEW_SESSION = { Claude: "claude", OpenCode: "opencode", Codex: "codex" };
 function launchNew(agent, cwd) {
   if (!NEW_SESSION[agent]) throw new Error(t("errors.unknownAgent"));
-  launchTerminal(cwd, "& " + psQuote(NEW_SESSION[agent]));
+  return launchTerminal(cwd, "& " + psQuote(NEW_SESSION[agent]));
 }
 // Which agent CLIs are on PATH, so the menu only offers new sessions that can actually start.
 const agentsReady = Promise.all(Object.entries(NEW_SESSION).map(([agent, exe]) => new Promise(resolve =>
@@ -391,13 +394,13 @@ function registerIpc() {
     if (item && name.trim()) item.name = name.trim().slice(0, 80);
     writeRegistry(data); return registryChanged(data);
   });
-  handle("launch:folder", p => { launchTerminal(text(p)); return true; });
-  handle("launch:agent", (agent, id, cwd) => {
+  handle("launch:folder", async p => { await launchTerminal(text(p)); return true; });
+  handle("launch:agent", async (agent, id, cwd) => {
     if (!SESSION_ID.test(text(id))) throw new Error(t("errors.invalidSession"));
-    launchAgent(text(agent), id, text(cwd));
+    await launchAgent(text(agent), id, text(cwd));
     return true;
   });
-  handle("launch:new", (agent, cwd) => { launchNew(text(agent), text(cwd)); return true; });
+  handle("launch:new", async (agent, cwd) => { await launchNew(text(agent), text(cwd)); return true; });
   // Folders only: shell.openPath() on a file runs it.
   handle("open:path", p => (isDir(p) ? shell.openPath(p) : t("errors.folderMissing")));
   handle("clipboard:write", async value => { await clipboard.writeText(text(value, 1_000_000)); return true; });
@@ -431,6 +434,8 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => {
     prefs.load();
     prefs.on("changed", onPrefsChanged);
+    // The proxy settings, before anything goes online (requests made meanwhile wait for them).
+    network.start();
     registerIpc();
 
     bar = createEdgeBar({
@@ -455,7 +460,7 @@ if (!app.requestSingleInstanceLock()) {
     voiceStarting = Promise.resolve()
       .then(() => require("./voice/controller").initVoice({
         balloon, onTrayChanged: buildTrayMenu, icon: makeIcon(64), prefs,
-        general: { set: patch => prefs.set(patch), hotkey: () => ({ current: hotkeyLabel(), candidates: HOTKEYS.map(k => keyLabel(k, " + ")) }), updates: updater }
+        general: { set: patch => prefs.set(patch), hotkey: () => ({ current: hotkeyLabel(), candidates: HOTKEYS.map(k => keyLabel(k, " + ")) }), updates: updater, network }
       }))
       .then(v => { voice = v; buildTrayMenu(); }, e => console.error("Voice features could not start:", e));
   });

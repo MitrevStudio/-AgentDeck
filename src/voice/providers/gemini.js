@@ -2,8 +2,9 @@
 // GeminiInteractions and GeminiSpeechProvider. Throws VoiceError only.
 //
 // The key always travels in the x-goog-api-key header, never in the URL: URLs end up in error messages, and
-// those are shown in the UI.
+// those are shown in the UI. Requests go through ../../network.js (Chromium's network stack and the proxy settings).
 const fs = require("node:fs");
+const network = require("../../network");
 const { classify, fromResponse, tooLarge } = require("../errors");
 const { t, formatNumber } = require("../../i18n");
 
@@ -41,7 +42,7 @@ const jsonHeaders = apiKey => ({ "content-type": "application/json; charset=utf-
 const interactionHeaders = apiKey => ({ ...jsonHeaders(apiKey), "Api-Revision": API_REVISION });
 
 async function postJson(url, headers, body, signal) {
-  const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body), signal });
+  const res = await network.fetch(url, { method: "POST", headers, body: JSON.stringify(body), signal });
   const text = await res.text();
   // Status before parsing: a proxy 502 answers with HTML, not JSON.
   if (!res.ok) throw fromResponse(res, text, PROVIDER);
@@ -169,7 +170,7 @@ async function* speak({ text, model, voice, apiKey, signal, timeoutMs }) {
     generation_config: { speech_config: [{ voice }] }
   };
   try {
-    const res = await fetch(INTERACTIONS_URL, { method: "POST", headers: interactionHeaders(apiKey), body: JSON.stringify(body), signal: attempt });
+    const res = await network.fetch(INTERACTIONS_URL, { method: "POST", headers: interactionHeaders(apiKey), body: JSON.stringify(body), signal: attempt });
     if (!res.ok) throw fromResponse(res, await res.text(), PROVIDER);
     yield* readAudioStream(res.body);
   } catch (error) {

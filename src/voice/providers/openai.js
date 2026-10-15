@@ -1,7 +1,8 @@
 // OpenAI speech-to-text (whisper-1, gpt-4o-transcribe, ...). Port of VoiceTray's OpenAITranscriptionProvider.
-// Throws VoiceError only.
+// Throws VoiceError only. Requests go through ../../network.js (Chromium's network stack and the proxy settings).
 const fs = require("node:fs");
 const path = require("node:path");
+const network = require("../../network");
 const { VoiceError, classify, fromResponse, tooLarge } = require("../errors");
 const { t, formatNumber } = require("../../i18n");
 
@@ -24,7 +25,7 @@ async function transcribe({ wavPath, model, language, apiKey, signal }) {
     form.append("model", model);
     if (language && language !== "auto") form.append("language", language);
 
-    const res = await fetch(URL, { method: "POST", headers: { Authorization: `Bearer ${apiKey}` }, body: form, signal });
+    const res = await network.fetch(URL, { method: "POST", headers: { Authorization: `Bearer ${apiKey}` }, body: form, signal });
     const body = await res.text();
     if (!res.ok) throw fromResponse(res, body, PROVIDER);
 

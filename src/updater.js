@@ -10,6 +10,9 @@
 // same way. Nothing here shows a dialog: being offline, a GitHub rate limit or a failed download end up in the state
 // and the next check tries again; a release whose installer is not uploaded yet counts as no update.
 //
+// Requests go through electron-updater's own session, which network.js gives the proxy settings; a proxy that asks
+// for a user name and password gets the saved ones from there too.
+//
 // AGENTDECK_UPDATE_URL (tests only): a generic feed - a folder with latest.yml and the installer - instead of GitHub.
 //
 // events: "changed" (state, previous) - state() as below, whenever any part of it changes.
@@ -31,7 +34,7 @@ const s = {
   available: null,  // the newer version the last check found
   downloaded: null, // the version downloaded and waiting to be installed
   percent: 0, checkedAt: 0,
-  error: null       // { during: "check" | "download", reason: "offline" | "limited" | "pending" | "corrupt" | "other", message }
+  error: null       // { during: "check" | "download", reason: "offline" | "proxy" | "limited" | "pending" | "corrupt" | "other", message }
 };
 
 function status() {
@@ -62,7 +65,8 @@ function set(patch) {
 function classify(e) {
   const text = String(e?.stack || e?.message || e);
   const code = e?.statusCode ?? Number(/HttpError: (\d{3})/.exec(text)?.[1]);
-  if (/net::ERR_(INTERNET_DISCONNECTED|NAME_NOT_RESOLVED|NAME_RESOLUTION_FAILED|NETWORK_|CONNECTION_|ADDRESS_UNREACHABLE|TIMED_OUT|PROXY_|TUNNEL_)|\b(ENOTFOUND|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENETUNREACH)\b/.test(text)) return "offline";
+  if (/net::ERR_(PROXY_|TUNNEL_|MANDATORY_PROXY_|PAC_|SOCKS_)/.test(text) || code === 407) return "proxy";
+  if (/net::ERR_(INTERNET_DISCONNECTED|NAME_NOT_RESOLVED|NAME_RESOLUTION_FAILED|NETWORK_|CONNECTION_|ADDRESS_UNREACHABLE|TIMED_OUT)|\b(ENOTFOUND|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENETUNREACH)\b/.test(text)) return "offline";
   if (code === 403 || code === 429) return "limited";
   if (code === 404 || ["ERR_UPDATER_CHANNEL_FILE_NOT_FOUND", "ERR_UPDATER_NO_PUBLISHED_VERSIONS", "ERR_UPDATER_ASSET_NOT_FOUND"].includes(e?.code)) return "pending";
   if (e?.code === "ERR_CHECKSUM_MISMATCH") return "corrupt";
@@ -87,6 +91,8 @@ function start({ auto = true } = {}) {
   au.allowDowngrade = false;
   au.disableWebInstaller = true;
   if (process.env.AGENTDECK_UPDATE_URL) au.setFeedURL({ provider: "generic", url: process.env.AGENTDECK_UPDATE_URL });
+  // electron-updater waits for an answer once anyone listens: this one always gives it (the saved sign-in, or none).
+  au.on("login", require("./network").loginHandler());
   au.on("download-progress", p => set({ percent: Math.floor(p.percent) }));
   s.supported = true;
   schedule(FIRST_CHECK_MS);
@@ -117,7 +123,7 @@ async function runCheck() {
     // The newest release without its installer yet (or no release at all): no update for now.
     if (reason === "pending") set({ checking: false, checkedAt: Date.now(), available: null });
     else set({ checking: false, error: { during: "check", reason, message: firstLine(e) } });
-    if (reason === "offline") again = OFFLINE_RETRY_MS;
+    if (reason === "offline" || reason === "proxy") again = OFFLINE_RETRY_MS;
   }
   schedule(again);
   return state();

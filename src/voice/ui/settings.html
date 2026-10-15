@@ -16,6 +16,7 @@
     <div class="seg vs-tabs" id="tabs" role="tablist">
       <button type="button" role="tab" id="tabGeneral" data-value="general" aria-controls="general" data-i18n="settings.general"></button>
       <button type="button" role="tab" id="tabVoice" data-value="voice" aria-controls="voice" data-i18n="settings.voice"></button>
+      <button type="button" role="tab" id="tabNetwork" data-value="network" aria-controls="network" data-i18n="settings.network"></button>
     </div>
   </header>
 
@@ -161,14 +162,91 @@
         </div>
       </section>
     </div>
+
+    <!-- Network: the proxy, saved with its own Save/Cancel. Rows with data-show belong to those modes only. -->
+    <div class="vs-pane" id="network" role="tabpanel" aria-labelledby="tabNetwork">
+      <section class="vs-sec">
+        <h2><span data-icon="globe"></span><span data-i18n="settings.network.proxy"></span></h2>
+        <div class="vs-grid">
+          <span class="vs-label" id="netModeLabel" data-i18n="settings.network.mode"></span>
+          <div class="vs-field">
+            <div class="seg vs-netmode" id="netMode" role="radiogroup" aria-labelledby="netModeLabel"></div>
+            <div class="vs-hint" id="netModeHint"></div>
+          </div>
+
+          <label class="vs-label" for="netPac" data-i18n="settings.network.pacUrl" data-show="pac"></label>
+          <div class="vs-field" data-show="pac">
+            <input id="netPac" class="input mono" type="text" spellcheck="false" autocomplete="off" placeholder="http://wpad.corp.local/proxy.pac">
+            <div class="vs-err" data-err="net.pacUrl"></div>
+          </div>
+
+          <label class="vs-label" for="netProxy" data-i18n="settings.network.server" data-show="manual"></label>
+          <div class="vs-field" data-show="manual">
+            <input id="netProxy" class="input mono" type="text" spellcheck="false" autocomplete="off" placeholder="http://proxy.corp.local:8080">
+            <div class="vs-err" data-err="net.proxy"></div>
+          </div>
+
+          <label class="vs-label" for="netBypass" data-i18n="settings.network.bypass" data-show="manual"></label>
+          <div class="vs-field" data-show="manual">
+            <input id="netBypass" class="input mono" type="text" spellcheck="false" autocomplete="off" placeholder="&lt;local&gt;, *.corp.local">
+            <div class="vs-hint" data-i18n="settings.network.bypassHint"></div>
+            <div class="vs-err" data-err="net.bypass"></div>
+          </div>
+
+          <label class="vs-label" for="netUser" data-i18n="settings.network.username" data-show="system pac manual"></label>
+          <div class="vs-field" data-show="system pac manual">
+            <input id="netUser" class="input" type="text" spellcheck="false" autocomplete="off">
+            <div class="vs-hint" data-i18n="settings.network.signInHint"></div>
+            <div class="vs-err" data-err="net.username"></div>
+          </div>
+
+          <label class="vs-label" for="netPass" data-i18n="settings.network.password" data-show="system pac manual"></label>
+          <div class="vs-field" data-show="system pac manual">
+            <div class="vs-key">
+              <input id="netPass" class="input" type="password" spellcheck="false" autocomplete="new-password">
+              <span class="tag" id="netPassTag"></span>
+            </div>
+            <div class="vs-keystate" id="netPassState"></div>
+            <div class="vs-err" data-err="net.password"></div>
+          </div>
+
+          <span class="vs-label" data-i18n="settings.network.check"></span>
+          <div class="vs-field">
+            <div class="vs-test">
+              <span class="tag" id="netTestTag"></span>
+              <span class="grow"></span>
+              <button type="button" class="btn sm" id="netTest"><span data-icon="pulse"></span><span data-i18n="settings.network.test"></span></button>
+            </div>
+            <div class="vs-hint" id="netTestHint" role="status"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="vs-sec" data-show="system pac manual">
+        <h2><span data-icon="terminal"></span><span data-i18n="settings.network.terminals"></span></h2>
+        <div class="vs-grid">
+          <span class="vs-label" data-i18n="settings.network.terminals.label"></span>
+          <div class="vs-field">
+            <label class="vs-toggle" for="netTerminals">
+              <span><b data-i18n="settings.network.terminals.toggle"></b></span>
+              <input type="checkbox" id="netTerminals" class="switch">
+            </label>
+            <div class="vs-hint" data-i18n="settings.network.terminals.hint"></div>
+          </div>
+        </div>
+      </section>
+    </div>
   </div>
 
   <footer class="vs-foot">
     <div class="vs-note" data-for="general" data-i18n="settings.general.applied"></div>
     <div class="vs-err vs-form-err" data-for="voice" data-err="form"></div>
+    <div class="vs-err vs-form-err" data-for="network" data-err="net.form"></div>
     <button type="button" class="btn" id="close" data-for="general" data-i18n="common.close"></button>
     <button type="button" class="btn" id="cancel" data-for="voice" data-i18n="common.cancel"></button>
     <button type="submit" class="btn primary" id="save" data-for="voice" data-i18n="voice.settings.save"></button>
+    <button type="button" class="btn" id="netCancel" data-for="network" data-i18n="common.cancel"></button>
+    <button type="submit" class="btn primary" id="netSave" data-for="network" data-i18n="voice.settings.save"></button>
   </footer>
 </form>
 <script src="../../common.js"></script>

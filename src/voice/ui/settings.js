@@ -1,7 +1,7 @@
-// The app's Settings page, in two tabs. General (language, theme, edge menu, updates) applies at once through
-// window.prefs; Voice is a port of VoiceTray's SettingsWindow plus the two hotkeys, saved with Save. The API keys
-// never come here: the page knows only whether one is saved, and an empty field keeps it - removing a key takes the
-// explicit button.
+// The app's Settings page, in three tabs. General (language, theme, edge menu, updates) applies at once through
+// window.prefs; Voice is a port of VoiceTray's SettingsWindow plus the two hotkeys, saved with Save; Network (the
+// proxy) has a Save of its own. Secrets never come here: the page knows only whether an API key or the proxy password
+// is saved, and an empty field keeps it - removing one takes the explicit button.
 // Uses $, esc, icon, t and tn from common.js.
 
 const PSEUDO_DEVICES = ["default", "communications"];
@@ -53,16 +53,21 @@ function showTab(name, focus = false) {
   if (focus) tab.focus();
   if (st.data) fit(); // before that, the first fit comes once the voice part is in
 }
-const otherTab = () => (document.body.dataset.tab === "voice" ? "general" : "voice");
+// The tab `step` places after (or before) the one shown, round the end.
+function nextTab(step) {
+  const list = [...document.querySelectorAll('[role="tab"]:not([hidden])')].map(b => b.dataset.value);
+  return list[(list.indexOf(document.body.dataset.tab) + step + list.length) % list.length];
+}
 
 // ---------- General ----------
 const THEMES = ["system", "dark", "light"];
 let general = { ...window.prefs };
-let voiceDirty = false; // unsaved voice edits: a language switch reloads the window
-function setVoiceDirty(on) {
-  voiceDirty = on;
-  $("tabVoice").classList.toggle("dirty", on);
-  $("tabVoice").title = on ? t("settings.voice.unsaved") : "";
+const dirty = { voice: false, network: false }; // unsaved edits per tab: a language switch reloads the window
+function setDirty(tab, on) {
+  dirty[tab] = on;
+  const button = document.querySelector(`[role="tab"][data-value="${tab}"]`);
+  button.classList.toggle("dirty", on);
+  button.title = on ? t("settings.voice.unsaved") : "";
 }
 
 function segHtml(options, value) {
@@ -79,7 +84,7 @@ function renderGeneral() {
 }
 async function setPref(key, value) {
   if (value === undefined || value === general[key]) return;
-  if (key === "language" && voiceDirty && !confirm(t("settings.general.languageReload"))) return;
+  if (key === "language" && (dirty.voice || dirty.network) && !confirm(t("settings.general.languageReload"))) return;
   general = { ...general, [key]: value };
   renderGeneral();
   await window.voiceSettings.setPrefs({ [key]: value });
@@ -112,13 +117,13 @@ $("edgeHandle").addEventListener("change", e => setPref("edgeHandle", e.target.c
 $("autoUpdate").addEventListener("change", e => setPref("autoUpdate", e.target.checked));
 // The tray changes the same settings; a language change reloads this page anyway.
 window.prefs.onChanged(p => { general = p; renderGeneral(); });
-for (const type of ["input", "change"]) $("voice").addEventListener(type, () => setVoiceDirty(true));
-$("voice").addEventListener("click", e => { if (e.target.closest("button")) setVoiceDirty(true); });
+for (const type of ["input", "change"]) $("voice").addEventListener(type, () => setDirty("voice", true));
+$("voice").addEventListener("click", e => { if (e.target.closest("button")) setDirty("voice", true); });
 $("tabs").addEventListener("click", e => { const b = e.target.closest('[role="tab"]'); if (b) showTab(b.dataset.value); });
 $("tabs").addEventListener("keydown", e => segKey(e, v => showTab(v, true)));
 // Ctrl+Tab, as in any tabbed dialog. A focused hotkey field records it instead (its handler stops the event).
 document.addEventListener("keydown", e => {
-  if (e.ctrlKey && e.key === "Tab") { e.preventDefault(); showTab(otherTab(), true); }
+  if (e.ctrlKey && e.key === "Tab") { e.preventDefault(); showTab(nextTab(e.shiftKey ? -1 : 1), true); }
 });
 $("logo").innerHTML = icon("sliders");
 showTab((() => { try { return localStorage.getItem(TAB_KEY); } catch { return null; } })());
@@ -133,6 +138,11 @@ const UPDATE_TAG = { // status -> tag colour and icon (none: a spinner)
   available: ["accent", "download"], downloading: ["accent", null], ready: ["ok", "check"], error: ["danger", "alert"]
 };
 let fittedHeight = 0;
+// Lines come and go with a state (the progress bar, a longer reason): the window follows.
+function refit() {
+  const height = Math.ceil(document.body.getBoundingClientRect().height);
+  if (st.data && height !== fittedHeight) { fittedHeight = height; fit(); }
+}
 function checkedAt(ms) {
   const today = new Date(ms).toDateString() === new Date().toDateString();
   return today ? I18N.formatTime(ms) : I18N.formatDateTime(ms, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
@@ -167,9 +177,7 @@ function renderUpdates(u) {
   $("updateCheck").classList.toggle("spin", u.status === "checking");
   $("updateDownload").hidden = u.status !== "available";
   $("updateInstall").hidden = u.status !== "ready";
-  // Lines come and go with the state (the progress bar, a longer reason): the window follows.
-  const height = Math.ceil(document.body.getBoundingClientRect().height);
-  if (st.data && height !== fittedHeight) { fittedHeight = height; fit(); }
+  refit();
 }
 $("updateCheck").addEventListener("click", () => updates.check());
 $("updateDownload").addEventListener("click", () => updates.download());
@@ -235,20 +243,22 @@ function clearErrors() {
   for (const el of document.querySelectorAll(".invalid, .warned")) el.classList.remove("invalid", "warned");
 }
 
-const FIELD_OF = { apiKey: "apiKey", model: "model", "hotkeys.dictate": "hkDictate", "hotkeys.readAloud": "hkRead" };
-function showErrors(errors, warn = false) {
+const FIELD_OF = { apiKey: "apiKey", model: "model", "hotkeys.dictate": "hkDictate", "hotkeys.readAloud": "hkRead",
+  "net.pacUrl": "netPac", "net.proxy": "netProxy", "net.bypass": "netBypass", "net.username": "netUser", "net.password": "netPass" };
+// `form`: the footer slot for what belongs to no field - the voice tab's or the network tab's.
+function showErrors(errors, warn = false, form = "form") {
   const loose = [];
   for (const [k, msg] of Object.entries(errors || {})) {
     const slot = document.querySelector(`[data-err="${CSS.escape(k)}"]`);
-    if (!slot || k === "form") { loose.push(msg); continue; }
+    if (!slot || k === form) { loose.push(msg); continue; }
     slot.textContent = msg;
     slot.classList.toggle("warn", warn);
     if (FIELD_OF[k]) $(FIELD_OF[k]).classList.add(warn ? "warned" : "invalid");
   }
   if (loose.length) {
-    const form = document.querySelector('[data-err="form"]');
-    form.textContent = loose.join(" ");
-    form.classList.toggle("warn", warn);
+    const slot = document.querySelector(`[data-err="${form}"]`);
+    slot.textContent = loose.join(" ");
+    slot.classList.toggle("warn", warn);
   }
   fit(); // messages add lines; the window grows with them
 }
@@ -340,6 +350,7 @@ document.addEventListener("keydown", e => { if (e.key === "Escape" && !e.default
 
 $("form").addEventListener("submit", async e => {
   e.preventDefault();
+  if (document.body.dataset.tab === "network") return saveNetwork();
   stash();
   clearErrors();
   const dev = st.devices[Number($("mic").value)] || st.devices[0];
@@ -367,7 +378,7 @@ $("form").addEventListener("submit", async e => {
     const r = await window.voiceSettings.save(payload);
     if (!r?.ok) return showErrors(r?.errors || { form: t("voice.settings.notSaved") });
     // Saved. The typed keys are gone from the page; only whether one exists remains.
-    setVoiceDirty(false);
+    setDirty("voice", false);
     st.data.hasKey = r.hasKey;
     st.data.settings = r.settings;
     for (const p of st.data.providers) st.keys[p] = { typed: "", clear: false };
@@ -385,8 +396,158 @@ $("form").addEventListener("submit", async e => {
   }
 });
 
+// ---------- network ----------
+// The proxy settings as main keeps them (network.js), and the password as typed or marked for removal.
+const NET_MODES = ["system", "pac", "manual", "direct"];
+const net = { data: null, mode: "system", clearPassword: false };
+
+function renderNetMode() {
+  const focused = document.activeElement?.closest("#netMode"); // re-rendering replaces the buttons
+  $("netMode").innerHTML = segHtml(NET_MODES.map(m => [m, t(`settings.network.mode.${m}`)]), net.mode);
+  $("netModeHint").textContent = t(`settings.network.hint.${net.mode}`);
+  for (const el of $("network").querySelectorAll("[data-show]")) el.hidden = !el.dataset.show.split(" ").includes(net.mode);
+  if (focused) $("netMode").querySelector(".on")?.focus();
+}
+function setNetMode(mode) {
+  if (!NET_MODES.includes(mode) || mode === net.mode) return;
+  net.mode = mode;
+  renderNetMode();
+  setDirty("network", true);
+  renderTest(null); // a result for other settings would mislead
+  if (st.data) fit();
+}
+
+function renderNetPassword() {
+  const saved = Boolean(net.data?.hasPassword), typed = $("netPass").value;
+  const text = key => `<span>${esc(t(key))}</span>`;
+  const link = (key, action, cls = "") => `<button type="button" class="vs-link${cls}" data-pass="${action}">${esc(t(key))}</button>`;
+  let tag, html = "";
+  if (typed) { tag = ["accent", "key", "settings.network.password.tag.new"]; html = text(saved ? "settings.network.password.replaces" : "settings.network.password.willEncrypt"); }
+  else if (saved && net.clearPassword) { tag = ["warn", "trash", "settings.network.password.tag.removing"]; html = text("settings.network.password.removeOnSave") + link("voice.settings.key.undo", "undo"); }
+  else if (saved) { tag = ["ok", "check", "settings.network.password.tag.saved"]; html = text("settings.network.password.savedInfo") + link("settings.network.password.remove", "clear", " danger"); }
+  else tag = ["", "key", "settings.network.password.tag.none"];
+  $("netPassTag").className = `tag ${tag[0]}`;
+  $("netPassTag").innerHTML = `${icon(tag[1])}${esc(t(tag[2]))}`;
+  $("netPassState").innerHTML = html;
+  $("netPassState").hidden = !html;
+  $("netPass").placeholder = saved && !net.clearPassword ? "••••••••" : "";
+}
+
+function fillNetwork(s) {
+  net.data = s;
+  net.mode = s.mode;
+  net.clearPassword = false;
+  $("netPac").value = s.pacUrl;
+  $("netProxy").value = s.proxy;
+  $("netBypass").value = s.bypass;
+  $("netUser").value = s.username;
+  $("netPass").value = "";
+  $("netTerminals").checked = s.terminals;
+  renderNetMode();
+  renderNetPassword();
+}
+
+// What is entered, for Save and for the test alike. An empty password field keeps the saved password.
+function netPayload() {
+  const typed = $("netPass").value;
+  return {
+    mode: net.mode, pacUrl: $("netPac").value, proxy: $("netProxy").value, bypass: $("netBypass").value,
+    username: $("netUser").value, terminals: $("netTerminals").checked,
+    password: typed ? { set: typed } : net.clearPassword ? { clear: true } : undefined
+  };
+}
+
+// The route Chromium resolved ("PROXY host:port; DIRECT"), in words: [first, ...fallbacks].
+function routeLabels(route) {
+  return String(route || "").split(";").map(s => s.trim()).filter(Boolean).map(entry => {
+    const [kind, where = ""] = entry.split(/\s+/);
+    if (kind === "DIRECT") return t("settings.network.test.direct");
+    return kind === "PROXY" ? where : `${kind.toLowerCase()}://${where}`;
+  });
+}
+
+// r: null (not run yet), {checking}, {reachable, ms, route} or {reachable: false, short, long, route}.
+function renderTest(r) {
+  let cls = "", ic = "clock", tag = t("settings.network.test.tag.idle"), hint = t("settings.network.test.hint.idle");
+  const labels = routeLabels(r?.route);
+  if (r?.checking) { cls = "accent"; ic = null; tag = t("settings.network.test.tag.checking"); hint = t("settings.network.test.hint.checking"); }
+  else if (r?.reachable) {
+    const ms = I18N.formatNumber(r.ms);
+    cls = "ok"; ic = "check"; tag = t("settings.network.test.tag.ok");
+    const direct = !labels.length || /^DIRECT/.test(String(r.route).trim());
+    hint = direct ? t("settings.network.test.okDirect", { ms }) : t("settings.network.test.okProxy", { proxy: labels[0], ms });
+    if (labels.length > 1) hint += ` ${t("settings.network.test.fallback", { list: labels.slice(1).join(", ") })}`;
+  } else if (r) {
+    cls = "danger"; ic = "alert"; tag = r.short;
+    const route = labels.length ? labels.join(" → ") : t("settings.network.test.routeUnknown");
+    hint = r.route == null ? r.long : `${r.long}\n${t("settings.network.test.route", { route })}`;
+  }
+  $("netTestTag").className = `tag ${cls}`;
+  $("netTestTag").innerHTML = `${ic ? icon(ic) : '<span class="spinner"></span>'}<span class="t">${esc(tag)}</span>`;
+  $("netTestHint").textContent = hint;
+  $("netTest").disabled = Boolean(r?.checking);
+  $("netTest").classList.toggle("spin", Boolean(r?.checking));
+  refit();
+}
+
+async function testNetwork() {
+  clearErrors();
+  renderTest({ checking: true });
+  try {
+    const r = await window.voiceSettings.network.test(netPayload());
+    if (r?.errors) { renderTest(null); showErrors(r.errors, false, "net.form"); return; }
+    renderTest(r);
+  } catch (err) {
+    renderTest({ reachable: false, short: t("voice.errors.unexpected.short"), long: err?.message || String(err) });
+  }
+}
+
+async function saveNetwork() {
+  clearErrors();
+  $("netSave").disabled = true;
+  try {
+    const r = await window.voiceSettings.network.save(netPayload());
+    if (!r?.ok) return showErrors(r?.errors || { "net.form": t("voice.settings.notSaved") }, false, "net.form");
+    // Saved and in effect. The typed password is gone from the page; only whether one exists remains.
+    setDirty("network", false);
+    fillNetwork(r.state);
+    if (!Object.keys(r.warnings || {}).length) return window.close();
+    showErrors(r.warnings, true, "net.form");
+  } catch (err) {
+    showErrors({ "net.form": err?.message || String(err) }, false, "net.form");
+  } finally {
+    $("netSave").disabled = false;
+  }
+}
+
+$("netMode").addEventListener("click", e => setNetMode(e.target.closest("[data-value]")?.dataset.value));
+$("netMode").addEventListener("keydown", e => segKey(e, setNetMode));
+for (const type of ["input", "change"]) $("network").addEventListener(type, e => {
+  setDirty("network", true);
+  if (e.target.matches(".input") && type === "input" && !$("netTest").disabled) renderTest(null); // that result was for other values
+  e.target.classList.remove("invalid", "warned");
+  const slot = e.target.closest(".vs-field")?.querySelector("[data-err]");
+  if (slot) slot.textContent = "";
+});
+$("netPass").addEventListener("input", () => {
+  if ($("netPass").value) net.clearPassword = false; // typing a new password supersedes "remove"
+  renderNetPassword();
+});
+$("netPassState").addEventListener("click", e => {
+  const btn = e.target.closest("[data-pass]");
+  if (!btn) return;
+  net.clearPassword = btn.dataset.pass === "clear";
+  setDirty("network", true);
+  renderNetPassword();
+});
+$("netTest").addEventListener("click", testNetwork);
+$("netCancel").addEventListener("click", () => window.close());
+
 // ---------- load ----------
 async function init() {
+  const network = await window.voiceSettings.network.get().catch(() => null);
+  if (network) { fillNetwork(network); renderTest(null); }
+  else $("tabNetwork").hidden = true;
   const d = st.data = await window.voiceSettings.get();
   const s = d.settings;
 
@@ -422,7 +583,7 @@ async function init() {
   renderReadAloudHint();
 
   await fit();
-  $(document.body.dataset.tab === "voice" ? "provider" : "uiLanguage").querySelector(".on")?.focus();
+  $({ voice: "provider", network: "netMode" }[document.body.dataset.tab] || "uiLanguage").querySelector(".on")?.focus();
 }
 
 init().catch(err => showErrors({ form: t("voice.settings.loadFailed", { error: err?.message || err }) }));

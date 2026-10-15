@@ -7,6 +7,7 @@ const { pathToFileURL } = require("node:url");
 const { maxRecordingMinutesFor } = require("./transcription");
 const { TRANSCRIPTION_MODELS, SPEECH_MODELS, VOICES, VOICE_STYLES, DEFAULT_SPEECH_MODEL, DEFAULT_VOICE, defaultModelFor } = require("./catalog");
 const { SAFE_ID, isObj, sleep } = require("./util");
+const { classify } = require("./errors");
 const { t } = require("../i18n");
 
 const UI = path.join(__dirname, "ui");
@@ -72,8 +73,8 @@ function normalizeAccelerator(value) {
 // ---------- windows ----------
 // copyText(text) -> bool puts text on the clipboard; onHotkeyCapture(on) is told while the Settings page records a
 // new combination (the current ones must not fire meanwhile). The Settings window is the app's: its General section
-// goes to general.set(patch) / general.hotkey() and to general.updates (../updater.js); background() is the window
-// colour of the current theme.
+// goes to general.set(patch) / general.hotkey() and to general.updates (../updater.js), its Network section to
+// general.network (../network.js); background() is the window colour of the current theme.
 function createVoiceWindows({ settings, store, queue, listDevices, onReread, onSettingsChanged, onHotkeyCapture, copyText, icon,
   general, background = () => "#0d1015" } = {}) {
   if (!settings || !store || !queue) throw new Error("createVoiceWindows: settings, store and queue are required");
@@ -239,6 +240,20 @@ function createVoiceWindows({ settings, store, queue, listDevices, onReread, onS
   handle("updates:download", settingsOwner, () => updates?.download());
   handle("updates:install", settingsOwner, () => updates?.install());
   updates?.on("changed", state => { if (alive(settingsWin)) settingsWin.webContents.send("updates:changed", state); });
+
+  // Network: the proxy settings (the password only as "saved or not"), saved with their own Save; the test runs with
+  // what is entered, saved or not, and its failure is described the way a failed dictation would be.
+  const network = general?.network;
+  const noNetwork = () => ({ ok: false, errors: { "net.form": t("voice.settings.notSaved") } });
+  handle("network:get", settingsOwner, () => network?.state() ?? null);
+  handle("network:save", settingsOwner, payload => (network ? network.save(payload) : noNetwork()));
+  handle("network:test", settingsOwner, async payload => {
+    if (!network) return noNetwork();
+    const r = await network.test(payload);
+    if (r.errors || r.reachable) return r;
+    const e = classify({ error: r.error, provider: "Gemini" });
+    return { reachable: false, route: r.route, short: e.shortMessage, long: e.longMessage };
+  });
 
   // The page is recording a new combination while one of its hotkey fields has the focus.
   handle("voice:settings:capture", settingsOwner, on => { onHotkeyCapture?.(on === true); return true; });

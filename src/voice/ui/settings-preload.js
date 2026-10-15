@@ -18,6 +18,12 @@ contextBridge.exposeInMainWorld("voiceSettings", {
     download: () => ipcRenderer.invoke("updates:download"),
     install: () => ipcRenderer.invoke("updates:install"),
     onChanged: cb => ipcRenderer.on("updates:changed", (_e, state) => cb(state))
+  },
+  // Network: the proxy settings (a password goes in, never out), saved on their own; test() uses what is entered.
+  network: {
+    get: () => ipcRenderer.invoke("network:get"),
+    save: payload => ipcRenderer.invoke("network:save", payload),
+    test: payload => ipcRenderer.invoke("network:test", payload)
   }
 });
 // UI language and theme, read before the page renders; i18n.js applies them.

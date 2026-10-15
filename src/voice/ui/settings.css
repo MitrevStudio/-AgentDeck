@@ -1,4 +1,4 @@
-/* The app's Settings: two tabs, General and Voice. Tokens and shared components (buttons, fields, selects, switch,
+/* The app's Settings: three tabs, General, Voice and Network. Tokens and shared components (buttons, fields, selects, switch,
    segmented control, tags, kbd) come from ../../theme.css. The window is sized to the tab shown; should the screen
    be too short for it, the header and the footer stay put while the tab scrolls. */
 body { user-select: none; }
@@ -13,12 +13,13 @@ body { user-select: none; }
 .vs-head h1 { margin: 0; font-size: 16px; font-weight: 650; }
 .vs-head p { margin: 0; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* ---------- tabs: General, Voice ---------- */
+/* ---------- tabs: General, Voice, Network ---------- */
 .vs-tabs { flex: none; }
 .vs .vs-tabs > button { min-width: 96px; height: 30px; padding: 0 14px; font-size: 13.5px; }
 .vs-tabs > .dirty::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 .vs-pane:not(.on) { display: none; }
-body:not([data-tab="general"]) [data-for="general"], body:not([data-tab="voice"]) [data-for="voice"] { display: none; }
+body:not([data-tab="general"]) [data-for="general"], body:not([data-tab="voice"]) [data-for="voice"],
+body:not([data-tab="network"]) [data-for="network"] { display: none; }
 
 /* The edge menu's hotkey: key caps, read-only. */
 .vs-caps { display: flex; align-items: center; gap: 5px; min-height: 34px; }
@@ -27,13 +28,15 @@ body:not([data-tab="general"]) [data-for="general"], body:not([data-tab="voice"]
 .vs-caps .none { color: var(--faint); }
 .vs-caps + .vs-hint { margin-top: 0; }
 
-/* Updates: the version and its state on one line, the actions at its end; a progress bar while downloading. */
-.vs-upd { display: flex; align-items: center; gap: 8px; min-height: 34px; }
+/* Updates: the version and its state on one line, the actions at its end; a progress bar while downloading. The
+   connection test (Network) reads the same way: its result as a tag, the button at the end, the details below. */
+.vs-upd, .vs-test { display: flex; align-items: center; gap: 8px; min-height: 34px; }
 .vs-ver { font: 600 13.5px var(--mono); color: var(--text); user-select: text; }
-.vs-upd .tag { min-width: 0; }
-.vs-upd .tag .spinner { width: 11px; height: 11px; border-width: 2px; border-color: color-mix(in srgb, currentColor 25%, transparent); border-top-color: currentColor; }
-.vs-upd .btn { flex: none; }
-.vs-upd + .vs-hint { margin-top: 0; }
+.vs-upd .tag, .vs-test .tag { min-width: 0; }
+.vs-upd .tag .spinner, .vs-test .tag .spinner { width: 11px; height: 11px; border-width: 2px; border-color: color-mix(in srgb, currentColor 25%, transparent); border-top-color: currentColor; }
+.vs-upd .btn, .vs-test .btn { flex: none; }
+.vs-upd + .vs-hint, .vs-test + .vs-hint { margin-top: 0; }
+.vs-test + .vs-hint { white-space: pre-line; user-select: text; }
 .vs-progress { height: 4px; margin: 4px 0 2px; border-radius: var(--r-pill); background: var(--panel-2); overflow: hidden; }
 .vs-progress > i { display: block; height: 100%; width: 0; border-radius: inherit; background: var(--accent); transition: width var(--dur) var(--ease-out); }
 
@@ -52,6 +55,10 @@ body:not([data-tab="general"]) [data-for="general"], body:not([data-tab="voice"]
 .vs-grid > .select, .vs-grid > .seg, .vs-grid > .vs-field, .vs-grid > .vs-toggle, .vs-grid > .vs-hint { margin-bottom: 10px; }
 .vs-field { min-width: 0; }
 .vs .select, .vs .input { height: 34px; }
+
+/* Network: four modes in one row; the proxy's fields come and go with the mode. */
+.vs .vs-netmode > button { padding: 0 8px; white-space: nowrap; }
+.vs-netmode + .vs-hint { margin-top: 6px; }
 
 /* Provider: a segmented control. */
 .vs .seg { padding: 2px; }
