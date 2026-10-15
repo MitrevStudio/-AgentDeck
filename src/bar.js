@@ -243,20 +243,47 @@ async function pollLive() {
   render();
 }
 
+// ---------- opening ----------
+// The menu comes out of the edge handle: the shell is uncovered from the handle's rectangle outwards while its
+// content drops into place - 140 ms, and the only motion the menu has. Hiding is instant. Main decides whether
+// motion is welcome (ev.motion) and where the handle is (ev.origin, in window coordinates).
+const REVEAL_MS = 140;
+let revealing = [];
+function reveal(origin, motion) {
+  for (const a of revealing) a.cancel();
+  revealing = [];
+  if (!motion || !origin) return;
+  const shell = $("shell");
+  const w = shell.offsetWidth, h = shell.offsetHeight, left = origin.x - shell.offsetLeft;
+  const from = `inset(0 ${w - left - origin.width}px ${h - origin.height}px ${left}px round 0 0 7px 7px)`;
+  // Ends just outside the shell, so the shadow is there on the last frame too.
+  const to = "inset(0 -18px -18px -18px round 0 0 18px 18px)";
+  revealing = [shell.animate({ clipPath: [from, to] }, { duration: REVEAL_MS, easing: "cubic-bezier(.25, .46, .45, .94)" })];
+  for (const el of shell.querySelectorAll(":scope > :not(.toast)")) {
+    revealing.push(el.animate({ opacity: [0, 1], transform: ["translateY(-4px)", "none"] },
+      { duration: REVEAL_MS - 30, delay: 30, easing: "ease-out", fill: "backwards" }));
+  }
+}
+function openHint({ hotkey, handle }) {
+  if (hotkey) return t(handle ? "bar.hint.hotkeyHandle" : "bar.hint.hotkey", { hotkey });
+  return t(handle ? "bar.hint.handle" : "bar.hint.tray");
+}
+
 // ---------- events ----------
 window.manager.onDataChanged(applyData);
 window.manager.onBarEvent(ev => {
   if (ev.type === "show") {
     st.shown = true; st.tile = ""; st.row = -1; st.confirm = ""; st.dir = ""; q.value = "";
-    $("hotkey").textContent = ev.hotkey ? t("bar.hint.hotkey", { hotkey: ev.hotkey }) : t("bar.hint.edge");
+    $("hotkey").textContent = openHint(ev);
     model = buildData(raw, live);
     render();
     $("strip").scrollLeft = 0; updateNav();
     $("shell").classList.add("in");
+    reveal(ev.origin, ev.motion);
     pollLive();
     if (ev.mode === "hotkey") q.focus();
   }
-  if (ev.type === "hide") { st.shown = false; $("shell").classList.remove("in"); q.blur(); }
+  if (ev.type === "hide") { st.shown = false; reveal(null); $("shell").classList.remove("in"); q.blur(); }
   if (ev.type === "focus") { q.focus(); q.select(); }
 });
 

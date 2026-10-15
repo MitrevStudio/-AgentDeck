@@ -1,0 +1,56 @@
+/* The edge handle: a small tab of matte glass on the top edge of the screen (the window is cut to it). It is drawn
+   in two layers - quiet glass, and clear glass that fades in while the pointer is on it, the menu is out or the
+   handle is being dragged. Both keep a dark outer edge and a light inner one, so the tab stands out on light and on
+   dark wallpapers alike. CSS cannot blur what lies behind the window, so the frost is a tint, a soft sheen and a
+   fine grain. */
+:root {
+  --hd-h: 14px;                  /* HEIGHT in edge-handle.js: the window is taller, cut to the tab */
+  --hd-r: 7px;
+  --hd-quiet: linear-gradient(rgba(58, 66, 80, .3), rgba(20, 24, 32, .4));
+  --hd-sheen: linear-gradient(rgba(255, 255, 255, .1), rgba(255, 255, 255, 0) 60%);
+  --hd-clear: linear-gradient(rgba(40, 47, 60, .93), rgba(19, 23, 31, .95));
+  --hd-edge: rgba(0, 0, 0, .34);
+  --hd-glint: rgba(255, 255, 255, .15);
+  --hd-glint-clear: rgba(255, 255, 255, .11);
+  --hd-grip: rgba(233, 237, 243, .62);
+  --hd-grain: .38;
+}
+:root[data-theme="light"] {
+  --hd-quiet: linear-gradient(rgba(255, 255, 255, .46), rgba(234, 239, 246, .52));
+  --hd-sheen: linear-gradient(rgba(255, 255, 255, .5), rgba(255, 255, 255, 0) 60%);
+  --hd-clear: linear-gradient(rgba(255, 255, 255, .96), rgba(240, 243, 248, .97));
+  --hd-edge: rgba(16, 24, 40, .26);
+  --hd-glint: rgba(255, 255, 255, .62);
+  --hd-glint-clear: rgba(255, 255, 255, .9);
+  --hd-grip: rgba(24, 32, 44, .5);
+  --hd-grain: .3;
+}
+
+html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+body { user-select: none; }
+
+.tab { position: fixed; top: 0; left: 0; right: 0; height: var(--hd-h); border-radius: 0 0 var(--hd-r) var(--hd-r); isolation: isolate; }
+.tab::before, .tab::after {
+  content: ""; position: absolute; inset: 0; z-index: 0; box-sizing: border-box; border-radius: inherit;
+  border: 1px solid var(--hd-edge); border-top: 0;
+  box-shadow: inset 0 -1px 0 var(--glint), inset 1px 0 0 var(--glint), inset -1px 0 0 var(--glint);
+}
+.tab::before { --glint: var(--hd-glint); background: var(--hd-sheen), var(--hd-quiet); }
+.tab::after { --glint: var(--hd-glint-clear); background: var(--hd-clear); opacity: 0; }
+/* The grain: fractal noise, overlaid on whichever glass shows. Paint order: quiet, clear, grain, grip. */
+.grain {
+  position: absolute; inset: 0; z-index: 1; border-radius: inherit; opacity: var(--hd-grain); mix-blend-mode: overlay;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 0 .55'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.grip {
+  position: absolute; z-index: 2; left: 50%; top: 5px; width: 30px; height: 3px; margin-left: -15px; border-radius: 2px;
+  background: var(--hd-grip); transform: scaleX(.8);
+}
+
+.tab:hover::after, .open .tab::after, .drag .tab::after { opacity: 1; }
+.tab:hover .grip, .open .grip, .drag .grip { background: var(--accent); transform: none; }
+.drag .tab { cursor: grabbing; }
+
+[data-motion] .tab::after { transition: opacity .1s var(--ease-out); }
+[data-motion] .grip { transition: transform .1s var(--ease-out), background-color .1s var(--ease-out); }

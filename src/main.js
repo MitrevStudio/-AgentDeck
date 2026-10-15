@@ -268,7 +268,9 @@ function showManager() {
     // The app keeps running for the edge menu; say so the first time the window goes away.
     if (!trayHintShown && tray) {
       trayHintShown = true;
-      balloon(hotkey ? t("tray.background.bodyHotkey", { hotkey: hotkeyLabel() }) : t("tray.background.body"), { title: t("tray.background.title") });
+      const handle = prefs.get().edgeHandle;
+      const body = hotkey ? (handle ? "bodyHotkeyHandle" : "bodyHotkey") : (handle ? "bodyHandle" : "body");
+      balloon(t(`tray.background.${body}`, { hotkey: hotkeyLabel() }), { title: t("tray.background.title") });
     }
   });
 }
@@ -299,7 +301,7 @@ function buildTrayMenu() {
     { label: t("common.openManager"), click: showManager },
     { type: "separator" },
     ...sep(v.items),
-    { label: t("tray.hoverEdge"), type: "checkbox", checked: p.hoverEdge, click: item => prefs.set({ hoverEdge: item.checked }) },
+    { label: t("tray.edgeHandle"), type: "checkbox", checked: p.edgeHandle, click: item => prefs.set({ edgeHandle: item.checked }) },
     { label: t("tray.language"), submenu: radio("language", Object.keys(LANGUAGES), l => LANGUAGES[l]) },
     { label: t("tray.theme"), submenu: radio("theme", prefs.THEMES, th => t(`theme.${th}`)) },
     { label: t("tray.settings"), enabled: Boolean(voice), click: () => voice?.openSettings() },
@@ -415,8 +417,9 @@ function onPrefsChanged(p, keys) {
   if (keys.includes("theme") && managerWin && !managerWin.isDestroyed()) managerWin.setBackgroundColor(prefs.background());
   if (keys.includes("language")) {
     cache = null; // fallback session titles are in the old language
-    for (const w of [managerWin, bar?.win]) if (w && !w.isDestroyed()) w.webContents.reload();
+    for (const w of [managerWin, bar?.win, bar?.handleWin]) if (w && !w.isDestroyed()) w.webContents.reload();
   }
+  if (keys.includes("edgeHandle")) bar?.syncHandle();
   if (keys.includes("autoUpdate")) updater.setAuto(p.autoUpdate);
   buildTrayMenu();
 }
@@ -430,7 +433,10 @@ if (!app.requestSingleInstanceLock()) {
     prefs.on("changed", onPrefsChanged);
     registerIpc();
 
-    bar = createEdgeBar({ preload: PRELOAD, hoverEnabled: () => prefs.get().hoverEdge, onOpenManager: showManager, hotkeyLabel });
+    bar = createEdgeBar({
+      preload: PRELOAD, onOpenManager: showManager, hotkeyLabel,
+      handle: { shown: () => prefs.get().edgeHandle, position: prefs.handlePosition, savePosition: prefs.setHandlePosition }
+    });
     tray = new Tray(makeIcon(32, 2));
     hotkey = HOTKEYS.find(k => globalShortcut.register(k, () => bar.toggle())) || "";
     if (!hotkey) console.error(`None of the hotkeys is free: ${HOTKEYS.join(", ")}`);

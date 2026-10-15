@@ -1,8 +1,9 @@
-// App-wide preferences: UI language, theme and automatic updates (`ui` in settings.json) and the edge menu's hover
-// switch (`hoverEdge`). Main process only. Every page gets a snapshot from its preload ("prefs:get") and
-// "prefs:changed" afterwards; i18n.js applies language and theme.
+// App-wide preferences: UI language, theme and automatic updates (`ui` in settings.json) and the edge handle
+// (`edgeHandle`: shown or not, and where). Main process only. Every page gets a snapshot from its preload
+// ("prefs:get") and "prefs:changed" afterwards; i18n.js applies language and theme. The handle's position is not in
+// the snapshot: it changes with a drag, which no page needs to hear about.
 //
-// events: "changed" (snapshot, keys) - keys lists what changed: "language", "theme", "hoverEdge", "autoUpdate".
+// events: "changed" (snapshot, keys) - keys lists what changed: "language", "theme", "edgeHandle", "autoUpdate".
 const { app, nativeTheme } = require("electron");
 const { EventEmitter } = require("node:events");
 const settings = require("./voice/settings");
@@ -15,7 +16,9 @@ const THEMES = ["system", "dark", "light"];
 const BACKGROUND = { dark: "#0d1015", light: "#f2f4f8" };
 
 const prefs = new EventEmitter();
-const state = { language: "bg", theme: "dark", hoverEdge: true, autoUpdate: true };
+const state = { language: "bg", theme: "dark", edgeHandle: true, autoUpdate: true };
+let handleX = 0.5; // the edge handle's centre, as a fraction of the display width
+const fraction = v => (typeof v === "number" && v >= 0 && v <= 1 ? v : null);
 
 // themeSource also gives native title bars and dialogs the chosen look; "system" follows Windows.
 const resolvedTheme = () => (nativeTheme.shouldUseDarkColors ? "dark" : "light");
@@ -28,7 +31,10 @@ function load() {
   const ui = isObj(root.ui) ? root.ui : {};
   if (LANGUAGES.includes(ui.language)) state.language = ui.language;
   if (THEMES.includes(ui.theme)) state.theme = ui.theme;
-  state.hoverEdge = root.hoverEdge !== false;
+  // Before the handle, `hoverEdge` switched the invisible hover zone it replaces; its choice carries over.
+  const handle = isObj(root.edgeHandle) ? root.edgeHandle : {};
+  state.edgeHandle = typeof handle.show === "boolean" ? handle.show : root.hoverEdge !== false;
+  handleX = fraction(handle.x) ?? handleX;
   state.autoUpdate = ui.autoUpdate !== false;
   i18n.setLanguage(state.language, { dev: !app.isPackaged });
   nativeTheme.themeSource = state.theme;
@@ -50,9 +56,9 @@ async function set(patch) {
     nativeTheme.themeSource = state.theme;
     keys.push("theme");
   }
-  if (typeof patch.hoverEdge === "boolean" && patch.hoverEdge !== state.hoverEdge) {
-    state.hoverEdge = patch.hoverEdge;
-    keys.push("hoverEdge");
+  if (typeof patch.edgeHandle === "boolean" && patch.edgeHandle !== state.edgeHandle) {
+    state.edgeHandle = patch.edgeHandle;
+    keys.push("edgeHandle");
   }
   if (typeof patch.autoUpdate === "boolean" && patch.autoUpdate !== state.autoUpdate) {
     state.autoUpdate = patch.autoUpdate;
@@ -60,10 +66,26 @@ async function set(patch) {
   }
   if (!keys.length) return get();
   prefs.emit("changed", get(), keys);
-  // In effect at once; a file that cannot be written is only logged.
-  await settings.writeRoot({ ui: { language: state.language, theme: state.theme, autoUpdate: state.autoUpdate }, hoverEdge: state.hoverEdge })
-    .catch(e => console.error("Could not save settings:", e.message));
+  await save();
   return get();
 }
 
-module.exports = Object.assign(prefs, { load, get, set, background, LANGUAGES, THEMES });
+// Where the edge handle was dropped (0..1 across the display). Saved quietly: no "changed" event.
+const handlePosition = () => handleX;
+function setHandlePosition(x) {
+  const v = fraction(x);
+  if (v === null || v === handleX) return Promise.resolve();
+  handleX = v;
+  return save();
+}
+
+// In effect at once; a file that cannot be written is only logged. `hoverEdge: undefined` drops the former key.
+function save() {
+  return settings.writeRoot({
+    ui: { language: state.language, theme: state.theme, autoUpdate: state.autoUpdate },
+    edgeHandle: { show: state.edgeHandle, x: Math.round(handleX * 10000) / 10000 },
+    hoverEdge: undefined
+  }).catch(e => console.error("Could not save settings:", e.message));
+}
+
+module.exports = Object.assign(prefs, { load, get, set, handlePosition, setHandlePosition, background, LANGUAGES, THEMES });

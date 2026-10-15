@@ -7,7 +7,7 @@ contextBridge.exposeInMainWorld("voiceSettings", {
   // true while a hotkey field has the focus: main lets go of the voice hotkeys so they reach the field.
   capture: on => ipcRenderer.invoke("voice:settings:capture", on === true),
   fit: height => ipcRenderer.invoke("voice:settings:fit", Number(height)),
-  // General section: applied at once ({language}, {theme}, {hoverEdge} or {autoUpdate}); the edge menu's hotkey,
+  // General section: applied at once ({language}, {theme}, {edgeHandle} or {autoUpdate}); the edge menu's hotkey,
   // read-only.
   setPrefs: patch => ipcRenderer.invoke("prefs:set", patch),
   edgeHotkey: () => ipcRenderer.invoke("app:edge-hotkey"),

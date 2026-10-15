@@ -1,5 +1,5 @@
 // Voice settings: the `voice` key of the app's userData/settings.json. Port of VoiceTray's AppSettings and
-// SettingsService. Other keys in that file (hoverEdge, ...) belong to main.js and are preserved on every write.
+// SettingsService. Other keys in that file (ui, edgeHandle) belong to main.js and are preserved on every write.
 // API keys never touch the disk in plaintext: safeStorage (DPAPI) ciphertext, base64, in apiKeysEnc.
 //
 // The in-memory copy changes at once; the file follows asynchronously (atomic-file.js), and save()/setApiKey()

@@ -36,7 +36,8 @@ kbd { font-size: 10.5px; border-bottom-width: 1px; border-radius: 4px; padding: 
 }
 /* Hidden until the show event has re-rendered it, so the previous contents never flash. */
 .shell:not(.in) { visibility: hidden; }
-/* The menu must react instantly: no transitions anywhere in it (theme.css gives buttons and inputs some). */
+/* The menu must react instantly: no transitions anywhere in it (theme.css gives buttons and inputs some). Its only
+   motion is the short reveal out of the edge handle when it opens (bar.js). */
 .shell, .shell * { transition: none !important; }
 
 .top { display: flex; align-items: center; gap: 12px; padding: 14px 16px 8px; }

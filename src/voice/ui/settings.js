@@ -73,7 +73,7 @@ function renderGeneral() {
   const focused = document.activeElement?.closest(".seg")?.id; // re-rendering replaces the buttons
   $("uiLanguage").innerHTML = segHtml(Object.entries(I18N.LANGUAGES), general.language);
   $("uiTheme").innerHTML = segHtml(THEMES.map(th => [th, t(`theme.${th}`)]), general.theme);
-  $("hoverEdge").checked = general.hoverEdge;
+  $("edgeHandle").checked = general.edgeHandle;
   $("autoUpdate").checked = general.autoUpdate;
   if (focused === "uiLanguage" || focused === "uiTheme") $(focused).querySelector(".on")?.focus();
 }
@@ -108,7 +108,7 @@ for (const [id, key] of [["uiLanguage", "language"], ["uiTheme", "theme"]]) {
   $(id).addEventListener("click", e => setPref(key, e.target.closest("[data-value]")?.dataset.value));
   $(id).addEventListener("keydown", e => segKey(e, v => setPref(key, v)));
 }
-$("hoverEdge").addEventListener("change", e => setPref("hoverEdge", e.target.checked));
+$("edgeHandle").addEventListener("change", e => setPref("edgeHandle", e.target.checked));
 $("autoUpdate").addEventListener("change", e => setPref("autoUpdate", e.target.checked));
 // The tray changes the same settings; a language change reloads this page anyway.
 window.prefs.onChanged(p => { general = p; renderGeneral(); });
