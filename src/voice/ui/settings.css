@@ -1,0 +1,112 @@
+/* The app's Settings: two tabs, General and Voice. Tokens and shared components (buttons, fields, selects, switch,
+   segmented control, tags, kbd) come from ../../theme.css. The window is sized to the tab shown; should the screen
+   be too short for it, the header and the footer stay put while the tab scrolls. */
+body { user-select: none; }
+
+.vs-head {
+  position: sticky; top: 0; z-index: 2;
+  display: flex; align-items: center; gap: 12px; padding: 12px 14px 12px 18px;
+  border-bottom: 1px solid var(--line); background: var(--panel);
+}
+.vs-head .logo { width: 36px; height: 36px; flex: none; border-radius: 10px; }
+.vs-head .logo .i { width: 18px; height: 18px; }
+.vs-head h1 { margin: 0; font-size: 16px; font-weight: 650; }
+.vs-head p { margin: 0; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- tabs: General, Voice ---------- */
+.vs-tabs { flex: none; }
+.vs .vs-tabs > button { min-width: 96px; height: 30px; padding: 0 14px; font-size: 13.5px; }
+.vs-tabs > .dirty::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.vs-pane:not(.on) { display: none; }
+body:not([data-tab="general"]) [data-for="general"], body:not([data-tab="voice"]) [data-for="voice"] { display: none; }
+
+/* The edge menu's hotkey: key caps, read-only. */
+.vs-caps { display: flex; align-items: center; gap: 5px; min-height: 34px; }
+.vs-caps kbd { font-size: 12px; padding: 2px 8px; color: var(--text); background: var(--panel-2); border-color: var(--line-3); border-radius: 6px; }
+.vs-caps .plus { color: var(--faint); font-size: 12px; }
+.vs-caps .none { color: var(--faint); }
+.vs-caps + .vs-hint { margin-top: 0; }
+
+/* ---------- sections: cards like the manager's panels ---------- */
+.vs-sec {
+  margin: 12px 14px 0; padding: 11px 16px 3px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-xl);
+}
+.vs-sec h2 {
+  display: flex; align-items: center; gap: 8px; margin: 0 0 10px;
+  font-size: 11.5px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
+}
+.vs-sec h2 .i { width: 15px; height: 15px; color: var(--accent); }
+.vs-grid { display: grid; grid-template-columns: 124px minmax(0, 1fr); gap: 0 14px; align-items: start; }
+.vs-label { padding-top: 7px; margin-bottom: 10px; font-size: 13.5px; color: var(--path-parent); }
+.vs-grid > .select, .vs-grid > .seg, .vs-grid > .vs-field, .vs-grid > .vs-toggle, .vs-grid > .vs-hint { margin-bottom: 10px; }
+.vs-field { min-width: 0; }
+.vs .select, .vs .input { height: 34px; }
+
+/* Provider: a segmented control. */
+.vs .seg { padding: 2px; }
+.vs .seg > button { height: 28px; }
+.vs .seg > button:focus-visible { outline-offset: -2px; }
+
+/* API key: masked, with whether one is saved at the right end of the field. */
+.vs-key { position: relative; }
+.vs-key .input { padding-right: 112px; font-family: var(--mono); font-size: 13.5px; letter-spacing: .02em; user-select: text; }
+.vs-key .input::placeholder { font-family: var(--sans); font-size: 13.5px; letter-spacing: 0; }
+.vs-key .tag { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); pointer-events: none; }
+.vs-keystate { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; margin-top: 5px; font-size: 12px; color: var(--muted); }
+.vs-link {
+  padding: 0; border: 0; background: none; color: var(--accent); font-size: 12px; font-weight: 600;
+  text-decoration: underline; text-underline-offset: 2px;
+}
+.vs-link.danger { color: var(--danger); }
+
+/* Clipboard paste: a toggle row. */
+.vs-toggle {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 7px 10px 7px 12px;
+  border-radius: var(--r-md); border: 1px solid var(--line); background: var(--bg); cursor: pointer;
+}
+.vs-toggle:hover { border-color: var(--line-2); }
+.vs-toggle b { font-size: 13.5px; font-weight: 600; }
+.vs-toggle small { margin-left: 6px; font-size: 12px; color: var(--faint); }
+
+.vs-hint { margin-top: 5px; font-size: 12px; line-height: 1.45; color: var(--faint); }
+.vs-grid > .vs-hint { margin-top: -3px; }
+
+/* ---------- hotkeys: capture chips ----------
+   The input stays the keyboard target (a combination is recorded, or one can be typed) but is invisible; the
+   combination is shown as key caps. */
+.vs-hk { display: flex; gap: 6px; }
+.vs-hk .icon-btn { width: 38px; height: 38px; border-radius: 10px; }
+.hk {
+  position: relative; flex: 1; min-width: 0; display: flex; align-items: center; height: 38px; padding: 0 10px;
+  border-radius: 10px; border: 1px solid var(--line-2); background: var(--bg); cursor: pointer;
+  transition: border-color .15s, box-shadow .15s;
+}
+.hk:hover { border-color: var(--line-3); }
+.hk input { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; border: 0; padding: 0; }
+.hk-caps { display: flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; pointer-events: none; }
+.hk-caps kbd { font-size: 12px; padding: 2px 8px; color: var(--text); background: var(--panel-2); border-color: var(--line-3); border-radius: 6px; }
+.hk-caps .plus { color: var(--faint); font-size: 12px; }
+.hk-caps .none { color: var(--faint); font-size: 13.5px; }
+.hk-rec { display: none; margin-left: auto; align-items: center; gap: 7px; padding-left: 10px; font-size: 12px; color: var(--accent); white-space: nowrap; pointer-events: none; }
+.hk-rec::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 18%, transparent); animation: rec 1.2s ease-in-out infinite; }
+@keyframes rec { 50% { opacity: .35; } }
+.hk:focus-within { border-color: var(--accent); box-shadow: var(--ring); }
+.hk:focus-within .hk-rec { display: inline-flex; }
+.hk:has(input.invalid) { border-color: var(--danger); }
+.hk:has(input.invalid):focus-within { box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 18%, transparent); }
+.hk:has(input.warned) { border-color: var(--warn); }
+
+.vs-err { font-size: 12px; color: var(--danger); }
+.vs-err:not(:empty) { margin-top: 5px; }
+.vs-err.warn { color: var(--warn); }
+
+/* ---------- footer ---------- */
+.vs-foot {
+  position: sticky; bottom: 0; z-index: 2;
+  display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 11px 14px 12px;
+  border-top: 1px solid var(--line); background: var(--panel);
+}
+.vs-foot .btn { min-width: 100px; justify-content: center; }
+.vs-form-err, .vs-note { flex: 1; margin: 0 !important; }
+.vs-note { font-size: 12px; color: var(--faint); }

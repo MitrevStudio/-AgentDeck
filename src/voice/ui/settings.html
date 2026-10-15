@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="bg">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+<title data-i18n="settings.title"></title>
+<link rel="stylesheet" href="../../theme.css">
+<link rel="stylesheet" href="settings.css">
+<script src="../../i18n.js"></script>
+</head>
+<body>
+<form id="form" class="vs" autocomplete="off" novalidate>
+  <header class="vs-head">
+    <div class="logo" id="logo"></div>
+    <div class="grow"><h1 data-i18n="settings.title"></h1><p data-i18n="settings.subtitle"></p></div>
+    <div class="seg vs-tabs" id="tabs" role="tablist">
+      <button type="button" role="tab" id="tabGeneral" data-value="general" aria-controls="general" data-i18n="settings.general"></button>
+      <button type="button" role="tab" id="tabVoice" data-value="voice" aria-controls="voice" data-i18n="settings.voice"></button>
+    </div>
+  </header>
+
+  <div class="vs-panes">
+    <!-- General: applied at once, outside Save/Cancel (which are the voice tab's). -->
+    <div class="vs-pane" id="general" role="tabpanel" aria-labelledby="tabGeneral">
+      <section class="vs-sec">
+        <h2><span data-icon="window"></span><span data-i18n="settings.general.appearance"></span></h2>
+        <div class="vs-grid">
+          <span class="vs-label" id="uiLanguageLabel" data-i18n="settings.general.language"></span>
+          <div class="seg" id="uiLanguage" role="radiogroup" aria-labelledby="uiLanguageLabel"></div>
+
+          <span class="vs-label" id="uiThemeLabel" data-i18n="settings.general.theme"></span>
+          <div class="seg" id="uiTheme" role="radiogroup" aria-labelledby="uiThemeLabel"></div>
+        </div>
+      </section>
+
+      <section class="vs-sec">
+        <h2><span data-icon="layers"></span><span data-i18n="settings.general.edge"></span></h2>
+        <div class="vs-grid">
+          <span class="vs-label" data-i18n="settings.general.mouse"></span>
+          <label class="vs-toggle" for="hoverEdge">
+            <span><b data-i18n="settings.general.hoverEdge"></b></span>
+            <input type="checkbox" id="hoverEdge" class="switch">
+          </label>
+
+          <span class="vs-label" data-i18n="settings.general.hotkey"></span>
+          <div class="vs-field"><div class="vs-caps" id="edgeHotkey"></div><div class="vs-hint" id="edgeHotkeyHint"></div></div>
+        </div>
+      </section>
+    </div>
+
+    <div class="vs-pane" id="voice" role="tabpanel" aria-labelledby="tabVoice">
+      <section class="vs-sec">
+        <h2><span data-icon="mic"></span><span data-i18n="voice.settings.dictation"></span></h2>
+        <div class="vs-grid">
+          <span class="vs-label" id="providerLabel" data-i18n="voice.settings.provider"></span>
+          <div class="seg" id="provider" role="radiogroup" aria-labelledby="providerLabel"></div>
+
+          <label class="vs-label" for="apiKey" data-i18n="voice.settings.apiKey"></label>
+          <div class="vs-field">
+            <div class="vs-key">
+              <input id="apiKey" class="input" type="password" spellcheck="false" autocomplete="new-password">
+              <span class="tag" id="keyTag"></span>
+            </div>
+            <div class="vs-keystate" id="keyState"></div>
+            <div class="vs-err" data-err="apiKey"></div>
+          </div>
+
+          <label class="vs-label" for="model" data-i18n="voice.settings.model"></label>
+          <div class="vs-field"><select id="model" class="select"></select><div class="vs-err" data-err="model"></div></div>
+
+          <label class="vs-label" for="language" data-i18n="voice.settings.language"></label>
+          <select id="language" class="select"></select>
+
+          <label class="vs-label" for="mic" data-i18n="voice.settings.mic"></label>
+          <select id="mic" class="select"></select>
+
+          <label class="vs-label" for="maxLen" data-i18n="voice.settings.maxLength"></label>
+          <div class="vs-field"><select id="maxLen" class="select"></select><div class="vs-hint" id="lengthHint"></div></div>
+
+          <span class="vs-label" data-i18n="voice.settings.paste"></span>
+          <label class="vs-toggle" for="clipboard">
+            <span><b data-i18n="voice.settings.paste.clipboard"></b><small data-i18n="voice.settings.paste.recommended"></small></span>
+            <input type="checkbox" id="clipboard" class="switch">
+          </label>
+        </div>
+      </section>
+
+      <section class="vs-sec">
+        <h2><span data-icon="speaker"></span><span data-i18n="voice.settings.readAloud"></span></h2>
+        <div class="vs-grid">
+          <label class="vs-label" for="raModel" data-i18n="voice.settings.raModel"></label>
+          <select id="raModel" class="select"></select>
+
+          <label class="vs-label" for="raVoice" data-i18n="voice.settings.raVoice"></label>
+          <div class="vs-field"><select id="raVoice" class="select"></select><div class="vs-hint" id="raHint"></div></div>
+        </div>
+      </section>
+
+      <section class="vs-sec">
+        <h2><span data-icon="keyboard"></span><span data-i18n="voice.settings.hotkeys"></span></h2>
+        <div class="vs-grid">
+          <label class="vs-label" for="hkDictate" data-i18n="voice.settings.hotkey.dictate"></label>
+          <div class="vs-field">
+            <div class="vs-hk">
+              <label class="hk" for="hkDictate">
+                <input id="hkDictate" type="text" spellcheck="false" autocomplete="off">
+                <span class="hk-caps" aria-hidden="true"></span>
+                <span class="hk-rec" data-i18n="voice.settings.hotkey.recording"></span>
+              </label>
+              <button type="button" class="icon-btn" data-reset="dictate" data-i18n-title="voice.settings.hotkey.reset"></button>
+            </div>
+            <div class="vs-err" data-err="hotkeys.dictate"></div>
+          </div>
+
+          <label class="vs-label" for="hkRead" data-i18n="voice.settings.hotkey.readAloud"></label>
+          <div class="vs-field">
+            <div class="vs-hk">
+              <label class="hk" for="hkRead">
+                <input id="hkRead" type="text" spellcheck="false" autocomplete="off">
+                <span class="hk-caps" aria-hidden="true"></span>
+                <span class="hk-rec" data-i18n="voice.settings.hotkey.recording"></span>
+              </label>
+              <button type="button" class="icon-btn" data-reset="readAloud" data-i18n-title="voice.settings.hotkey.reset"></button>
+            </div>
+            <div class="vs-err" data-err="hotkeys.readAloud"></div>
+          </div>
+
+          <span></span>
+          <div class="vs-hint" data-i18n="voice.settings.hotkey.hint"></div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <footer class="vs-foot">
+    <div class="vs-note" data-for="general" data-i18n="settings.general.applied"></div>
+    <div class="vs-err vs-form-err" data-for="voice" data-err="form"></div>
+    <button type="button" class="btn" id="close" data-for="general" data-i18n="common.close"></button>
+    <button type="button" class="btn" id="cancel" data-for="voice" data-i18n="common.cancel"></button>
+    <button type="submit" class="btn primary" id="save" data-for="voice" data-i18n="voice.settings.save"></button>
+  </footer>
+</form>
+<script src="../../common.js"></script>
+<script src="settings.js"></script>
+</body>
+</html>

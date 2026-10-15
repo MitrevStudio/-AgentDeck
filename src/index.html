@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="bg">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AgentDeck</title>
+<link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="styles.css">
+<script src="i18n.js"></script>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <div class="logo">⌘</div>
+    <div><h1 data-i18n="app.name"></h1><p data-i18n="app.tagline"></p></div>
+  </div>
+  <div class="search">
+    <span data-icon="search"></span>
+    <input id="search" type="search" data-i18n-placeholder="manager.search.placeholder" data-i18n-aria-label="common.search" autocomplete="off" spellcheck="false">
+    <button id="clearSearch" class="icon-btn clear" data-i18n-title="manager.search.clear" hidden><span data-icon="x"></span></button>
+    <kbd>Ctrl K</kbd>
+  </div>
+  <div class="top-actions">
+    <button id="voiceHistory" class="btn" data-i18n-title="manager.history.title"><span data-icon="clock"></span><span class="label" data-i18n="manager.history.label"></span></button>
+    <button id="settings" class="btn" data-i18n-title="manager.settings.title"><span data-icon="sliders"></span><span class="label" data-i18n="manager.settings.label"></span></button>
+    <button id="refresh" class="btn" data-i18n-title="manager.refresh.title"><span data-icon="refresh"></span><span class="label" data-i18n="manager.refresh.label"></span></button>
+    <button id="add" class="btn primary"><span data-icon="plus"></span><span class="label" data-i18n="manager.addProject"></span></button>
+  </div>
+</header>
+<main>
+  <aside class="panel">
+    <div class="panel-head"><h2 data-i18n="manager.projects"></h2><span class="count" id="projectCount">0</span></div>
+    <div class="panel-body" id="projects"></div>
+  </aside>
+  <section class="panel">
+    <div class="panel-head"><h2 data-i18n="manager.sessions"></h2><span class="count" id="sessionCount">0</span><div id="liveFilter"></div><div class="grow"></div><div class="chips" id="agentChips"></div></div>
+    <div id="scope"></div>
+    <div class="panel-body" id="sessions"></div>
+  </section>
+</main>
+<footer class="status">
+  <span id="status" data-i18n="manager.status.ready"></span>
+  <span class="keys"><kbd>Ctrl K</kbd><span data-i18n="manager.keys.search"></span><kbd>↑</kbd><kbd>↓</kbd><span data-i18n="manager.keys.select"></span><kbd>Enter</kbd><span data-i18n="manager.keys.resume"></span><kbd>Esc</kbd><span data-i18n="manager.keys.clear"></span></span>
+</footer>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<script src="common.js"></script>
+<script src="renderer.js"></script>
+</body>
+</html>

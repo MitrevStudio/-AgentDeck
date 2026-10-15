@@ -1,0 +1,118 @@
+/* Manager window layout. Tokens and shared components (buttons, search, chips, panels, cards, paths, live pills,
+   empty states, toast) come from theme.css, which is linked first. */
+html, body { height: 100%; }
+body { display: flex; flex-direction: column; overflow: hidden; }
+
+/* ---------- header ---------- */
+.top {
+  display: flex; align-items: center; gap: 20px; padding: 14px 20px;
+  border-bottom: 1px solid var(--line); background: var(--panel);
+}
+.brand { display: flex; align-items: center; gap: 12px; flex: none; }
+.logo { width: 38px; height: 38px; border-radius: 10px; font-size: 20px; }
+.brand h1 { margin: 0; font-size: 16px; font-weight: 650; }
+.brand p { margin: 0; color: var(--muted); font-size: 12px; }
+.search { flex: 1; max-width: 780px; margin: 0 auto; }
+.top-actions { display: flex; gap: 8px; flex: none; }
+
+/* ---------- layout ---------- */
+main {
+  flex: 1; min-height: 0; display: grid; gap: 16px; padding: 16px 20px;
+  grid-template-columns: minmax(310px, 390px) 1fr;
+}
+
+/* ---------- paths ---------- */
+.dir {
+  display: flex; align-items: center; gap: 10px; margin-top: 11px; padding: 8px 8px 8px 12px;
+  background: var(--path-bg); border: 1px solid var(--line); border-radius: var(--r-md);
+}
+.dir > .i { width: 18px; height: 18px; color: var(--accent); }
+.dir .path { flex: 1; min-width: 0; font-size: 15px; }
+.dir.unknown { color: var(--warn); font-size: 13px; padding: 10px 12px; }
+.dir.unknown > .i { color: var(--warn); }
+
+/* ---------- projects ---------- */
+.proj {
+  padding: 11px 12px 8px; border-radius: 10px; border: 1px solid transparent;
+  margin-bottom: 4px; cursor: pointer;
+}
+.proj:hover { background: var(--panel-2); }
+.proj.active { background: var(--accent-weak); border-color: var(--accent-line); }
+.proj-row { display: flex; align-items: center; gap: 9px; }
+.proj-row > .i { color: var(--accent); width: 17px; height: 17px; }
+.proj-name { flex: 1; min-width: 0; font-size: 14.5px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proj > .path { margin: 5px 0 0 26px; }
+.proj-meta { display: flex; align-items: center; gap: 6px; margin: 4px 0 0 26px; min-height: 30px; font-size: 12px; color: var(--faint); }
+.proj-tools { margin-left: auto; display: flex; gap: 1px; opacity: 0; transition: opacity var(--dur-fast); }
+.proj:hover .proj-tools, .proj.active .proj-tools, .proj:focus-within .proj-tools { opacity: 1; }
+.proj.all { padding-bottom: 11px; margin-bottom: 8px; }
+.proj.all .proj-name { font-weight: 600; }
+.rename {
+  flex: 1; min-width: 0; height: 30px; padding: 0 8px; border-radius: var(--r-sm); outline: none;
+  border: 1px solid var(--accent); background: var(--bg); font-weight: 600;
+}
+
+/* ---------- sessions ---------- */
+.scope {
+  display: flex; align-items: center; gap: 12px; padding: 14px 14px 14px 18px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 9%, transparent), color-mix(in srgb, var(--accent) 2%, transparent));
+}
+.scope > .i { width: 24px; height: 24px; color: var(--accent); }
+.scope .label { font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; }
+.scope .path { font-size: 18px; }
+
+.group {
+  position: sticky; top: -10px; z-index: 1; display: flex; gap: 8px; align-items: baseline;
+  margin: 0 -10px 4px; padding: 10px 16px 7px; background: var(--panel);
+  font-size: 11.5px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
+}
+.group:first-child { margin-top: -10px; }
+.group .n { color: var(--faint); font-weight: 500; letter-spacing: 0; }
+/* A session is a .card (theme.css). */
+.sess { margin-bottom: 10px; scroll-margin: 44px 0 10px; }
+.sess-head { display: flex; align-items: flex-start; gap: 10px; }
+.agent { flex: none; margin-top: 1px; padding: 2px 8px; border-radius: 6px; font-size: 11.5px; font-weight: 700; }
+.agent.claude { color: var(--claude); background: var(--claude-bg); }
+.agent.opencode { color: var(--opencode); background: var(--opencode-bg); }
+.agent.codex { color: var(--codex); background: var(--codex-bg); }
+.sess-title { flex: 1; min-width: 0; margin: 0; font-size: 15.5px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+.when { flex: none; margin-top: 2px; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+.sess-prompt { margin: 5px 0 0; color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sess-foot { display: flex; align-items: center; gap: 8px; margin-top: 11px; }
+.sid { flex: 1; min-width: 0; font: 12px var(--mono); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- live status ---------- */
+.sess.live-busy { border-color: color-mix(in srgb, var(--busy) 40%, transparent); box-shadow: inset 3px 0 0 var(--busy); }
+.sess.live-idle { border-color: color-mix(in srgb, var(--wait) 35%, transparent); box-shadow: inset 3px 0 0 var(--wait); }
+.sess.live-stale { box-shadow: inset 3px 0 0 var(--muted); }
+.sess.active.live-busy { box-shadow: inset 3px 0 0 var(--busy), var(--ring); }
+.sess.active.live-idle { box-shadow: inset 3px 0 0 var(--wait), var(--ring); }
+.sess.active.live-stale { box-shadow: inset 3px 0 0 var(--muted), var(--ring); }
+.proj-live { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 650; color: var(--muted); }
+.proj-live .pulse { margin-left: 3px; }
+.live-filter {
+  display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; margin-left: 4px;
+  border-radius: var(--r-pill); border: 1px solid var(--line-2); background: var(--bg); font-size: 12.5px; font-weight: 600;
+}
+.live-filter:hover { border-color: var(--accent); }
+.live-filter.on { border-color: var(--busy); background: var(--busy-bg); }
+.live-filter .sep { width: 1px; height: 14px; margin: 0 3px; background: var(--line-2); }
+.live-none { margin-left: 6px; font-size: 12px; color: var(--faint); }
+
+/* ---------- footer ---------- */
+.status {
+  display: flex; align-items: center; gap: 16px; padding: 8px 20px; font-size: 12px; color: var(--muted);
+  border-top: 1px solid var(--line); background: var(--panel);
+}
+.keys { margin-left: auto; display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+.keys span { margin-right: 10px; }
+
+@media (max-width: 1180px) {
+  .brand p, .keys { display: none; }
+  main { grid-template-columns: 310px 1fr; }
+}
+@media (max-width: 1020px) {
+  .brand h1 { display: none; }
+  .top-actions .label { display: none; }
+}

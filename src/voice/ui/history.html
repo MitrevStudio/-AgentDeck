@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src file:">
+<title data-i18n="voice.history.windowTitle"></title>
+<link rel="stylesheet" href="../../theme.css">
+<link rel="stylesheet" href="history.css">
+<script src="../../i18n.js"></script>
+</head>
+<body>
+<header class="vh-top">
+  <div class="vh-brand">
+    <div class="logo"><span data-icon="history"></span></div>
+    <div><h1 data-i18n="voice.history.title"></h1><p data-i18n="voice.history.subtitle"></p></div>
+  </div>
+  <div class="search">
+    <span data-icon="search"></span>
+    <input id="search" type="search" data-i18n-placeholder="voice.history.search.placeholder" autocomplete="off" spellcheck="false" data-i18n-aria-label="common.search">
+    <button id="clearSearch" class="icon-btn clear" data-i18n-title="voice.history.search.clear" hidden><span data-icon="x"></span></button>
+    <kbd>Ctrl F</kbd>
+  </div>
+</header>
+<div class="vh-main" id="main">
+  <section class="panel vh-list-panel">
+    <div class="panel-head"><div class="chips" id="kinds" data-i18n-aria-label="voice.history.kinds"></div></div>
+    <div id="list" class="vh-list" role="listbox" tabindex="0" data-i18n-aria-label="voice.history.records"></div>
+  </section>
+  <div id="splitter" class="vh-split" role="separator" aria-orientation="vertical" data-i18n-title="voice.history.splitter"></div>
+  <section class="panel vh-detail">
+    <div id="detail" class="vh-detail-body" hidden>
+      <div class="panel-head vh-dhead">
+        <span class="vh-dkind" id="dKind"></span>
+        <div class="vh-dtitle"><div class="vh-dtime" id="dTime"></div><div class="vh-dmeta" id="dMeta"></div></div>
+        <span class="tag" id="dStatus"></span>
+      </div>
+      <div class="vh-dbody">
+        <div class="vh-err" id="dErr" hidden></div>
+        <textarea id="dText" class="vh-dtext" readonly spellcheck="false" data-i18n-aria-label="voice.history.text"></textarea>
+      </div>
+      <div class="vh-dfoot">
+        <button id="play" class="btn sm" disabled></button>
+        <button id="copy" class="btn sm" disabled><span data-icon="copy"></span><span data-i18n="voice.history.copy"></span></button>
+        <button id="redo" class="btn sm" disabled></button>
+        <div class="grow"></div>
+        <button id="del" class="btn sm danger" disabled><span data-icon="trash"></span><span data-i18n="voice.history.delete"></span></button>
+      </div>
+    </div>
+    <div id="detailEmpty" class="empty vh-detail-empty"></div>
+  </section>
+</div>
+<footer class="status">
+  <span id="status"></span>
+  <span class="keys"><kbd>Ctrl F</kbd><span data-i18n="voice.history.keys.search"></span><kbd>↑</kbd><kbd>↓</kbd><span data-i18n="voice.history.keys.select"></span><kbd>Del</kbd><span data-i18n="voice.history.keys.delete"></span><kbd>Esc</kbd><span data-i18n="voice.history.keys.close"></span></span>
+  <button id="clear" class="btn sm danger" disabled><span data-icon="trash"></span><span data-i18n="voice.history.clearAll"></span></button>
+  <button id="close" class="btn sm" data-i18n="voice.history.close"></button>
+</footer>
+<dialog id="ask" class="dialog vh-ask">
+  <form method="dialog">
+    <div class="vh-ask-body">
+      <span class="vh-ask-icon" id="askIcon"></span>
+      <p id="askText"></p>
+    </div>
+    <div class="vh-ask-actions">
+      <button value="no" class="btn sm" id="askNo" data-i18n="common.cancel"></button>
+      <button value="yes" class="btn sm danger-solid" id="askYes"></button>
+    </div>
+  </form>
+</dialog>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<audio id="player" preload="none"></audio>
+<script src="../../common.js"></script>
+<script src="history.js"></script>
+</body>
+</html>

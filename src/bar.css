@@ -1,0 +1,120 @@
+/* Edge menu layout. Tokens and shared components come from theme.css, which is linked first; this file keeps the
+   menu's own layout and its denser sizes. */
+/* The menu floats over other apps: hairlines instead of solid lines, raised surfaces one step further from the
+   background. Listed for both themes, so theme.css's light block does not win. */
+:root, :root[data-theme="light"] {
+  --line: var(--hairline); --line-2: var(--hairline-2); --panel-2: var(--panel-3);
+  --accent-weak: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+body { line-height: 1.4; user-select: none; }
+
+/* ---------- denser shared components ---------- */
+kbd { font-size: 10.5px; border-bottom-width: 1px; border-radius: 4px; padding: 0 5px; }
+:focus-visible { outline-offset: 1px; }
+::-webkit-scrollbar { width: 10px; height: 8px; }
+::-webkit-scrollbar-thumb { border-radius: 10px; border: 2px solid transparent; background-clip: padding-box; }
+.icon-btn { width: 32px; height: 32px; border-radius: 8px; }
+.btn { gap: 6px; height: 32px; padding: 0 11px; border-radius: 8px; font-size: 13px; font-weight: 600; }
+.btn .i { width: 14px; height: 14px; }
+.btn.new.claude { color: var(--claude); }
+.btn.new.opencode { color: var(--opencode); }
+.btn.new.codex { color: var(--codex); }
+.path { font-size: 13px; line-height: 1.4; }
+.live { gap: 6px; height: 22px; padding: 0 9px; font-size: 11.5px; }
+.empty { padding: 34px 16px; }
+.toast {
+  position: absolute; bottom: 40px; transform: translate(-50%, 8px); max-width: 80%; padding: 8px 14px;
+  border-radius: var(--r-md); font-size: 13px; box-shadow: none;
+}
+
+/* The visible menu. The window around it is transparent; the margin carries the shadow. */
+.shell {
+  position: absolute; inset: 0 18px 18px; display: flex; flex-direction: column; overflow: hidden;
+  background: var(--glass); border: 1px solid var(--line-2); border-top: 0; border-radius: 0 0 18px 18px;
+  box-shadow: var(--shadow-float), inset 0 2px 0 color-mix(in srgb, var(--accent) 55%, transparent);
+}
+/* Hidden until the show event has re-rendered it, so the previous contents never flash. */
+.shell:not(.in) { visibility: hidden; }
+/* The menu must react instantly: no transitions anywhere in it (theme.css gives buttons and inputs some). */
+.shell, .shell * { transition: none !important; }
+
+.top { display: flex; align-items: center; gap: 12px; padding: 14px 16px 8px; }
+.logo { width: 32px; height: 32px; flex: none; border-radius: 9px; font-size: 17px; }
+.search { flex: 1; }
+.search > .i { left: 13px; width: 18px; height: 18px; }
+.search input { height: 42px; padding: 0 14px 0 42px; border-radius: 11px; font-size: 15px; user-select: text; }
+
+/* ---------- project strip ---------- */
+.strip-wrap { position: relative; border-bottom: 1px solid var(--line); }
+/* Scrolled with the wheel or the edge arrows; a scrollbar would only add noise. */
+.strip { display: flex; gap: 6px; overflow-x: auto; overflow-y: hidden; padding: 6px 16px 10px; scrollbar-width: none; }
+.tile {
+  position: relative; flex: none; width: 98px; height: 98px; padding: 10px 6px 8px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px;
+  border-radius: 13px; border: 1px solid transparent; background: transparent;
+}
+.tile:hover { background: var(--panel-2); }
+.tile.sel { background: var(--accent-weak); border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+.mono {
+  --h: 215; position: relative; flex: none; width: 46px; height: 46px; border-radius: 13px; display: grid; place-items: center;
+  font-size: 16px; font-weight: 750; letter-spacing: .02em;
+  background: hsl(var(--h) var(--tile-bg)); color: hsl(var(--h) var(--tile-fg)); box-shadow: inset 0 0 0 1px hsl(var(--h) var(--tile-ring));
+}
+.mono.sm { width: 40px; height: 40px; font-size: 14px; border-radius: 11px; }
+.mono.special { background: var(--panel-2); color: var(--accent); box-shadow: inset 0 0 0 1px var(--line-2); }
+.mono.special.live { color: var(--busy); }
+.mono.special .i { width: 22px; height: 22px; }
+.badge { position: absolute; right: -5px; bottom: -5px; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; background: var(--glass); }
+.tname { max-width: 100%; font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tcount { position: absolute; top: 6px; right: 8px; font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.strip .none { padding: 30px 6px; color: var(--muted); }
+.nav {
+  position: absolute; top: 0; bottom: 8px; z-index: 2; width: 38px; display: grid; place-items: center;
+  border: 0; color: var(--text); opacity: 0; pointer-events: none;
+}
+.nav.on { opacity: 1; pointer-events: auto; }
+.nav.left { left: 0; background: linear-gradient(90deg, var(--glass) 40%, transparent); }
+.nav.right { right: 0; background: linear-gradient(270deg, var(--glass) 40%, transparent); }
+
+/* ---------- detail ---------- */
+.detail { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.dhead { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.dtitle { min-width: 0; }
+.dname { font-size: 15px; font-weight: 700; }
+.dsub { font-size: 12.5px; color: var(--muted); }
+.dactions { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.dhead .path { font-size: 16px; }
+.rows { flex: 1; overflow: auto; padding: 6px 8px 8px; }
+.row { display: flex; align-items: center; gap: 11px; min-height: 46px; padding: 7px 10px; border-radius: 10px; cursor: pointer; }
+.row.sel { background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--line-2); }
+.row.is-live { box-shadow: inset 3px 0 0 var(--busy); }
+.row.is-live.sel { box-shadow: inset 3px 0 0 var(--busy), inset 0 0 0 1px var(--line-2); }
+.row:has(.live.idle) { box-shadow: inset 3px 0 0 var(--wait); }
+.adot { width: 9px; height: 9px; flex: none; border-radius: 50%; }
+.adot.claude { background: var(--claude); }
+.adot.opencode { background: var(--opencode); }
+.adot.codex { background: var(--codex); }
+.ricon { color: var(--accent); display: grid; }
+.rmain { flex: 1; min-width: 0; }
+.rmain .t { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rmain .path { font-size: 12.5px; margin-top: 1px; }
+.row.dir .path { font-size: 14px; }
+.when { flex: none; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.ract { flex: none; display: flex; gap: 2px; opacity: 0; }
+.row:hover .ract, .row.sel .ract, .ract.show { opacity: 1; }
+.ract .go { color: var(--accent); }
+.confirm {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 2px 6px 8px 30px; padding: 9px 12px;
+  border-radius: var(--r-md); background: var(--wait-bg); color: var(--wait); font-size: 13px;
+}
+
+/* ---------- live summary ---------- */
+#liveSum .sum { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: var(--r-pill); border: 1px solid var(--line-2); font-size: 12.5px; font-weight: 600; white-space: nowrap; background: transparent; }
+#liveSum .sum:hover { border-color: var(--accent); }
+#liveSum .sep { width: 1px; height: 14px; margin: 0 3px; background: var(--line-2); }
+
+.keys { display: flex; align-items: center; gap: 5px; padding: 7px 16px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--faint); }
+.keys kbd + kbd { margin-left: -2px; }
+.keys kbd:not(:first-child) { margin-left: 8px; }
+.keys kbd + kbd:not(:first-child) { margin-left: 0; }

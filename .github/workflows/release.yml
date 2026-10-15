@@ -1,0 +1,73 @@
+# Every push to main: check → semantic-release decides the next version from the commit messages
+# (fix: → patch, feat: → minor, BREAKING CHANGE → major), tags it and creates the GitHub release →
+# the Windows installer is built from that tag and attached to the release.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+
+  release:
+    needs: check
+    runs-on: ubuntu-latest
+    outputs:
+      published: ${{ steps.semrel.outputs.new_release_published }}
+      version: ${{ steps.semrel.outputs.new_release_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: semrel
+        uses: cycjimmy/semantic-release-action@v4
+        with:
+          semantic_version: 24
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build:
+    needs: release
+    if: needs.release.outputs.published == 'true'
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.release.outputs.version }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # The repository does not carry the version; the release tag is the source of truth.
+      - run: npm version "$env:VERSION" --no-git-tag-version --allow-same-version
+      - name: Build installer
+        run: npx electron-builder --win --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - name: Attach installer to the release
+        shell: bash
+        run: gh release upload "v$VERSION" dist/*.exe dist/*.blockmap dist/latest.yml --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -1,0 +1,69 @@
+{
+  "name": "agentdeck",
+  "productName": "AgentDeck",
+  "version": "0.0.0-development",
+  "private": true,
+  "description": "AI sessions, projects and voice in one place: a Windows launcher for AI coding sessions",
+  "license": "MIT",
+  "author": "MitrevStudio",
+  "repository": "github:MitrevStudio/-AgentDeck",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "check": "node scripts/check.js",
+    "dist": "electron-builder --win --publish never",
+    "dist:dir": "electron-builder --win --dir --publish never"
+  },
+  "//": "build.files: soundtouchjs ships a demo page and song (public/) the app never loads. build.asarUnpack: koffi loads its native addon (koffi.node from @koromix/koffi-win32-x64) with process.dlopen, which needs a real file on disk, so both packages stay outside app.asar (resources/app.asar.unpacked). Everything else, the selection worker and the AudioWorklet modules included, loads fine from app.asar.",
+  "build": {
+    "appId": "com.mitrevstudio.agentdeck",
+    "productName": "AgentDeck",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**",
+      "package.json",
+      "!node_modules/soundtouchjs/{public,scripts}/**"
+    ],
+    "asarUnpack": [
+      "node_modules/koffi/**",
+      "node_modules/@koromix/koffi-win32-x64/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "artifactName": "AgentDeck-Setup-${version}.${ext}"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "MitrevStudio",
+        "repo": "-AgentDeck"
+      }
+    ]
+  },
+  "devDependencies": {
+    "electron": "^36.3.1",
+    "electron-builder": "^26.15.3"
+  },
+  "dependencies": {
+    "koffi": "^3.3.3",
+    "soundtouchjs": "^0.3.0"
+  }
+}

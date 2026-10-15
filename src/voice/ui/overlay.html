@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="bg">
+<head>
+<meta charset="UTF-8">
+<!-- The read-aloud player is an AudioWorklet (script-src covers it and its soundtouchjs import); nothing else loads. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'">
+<title>AgentDeck</title>
+<link rel="stylesheet" href="../../theme.css">
+<link rel="stylesheet" href="overlay.css">
+<script src="../../i18n.js"></script>
+</head>
+<body>
+<div class="stage out" id="stage">
+  <!-- Shown above the pill while the pointer rests on it: the keys while recording, the passage while reading. -->
+  <div class="tip" id="tip" aria-hidden="true"></div>
+  <div class="pill" id="pill">
+    <!-- One row for every pill state; each part says in which states it is shown (data-in). -->
+    <div class="layer row" id="row">
+      <span class="part lead" data-in="listening transcribing success" aria-hidden="true">
+        <span class="rec-dot"></span>
+        <svg class="tick" viewBox="0 0 16 16"><path d="M4.6 8.3l2.3 2.3 4.5-4.9"/></svg>
+      </span>
+      <canvas class="part wave" id="wave" data-in="listening transcribing preparing speaking" aria-hidden="true"></canvas>
+      <span class="part timer" id="timer" data-in="listening"></span>
+      <span class="part label" data-in="transcribing preparing success">
+        <span class="title" id="title"></span><span class="sub" id="sub"></span>
+      </span>
+      <span class="part ptime" id="ptime" data-in="speaking"></span>
+      <span class="part transport" data-in="speaking">
+        <button class="pbtn" id="pause" type="button"></button>
+        <button class="pbtn" id="stop" type="button" data-i18n-title="voice.overlay.stop" data-i18n-aria-label="voice.overlay.stop"></button>
+        <button class="speed" id="speed" type="button" data-i18n-title="voice.overlay.speed"></button>
+      </span>
+      <div class="track" id="track"><i id="trackFill"></i></div>
+    </div>
+    <!-- Error and notice: the pill opens up into a small card. -->
+    <div class="layer msg" id="msg" role="status" aria-live="polite">
+      <div class="msg-head">
+        <span class="msg-ico" id="msgIco"></span>
+        <div class="msg-text">
+          <div class="msg-title" id="msgTitle"></div>
+          <div class="msg-detail" id="msgDetail"></div>
+        </div>
+      </div>
+      <div class="msg-actions" id="msgActions">
+        <button class="mbtn" id="dismiss" type="button" data-i18n="voice.overlay.close"></button>
+        <button class="mbtn primary" id="retry" type="button"></button>
+      </div>
+      <div class="countdown"><i id="countdown"></i></div>
+    </div>
+  </div>
+</div>
+<script src="../../common.js"></script>
+<script src="overlay.js"></script>
+</body>
+</html>

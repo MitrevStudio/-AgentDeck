@@ -1,0 +1,115 @@
+/* Voice History, laid out like the manager window: header with search, list panel, detail panel, status bar.
+   Tokens and shared components (search, chips, panels, cards, tags, buttons, empty states, toast, dialog) come
+   from ../../theme.css (--read / --read-bg mark a reading). */
+html, body { height: 100%; }
+body { display: flex; flex-direction: column; overflow: hidden; }
+
+/* ---------- header ---------- */
+.vh-top {
+  display: flex; align-items: center; gap: 18px; padding: 12px 18px;
+  border-bottom: 1px solid var(--line); background: var(--panel);
+}
+.vh-brand { display: flex; align-items: center; gap: 11px; flex: none; }
+.vh-brand .logo { width: 36px; height: 36px; border-radius: 10px; }
+.vh-brand .logo .i { width: 19px; height: 19px; }
+.vh-brand h1 { margin: 0; font-size: 15.5px; font-weight: 650; }
+.vh-brand p { margin: 0; color: var(--muted); font-size: 12px; }
+.vh-top .search { flex: 1; max-width: 640px; margin-left: auto; }
+.vh-top .search input { height: 42px; padding-right: 100px; font-size: 15px; border-radius: 11px; }
+.vh-top .search .clear { right: 62px; }
+
+/* ---------- layout ---------- */
+.vh-main {
+  --list-w: 380px;
+  flex: 1; min-height: 0; display: grid; grid-template-columns: var(--list-w) 12px minmax(0, 1fr);
+  padding: 14px 18px;
+}
+.vh-split { cursor: col-resize; position: relative; }
+.vh-split::after {
+  content: ""; position: absolute; top: 42%; bottom: 42%; left: 5px; width: 2px; border-radius: 2px;
+  background: var(--line-2); opacity: 0; transition: opacity var(--dur-fast);
+}
+.vh-split:hover::after { opacity: 1; }
+.vh-list-panel .panel-head { padding-right: 10px; }
+.vh-list-panel .chips .chip { height: 26px; padding: 0 9px; gap: 6px; font-size: 12.5px; }
+
+/* ---------- list: cards grouped by day ---------- */
+.vh-list { flex: 1; overflow: hidden auto; padding: 10px; outline: none; }
+.vh-group {
+  position: sticky; top: -10px; z-index: 1; display: flex; gap: 8px; align-items: baseline;
+  margin: 0 -10px 4px; padding: 10px 14px 7px; background: var(--panel);
+}
+.vh-group:first-child { margin-top: -10px; }
+.vh-group .n { color: var(--faint); font-weight: 500; letter-spacing: 0; font-size: 11.5px; }
+.vh-row { padding: 11px 13px 12px; margin-bottom: 8px; cursor: pointer; }
+.vh-row.failed { box-shadow: inset 3px 0 0 var(--danger); }
+.vh-row.work { box-shadow: inset 3px 0 0 var(--wait); }
+.vh-row.active.failed { box-shadow: inset 3px 0 0 var(--danger), var(--ring); }
+.vh-row.active.work { box-shadow: inset 3px 0 0 var(--wait), var(--ring); }
+.vh-list:focus-visible .vh-row.active { border-color: var(--accent-strong); }
+.vh-r1 { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.vh-kind { display: inline-flex; align-items: center; gap: 5px; flex: none; padding: 2px 8px 2px 6px; border-radius: 6px; font-size: 11.5px; font-weight: 700; color: var(--accent); background: var(--accent-weak); }
+.vh-kind .i { width: 13px; height: 13px; }
+.vh-kind.read, .tag.read { color: var(--read); background: var(--read-bg); }
+.vh-time { flex: none; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+/* A long status ("Transcribing…") gives way before the date does; its full text is in the tooltip. */
+.vh-r1 .tag { margin-left: auto; flex: 0 1 auto; min-width: 0; }
+.vh-prev {
+  margin-top: 7px; font-size: 13.5px; line-height: 1.45; color: var(--text); overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.vh-prev.muted { color: var(--muted); }
+.vh-meta { margin-top: 6px; font-size: 11.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tag .spinner { width: 10px; height: 10px; border-width: 2px; border-color: color-mix(in srgb, var(--wait) 25%, transparent); border-top-color: var(--wait); }
+
+/* ---------- detail ---------- */
+.vh-detail-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.vh-dhead { gap: 12px; padding: 12px 16px; min-height: 64px; }
+.vh-dkind { flex: none; width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; color: var(--accent); background: var(--accent-weak); }
+.vh-dkind.read { color: var(--read); background: var(--read-bg); }
+.vh-dkind .i { width: 19px; height: 19px; }
+.vh-dtitle { flex: 1; min-width: 0; }
+.vh-dtime { font-size: 15px; font-weight: 650; }
+.vh-dtime::first-letter { text-transform: uppercase; } /* a heading; Bulgarian writes weekdays in lower case */
+.vh-dmeta { margin-top: 1px; font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+.vh-dhead .tag { flex: 0 1 auto; min-width: 0; max-width: 45%; }
+.vh-dbody { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 14px 16px 0; }
+.vh-err {
+  display: flex; gap: 9px; margin-bottom: 12px; padding: 10px 12px; border-radius: var(--r-md); font-size: 13px; line-height: 1.45;
+  color: var(--danger-text); border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+}
+.vh-err .i { color: var(--danger); margin-top: 1px; }
+.vh-dtext {
+  flex: 1; min-height: 0; width: 100%; resize: none; padding: 14px 16px; outline: none;
+  border-radius: var(--r-lg); border: 1px solid var(--line); background: var(--path-bg); color: var(--text);
+  font: 15px/1.65 var(--sans); transition: border-color .15s, box-shadow .15s;
+}
+.vh-dtext:focus { border-color: var(--accent); box-shadow: var(--ring); }
+.vh-dtext.muted { color: var(--muted); }
+.vh-dfoot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 16px 14px; }
+.vh-dfoot .btn.playing { border-color: var(--accent); color: var(--accent-strong); background: var(--accent-weak); }
+.vh-detail-empty { margin: auto; }
+
+/* ---------- status bar ---------- */
+.status {
+  display: flex; align-items: center; gap: 10px; padding: 7px 18px; font-size: 12px; color: var(--muted);
+  border-top: 1px solid var(--line); background: var(--panel);
+}
+.status #status { margin-right: auto; }
+.keys { display: flex; align-items: center; gap: 5px; margin-right: 8px; white-space: nowrap; }
+.keys span { margin-right: 10px; }
+
+/* ---------- confirmation ---------- */
+.vh-ask-body { display: flex; gap: 14px; padding: 20px 20px 6px; }
+.vh-ask-icon { flex: none; width: 36px; height: 36px; border-radius: 11px; display: grid; place-items: center; color: var(--danger); background: var(--danger-bg); }
+.vh-ask-icon .i { width: 19px; height: 19px; }
+.vh-ask p { margin: 7px 0 0; line-height: 1.5; }
+.vh-ask-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px 18px; }
+
+@media (max-width: 900px) {
+  .vh-brand p, .keys { display: none; }
+}
+@media (max-width: 780px) {
+  .vh-brand h1 { display: none; }
+}
