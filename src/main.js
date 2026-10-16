@@ -14,7 +14,8 @@ if (testProfile) app.setPath("userData", path.resolve(testProfile));
 else if (fs.existsSync(formerProfile)) app.setPath("userData", formerProfile);
 const { terminalEnv } = require("./terminal-env");
 const { liveSessions, findTranscript } = require("./live");
-const { focusSession } = require("./terminal-focus");
+const { focusSession, allowForeground, terminalWindows, raiseNewTerminal } = require("./terminal-focus");
+const { createLog } = require("./voice/log-file");
 const promptLaunch = require("./prompt-launch");
 const { createEdgeBar } = require("./edge-bar");
 const { makeIcon } = require("./app-icon");
@@ -206,22 +207,47 @@ async function scanSessions() {
     seen.add(key); return true;
   }).sort((a,b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 1000);
 }
+// userData/logs/launch.log: every terminal AgentDeck opens and how it went (folder and command, never a prompt's text).
+const writeLaunchLog = createLog("launch.log");
+const launchLog = (...parts) => writeLaunchLog([new Date().toISOString(), ...parts].join(" "));
+function spawnDetached(file, args, opts) {
+  const child = spawn(file, args, { detached: true, stdio: "ignore", ...opts });
+  child.unref();
+  return new Promise((resolve, reject) => { child.once("spawn", resolve); child.once("error", reject); });
+}
 async function launchTerminal(cwd, command = null) {
   if (!cwd || !fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) throw new Error(t("errors.folderMissing"));
   // Pass fixed argument arrays to wt.exe. No user-supplied shell command is evaluated. "-w new" gives the session a
   // window of its own (Settings -> General); "-w 0" adds a tab to the last used window.
-  const args = ["-w", prefs.get().newWindow ? "new" : "0", "new-tab", "-d", cwd];
+  const newWindow = prefs.get().newWindow;
+  const args = ["-w", newWindow ? "new" : "0", "new-tab", "-d", cwd];
   if (command) {
     args.push("powershell.exe", "-NoExit", "-Command", command);
   }
   // AgentDeck's proxy too, when the user asked for it in Settings -> Network; a terminal opens without it otherwise.
   const proxy = await network.terminalProxy().catch(e => { console.error("Could not resolve the proxy for the terminal:", e.message); return null; });
-  const child = spawn("wt.exe", args, { detached: true, stdio: "ignore", windowsHide: true, env: terminalEnv(process.env, proxy) });
-  child.unref();
-  await new Promise((resolve, reject) => {
-    child.once("spawn", resolve);
-    child.once("error", err => { console.error("Could not launch Windows Terminal:", err.message); reject(err); });
-  });
+  const env = terminalEnv(process.env, proxy);
+  const what = `cwd="${cwd}" cmd=${command ? `"${command.slice(0, 120)}"` : "-"}`;
+  const before = newWindow ? terminalWindows() : null;
+  allowForeground();
+  try {
+    // Never windowsHide: Windows Terminal applies the launcher's "start hidden" to the window it opens for "-w new",
+    // which then stayed invisible ("nothing happens"). wt.exe has no console of its own to flash.
+    await spawnDetached("wt.exe", args, { windowsHide: false, env });
+  } catch (err) {
+    launchLog(`wt failed (${err.code || err.message})`, what);
+    if (err.code !== "ENOENT") throw err;
+    // No Windows Terminal (older Windows 10): a console window of its own instead of nothing at all.
+    await spawnDetached("powershell.exe", ["-NoExit", ...(command ? ["-Command", command] : [])], { cwd, env, windowsHide: false });
+    launchLog("console", what);
+    return;
+  }
+  launchLog(`wt ${newWindow ? "window" : "tab"}`, what);
+  if (before) {
+    raiseNewTerminal(before)
+      .then(r => launchLog(`new window ${r.found ? (r.front ? "in front" : "found, not in front") : "not seen within 4 s"}`))
+      .catch(e => launchLog(`raising the new window failed: ${e.message}`));
+  }
 }
 function agentCommand(agent, id) {
   if (agent === "OpenCode") return ["opencode", "--session", id];

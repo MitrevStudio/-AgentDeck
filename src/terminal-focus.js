@@ -117,6 +117,8 @@ function user32() {
     BringWindowToTop: lib.func("bool __stdcall BringWindowToTop(void *hwnd)"),
     GetWindowThreadProcessId: lib.func("uint32_t __stdcall GetWindowThreadProcessId(void *hwnd, void *pid)"),
     AttachThreadInput: lib.func("bool __stdcall AttachThreadInput(uint32_t from, uint32_t to, bool attach)"),
+    AllowSetForegroundWindow: lib.func("bool __stdcall AllowSetForegroundWindow(uint32_t pid)"),
+    FindWindowExW: lib.func("void * __stdcall FindWindowExW(void *parent, void *after, str16 cls, str16 title)"),
     GetCurrentThreadId: k32.func("uint32_t __stdcall GetCurrentThreadId()")
   });
 }
@@ -145,6 +147,34 @@ async function bringToFront(hwnd) {
   const attached = Boolean(them) && them !== me && w.AttachThreadInput(me, them, true);
   try { w.BringWindowToTop(hwnd); w.SetForegroundWindow(hwnd); } finally { if (attached) w.AttachThreadInput(me, them, false); }
   return until(inFront, FRONT_TIMEOUT_MS / 2);
+}
+
+// ---------- new terminal windows ----------
+// A window that Windows Terminal opens for `wt -w new` may not get the foreground: WT is not the process the user
+// just clicked, and AgentDeck's menu has often hidden itself by then. So AgentDeck, still in front right after the
+// click, lets any process take the foreground once, and afterwards brings the new window up itself.
+const ASFW_ANY = 0xFFFFFFFF;
+const WT_CLASS = "CASCADIA_HOSTING_WINDOW_CLASS";
+function allowForeground() {
+  try { user32().AllowSetForegroundWindow(ASFW_ANY); } catch {}
+}
+// The visible Windows Terminal windows. WT keeps hidden windows around and may show one of those for `-w new`, so a
+// "new" window is one that is visible now and was not before - not necessarily a handle never seen.
+function terminalWindows() {
+  const w = user32(), out = [];
+  for (let h = w.FindWindowExW(null, null, WT_CLASS, null); h; h = w.FindWindowExW(null, h, WT_CLASS, null)) {
+    if (w.IsWindowVisible(h)) out.push(h);
+  }
+  return out;
+}
+// Waits for a Windows Terminal window that was not visible before (`before`: terminalWindows()) and brings it up.
+async function raiseNewTerminal(before, timeoutMs = 4000) {
+  const known = new Set(before.map(String));
+  for (const end = Date.now() + timeoutMs; Date.now() < end; await sleep(100)) {
+    const fresh = terminalWindows().find(h => !known.has(String(h)));
+    if (fresh) return { found: true, front: await bringToFront(fresh) };
+  }
+  return { found: false, front: false };
 }
 
 // ---------- API ----------
@@ -201,4 +231,4 @@ function keepWarm() {
   ask("warm", null, START_TIMEOUT_MS).catch(e => console.error("Starting the terminal helper failed:", e.message));
 }
 
-module.exports = { focusSession, terminalSelection, keepWarm };
+module.exports = { focusSession, terminalSelection, keepWarm, allowForeground, terminalWindows, raiseNewTerminal };
