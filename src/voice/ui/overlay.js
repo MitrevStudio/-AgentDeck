@@ -158,9 +158,10 @@ function fit(animate = true) {
   if (!w || !h) return;
   const ws = `${w}px`, hs = `${h}px`;
   if (pill.style.width === ws && pill.style.height === hs) return;
-  if (!animate) pill.classList.add("snap");
+  if (animate) startMorph(); else { stopMorph(); pill.classList.add("snap"); }
   pill.style.width = ws; pill.style.height = hs;
   if (!animate) { void pill.offsetWidth; pill.classList.remove("snap"); }
+  reportShape();
 }
 new ResizeObserver(() => { if (state) fit(!hidden); }).observe(row);
 new ResizeObserver(() => { if (state) fit(!hidden); }).observe(msg);
@@ -433,16 +434,16 @@ function show(next, d) {
   }
   startLoop();
   // Still under the pointer: the new state gets the hover effects too (a confirm card pauses its countdown).
-  if (interactive) { interactive = null; setInteractive(true); }
-  requestAnimationFrame(reportPill);
+  if (interactive) { interactive = false; setInteractive(true); }
+  // Before main hears that the state is rendered: a hidden window is shown with its shape in place.
+  reportShape();
 }
 
 function hide() {
   state = null;
   hidden = true;
   stopCountdown();
-  setInteractive(false);
-  reportPill();
+  setInteractive(false); // the shape stays as it is for the exit animation; main hides the window after it
   stage.classList.add("out");
   clearInterval(playbackTimer);
   playbackTimer = null;
@@ -517,35 +518,65 @@ $("speed").addEventListener("click", () => {
   api.action("speed", next);
 });
 
-// ---- hover & click-through --------------------------------------------------------------------------------------
-// Main watches the cursor and lets the window take the mouse only while it is over the pill (everywhere else clicks
-// fall through to whatever is below); it tells the page, which reveals the quiet extras meanwhile: the key hints,
-// the whole text of an error. Main hit-tests against the pill's box, so every new size or place is reported.
-let interactive = null;
+// ---- shape & hover ------------------------------------------------------------------------------------------------
+// Main gives the window the shape reported here: the pill with room for its shadow, and the tip above it while that
+// shows. It is the window region: Windows passes every click outside it to whatever is below and lets the window
+// have the mouse only inside it, so the pointer moving in this page at all means it is over the panel - the quiet
+// extras come out meanwhile (the key hints, the whole text of an error). The region also clips what is drawn, so
+// while the pill morphs it covers both sizes and the spring's overshoot.
+const ROOM = { side: 10, top: 4, bottom: 16 }; // around the pill: its shadow (--shadow) and the enter animation's drop
+const OVERSHOOT = 0.06; // how far the spring passes its target, as a share of the way
+const TIP_FADE_MS = 200; // the tip's fade-out (.tip in overlay.css), and a little more
+let morph = null; // {w, h, timer}: the size the pill morphs from, until it has settled
+let interactive = false;
+let tipLinger = 0; // the timer while the tip fades out
+let reportedShape = "";
+
+function startMorph() {
+  clearTimeout(morph?.timer);
+  const ms = parseFloat(getComputedStyle(pill).transitionDuration) * 1000 || 0;
+  morph = { w: pill.offsetWidth, h: pill.offsetHeight, timer: setTimeout(() => { morph = null; reportShape(); }, ms + 80) };
+}
+function stopMorph() {
+  clearTimeout(morph?.timer);
+  morph = null;
+}
+
+const withRoom = r => ({ x: r.x - ROOM.side, y: r.y - ROOM.top, width: r.width + 2 * ROOM.side, height: r.height + ROOM.top + ROOM.bottom });
+function reportShape() {
+  if (!state || hidden) return;
+  const w0 = parseFloat(pill.style.width) || pill.offsetWidth, h0 = parseFloat(pill.style.height) || pill.offsetHeight;
+  const w = morph ? Math.max(w0, morph.w) + Math.abs(w0 - morph.w) * OVERSHOOT : w0;
+  const h = morph ? Math.max(h0, morph.h) + Math.abs(h0 - morph.h) * OVERSHOOT : h0;
+  // Whatever its size, the pill is centred with its bottom edge on the page's bottom padding (overlay.css).
+  const cx = body.clientWidth / 2, bottom = body.clientHeight - parseFloat(getComputedStyle(body).paddingBottom);
+  const rects = [withRoom({ x: cx - w / 2, y: bottom - h, width: w, height: h })];
+  if ((interactive || tipLinger) && tip.classList.contains("on")) {
+    const r = tip.getBoundingClientRect();
+    rects.push(withRoom({ x: r.left, y: r.top, width: r.width, height: r.height }));
+  }
+  const key = JSON.stringify(rects.map(r => [r.x, r.y, r.width, r.height].map(Math.round)));
+  if (key !== reportedShape) { reportedShape = key; api.shape(rects); }
+}
+new ResizeObserver(reportShape).observe(pill);
+new ResizeObserver(reportShape).observe(tip);
+addEventListener("resize", reportShape);
+
 function setInteractive(on) {
+  on = Boolean(on && state && !hidden);
   if (on === interactive) return;
   interactive = on;
   body.classList.toggle("hover", on);
   if (state === "confirm") { pauseCountdown(on); api.action("hold", on); }
+  api.hover(on); // main holds a notice meanwhile
+  // The tip comes with it, and stays in the shape while it fades out (also a pointer that is back at once finds the
+  // shape as it was).
+  clearTimeout(tipLinger);
+  tipLinger = on ? 0 : setTimeout(() => { tipLinger = 0; reportShape(); }, TIP_FADE_MS);
+  reportShape();
 }
-api.onHover(on => setInteractive(Boolean(on) && Boolean(state) && !hidden));
-// The layout box from offsets: unlike a bounding rect it leaves out the stage's enter animation (scaled down and
-// shifted, .34 s), which would otherwise be what main hit-tests against for as long as the panel stays.
-function layoutBox(el) {
-  let x = 0, y = 0;
-  for (let n = el; n; n = n.offsetParent) { x += n.offsetLeft; y += n.offsetTop; }
-  return { x, y, width: el.offsetWidth, height: el.offsetHeight };
-}
-let reportedPill = "";
-function reportPill() {
-  const box = state && !hidden ? layoutBox(pill) : null;
-  const key = JSON.stringify(box);
-  if (key !== reportedPill) { reportedPill = key; api.pill(box); }
-}
-new ResizeObserver(reportPill).observe(pill);
-// Size morphs and the stage's enter/exit: whatever moved, the box is taken again once it has settled.
-document.addEventListener("transitionend", reportPill);
-addEventListener("resize", reportPill);
+document.addEventListener("pointermove", () => setInteractive(true));
+document.documentElement.addEventListener("pointerleave", () => setInteractive(false));
 
 // ---- read-aloud player ------------------------------------------------------------------------------------------
 let player = null;

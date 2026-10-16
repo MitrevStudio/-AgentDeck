@@ -1,7 +1,8 @@
 /* The voice panel: a slim pill at the bottom centre of the screen that morphs between states, and opens up into a
    small card for errors and notices. Quiet on purpose: a translucent surface, a hairline edge, a soft shadow and no
    glow. Colours come from theme.css tokens only, so the pill is dark or light with the app. The window around it is
-   transparent and click-through; main gives it a fixed size and keeps --pad-bottom below the pill for the shadow. */
+   transparent, with a fixed size and --pad-bottom below the pill; its shape (overlay.js) is the pill with room for the
+   shadow, so the shadow has to stay within that room (ROOM there). */
 :root {
   --pad-bottom: 26px;       /* matches PAD_BOTTOM in overlay.js (main) */
   --row-h: 40px;
@@ -18,7 +19,7 @@ body {
   --tone: var(--accent);
   --surface: color-mix(in srgb, var(--glass) 93%, transparent);
   --edge: inset 0 0 0 1px var(--hairline-2), inset 0 1px 0 var(--hairline);
-  --shadow: 0 10px 24px -12px var(--backdrop), 0 2px 6px -3px var(--backdrop);
+  --shadow: 0 8px 18px -10px var(--backdrop), 0 2px 6px -3px var(--backdrop); /* fades out within 10 px aside, 16 below */
   --soft: color-mix(in srgb, var(--text) 8%, transparent);  /* quiet fills: button hover, empty track */
 }
 body[data-tone="warn"] { --tone: var(--wait); }
@@ -32,7 +33,7 @@ body[data-tone="ok"] { --tone: var(--busy); }
   transition: opacity .2s var(--ease-out), transform .34s var(--spring);
 }
 .stage.out {
-  opacity: 0; transform: translateY(8px) scale(.96);
+  opacity: 0; transform: translateY(8px) scale(.96); pointer-events: none; /* on its way out: nothing to click */
   transition: opacity .16s var(--ease-in), transform .2s var(--ease-in);
 }
 .stage[data-layer="msg"] { --radius: var(--r-xl); }

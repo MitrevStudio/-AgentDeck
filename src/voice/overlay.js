@@ -1,7 +1,8 @@
 // The floating voice panel (ui/overlay.html): a pill at the bottom centre of the display the cursor is on, 24 px
 // above the work-area bottom (the taskbar). It never takes focus - the window the user is dictating into must stay
-// the foreground window - and the window around the pill is click-through: only while the pointer is over the
-// pill itself does the window take mouse input (main polls the cursor against the box the page reports).
+// the foreground window - and the window around the pill is click-through: the page gives the window its shape (the
+// pill with room for its shadow, see setShape), and outside it Windows passes every click to what is below. Nothing
+// tracks the cursor for that, so nothing can lose track of it.
 //
 // The window has a fixed size, large enough for the tallest state; the pill morphs inside it, so a state change
 // never resizes the window mid-animation. It also hosts the read-aloud player (see `player`), since the panel is on
@@ -12,8 +13,8 @@ const path = require("node:path");
 const { t } = require("../i18n");
 const { createLog } = require("./log-file");
 
-// userData/logs/overlay.log: shows, the pill boxes reported, hover changes and button actions - to tell, when a
-// button "does nothing", whether the pointer was never seen over the pill or the click never arrived.
+// userData/logs/overlay.log: shows and where, the shapes reported, hover changes and button actions - to tell, when a
+// button "does nothing", whether the window never got the pointer (hover is the page's own) or the click never arrived.
 const writeLog = createLog("overlay.log");
 const diag = (...parts) => writeLog([new Date().toISOString(), ...parts].join(" "));
 const fmtBox = b => (b ? `${Math.round(b.x)},${Math.round(b.y)} ${Math.round(b.width)}x${Math.round(b.height)}` : "none");
@@ -24,8 +25,6 @@ const PAD_BOTTOM = 26;      // transparent room below the pill for its shadow (m
 const BOTTOM_GAP = 24;      // the pill's bottom edge sits this far above the work-area bottom
 const REVEAL_TIMEOUT_MS = 250; // show anyway if the page has not confirmed the new state by then
 const EXIT_MS = 240;        // the page's exit animation; the window is hidden after it
-const HOVER_POLL_MS = 40;   // cursor checks while the panel is up
-const HOVER_MARGIN = 4;     // px around the pill that still count as over it
 const NOTICE_MS = 3500;
 const SUCCESS_MS = 1200;
 // confirm and choices: a voice command's card (command-runner.js), which goes away only when the command does.
@@ -64,33 +63,14 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
   const alive = () => Boolean(win && !win.isDestroyed());
   const isOurs = e => alive() && e.sender === win.webContents;
 
-  // The window takes the mouse only while the cursor is over the pill; everywhere else clicks fall through. Hover is
-  // found by polling the cursor while the panel is up rather than with setIgnoreMouseEvents' `forward`: that installs a
-  // system-wide low-level mouse hook on the main thread, which Windows silently removes once the thread is busy for a
-  // moment (and which delays every mouse move meanwhile) - after that the panel never noticed the pointer again.
-  let pill = null; // the pill's box in window coordinates, reported by the page
-  let hovering = false, hoverTimer = null, loggedState = null;
-  function setHover(on, where = "") {
-    if (on === hovering) return;
-    hovering = on;
-    if (alive()) win.setIgnoreMouseEvents(!on);
-    send("voice:overlay-hover", on);
-    holdAutoHide(on);
-    diag(`hover=${on}`, where);
-  }
-  function pollHover() {
-    if (!visible || !alive() || !pill || !win.isVisible()) return setHover(false);
-    const p = screen.getCursorScreenPoint(), b = win.getBounds();
-    const x = p.x - b.x, y = p.y - b.y, m = HOVER_MARGIN;
-    const inside = x >= pill.x - m && x < pill.x + pill.width + m && y >= pill.y - m && y < pill.y + pill.height + m;
-    setHover(inside, `cursor=${p.x},${p.y} win=${fmtBox(b)} pill=${fmtBox(pill)}`);
-  }
-  function watchHover(on) {
-    clearInterval(hoverTimer);
-    hoverTimer = on ? setInterval(pollHover, HOVER_POLL_MS) : null;
-    if (!on) setHover(false);
-  }
-  const clickThrough = () => { watchHover(false); if (alive()) win.setIgnoreMouseEvents(true); };
+  // The window's shape: what the page last reported, in window coordinates. It is the window region, so it clips
+  // both what is drawn and where the mouse reaches the window; Windows keeps it, and only a new DPI (another display,
+  // a remote session at another scale) needs it set again, since it is scaled to device pixels when set. Until the
+  // page has reported one the window has no area at all - never a transparent pane that swallows clicks.
+  const NO_SHAPE = [{ x: 0, y: 0, width: 0, height: 0 }];
+  let shape = null;
+  let loggedState = null;
+  const applyShape = () => { if (alive()) win.setShape(shape || NO_SHAPE); };
 
   // Only show() and a new reading bring the window (back): after a renderer crash, or once destroyed at quit, nothing
   // else may conjure one up.
@@ -104,10 +84,10 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
       webPreferences: { preload: preloadPath, contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false }
     });
     w.setAlwaysOnTop(true, "screen-saver");
-    w.setIgnoreMouseEvents(true);
+    w.setShape(NO_SHAPE);
     // A crashed page, or one that never loaded, takes its window along; the next show() or reading makes a new one.
     const lost = () => {
-      if (win === w) { win = null; loaded = null; visible = false; pill = null; watchHover(false); }
+      if (win === w) { win = null; loaded = null; visible = false; shape = null; }
       if (playerId != null) emitter.emit("player", { id: playerId, type: "error", message: t("voice.errors.panelCrashed") });
       playerId = null;
       if (!w.isDestroyed()) w.destroy();
@@ -134,13 +114,19 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
     const x = Math.round(wa.x + (wa.width - WIDTH) / 2);
     const y = Math.max(wa.y, Math.round(bottom - HEIGHT));
     win.setBounds({ x, y, width: WIDTH, height: HEIGHT });
+    applyShape(); // scaled for the display it is on now
   }
 
   function reveal() {
     clearTimeout(revealTimer);
     revealSeq = 0;
-    if (!visible || !alive()) return;
-    if (!win.isVisible()) { place(); win.showInactive(); }
+    if (!visible || !alive() || win.isVisible()) return;
+    place();
+    win.showInactive();
+    // On top of the always-on-top band too: a window that turned topmost while the panel was away would cover it.
+    win.moveTop();
+    const b = win.getBounds();
+    diag(`reveal win=${fmtBox(b)} scale=${screen.getDisplayMatching(b).scaleFactor}`);
   }
 
   // A hidden panel opens at the bottom of the cursor's display; a visible one morphs into the new state in place.
@@ -156,7 +142,7 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
       visible = true;
       anchor = screen.getCursorScreenPoint();
       clearTimeout(exitTimer);
-      if (alive() && win.isVisible()) place(); // still playing the exit animation: re-enter where it belongs now
+      if (alive() && win.isVisible()) { place(); win.moveTop(); } // still playing the exit animation: re-enter where it belongs now
       else {
         revealSeq = id;
         clearTimeout(revealTimer);
@@ -165,7 +151,6 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
     }
     send("voice:overlay-state", { seq: id, state: next, data });
     if (state !== loggedState) { loggedState = state; diag(`show ${next}`); }
-    if (!hoverTimer) watchHover(true);
     autoHide = null;
     if (AUTO_HIDE[next]) armAutoHide(Number(d.durationMs) > 0 ? Number(d.durationMs) : AUTO_HIDE[next]);
   }
@@ -201,7 +186,6 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
     visible = false;
     state = null;
     data = {};
-    clickThrough();
     loggedState = null;
     diag("hide");
     send("voice:overlay-state", { seq: ++seq, state: null, data: {} });
@@ -248,13 +232,38 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
     emitter.emit("action", ev);
   }
 
-  // The page reports the pill's box whenever its size or place changes; the hover poll hit-tests against it.
-  function onPill(e, box) {
+  // The page reports the window's shape whenever the pill's size or the tip above it changes (rectangles in window
+  // coordinates, at most a few), and before it confirms a state, so a hidden window is shown with its shape in place.
+  function onShape(e, rects) {
+    if (!isOurs(e) || !Array.isArray(rects)) return;
+    const clamp = (v, max) => Math.min(max, Math.max(0, v));
+    const next = [];
+    for (const r of rects.slice(0, 4)) {
+      if (!r || !["x", "y", "width", "height"].every(k => Number.isFinite(r[k]))) continue;
+      const x = clamp(Math.floor(r.x), WIDTH), y = clamp(Math.floor(r.y), HEIGHT);
+      const right = clamp(Math.ceil(r.x + r.width), WIDTH), bottom = clamp(Math.ceil(r.y + r.height), HEIGHT);
+      if (right > x && bottom > y) next.push({ x, y, width: right - x, height: bottom - y });
+    }
+    shape = next.length ? next : null;
+    applyShape();
+    diag(`shape ${shape ? shape.map(fmtBox).join(" + ") : "none"} state=${state || "-"}`);
+  }
+
+  // The page tells when the pointer is over the panel - the window gets the mouse only inside its shape - and the
+  // pointer resting on it holds a notice that would go away by itself.
+  function onHover(e, on) {
     if (!isOurs(e)) return;
-    const ok = box && ["x", "y", "width", "height"].every(k => Number.isFinite(box[k]));
-    pill = ok ? { x: box.x, y: box.y, width: box.width, height: box.height } : null;
-    diag(`pill ${fmtBox(pill)} state=${state || "-"}`);
-    pollHover();
+    on = Boolean(on) && visible;
+    holdAutoHide(on);
+    diag(`hover=${on}`);
+  }
+
+  // Another display, a new resolution or scale (a remote session reconnected from another computer): back to the
+  // bottom centre where it belongs, with the shape scaled anew.
+  function onDisplays() {
+    if (!visible || !alive() || !win.isVisible()) return;
+    place();
+    diag(`displays changed win=${fmtBox(win.getBounds())}`);
   }
 
   function onPlayer(e, msg) {
@@ -266,8 +275,12 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
 
   ipcMain.on("voice:overlay-size", onSize);
   ipcMain.on("voice:overlay-action", onActionMsg);
-  ipcMain.on("voice:overlay-pill", onPill);
+  ipcMain.on("voice:overlay-shape", onShape);
+  ipcMain.on("voice:overlay-hover", onHover);
   ipcMain.on("voice:overlay-player", onPlayer);
+  screen.on("display-metrics-changed", onDisplays);
+  screen.on("display-added", onDisplays);
+  screen.on("display-removed", onDisplays);
 
   // Read-aloud audio, played by the panel page. `id` ties every call and event to one reading.
   const audio = msg => send("voice:overlay-audio", msg);
@@ -294,8 +307,12 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
     clearTimeout(exitTimer);
     ipcMain.removeListener("voice:overlay-size", onSize);
     ipcMain.removeListener("voice:overlay-action", onActionMsg);
-    ipcMain.removeListener("voice:overlay-pill", onPill);
+    ipcMain.removeListener("voice:overlay-shape", onShape);
+    ipcMain.removeListener("voice:overlay-hover", onHover);
     ipcMain.removeListener("voice:overlay-player", onPlayer);
+    screen.removeListener("display-metrics-changed", onDisplays);
+    screen.removeListener("display-added", onDisplays);
+    screen.removeListener("display-removed", onDisplays);
     if (alive()) win.destroy();
     win = null;
   }

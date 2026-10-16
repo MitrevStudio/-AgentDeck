@@ -7,8 +7,8 @@ contextBridge.exposeInMainWorld("voiceOverlay", {
   onAudio: cb => ipcRenderer.on("voice:overlay-audio", (_e, msg) => cb(msg)),
   action: (type, arg) => ipcRenderer.send("voice:overlay-action", type, arg),
   size: (seq, height) => ipcRenderer.send("voice:overlay-size", seq, height),
-  pill: box => ipcRenderer.send("voice:overlay-pill", box),
-  onHover: cb => ipcRenderer.on("voice:overlay-hover", (_e, on) => cb(on)),
+  shape: rects => ipcRenderer.send("voice:overlay-shape", rects),
+  hover: on => ipcRenderer.send("voice:overlay-hover", on),
   player: msg => ipcRenderer.send("voice:overlay-player", msg)
 });
 // UI language and theme, read before the page renders; i18n.js applies them.
