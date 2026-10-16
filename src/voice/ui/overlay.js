@@ -432,8 +432,9 @@ function show(next, d) {
     fit(true);
   }
   startLoop();
-  setInteractive(false);
-  requestAnimationFrame(recheckPointer);
+  // Still under the pointer: the new state gets the hover effects too (a confirm card pauses its countdown).
+  if (interactive) { interactive = null; setInteractive(true); }
+  requestAnimationFrame(reportPill);
 }
 
 function hide() {
@@ -441,6 +442,7 @@ function hide() {
   hidden = true;
   stopCountdown();
   setInteractive(false);
+  reportPill();
   stage.classList.add("out");
   clearInterval(playbackTimer);
   playbackTimer = null;
@@ -515,26 +517,27 @@ $("speed").addEventListener("click", () => {
   api.action("speed", next);
 });
 
-// ---- click-through ----------------------------------------------------------------------------------------------
-// The window takes the mouse only while the pointer is over the pill; everywhere else clicks fall through to
-// whatever is below. Pointer moves arrive even while click-through (main forwards them). The same moment reveals
-// the quiet extras: the key hints, the whole text of an error.
-let interactive = null, pointer = null;
+// ---- hover & click-through --------------------------------------------------------------------------------------
+// Main watches the cursor and lets the window take the mouse only while it is over the pill (everywhere else clicks
+// fall through to whatever is below); it tells the page, which reveals the quiet extras meanwhile: the key hints,
+// the whole text of an error. Main hit-tests against the pill's box, so every new size or place is reported.
+let interactive = null;
 function setInteractive(on) {
   if (on === interactive) return;
   interactive = on;
   body.classList.toggle("hover", on);
-  api.interactive(on);
   if (state === "confirm") { pauseCountdown(on); api.action("hold", on); }
 }
-const overPill = el => Boolean(state) && !hidden && Boolean(el) && pill.contains(el);
-function recheckPointer() {
-  setInteractive(pointer ? overPill(document.elementFromPoint(pointer[0], pointer[1])) : false);
+api.onHover(on => setInteractive(Boolean(on) && Boolean(state) && !hidden));
+let reportedPill = "";
+function reportPill() {
+  const r = state && !hidden ? pill.getBoundingClientRect() : null;
+  const box = r ? { x: r.left, y: r.top, width: r.width, height: r.height } : null;
+  const key = JSON.stringify(box);
+  if (key !== reportedPill) { reportedPill = key; api.pill(box); }
 }
-document.addEventListener("mousemove", e => { pointer = [e.clientX, e.clientY]; setInteractive(overPill(e.target)); });
-document.addEventListener("mouseleave", () => { pointer = null; setInteractive(false); });
-// The pill changed size under a resting pointer: it may no longer be over it (or now is).
-pill.addEventListener("transitionend", e => { if (e.target === pill) recheckPointer(); });
+new ResizeObserver(reportPill).observe(pill);
+pill.addEventListener("transitionend", e => { if (e.target === pill) reportPill(); });
 
 // ---- read-aloud player ------------------------------------------------------------------------------------------
 let player = null;

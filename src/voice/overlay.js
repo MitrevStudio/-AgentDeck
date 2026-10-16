@@ -1,7 +1,7 @@
 // The floating voice panel (ui/overlay.html): a pill at the bottom centre of the display the cursor is on, 24 px
 // above the work-area bottom (the taskbar). It never takes focus - the window the user is dictating into must stay
 // the foreground window - and the window around the pill is click-through: only while the pointer is over the
-// pill itself does the window take mouse input (the page reports that on "voice:overlay-interactive").
+// pill itself does the window take mouse input (main polls the cursor against the box the page reports).
 //
 // The window has a fixed size, large enough for the tallest state; the pill morphs inside it, so a state change
 // never resizes the window mid-animation. It also hosts the read-aloud player (see `player`), since the panel is on
@@ -17,6 +17,7 @@ const PAD_BOTTOM = 26;      // transparent room below the pill for its shadow (m
 const BOTTOM_GAP = 24;      // the pill's bottom edge sits this far above the work-area bottom
 const REVEAL_TIMEOUT_MS = 250; // show anyway if the page has not confirmed the new state by then
 const EXIT_MS = 240;        // the page's exit animation; the window is hidden after it
+const HOVER_POLL_MS = 40;   // cursor checks while the panel is up
 const NOTICE_MS = 3500;
 const SUCCESS_MS = 1200;
 // confirm and choices: a voice command's card (command-runner.js), which goes away only when the command does.
@@ -54,7 +55,32 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
 
   const alive = () => Boolean(win && !win.isDestroyed());
   const isOurs = e => alive() && e.sender === win.webContents;
-  const clickThrough = () => { if (alive()) win.setIgnoreMouseEvents(true, { forward: true }); };
+
+  // The window takes the mouse only while the cursor is over the pill; everywhere else clicks fall through. Hover is
+  // found by polling the cursor while the panel is up rather than with setIgnoreMouseEvents' `forward`: that installs a
+  // system-wide low-level mouse hook on the main thread, which Windows silently removes once the thread is busy for a
+  // moment (and which delays every mouse move meanwhile) - after that the panel never noticed the pointer again.
+  let pill = null; // the pill's box in window coordinates, reported by the page
+  let hovering = false, hoverTimer = null;
+  function setHover(on) {
+    if (on === hovering) return;
+    hovering = on;
+    if (alive()) win.setIgnoreMouseEvents(!on);
+    send("voice:overlay-hover", on);
+    holdAutoHide(on);
+  }
+  function pollHover() {
+    if (!visible || !alive() || !pill || !win.isVisible()) return setHover(false);
+    const p = screen.getCursorScreenPoint(), b = win.getBounds();
+    const x = p.x - b.x, y = p.y - b.y;
+    setHover(x >= pill.x && x < pill.x + pill.width && y >= pill.y && y < pill.y + pill.height);
+  }
+  function watchHover(on) {
+    clearInterval(hoverTimer);
+    hoverTimer = on ? setInterval(pollHover, HOVER_POLL_MS) : null;
+    if (!on) setHover(false);
+  }
+  const clickThrough = () => { watchHover(false); if (alive()) win.setIgnoreMouseEvents(true); };
 
   // Only show() and a new reading bring the window (back): after a renderer crash, or once destroyed at quit, nothing
   // else may conjure one up.
@@ -68,10 +94,10 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
       webPreferences: { preload: preloadPath, contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false }
     });
     w.setAlwaysOnTop(true, "screen-saver");
-    w.setIgnoreMouseEvents(true, { forward: true });
+    w.setIgnoreMouseEvents(true);
     // A crashed page, or one that never loaded, takes its window along; the next show() or reading makes a new one.
     const lost = () => {
-      if (win === w) { win = null; loaded = null; visible = false; }
+      if (win === w) { win = null; loaded = null; visible = false; pill = null; watchHover(false); }
       if (playerId != null) emitter.emit("player", { id: playerId, type: "error", message: t("voice.errors.panelCrashed") });
       playerId = null;
       if (!w.isDestroyed()) w.destroy();
@@ -128,6 +154,7 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
       }
     }
     send("voice:overlay-state", { seq: id, state: next, data });
+    if (!hoverTimer) watchHover(true);
     autoHide = null;
     if (AUTO_HIDE[next]) armAutoHide(Number(d.durationMs) > 0 ? Number(d.durationMs) : AUTO_HIDE[next]);
   }
@@ -207,11 +234,12 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
     emitter.emit("action", ev);
   }
 
-  // Only while the pointer is over the pill does the window take mouse input; everywhere else clicks fall through.
-  function onInteractive(e, on) {
+  // The page reports the pill's box whenever its size or place changes; the hover poll hit-tests against it.
+  function onPill(e, box) {
     if (!isOurs(e)) return;
-    win.setIgnoreMouseEvents(!(on && visible), { forward: true });
-    holdAutoHide(Boolean(on && visible));
+    const ok = box && ["x", "y", "width", "height"].every(k => Number.isFinite(box[k]));
+    pill = ok ? { x: box.x, y: box.y, width: box.width, height: box.height } : null;
+    pollHover();
   }
 
   function onPlayer(e, msg) {
@@ -223,7 +251,7 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
 
   ipcMain.on("voice:overlay-size", onSize);
   ipcMain.on("voice:overlay-action", onActionMsg);
-  ipcMain.on("voice:overlay-interactive", onInteractive);
+  ipcMain.on("voice:overlay-pill", onPill);
   ipcMain.on("voice:overlay-player", onPlayer);
 
   // Read-aloud audio, played by the panel page. `id` ties every call and event to one reading.
@@ -251,7 +279,7 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
     clearTimeout(exitTimer);
     ipcMain.removeListener("voice:overlay-size", onSize);
     ipcMain.removeListener("voice:overlay-action", onActionMsg);
-    ipcMain.removeListener("voice:overlay-interactive", onInteractive);
+    ipcMain.removeListener("voice:overlay-pill", onPill);
     ipcMain.removeListener("voice:overlay-player", onPlayer);
     if (alive()) win.destroy();
     win = null;
