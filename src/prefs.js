@@ -1,9 +1,11 @@
-// App-wide preferences: UI language, theme and automatic updates (`ui` in settings.json) and the edge handle
-// (`edgeHandle`: shown or not, and where). Main process only. Every page gets a snapshot from its preload
-// ("prefs:get") and "prefs:changed" afterwards; i18n.js applies language and theme. The handle's position is not in
-// the snapshot: it changes with a drag, which no page needs to hear about.
+// App-wide preferences: UI language, theme and automatic updates (`ui` in settings.json), the edge handle
+// (`edgeHandle`: shown or not, and where) and whether sessions open in a terminal window of their own (`terminal`).
+// Main process only. Every page gets a snapshot from its preload ("prefs:get") and "prefs:changed" afterwards;
+// i18n.js applies language and theme. The handle's position is not in the snapshot: it changes with a drag, which no
+// page needs to hear about.
 //
-// events: "changed" (snapshot, keys) - keys lists what changed: "language", "theme", "edgeHandle", "autoUpdate".
+// events: "changed" (snapshot, keys) - keys lists what changed: "language", "theme", "edgeHandle", "autoUpdate",
+// "newWindow".
 const { app, nativeTheme } = require("electron");
 const { EventEmitter } = require("node:events");
 const settings = require("./voice/settings");
@@ -16,7 +18,7 @@ const THEMES = ["system", "dark", "light"];
 const BACKGROUND = { dark: "#0d1015", light: "#f2f4f8" };
 
 const prefs = new EventEmitter();
-const state = { language: "bg", theme: "dark", edgeHandle: true, autoUpdate: true };
+const state = { language: "bg", theme: "dark", edgeHandle: true, autoUpdate: true, newWindow: true };
 let handleX = 0.5; // the edge handle's centre, as a fraction of the display width
 const fraction = v => (typeof v === "number" && v >= 0 && v <= 1 ? v : null);
 
@@ -36,6 +38,7 @@ function load() {
   state.edgeHandle = typeof handle.show === "boolean" ? handle.show : root.hoverEdge !== false;
   handleX = fraction(handle.x) ?? handleX;
   state.autoUpdate = ui.autoUpdate !== false;
+  state.newWindow = !(isObj(root.terminal) && root.terminal.newWindow === false);
   i18n.setLanguage(state.language, { dev: !app.isPackaged });
   nativeTheme.themeSource = state.theme;
   // Windows switched between light and dark while the theme follows it.
@@ -64,6 +67,10 @@ async function set(patch) {
     state.autoUpdate = patch.autoUpdate;
     keys.push("autoUpdate");
   }
+  if (typeof patch.newWindow === "boolean" && patch.newWindow !== state.newWindow) {
+    state.newWindow = patch.newWindow;
+    keys.push("newWindow");
+  }
   if (!keys.length) return get();
   prefs.emit("changed", get(), keys);
   await save();
@@ -84,6 +91,7 @@ function save() {
   return settings.writeRoot({
     ui: { language: state.language, theme: state.theme, autoUpdate: state.autoUpdate },
     edgeHandle: { show: state.edgeHandle, x: Math.round(handleX * 10000) / 10000 },
+    terminal: { newWindow: state.newWindow },
     hoverEdge: undefined
   }).catch(e => console.error("Could not save settings:", e.message));
 }

@@ -87,6 +87,7 @@ function renderGeneral() {
   $("uiTheme").innerHTML = segHtml(THEMES.map(th => [th, t(`theme.${th}`)]), general.theme);
   $("edgeHandle").checked = general.edgeHandle;
   $("autoUpdate").checked = general.autoUpdate;
+  $("newWindow").checked = general.newWindow !== false;
   if (focused === "uiLanguage" || focused === "uiTheme") $(focused).querySelector(".on")?.focus();
 }
 async function setPref(key, value) {
@@ -122,6 +123,7 @@ for (const [id, key] of [["uiLanguage", "language"], ["uiTheme", "theme"]]) {
 }
 $("edgeHandle").addEventListener("change", e => setPref("edgeHandle", e.target.checked));
 $("autoUpdate").addEventListener("change", e => setPref("autoUpdate", e.target.checked));
+$("newWindow").addEventListener("change", e => setPref("newWindow", e.target.checked));
 // Start with Windows, applied at once: the installed app only - a copy run from source shows it off and says why.
 function renderAutostart(a) {
   if (!a) return;

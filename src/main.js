@@ -208,8 +208,9 @@ async function scanSessions() {
 }
 async function launchTerminal(cwd, command = null) {
   if (!cwd || !fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) throw new Error(t("errors.folderMissing"));
-  // Pass fixed argument arrays to wt.exe. No user-supplied shell command is evaluated.
-  const args = ["-w", "0", "new-tab", "-d", cwd];
+  // Pass fixed argument arrays to wt.exe. No user-supplied shell command is evaluated. "-w new" gives the session a
+  // window of its own (Settings -> General); "-w 0" adds a tab to the last used window.
+  const args = ["-w", prefs.get().newWindow ? "new" : "0", "new-tab", "-d", cwd];
   if (command) {
     args.push("powershell.exe", "-NoExit", "-Command", command);
   }
