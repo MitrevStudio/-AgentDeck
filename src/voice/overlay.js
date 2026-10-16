@@ -10,6 +10,13 @@ const { BrowserWindow, ipcMain, screen } = require("electron");
 const { EventEmitter } = require("node:events");
 const path = require("node:path");
 const { t } = require("../i18n");
+const { createLog } = require("./log-file");
+
+// userData/logs/overlay.log: shows, the pill boxes reported, hover changes and button actions - to tell, when a
+// button "does nothing", whether the pointer was never seen over the pill or the click never arrived.
+const writeLog = createLog("overlay.log");
+const diag = (...parts) => writeLog([new Date().toISOString(), ...parts].join(" "));
+const fmtBox = b => (b ? `${Math.round(b.x)},${Math.round(b.y)} ${Math.round(b.width)}x${Math.round(b.height)}` : "none");
 
 const WIDTH = 380;          // transparent canvas around the pill: room for the error card and its shadow
 const HEIGHT = 236;         // the card with its whole text (shown while the pointer rests on it), or the key hints
@@ -18,6 +25,7 @@ const BOTTOM_GAP = 24;      // the pill's bottom edge sits this far above the wo
 const REVEAL_TIMEOUT_MS = 250; // show anyway if the page has not confirmed the new state by then
 const EXIT_MS = 240;        // the page's exit animation; the window is hidden after it
 const HOVER_POLL_MS = 40;   // cursor checks while the panel is up
+const HOVER_MARGIN = 4;     // px around the pill that still count as over it
 const NOTICE_MS = 3500;
 const SUCCESS_MS = 1200;
 // confirm and choices: a voice command's card (command-runner.js), which goes away only when the command does.
@@ -61,19 +69,21 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
   // system-wide low-level mouse hook on the main thread, which Windows silently removes once the thread is busy for a
   // moment (and which delays every mouse move meanwhile) - after that the panel never noticed the pointer again.
   let pill = null; // the pill's box in window coordinates, reported by the page
-  let hovering = false, hoverTimer = null;
-  function setHover(on) {
+  let hovering = false, hoverTimer = null, loggedState = null;
+  function setHover(on, where = "") {
     if (on === hovering) return;
     hovering = on;
     if (alive()) win.setIgnoreMouseEvents(!on);
     send("voice:overlay-hover", on);
     holdAutoHide(on);
+    diag(`hover=${on}`, where);
   }
   function pollHover() {
     if (!visible || !alive() || !pill || !win.isVisible()) return setHover(false);
     const p = screen.getCursorScreenPoint(), b = win.getBounds();
-    const x = p.x - b.x, y = p.y - b.y;
-    setHover(x >= pill.x && x < pill.x + pill.width && y >= pill.y && y < pill.y + pill.height);
+    const x = p.x - b.x, y = p.y - b.y, m = HOVER_MARGIN;
+    const inside = x >= pill.x - m && x < pill.x + pill.width + m && y >= pill.y - m && y < pill.y + pill.height + m;
+    setHover(inside, `cursor=${p.x},${p.y} win=${fmtBox(b)} pill=${fmtBox(pill)}`);
   }
   function watchHover(on) {
     clearInterval(hoverTimer);
@@ -154,6 +164,7 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
       }
     }
     send("voice:overlay-state", { seq: id, state: next, data });
+    if (state !== loggedState) { loggedState = state; diag(`show ${next}`); }
     if (!hoverTimer) watchHover(true);
     autoHide = null;
     if (AUTO_HIDE[next]) armAutoHide(Number(d.durationMs) > 0 ? Number(d.durationMs) : AUTO_HIDE[next]);
@@ -191,6 +202,8 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
     state = null;
     data = {};
     clickThrough();
+    loggedState = null;
+    diag("hide");
     send("voice:overlay-state", { seq: ++seq, state: null, data: {} });
     emitter.emit("hidden");
     // The page plays its exit animation first; a show() in the meantime keeps the window.
@@ -223,6 +236,7 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
 
   function onActionMsg(e, type, arg) {
     if (!isOurs(e)) return;
+    diag(`action ${type}`);
     const ev = { type };
     if (type === "retry") ev.jobId = arg ?? data.jobId ?? null;
     if (type === "speed") { ev.speed = Number(arg); data.speed = ev.speed; }
@@ -239,6 +253,7 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
     if (!isOurs(e)) return;
     const ok = box && ["x", "y", "width", "height"].every(k => Number.isFinite(box[k]));
     pill = ok ? { x: box.x, y: box.y, width: box.width, height: box.height } : null;
+    diag(`pill ${fmtBox(pill)} state=${state || "-"}`);
     pollHover();
   }
 

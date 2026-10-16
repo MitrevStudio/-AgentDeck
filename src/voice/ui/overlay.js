@@ -529,15 +529,23 @@ function setInteractive(on) {
   if (state === "confirm") { pauseCountdown(on); api.action("hold", on); }
 }
 api.onHover(on => setInteractive(Boolean(on) && Boolean(state) && !hidden));
+// The layout box from offsets: unlike a bounding rect it leaves out the stage's enter animation (scaled down and
+// shifted, .34 s), which would otherwise be what main hit-tests against for as long as the panel stays.
+function layoutBox(el) {
+  let x = 0, y = 0;
+  for (let n = el; n; n = n.offsetParent) { x += n.offsetLeft; y += n.offsetTop; }
+  return { x, y, width: el.offsetWidth, height: el.offsetHeight };
+}
 let reportedPill = "";
 function reportPill() {
-  const r = state && !hidden ? pill.getBoundingClientRect() : null;
-  const box = r ? { x: r.left, y: r.top, width: r.width, height: r.height } : null;
+  const box = state && !hidden ? layoutBox(pill) : null;
   const key = JSON.stringify(box);
   if (key !== reportedPill) { reportedPill = key; api.pill(box); }
 }
 new ResizeObserver(reportPill).observe(pill);
-pill.addEventListener("transitionend", e => { if (e.target === pill) reportPill(); });
+// Size morphs and the stage's enter/exit: whatever moved, the box is taken again once it has settled.
+document.addEventListener("transitionend", reportPill);
+addEventListener("resize", reportPill);
 
 // ---- read-aloud player ------------------------------------------------------------------------------------------
 let player = null;

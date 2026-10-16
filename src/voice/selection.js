@@ -11,11 +11,11 @@
 // The capture runs on a worker thread of its own, as VoiceTray gave it its own thread: reading a format the source
 // application renders on demand (a large Excel range) takes as long as that application needs - seconds, or for
 // ever if it hangs - and the app must stay responsive meanwhile.
-const fs = require("node:fs");
 const path = require("node:path");
 const { Worker } = require("node:worker_threads");
 const w = require("./win32");
 const { sleep } = require("./util");
+const { createLog } = require("./log-file");
 const i18n = require("../i18n");
 const { CF } = w;
 
@@ -238,8 +238,6 @@ async function clipboardText(maxChars) {
 }
 
 // userData/logs/selection.log: one line per capture, how it went - never what was selected.
-const LOG_MAX_BYTES = 200 * 1024;
-let logFile = null, logging = Promise.resolve();
 function logCapture(target, uia, r, totalMs) {
   const d = r.diag || {};
   const ms = v => (v == null ? "-" : `${v}ms`);
@@ -257,16 +255,7 @@ function logClipboardRead({ via, chars, ageMs }) {
   writeLog([new Date().toISOString(), "method=clipboard", `via=${via}`, `chars=${chars}`,
     `age=${ageMs == null ? "-" : `${Math.round(ageMs / 1000)}s`}`].join(" "));
 }
-function writeLog(line) {
-  logging = logging.then(() => appendLog(line)).catch(e => console.error("Writing selection.log failed:", e.message));
-}
-async function appendLog(line) {
-  logFile ??= path.join(require("electron").app.getPath("userData"), "logs", "selection.log");
-  await fs.promises.mkdir(path.dirname(logFile), { recursive: true });
-  const size = await fs.promises.stat(logFile).then(s => s.size, () => 0);
-  if (size > LOG_MAX_BYTES) await fs.promises.rename(logFile, `${logFile}.1`);
-  await fs.promises.appendFile(logFile, line + "\n");
-}
+const writeLog = createLog("selection.log");
 
 // Starts the thread - and the terminal helper - ahead of the first capture; dispose() ends the thread.
 const warmUp = () => { ensureWorker(); terminalFocus().keepWarm(); };
