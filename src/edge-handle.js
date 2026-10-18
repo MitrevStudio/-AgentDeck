@@ -10,6 +10,7 @@ const { BrowserWindow, screen, ipcMain } = require("electron");
 const path = require("node:path");
 const { t } = require("./i18n");
 const desktop = require("./desktop");
+const { acceptClicks } = require("./window-clicks");
 
 const WIDTH = 160;
 const HEIGHT = 14;              // the tab's height in handle.css (--hd-h)
@@ -29,6 +30,7 @@ function createEdgeHandle({ shown, position, savePosition, onIntent, onClick, on
   });
   // The menu's level: it stays reachable over other always-on-top windows, and above the open menu (raise()).
   win.setAlwaysOnTop(true, "pop-up-menu");
+  acceptClicks(win); // or Windows throws away every press on the tab: no click, no drag (window-clicks.js)
   win.loadFile(path.join(__dirname, "handle.html"));
 
   // open: the menu is out; drag: {offset} while the handle is being dragged; intent: the pending hover open.

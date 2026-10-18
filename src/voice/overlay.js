@@ -12,6 +12,7 @@ const { EventEmitter } = require("node:events");
 const path = require("node:path");
 const { t } = require("../i18n");
 const { createLog } = require("./log-file");
+const { acceptClicks } = require("../window-clicks");
 
 // userData/logs/overlay.log: shows and where, the shapes reported, hover changes and button actions - to tell, when a
 // button "does nothing", whether the window never got the pointer (hover is the page's own) or the click never arrived.
@@ -85,6 +86,8 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
     });
     w.setAlwaysOnTop(true, "screen-saver");
     w.setShape(NO_SHAPE);
+    // Without this Windows throws every press on the panel away (it never takes focus; see window-clicks.js).
+    if (!acceptClicks(w)) diag("clicks unavailable");
     // A crashed page, or one that never loaded, takes its window along; the next show() or reading makes a new one.
     const lost = () => {
       if (win === w) { win = null; loaded = null; visible = false; shape = null; }
