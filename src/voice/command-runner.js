@@ -124,7 +124,7 @@ function createCommandRunner(deps) {
     c.agents = Array.isArray(data?.agents) ? data.agents : null;
     const candidates = cmd.buildCandidates({ ...data, live }, transcript);
     const answer = await deps.generate({ system: cmd.INSTRUCTIONS, text: cmd.intentInput(transcript, candidates, now()), provider: s.provider,
-      model: cmd.COMMAND_MODELS[s.provider], temperature: 0, signal, timeoutMs: cmd.INTENT_TIMEOUT_MS });
+      model: cmd.COMMAND_MODELS[s.provider], temperature: 0, schema: cmd.intentSchema(candidates), signal, timeoutMs: cmd.INTENT_TIMEOUT_MS });
     if (cur !== c) return;
     c.intent = cmd.parseIntent(answer);
     if (!c.intent) console.error("The command answer was not usable JSON; searching instead:", String(answer).slice(0, 200));

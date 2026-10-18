@@ -6,16 +6,21 @@
 // offered as up to three choices. Before anything runs, a card on the voice panel says what will happen and counts
 // down (Esc or Cancel stops it). Every command is kept in History.
 //
-// The pure part (candidate lists, instructions, reading and checking the answer, the fallback search, carrying out
-// a plan) is exported for tests; createCommandRunner() is a command's life on screen.
+// The answer is structured output: a JSON Schema built from the lists lets the model name only ids that are in them
+// (or none). It is still read and checked as if it were free text, since a provider may not hold to the schema.
+//
+// The pure part (candidate lists, instructions and schema, reading and checking the answer, the fallback search,
+// carrying out a plan) is exported for tests; createCommandRunner() is a command's life on screen.
 const { t } = require("../i18n");
 const { isObj, flat, normPath } = require("./util");
 
 const ACTIONS = ["new_session", "open_session", "open_project", "unknown"];
 const AGENTS = ["Claude", "OpenCode", "Codex"];
-// The text model that understands a command. Gemini's flash-lite (the rewrite model) picks some session even when none
-// is about what was said; 3.5 flash says "none" and still answers in about a second.
-const COMMAND_MODELS = { Gemini: "gemini-3.5-flash", OpenAI: "gpt-4.1-mini" };
+// The text model that understands a command. Measured on 35 made-up commands, three times each (Bulgarian and
+// English, with sessions close to but not about what was said): 3.5 flash-lite with the schema got all of them right
+// in 0.7 s, where 3.5 flash takes 1.1 s; 3.1 flash-lite (the rewrite model) opened a wrong session where none was
+// about what was said.
+const COMMAND_MODELS = { Gemini: "gemini-3.5-flash-lite", OpenAI: "gpt-4.1-mini" };
 // What the model is shown is sent to the provider: names, folder names (never a whole path), session titles and
 // first prompts - as few as still let it pick the right one.
 const MAX_PROJECTS = 100;
@@ -136,7 +141,7 @@ const INSTRUCTIONS = [
   "- open_project: only look at a project (\"open project X\", \"покажи проекта X\"), with no session to start or resume.",
   "- unknown: anything else, or nothing usable.",
   "- Ids are copied exactly from the lists and never made up. When the project or session is not in the lists, use null.",
-  "- alternatives: only when the command fits two or three items about equally well, the ids of the others (at most 2), best first; otherwise []."
+  "- alternatives: only when the command fits two or three items about equally well (\"the session about the tests\" with several sessions about tests), the ids of the others (at most 2), best first; otherwise []. An item that is only in the same project, or about something else, is not an alternative."
 ].join("\n");
 
 function ago(ms, now) {
@@ -150,6 +155,27 @@ function ago(ms, now) {
 const liveText = l => (!l ? "-" : l.status === "busy" ? "running, working" : l.status === "idle" ? "running, waiting for input" : "running");
 // The transcript cannot close its own tag early.
 const wrap = text => `<command>\n${String(text).replace(/<\/?command>/gi, m => m.replace("<", "< "))}\n</command>`;
+
+// The answer's shape for these lists: the ids are enums, so the model can choose from the lists or say none, and
+// never make one up. Every property is required and no other is allowed (what OpenAI's strict mode asks for);
+// alternatives are capped when the answer is read.
+function intentSchema(c) {
+  const oneOf = values => (values.length ? { anyOf: [{ type: "string", enum: values }, { type: "null" }] } : { type: "null" });
+  const ids = [...c.projects, ...c.sessions].map(x => x.id);
+  return {
+    type: "object",
+    properties: {
+      action: { type: "string", enum: ACTIONS },
+      agent: oneOf(AGENTS),
+      projectId: oneOf(c.projects.map(p => p.id)),
+      sessionKey: oneOf(c.sessions.map(s => s.id)),
+      task: { type: ["string", "null"] },
+      alternatives: { type: "array", items: ids.length ? { type: "string", enum: ids } : { type: "string" } }
+    },
+    required: ["action", "agent", "projectId", "sessionKey", "task", "alternatives"],
+    additionalProperties: false
+  };
+}
 
 function intentInput(transcript, c, now = Date.now()) {
   const lines = ["Projects (id | name | folder):"];
@@ -280,6 +306,6 @@ async function execute(plan, { launchNew, launchAgent, focus, showProject }) {
 }
 
 module.exports = {
-  buildCandidates, intentInput, parseIntent, resolveIntent, rankSessions, rankProjects, words, describe, execute,
+  buildCandidates, intentInput, intentSchema, parseIntent, resolveIntent, rankSessions, rankProjects, words, describe, execute,
   INSTRUCTIONS, ACTIONS, AGENTS, COMMAND_MODELS, LIMIT_SECONDS, INTENT_TIMEOUT_MS, CHOICE_TIMEOUT_MS
 };

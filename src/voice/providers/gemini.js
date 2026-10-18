@@ -124,13 +124,16 @@ async function transcribe({ wavPath, model, language, vocabulary = [], apiKey, s
 // and every second of it is a second before anything is pasted. Pro models cannot turn it off and are left alone.
 const thinkingOff = model => (!/flash/i.test(model) ? undefined : /^gemini-2\./.test(model) ? { thinkingBudget: 0 } : { thinkingLevel: "minimal" });
 
-// One answer from a text model: `system` holds the instructions, `text` the material. Empty when the model gave no
-// text (blocked, or cut off before any); the caller decides what that means.
-async function generateText({ model, system, text, temperature = 0.2, apiKey, signal }) {
+// One answer from a text model: `system` holds the instructions, `text` the material; with a `schema` (JSON Schema)
+// the answer is JSON that follows it. Empty when the model gave no text (blocked, or cut off before any); the caller
+// decides what that means.
+async function generateText({ model, system, text, temperature = 0.2, schema, apiKey, signal }) {
+  const generationConfig = { temperature, thinkingConfig: thinkingOff(model) };
+  if (schema) Object.assign(generationConfig, { responseMimeType: "application/json", responseJsonSchema: schema });
   const body = {
     systemInstruction: { parts: [{ text: system }] },
     contents: [{ role: "user", parts: [{ text }] }],
-    generationConfig: { temperature, thinkingConfig: thinkingOff(model) }
+    generationConfig
   };
   try {
     const root = await postJson(GENERATE_URL(model), jsonHeaders(apiKey), body, signal);

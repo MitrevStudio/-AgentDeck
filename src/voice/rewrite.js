@@ -2,8 +2,8 @@
 // with a fast text model on the user's own provider and key. Failures are VoiceErrors like a transcription's (the
 // queue then delivers the transcript as it was, so a dictation is never lost to a rewrite).
 //
-// generate() is the general part: one instruction + one piece of text in, the model's text out, with the timeout and
-// the error classification every voice request gets. Voice commands build on it.
+// generate() is the general part: one instruction + one piece of text in, the model's text out (or JSON that follows
+// a schema), with the timeout and the error classification every voice request gets. Voice commands build on it.
 const { classify, configuration, VoiceError } = require("./errors");
 const { REWRITE_MODELS } = require("./catalog");
 const { MODES } = require("./dictation-options");
@@ -19,9 +19,10 @@ const timeoutFor = text => Math.min(15_000 + String(text).length * 20, 120_000);
 const settings = () => require("./settings");
 
 // One answer from the provider's text model. provider (default: the dictation provider), model (default: its rewrite
-// model), temperature, signal (abort = a "Cancelled" VoiceError), timeoutMs (default: by length), getApiKey (default:
-// the saved keys). Resolves with the trimmed text, "" when the model gave none.
-async function generate({ system, text, provider, model, temperature = 0.2, signal, timeoutMs, getApiKey } = {}) {
+// model), temperature, schema (a JSON Schema the answer must follow: structured output), signal (abort = a "Cancelled"
+// VoiceError), timeoutMs (default: by length), getApiKey (default: the saved keys). Resolves with the trimmed text, ""
+// when the model gave none.
+async function generate({ system, text, provider, model, temperature = 0.2, schema, signal, timeoutMs, getApiKey } = {}) {
   const name = providerName(provider || settings().load().provider);
   if (!name) throw configuration(t("voice.errors.unknownProvider", { provider }));
   const apiKey = String((await (getApiKey || settings().getApiKey)(name)) || "").trim();
@@ -29,7 +30,7 @@ async function generate({ system, text, provider, model, temperature = 0.2, sign
   const timeout = AbortSignal.timeout(timeoutMs ?? timeoutFor(text));
   const attempt = signal ? AbortSignal.any([signal, timeout]) : timeout;
   try {
-    const out = await PROVIDERS[name].generateText({ model: model || REWRITE_MODELS[name], system, text: String(text ?? ""), temperature, apiKey, signal: attempt });
+    const out = await PROVIDERS[name].generateText({ model: model || REWRITE_MODELS[name], system, text: String(text ?? ""), temperature, schema, apiKey, signal: attempt });
     return String(out ?? "").trim();
   } catch (error) {
     throw classify({ error, provider: name, signal });

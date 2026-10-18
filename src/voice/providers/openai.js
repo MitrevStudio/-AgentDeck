@@ -57,11 +57,15 @@ async function transcribe({ wavPath, model, language, vocabulary = [], apiKey, s
   }
 }
 
-// One answer from a chat model: `system` holds the instructions, `text` the material. Empty when the model gave no
-// text; the caller decides what that means.
-async function generateText({ model, system, text, temperature = 0.2, apiKey, signal }) {
+// One answer from a chat model: `system` holds the instructions, `text` the material; with a `schema` (JSON Schema,
+// strict: every property required, no others) the answer is JSON that follows it. Empty when the model gave no text;
+// the caller decides what that means.
+async function generateText({ model, system, text, temperature = 0.2, schema, apiKey, signal }) {
   try {
-    const body = JSON.stringify({ model, temperature, messages: [{ role: "system", content: system }, { role: "user", content: text }] });
+    const body = JSON.stringify({
+      model, temperature, messages: [{ role: "system", content: system }, { role: "user", content: text }],
+      ...(schema && { response_format: { type: "json_schema", json_schema: { name: "answer", strict: true, schema } } })
+    });
     const res = await network.fetch(CHAT_URL, {
       method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "content-type": "application/json" }, body, signal
     });
