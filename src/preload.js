@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld("manager", {
   copyText: text => ipcRenderer.invoke("clipboard:write", text),
   getLive: () => ipcRenderer.invoke("live:get"),
   getUsage: () => ipcRenderer.invoke("usage:get"),
+  getLimits: () => ipcRenderer.invoke("limits:get"),
+  onLimitsChanged: cb => ipcRenderer.on("limits:changed", (_e, l) => cb(l)),
   refreshUsage: () => ipcRenderer.invoke("usage:refresh"),
   onUsageChanged: cb => ipcRenderer.on("usage:changed", (_e, u) => cb(u)),
   getPreview: (agent, id) => ipcRenderer.invoke("session:preview", agent, id),

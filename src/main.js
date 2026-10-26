@@ -23,6 +23,8 @@ const prefs = require("./prefs");
 const network = require("./network");
 const updater = require("./updater");
 const usage = require("./usage");
+const { createLimits } = require("./limits");
+const limits = createLimits({ fetch: (url, init) => network.fetch(url, init), onChange: l => broadcast("limits:changed", l) });
 const { createNotifier } = require("./notify");
 let notifier = null;
 const sessionPreview = require("./session-preview");
@@ -489,6 +491,7 @@ function registerIpc() {
   handle("live:get", () => liveSessions());
   // Tokens and API-equivalent cost (usage.js): the last result at once, or a fresh pass over the transcripts.
   handle("usage:get", () => usage.get());
+  handle("limits:get", () => limits.refresh());
   // The figures themselves come as "usage:changed" when they changed; the answer only says when they were checked.
   handle("usage:refresh", async () => { const u = await usage.refresh(); return u && { at: u.at, stats: u.stats, version: u.version }; });
   // A session's last messages and a few facts about it (session-preview.js). The transcript is the one the scan
@@ -582,6 +585,7 @@ if (!app.requestSingleInstanceLock()) {
     tray.on("balloon-click", () => { const click = balloonClick; balloonClick = null; click?.(); });
     updater.on("changed", onUpdateChanged);
     updater.start({ auto: prefs.get().autoUpdate });
+    limits.start();
     notifier = createNotifier({
       liveSessions, focus: focusSession, balloon, t, tn, onChange: buildTrayMenu,
       quiet: () => Boolean(bar?.isVisible()),

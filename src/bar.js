@@ -360,6 +360,7 @@ window.manager.onBarEvent(ev => {
     $("shell").classList.add("in");
     reveal(ev.origin, ev.motion);
     pollLive();
+    window.limitsUi?.refresh();
     if (ev.mode === "hotkey") q.focus();
   }
   if (ev.type === "hide") { st.shown = false; reveal(null); $("shell").classList.remove("in"); q.blur(); }
