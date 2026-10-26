@@ -16,7 +16,7 @@ function livePill(s) {
 }
 
 function prepare() {
-  data = buildData(raw, live);
+  data = conceal(buildData(raw, live), readHidden());
   if (ui.selected && !data.projects.some(p => p.n === ui.selected)) ui.selected = "";
 }
 
@@ -205,6 +205,7 @@ async function load() {
   }
 }
 
+window.addEventListener("storage", e => { if (e.key === HIDDEN_KEY && ui.loaded) { prepare(); render(); } });
 function applyRegistry(registry) { raw.registry = registry; prepare(); render(); }
 
 // Returns true when the set of running sessions or any of their states changed.

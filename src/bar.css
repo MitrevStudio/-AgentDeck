@@ -123,3 +123,58 @@ kbd { font-size: 10.5px; border-bottom-width: 1px; border-radius: 4px; padding: 
 .keys kbd + kbd { margin-left: -2px; }
 .keys kbd:not(:first-child) { margin-left: 8px; }
 .keys kbd + kbd:not(:first-child) { margin-left: 0; }
+
+/* Hidden items: dimmed while revealed; the top-bar eye is tinted while they are left out. */
+.tile.concealed, .row.concealed { opacity: .45; }
+.tile.concealed.sel, .row.concealed.sel { opacity: .7; }
+.icon-btn.hide-toggle.on, .icon-btn.hide-tag.on { color: var(--accent); background: var(--accent-weak); border-color: var(--accent-line); }
+
+/* Session delete: the confirm under the row, and its button. */
+.confirm.danger { background: var(--danger-bg); color: var(--danger-text); }
+.btn.danger { border-color: var(--danger-line); color: var(--danger); }
+.ract .icon-btn.danger:hover { color: var(--danger); border-color: var(--danger-line); }
+/* Same right edge, padding and gap as the row, so the buttons line up under .ract's last two. */
+.confirm.del { flex-wrap: nowrap; gap: 2px; margin: 2px 0 8px 30px; padding: 6px 10px 6px 12px; }
+.confirm.del .msg { flex: 1; min-width: 0; margin-right: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.confirm.del .btn, .confirm.del .icon-btn { flex: none; height: 32px; }
+
+/* Plan limits: percentage, a bar of the use with the time gone in the window marked on it. */
+#limits { display: flex; gap: 6px; }
+#limits .lim { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: var(--r-pill); border: 1px solid var(--line-2); font-size: 12.5px; font-weight: 600; white-space: nowrap; cursor: default; }
+#limits .lim-k { color: var(--muted); font-weight: 500; }
+#limits .lim-bar { position: relative; width: 38px; height: 5px; border-radius: 3px; background: var(--line-2); }
+#limits .lim-bar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: var(--accent); }
+#limits .lim-bar b { position: absolute; top: -2px; width: 2px; height: 9px; margin-left: -1px; border-radius: 1px; background: var(--text); opacity: .55; }
+#limits .lim.warn { border-color: color-mix(in srgb, var(--wait) 55%, transparent); color: var(--wait); }
+#limits .lim.warn .lim-bar i { background: var(--wait); }
+#limits .lim.danger { border-color: var(--danger-line); color: var(--danger); }
+#limits .lim.danger .lim-bar i { background: var(--danger); }
+#limits .lim.err { color: var(--muted); }
+
+/* A full-text hit: the matching passage under the session's title. */
+.snip { margin-top: 2px; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* The day tile: groups per ticket with their time, the sessions under them, the summary beside them. */
+.mono.special.day { color: var(--wait); }
+.dgroup { margin: 2px 0 10px; }
+.dg-head { display: flex; align-items: baseline; gap: 8px; padding: 6px 10px 3px; font-size: 13.5px; }
+.dg-name { font-weight: 700; }
+.dg-sub { font-size: 12px; color: var(--muted); }
+.dg-time { font-weight: 700; font-variant-numeric: tabular-nums; }
+.drow { display: flex; align-items: center; gap: 11px; min-height: 40px; padding: 5px 10px 5px 18px; border-radius: 10px; cursor: pointer; }
+.drow:hover { background: var(--panel-2); }
+.drow .when { min-width: 52px; font-variant-numeric: tabular-nums; }
+.dsum .pv-title { padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.dsum-text { flex: 1; min-height: 0; overflow: auto; padding: 12px 14px; font-size: 13px; line-height: 1.55; white-space: pre-wrap; user-select: text; }
+.empty.err { color: var(--danger); }
+
+/* The shortcuts panel, under the keyboard button. */
+.kbd-panel { position: absolute; top: 58px; right: 16px; z-index: 30; width: 410px; max-height: calc(100% - 80px); overflow: auto; padding: 10px 14px 12px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line-2); box-shadow: 0 16px 40px rgba(0, 0, 0, .35); }
+.kbd-panel[hidden] { display: none; }
+.kbd-head { display: flex; align-items: center; justify-content: space-between; }
+.kbd-head .icon-btn { width: 28px; height: 28px; }
+.kbd-panel h3 { margin: 10px 0 4px; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.kbd-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 0; font-size: 13px; }
+.kbd-keys { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; color: var(--muted); font-size: 12px; }
+.kbd-keys .plus { color: var(--faint); }
+.kbd-note { margin-top: 10px; font-size: 11.5px; color: var(--muted); }

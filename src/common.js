@@ -28,6 +28,8 @@ const ICONS = {
   pulse: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
   mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  eyeOff: '<path d="M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-2.6 3.5M6.6 6.6A17 17 0 0 0 2 12s3.5 7 10 7a9.6 9.6 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="m3 3 18 18"/>',
   // voice pages
   speaker: '<path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M15.5 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a7.5 7.5 0 0 1 0 11"/>',
   keyboard: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6.5 10h.01M10 10h.01M14 10h.01M17.5 10h.01M8 14h8"/>',
@@ -121,6 +123,34 @@ function leafStart(p) {
 }
 const pathHtml = (p, toks) => `<span class="path">${hl(p, toks, leafStart(p))}</span>`;
 const inProject = (s, p) => s.cwdN === p.n || s.cwdN.startsWith(p.n + "/");
+
+// ---------- hidden items ----------
+// Projects (by normalized path) and sessions (by sessionKey) tagged as hidden, and whether they are revealed. Kept in
+// localStorage, which the edge menu and the manager window share; a change in one reaches the other as "storage".
+const HIDDEN_KEY = "agentdeck.hidden";
+function readHidden() {
+  let h = {};
+  try { h = JSON.parse(localStorage.getItem(HIDDEN_KEY)) || {}; } catch {}
+  return { reveal: h.reveal === true, projects: new Set(h.projects || []), sessions: new Set(h.sessions || []) };
+}
+function writeHidden(h) {
+  try { localStorage.setItem(HIDDEN_KEY, JSON.stringify({ reveal: h.reveal, projects: [...h.projects], sessions: [...h.sessions] })); } catch {}
+}
+// Marks what is hidden (.concealed) and, unless revealed, leaves it out. A session is hidden when tagged itself, or when
+// every project it belongs to is hidden - so a hidden project's sessions do not turn up in search or the live tile.
+function conceal(data, h) {
+  const hid = p => h.projects.has(p.n);
+  for (const p of data.projects) { p.concealed = hid(p); p.total = p.sessions.length; }
+  for (const s of data.sessions) {
+    const owners = data.projects.filter(p => inProject(s, p));
+    s.concealed = h.sessions.has(sessionKey(s)) || (owners.length > 0 && owners.every(hid));
+  }
+  if (h.reveal) return data;
+  return {
+    projects: data.projects.filter(p => !p.concealed).map(p => ({ ...p, sessions: p.sessions.filter(s => !s.concealed) })),
+    sessions: data.sessions.filter(s => !s.concealed)
+  };
+}
 
 // ---------- data ----------
 // Turns the scan result into searchable projects and sessions. `live` maps sessionKey -> live state.

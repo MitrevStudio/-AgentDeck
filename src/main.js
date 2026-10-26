@@ -23,6 +23,14 @@ const prefs = require("./prefs");
 const network = require("./network");
 const updater = require("./updater");
 const usage = require("./usage");
+let answerPopup = null;
+const day = require("./day");
+const fullText = require("./search").createSearch({ dbFile: path.join(app.getPath("userData"), "search.db") });
+const voiceContext = require("./voice-context").createVoiceContext({ liveSessions: (...a) => liveSessions(...a), findTranscript: id => findTranscript(id) });
+const { createLimits } = require("./limits");
+const limits = createLimits({ fetch: (url, init) => network.fetch(url, init), onChange: l => broadcast("limits:changed", l) });
+const { createNotifier } = require("./notify");
+let notifier = null;
 const sessionPreview = require("./session-preview");
 const gitStatus = require("./git-status");
 const autostart = require("./autostart");
@@ -304,6 +312,7 @@ function scan() {
   scanning ??= scanSessions().then(async sessions => {
     // Scan first: it auto-indexes projects into the registry, which must be read afterwards.
     cache = { registry: readRegistry(), sessions, agents: await agentsReady, at: Date.now() };
+    fullText.index(sessions);
     broadcast("data:changed", cache);
     // Transcripts may have grown too, and there may be new folders: their results are broadcast on their own.
     usage.refresh().catch(err => console.error("Usage scan failed:", err.message));
@@ -366,21 +375,29 @@ function balloon(content, { title = t("app.name"), iconType = "info", jobId = nu
 function buildTrayMenu() {
   if (!tray || tray.isDestroyed()) return;
   const v = voice ? voice.trayMenu() : { failures: [], items: [], failureCount: 0 };
-  const failed = v.failureCount;
-  if (badged !== failed > 0) { badged = failed > 0; tray.setImage(makeIcon(32, 2, { badge: badged })); }
-  tray.setToolTip(`${t("app.name")}${hotkey ? ` — ${hotkeyLabel()}` : ""}${failed ? ` · ${tn("tray.failed", failed)}` : ""}`);
+  const failed = v.failureCount, waits = notifier ? notifier.list() : [];
+  if (badged !== (failed > 0 || waits.length > 0)) { badged = failed > 0 || waits.length > 0; tray.setImage(makeIcon(32, 2, { badge: badged })); }
+  const cut = s => (s.length > 60 ? s.slice(0, 59) + "…" : s).replace(/&/g, "&&");
+  const waitItems = waits.length ? [
+    { label: tn("notify.waiting", waits.length), enabled: false },
+    ...waits.slice(0, 8).map(w => ({ label: cut(`${w.title} · ${w.project}`), click: () => notifier.bringUp(w.key) })),
+    { label: t("notify.clear"), click: () => notifier.clear() }
+  ] : [];
+  tray.setToolTip(`${t("app.name")}${hotkey ? ` — ${hotkeyLabel()}` : ""}${failed ? ` · ${tn("tray.failed", failed)}` : ""}${waits.length ? ` · ${tn("notify.waiting", waits.length)}` : ""}`);
   const sep = list => (list.length ? [...list, { type: "separator" }] : []);
   const p = prefs.get();
   const radio = (key, values, label) => values.map(value => ({
     label: label(value), type: "radio", checked: p[key] === value, click: () => prefs.set({ [key]: value })
   }));
   tray.setContextMenu(Menu.buildFromTemplate([
+    ...sep(waitItems),
     ...sep(v.failures),
     { label: t("tray.openMenu"), accelerator: hotkey || undefined, click: () => bar.show("hotkey") },
     { label: t("common.openManager"), click: showManager },
     { type: "separator" },
     ...sep(v.items),
     { label: t("tray.edgeHandle"), type: "checkbox", checked: p.edgeHandle, click: item => prefs.set({ edgeHandle: item.checked }) },
+    { label: t("notify.toggle"), type: "checkbox", checked: notifier ? notifier.enabled() : true, enabled: Boolean(notifier), click: item => notifier?.setEnabled(item.checked) },
     { label: t("tray.language"), submenu: radio("language", Object.keys(LANGUAGES), l => LANGUAGES[l]) },
     { label: t("tray.theme"), submenu: radio("theme", prefs.THEMES, th => t(`theme.${th}`)) },
     { label: t("tray.settings"), enabled: Boolean(voice), click: () => voice?.openSettings() },
@@ -479,6 +496,29 @@ function registerIpc() {
   handle("live:get", () => liveSessions());
   // Tokens and API-equivalent cost (usage.js): the last result at once, or a fresh pass over the transcripts.
   handle("usage:get", () => usage.get());
+  // The shortcuts as set now: the menu's hotkey and the voice ones (labels such as "Ctrl + Shift + Space").
+  handle("app:shortcuts", () => {
+    let v = {};
+    try { v = require("./voice/settings").load() || {}; } catch {}
+    const k = a => (a ? keyLabel(a, " + ") : "");
+    return { menu: hotkeyLabel(), dictate: k(v.hotkeys?.dictate), readAloud: k(v.hotkeys?.readAloud), editSelection: k(v.hotkeys?.editSelection),
+      ask: k(v.hotkeys?.ask), commandHold: Boolean(voice) && v.commands?.enabled !== false && v.commands?.trigger === "hold" };
+  });
+  // One day's work (day.js); the summary leaves out the sessions the menu hides (skip: "Agent:id" keys).
+  const DAY = /^\d{4}-\d{2}-\d{2}$/;
+  const dayReport = async date => {
+    if (!DAY.test(text(date, 10))) throw new Error(t("errors.invalidData"));
+    return day.reportAsync({ date, sessions: (cache ?? await scan()).sessions, projects: readRegistry().projects });
+  };
+  handle("day:get", dayReport);
+  handle("day:summary", async (date, skip) => {
+    const rep = day.exclude(await dayReport(date), Array.isArray(skip) ? skip.filter(k => typeof k === "string") : []);
+    const claude = day.findClaude();
+    if (!claude) throw new Error(t("bar.day.noClaude"));
+    return day.summarize(rep, { claude, language: require("./i18n").language() });
+  });
+  handle("search:text", q => fullText.query(text(q, 500)));
+  handle("limits:get", () => limits.refresh());
   // The figures themselves come as "usage:changed" when they changed; the answer only says when they were checked.
   handle("usage:refresh", async () => { const u = await usage.refresh(); return u && { at: u.at, stats: u.stats, version: u.version }; });
   // A session's last messages and a few facts about it (session-preview.js). The transcript is the one the scan
@@ -489,12 +529,36 @@ function registerIpc() {
       ?? { agent, id, file: agent === "Claude" ? findTranscript(id) : "" };
     return sessionPreview.preview(s, { openCodeDb: OPENCODE_DB });
   });
+  // Deletes a session. A Claude or Codex transcript goes to the Recycle Bin (a Claude session's folder of subagent and
+  // tool-result files with it), only from the agent's own folder; an OpenCode session is deleted by its CLI, for good.
+  // A session open in a terminal is refused. A transcript already gone (Claude Code drops those older than
+  // cleanupPeriodDays, possibly after the last scan) only leaves the list. The windows hear about it as "data:changed".
+  handle("session:delete", async (agent, id) => {
+    if (!SESSION_ID.test(text(id)) || !isAgent(agent)) throw new Error(t("errors.invalidSession"));
+    if ((await liveSessions()).some(l => l.agent === agent && l.id === id)) throw new Error(t("errors.sessionRunning"));
+    if (agent === "OpenCode") {
+      if (!/^[\w-]+$/.test(id)) throw new Error(t("errors.invalidSession"));
+      await runOpenCode(["session", "delete", id], USER, 15000);
+    } else {
+      const root = agent === "Claude" ? CLAUDE_DIR : CODEX_DIR;
+      const s = cache?.sessions.find(x => x.agent === agent && x.id === id);
+      const file = s?.file || (agent === "Claude" ? findTranscript(id) : "");
+      const rel = file ? path.relative(root, file) : "";
+      if (file && (!rel || rel.startsWith("..") || path.isAbsolute(rel) || !file.endsWith(".jsonl"))) throw new Error(t("errors.sessionNoFile"));
+      if (file && fs.existsSync(file)) await shell.trashItem(file);
+      const extra = file ? file.slice(0, -".jsonl".length) : "";
+      if (agent === "Claude" && isDir(extra)) await shell.trashItem(extra);
+    }
+    if (cache) { cache = { ...cache, sessions: cache.sessions.filter(x => !(x.agent === agent && x.id === id)) }; broadcast("data:changed", cache); }
+    return true;
+  });
   // Branch and changes of the projects' and sessions' folders (git-status.js); a refresh is answered by "git:changed".
   handle("git:get", () => gitStatus.get());
   handle("git:refresh", () => { gitStatus.refresh().catch(err => console.error("Git status failed:", err.message)); return true; });
   // Brings a running session's own terminal (tab) to the front; pid and folder come from the live registry.
   handle("terminal:focus", (agent, id) => {
     if (!SESSION_ID.test(text(id))) throw new Error(t("errors.invalidSession"));
+    notifier?.seen(agent, id);
     return focusSession({ agent: text(agent), id });
   });
   // A path typed into the menu's search: offer a new session there if it is an existing directory.
@@ -548,6 +612,19 @@ if (!app.requestSingleInstanceLock()) {
     tray.on("balloon-click", () => { const click = balloonClick; balloonClick = null; click?.(); });
     updater.on("changed", onUpdateChanged);
     updater.start({ auto: prefs.get().autoUpdate });
+    limits.start();
+    notifier = createNotifier({
+      liveSessions, focus: focusSession, balloon, t, tn, onChange: buildTrayMenu,
+      quiet: () => Boolean(bar?.isVisible()),
+      file: path.join(app.getPath("userData"), "notify.json"),
+      describe: (agent, id, cwd) => {
+        const s = cache?.sessions.find(x => x.agent === agent && x.id === id);
+        const dir = s?.cwd || cwd || "";
+        const p = dir ? cache?.registry.projects.find(x => norm(x.path) === norm(dir)) : null;
+        return { title: s?.title, project: p?.name || path.basename(dir) };
+      }
+    });
+    notifier.start();
     buildTrayMenu();
 
     // Started with Windows: the tray and the edge menu only, until the user asks for the window.
@@ -564,13 +641,15 @@ if (!app.requestSingleInstanceLock()) {
       active: () => Boolean(bar?.isVisible() || (managerWin && !managerWin.isDestroyed() && managerWin.isVisible() && !managerWin.isMinimized()))
     });
     scan().catch(err => console.error("Initial scan failed:", err.message));
+    answerPopup = require("./answer-popup").createAnswerPopup({ preload: PRELOAD, background: prefs.background, copy: async s => clipboard.writeText(s), icon: makeIcon(64) });
+    voiceContext.start();
     // Started once the windows are up: the first run copies VoiceTray's history first, and a voice part that cannot
     // start (native module, broken data) must not take the session manager down with it.
     voiceStarting = Promise.resolve()
       .then(() => require("./voice/controller").initVoice({
-        balloon, onTrayChanged: buildTrayMenu, icon: makeIcon(64), prefs,
+        balloon, onTrayChanged: buildTrayMenu, icon: makeIcon(64), prefs, showAnswer: a => answerPopup?.show(a),
         // The dictionary may include the projects' names.
-        projectNames: () => readRegistry().projects.map(p => p.name),
+        projectNames: () => [...readRegistry().projects.map(p => p.name), ...voiceContext.terms()],
         general: { set: patch => prefs.set(patch), hotkey: () => ({ current: hotkeyLabel(), candidates: HOTKEYS.map(k => keyLabel(k, " + ")) }), updates: updater, network,
           autostart },
         // Voice commands open sessions with the menu's own launchers; a project is shown in the menu itself.

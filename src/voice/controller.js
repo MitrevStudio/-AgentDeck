@@ -53,7 +53,7 @@ function previewOf(text) {
 // window's General section) come from main; projectNames() lists AgentDeck's projects, which the dictionary may
 // include. commands: what voice commands need of main (command-runner.js, `app`). Resolves once voice is ready: on
 // the first run that includes copying VoiceTray's history, which the rest of the app does not wait for.
-async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, prefs, general, projectNames = () => [], commands: app = null } = {}) {
+async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, prefs, general, projectNames = () => [], commands: app = null, showAnswer = null } = {}) {
   // Startup order matters: the import copies VoiceTray's records before recovery re-points their audio paths.
   settings.init();
   store.init();
@@ -80,7 +80,7 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
 
   // "Copied, press Ctrl+V" goes on the panel when it was watching that dictation, otherwise into a balloon - the
   // choice VoiceTray made between its card and a balloon.
-  const notify = n => { if (!(n.type === "clipboard" && n.job?.Id === toldOnPanel)) balloon(n.message, { iconType: "info" }); };
+  const notify = n => { if (!(n.type === "clipboard" && (n.job?.Id === toldOnPanel || n.job?.Ask))) balloon(n.message, { iconType: "info" }); };
   const projects = () => { try { return projectNames() || []; } catch { return []; } };
   const terms = () => vocabulary(settings.load().dictionary, projects());
   const q = createQueue({ notify, vocabulary: terms });
@@ -128,14 +128,14 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
   }
 
   // ---------- hotkeys ----------
-  const releaseHotkeys = () => { hotkeys.unregister("dictate"); hotkeys.unregister("readAloud"); };
+  const releaseHotkeys = () => { hotkeys.unregister("dictate"); hotkeys.unregister("readAloud"); hotkeys.unregister("ask"); hotkeys.unregister("editSelection"); };
 
   function registerHotkeys(s = settings.load()) {
     // Both released first, so swapping the two combinations does not collide with ourselves.
     releaseHotkeys();
     registered = {};
     const errors = {};
-    for (const [id, onPress] of [["dictate", onDictateKey], ["readAloud", onReadAloudKey]]) {
+    for (const [id, onPress] of [["dictate", onDictateKey], ["readAloud", onReadAloudKey], ["ask", onAskKey], ["editSelection", onEditKey]]) {
       const accel = s.hotkeys[id];
       if (hotkeys.register(id, accel, onPress)) registered[id] = accel;
       else errors[id] = win32.parseAccelerator(accel) ? t("voice.errors.hotkeyTaken", { key: keyLabel(accel) }) : t("voice.errors.hotkeyInvalid", { key: accel });
@@ -217,7 +217,7 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
     });
   }
 
-  async function startRecording(target) {
+  async function startRecording(target, extra = {}) {
     // Recording wins: left playing, the microphone would pick up the reading and put it into the transcript.
     capturing = null;
     if (tts.isActive()) tts.stop();
@@ -225,15 +225,15 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
     const providerCap = maxRecordingMinutesFor(s.provider);
     const r = rec = {
       // Transcribed with what is set now: the length cap below is this provider's, whatever is chosen meanwhile.
-      id: store.newId(), target, recordedWith: jobSettings(s), mode: s.dictationMode, stopping: false,
+      id: store.newId(), target, recordedWith: jobSettings(s), mode: s.dictationMode, stopping: false, editSource: extra.editSource, ask: extra.ask === true,
       capMinutes: Math.min(s.maxRecordingMinutes, providerCap), capIsProvider: providerCap < s.maxRecordingMinutes
     };
     // Nothing may be typed into the window the user is about to dictate into.
     q.setRecording(true);
     hotkeys.register("cancel", "Escape", cancelRecording);
     freshPanel("listening", {
-      hotkey: keyLabel(registered.dictate), cancelKey: "Esc", limitSeconds: r.capMinutes * 60, mode: r.mode,
-      hint: registered.dictate ? undefined : t("voice.overlay.hintNoHotkey")
+      hotkey: keyLabel(r.ask ? registered.ask : r.editSource !== undefined ? registered.editSelection : registered.dictate), cancelKey: "Esc", limitSeconds: r.capMinutes * 60, mode: r.mode,
+      hint: r.ask ? t("voice.ask.hint") : r.editSource !== undefined ? t("voice.edit.hint") : registered.dictate ? undefined : t("voice.overlay.hintNoHotkey")
     }, r.id);
     trayChanged();
     try {
@@ -305,7 +305,7 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
     if (owner === r.id && overlay.state === "listening") overlay.show("transcribing", { provider: r.recordedWith.Provider, mode: r.mode });
     q.enqueue(r.id, {
       deliverTo: r.target, durationSeconds: result.durationMs / 1000, audioBytes: result.bytes + HEADER_BYTES,
-      recordedWith: { ...r.recordedWith, Mode: r.mode }
+      recordedWith: { ...r.recordedWith, Mode: r.mode, ...(r.editSource !== undefined ? { EditSource: r.editSource } : {}), ...(r.ask ? { Ask: true } : {}) }
     });
   }
 
@@ -317,6 +317,9 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
       if (!busy() && !(owner === id && overlay.state === "transcribing")) panel("transcribing", { provider: job.Provider, mode: job.Mode }, id);
     } else if (type === "rewriting") {
       if (owner === id && overlay.state === "transcribing") overlay.update({ rewriting: job?.Mode });
+    } else if (type === "completed" && job?.Ask) {
+      if (owner === id) closePanel();
+      showAnswer?.({ question: job.RawText || "", answer: job.ResultText || "", copied: outcome !== "Failed" });
     } else if (type === "completed" && owner === id && overlay.state === "transcribing") {
       // A brief "done" on the panel that was waiting for this dictation; it goes away by itself. A rewrite that
       // failed says so quietly here (and in History): the transcript went in as it was.
@@ -336,6 +339,56 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
       else panel("error", { jobId: id, title, detail, canRetry: true }, id);
     }
   });
+
+  // ---------- voice question ----------
+  // The question key records a question (no window to type into: the answer goes to the clipboard and its own
+  // window); pressed again it ends the recording.
+  function onAskKey() {
+    if (disposed) return;
+    if (rec) {
+      if (rec.ask && !rec.stopping) toggleRecording();
+      else if (!rec.stopping) balloon(keepRecording());
+      return;
+    }
+    if (commands.active || editCapture) return;
+    if (tts.isActive()) tts.stop();
+    const run = startRecording(null, { ask: true });
+    const r = rec;
+    run.catch(e => {
+      console.error("Recording failed:", e);
+      if (r && endRecording(r) && owner === r.id) closePanel();
+    });
+  }
+
+  // ---------- voice edit ----------
+  // The edit key copies the selection of the window in front (as read-aloud does), then records what to do with it;
+  // pressed again it ends the recording. The edited text is pasted over the selection by the queue.
+  let editCapture = null;
+  function onEditKey() {
+    if (disposed) return;
+    if (rec) {
+      if (rec.editSource !== undefined && !rec.stopping) toggleRecording();
+      else if (!rec.stopping) balloon(keepRecording());
+      return;
+    }
+    if (commands.active || editCapture) return;
+    if (tts.isActive()) tts.stop();
+    const target = win32.foreground();
+    const token = editCapture = {};
+    selection.capture(target).catch(e => ({ text: "", failure: "Error", message: e.message })).then(sel => {
+      if (editCapture !== token || disposed) return;
+      editCapture = null;
+      if (rec) return;
+      if (!sel.text?.trim() || sel.failure === "NothingSelected") return readAloudNotice(t("voice.edit.nothing.title"), t("voice.edit.nothing.detail"));
+      if (sel.failure !== "None") return readAloudNotice(...selectionProblem(sel));
+      const run = startRecording(target, { editSource: sel.text });
+      const r = rec;
+      run.catch(e => {
+        console.error("Recording failed:", e);
+        if (r && endRecording(r) && owner === r.id) closePanel();
+      });
+    });
+  }
 
   // ---------- read-aloud ----------
   function onReadAloudKey() {

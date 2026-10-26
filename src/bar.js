@@ -6,9 +6,35 @@ let tiles = [], rows = [];
 let shownDetail = ""; // the list #detail shows: which opening of the menu, tile and query
 // tile: selected tile key; row: highlighted row (-1 = none); confirm: session key awaiting "open again"; dir: typed directory;
 // opened: counts the times the menu came out
-const st = { tile: "", row: -1, confirm: "", dir: "", shown: false, opened: 0 };
+const st = { tile: "", row: -1, confirm: "", del: "", dir: "", shown: false, opened: 0 };
 const q = $("q");
 const liveOf = s => live.get(sessionKey(s));
+// Whole conversations, searched in main's index (search.js): a session whose text matches joins the hits even when
+// its title does not, with the matching passage under its title. Words under three letters are not searched there.
+const fts = { q: "", hits: new Map() };
+let ftsTimer = 0, ftsTicket = 0;
+function ftsSearch(value) {
+  clearTimeout(ftsTimer);
+  const v = value.trim();
+  if (!v.split(/\s+/).some(w => [...w].length >= 3)) { fts.q = ""; fts.hits = new Map(); return; }
+  const ticket = ++ftsTicket;
+  ftsTimer = setTimeout(async () => {
+    let hits = [];
+    try { hits = await window.manager.searchText(v); } catch {}
+    if (ticket !== ftsTicket || q.value.trim() !== v) return;
+    fts.q = v; fts.hits = new Map(hits.map(h => [h.key, h.snippet]));
+    render();
+  }, 220);
+}
+const ftsHit = s => fts.q !== "" && fts.q === q.value.trim() && fts.hits.has(sessionKey(s));
+const found = (s, toks) => matches(s.hay, toks) || ftsHit(s);
+function snipHtml(s, toks) {
+  if (!ftsHit(s) || matches(s.hay, toks)) return "";
+  const text = esc(fts.hits.get(sessionKey(s)).replace(/\s+/g, " ")).replace(/\u0002/g, "<mark>").replace(/\u0003/g, "</mark>");
+  return `<div class="snip" title="${esc(t("bar.search.inText"))}">${text}</div>`;
+}
+let hidden = readHidden();
+const remodel = () => conceal(buildData(raw, live), hidden);
 
 function initials(name) {
   const words = String(name).replace(/([a-z])([A-Z])/g, "$1 $2").split(/[\s\-_.]+/).filter(Boolean);
@@ -25,12 +51,13 @@ const liveFirst = list => [...list.filter(liveOf).sort(byLive), ...list.filter(s
 // ---------- model ----------
 function computeTiles() {
   const toks = tokenize(q.value);
-  const hits = toks.length ? model.sessions.filter(s => matches(s.hay, toks)) : model.sessions;
+  const hits = toks.length ? model.sessions.filter(s => found(s, toks)) : model.sessions;
   const hitSet = new Set(hits);
   const out = [];
   if (toks.length) out.push({ key: "results", kind: "results", label: t("bar.tile.results"), count: hits.length + (st.dir ? 1 : 0) });
   const running = model.sessions.filter(liveOf);
   if (running.length && !toks.length) out.push({ key: "live", kind: "live", label: t("bar.tile.live"), count: running.length });
+  if (!toks.length && window.dayUi?.enabled()) out.push({ key: "day", kind: "day", label: t("bar.tile.day"), count: "" });
   for (const p of model.projects) {
     const inside = toks.length ? p.sessions.filter(s => hitSet.has(s)) : p.sessions;
     if (toks.length && !inside.length && !matches(p.hay, toks)) continue;
@@ -49,8 +76,9 @@ function rowsFor(tile, toks, hits) {
     const dir = st.dir ? [{ type: "dir", path: st.dir }] : [];
     return [...dir, ...liveFirst(hits).slice(0, 150).map(s => ({ type: "session", s, showPath: true }))];
   }
+  if (tile.kind === "day") return [];
   if (tile.kind === "live") return model.sessions.filter(liveOf).sort(byLive).map(s => ({ type: "session", s, showPath: true }));
-  const list = toks.length ? tile.p.sessions.filter(s => matches(s.hay, toks)) : tile.p.sessions;
+  const list = toks.length ? tile.p.sessions.filter(s => found(s, toks)) : tile.p.sessions;
   return liveFirst(list).map(s => ({ type: "session", s, showPath: s.cwdN !== tile.p.n }));
 }
 
@@ -58,21 +86,31 @@ function rowsFor(tile, toks, hits) {
 function render({ strip = true } = {}) {
   const { toks, hits, tiles: list } = computeTiles();
   tiles = list;
-  if (!tiles.some(tile => tile.key === st.tile)) { st.tile = tiles[0]?.key || ""; st.row = q.value ? 0 : -1; }
+  if (!tiles.some(tile => tile.key === st.tile)) { st.tile = (tiles.find(x => x.kind !== "day") || tiles[0])?.key || ""; st.row = q.value ? 0 : -1; }
   const cur = tiles.find(tile => tile.key === st.tile);
   rows = rowsFor(cur, toks, hits);
   if (st.row >= rows.length) st.row = rows.length ? 0 : -1;
   if (strip) renderStrip(toks); else markTiles();
   renderDetail(cur, toks);
   renderLiveSum();
+  renderHiddenToggle();
 }
+// The eye in the top bar: crossed out while the hidden items are left out, open while they are shown (dimmed).
+function renderHiddenToggle() {
+  const el = $("hiddenToggle"), n = hidden.projects.size + hidden.sessions.size;
+  el.classList.toggle("on", !hidden.reveal);
+  el.title = t(hidden.reveal ? "bar.hidden.revealed" : "bar.hidden.concealed", { n });
+  el.innerHTML = icon(hidden.reveal ? "eye" : "eyeOff");
+}
+const hideBtn = (kind, key, on) => `<button class="icon-btn hide-tag ${on ? "on" : ""}" data-act="toggle-hidden" data-kind="${kind}" data-key="${esc(key)}"
+  title="${esc(t(on ? "bar.hidden.untag" : "bar.hidden.tag"))}">${icon(on ? "eyeOff" : "eye")}</button>`;
 
 function tileHtml(tile, toks) {
   const badge = tile.busy ? '<span class="badge"><span class="spinner"></span></span>' : tile.idle ? '<span class="badge"><span class="pulse"></span></span>' : "";
   const mono = tile.kind === "project"
     ? `<span class="mono" style="--h:${hue(tile.p.n)}">${esc(initials(tile.label))}${badge}</span>`
-    : `<span class="mono special ${tile.kind}">${icon(tile.kind === "live" ? "pulse" : "search")}</span>`;
-  return `<button class="tile ${tile.key === st.tile ? "sel" : ""}" data-key="${esc(tile.key)}" title="${esc(tile.kind === "project" ? `${tile.label}\n${tile.p.path}${gitTip(tile.p.path)}` : tile.label)}">
+    : `<span class="mono special ${tile.kind}">${icon(tile.kind === "live" ? "pulse" : tile.kind === "day" ? "clock" : "search")}</span>`;
+  return `<button class="tile ${tile.key === st.tile ? "sel" : ""} ${tile.p?.concealed ? "concealed" : ""}" data-key="${esc(tile.key)}" title="${esc(tile.kind === "project" ? `${tile.label}\n${tile.p.path}${gitTip(tile.p.path)}` : tile.label)}">
     ${mono}<span class="tname">${tile.kind === "project" ? hl(tile.label, toks) : esc(tile.label)}</span><span class="tcount">${tile.count}</span>${tile.kind === "project" ? gitTile(tile.p.path) : ""}</button>`;
 }
 function renderStrip(toks) {
@@ -93,6 +131,7 @@ function newButtons(cwd) {
     `<button class="btn new ${a.toLowerCase()}" data-act="new" data-agent="${a}" data-path="${esc(cwd)}" title="${esc(t("bar.newSession", { agent: a, path: cwd }))}">${icon("plus")}${a}</button>`).join("");
 }
 function renderDetail(tile, toks) {
+  if (tile?.kind === "day") { $("detail").innerHTML = window.dayUi.html(); shownDetail = ""; return; }
   if (!tile) {
     $("detail").innerHTML = `<div class="empty">${esc(t(model.projects.length ? "bar.nothingFound" : "bar.loading"))}</div>`;
     return;
@@ -101,6 +140,8 @@ function renderDetail(tile, toks) {
     ? `<div class="dhead"><span class="mono sm" style="--h:${hue(tile.p.n)}">${esc(initials(tile.label))}</span>
         <div class="dtitle"><div class="dname">${hl(tile.label, toks)}${usageTotal(tile.p.sessions)}${gitLine(tile.p.path)}</div>${pathHtml(tile.p.path, toks)}</div>
         <button class="icon-btn" data-act="copy" data-path="${esc(tile.p.path)}" title="${esc(t("action.copyPath"))}">${icon("copy")}</button>
+        ${hideBtn("project", tile.p.n, hidden.projects.has(tile.p.n))}
+        ${tile.p.total === 0 ? `<button class="icon-btn danger" data-act="remove-project" data-path="${esc(tile.p.path)}" title="${esc(t("action.remove"))}">${icon("trash")}</button>` : ""}
         <div class="dactions">${newButtons(tile.p.path)}
           <button class="btn" data-act="terminal" data-path="${esc(tile.p.path)}">${icon("terminal")}${esc(t("action.terminal"))}</button>
           <button class="btn" data-act="explorer" data-path="${esc(tile.p.path)}">${icon("open")}${esc(t("action.explorer"))}</button></div></div>`
@@ -136,20 +177,27 @@ function rowHtml(r, i, toks) {
     ? `<div class="confirm">${esc(t("bar.confirm.openAgain", { pid: l.pid }))}
         <button class="btn warn" data-act="resume-anyway">${esc(t("action.openAgain"))}</button><button class="btn" data-act="cancel">${esc(t("common.cancel"))}</button></div>`
     : "";
-  return `<div class="row ${i === st.row ? "sel" : ""} ${l ? "is-live" : ""}" data-i="${i}">
+  // One line; "delete" ends right under the row's trash button and "cancel" sits under its play button.
+  const delMsg = t(s.agent === "OpenCode" ? "bar.confirm.deleteForever" : "bar.confirm.delete", { title: s.title });
+  const del = st.del === key
+    ? `<div class="confirm danger del"><span class="msg" title="${esc(delMsg)}">${esc(delMsg)}</span>
+        <button class="btn danger" data-act="delete-yes">${icon("trash")}${esc(t("action.delete"))}</button><button class="icon-btn" data-act="cancel" title="${esc(t("common.cancel"))}">${icon("x")}</button></div>`
+    : "";
+  return `<div class="row ${i === st.row ? "sel" : ""} ${l ? "is-live" : ""} ${s.concealed ? "concealed" : ""}" data-i="${i}">
     <span class="adot ${s.agent.toLowerCase()}" title="${esc(s.agent)}"></span>
-    <div class="rmain"><div class="t" title="${esc(s.title)}">${hl(s.title, toks)}</div>${r.showPath && s.cwd ? pathHtml(s.cwd, toks) : ""}</div>
+    <div class="rmain"><div class="t" title="${esc(s.title)}">${hl(s.title, toks)}</div>${r.showPath && s.cwd ? pathHtml(s.cwd, toks) : ""}${snipHtml(s, toks)}</div>
     ${livePill(l, key)}${usageCost(s)}<span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span>
-    <span class="ract">${s.cwd ? `<button class="icon-btn" data-act="terminal" data-path="${esc(s.cwd)}" title="${esc(t("bar.terminalIn", { path: s.cwd }))}">${icon("terminal")}</button>
+    <span class="ract">${hideBtn("session", key, hidden.sessions.has(key))}${s.cwd ? `<button class="icon-btn" data-act="terminal" data-path="${esc(s.cwd)}" title="${esc(t("bar.terminalIn", { path: s.cwd }))}">${icon("terminal")}</button>
       <button class="icon-btn" data-act="copy" data-path="${esc(s.cwd)}" title="${esc(t("action.copyPath"))}">${icon("copy")}</button>` : ""}
       ${l ? `<button class="icon-btn" data-act="resume" title="${esc(t("bar.alreadyOpen"))}">${icon("play")}</button>
       <button class="icon-btn go" data-act="show-terminal" title="${esc(t("term.showTitle", { pid: l.pid }))}">${icon("raise")}</button>`
-        : `<button class="icon-btn go" data-act="resume" title="${esc(t("action.resume"))}">${icon("play")}</button>`}</span>
-  </div>${confirm}`;
+        : `<button class="icon-btn danger" data-act="delete" title="${esc(t("bar.delete"))}">${icon("trash")}</button>
+      <button class="icon-btn go" data-act="resume" title="${esc(t("action.resume"))}">${icon("play")}</button>`}</span>
+  </div>${confirm}${del}`;
 }
 function renderLiveSum() {
   let busy = 0, idle = 0;
-  for (const l of live.values()) l.status === "busy" ? busy++ : idle++;
+  for (const l of model.sessions.map(liveOf).filter(Boolean)) l.status === "busy" ? busy++ : idle++;
   $("liveSum").innerHTML = busy || idle
     ? `<button class="sum" data-act="show-live" title="${esc(t("bar.showLive"))}">${busy ? `<span class="spinner"></span>${esc(tn("live.count.busy", busy))}` : ""}${busy && idle ? '<span class="sep"></span>' : ""}${idle ? `<span class="pulse"></span>${esc(tn("live.count.idle", idle))}` : ""}</button>`
     : "";
@@ -214,17 +262,38 @@ async function act(name, el) {
       if (s) await launch(() => window.manager.launchAgent(s.agent, s.id, s.cwd));
       return;
     }
-    if (name === "cancel") { st.confirm = ""; return render({ strip: false }); }
+    if (name === "cancel") { st.confirm = ""; st.del = ""; return render({ strip: false }); }
+    if (name === "delete") {
+      const s = rows[Number(el.closest(".row")?.dataset.i)]?.s;
+      if (s) { st.del = sessionKey(s); st.confirm = ""; render({ strip: false }); }
+      return;
+    }
+    if (name === "delete-yes") {
+      const s = rows.find(r => r.s && sessionKey(r.s) === st.del)?.s;
+      st.del = "";
+      if (!s) return render({ strip: false });
+      // Projects this was the last session of leave the list with it (their folders stay).
+      const emptied = model.projects.filter(p => p.total === 1 && p.sessions.includes(s));
+      await window.manager.deleteSession(s.agent, s.id);
+      for (const p of emptied) await window.manager.removeProject(p.path);
+      return toast(t(s.agent === "OpenCode" ? "toast.deletedForever" : "toast.deleted"));
+    }
+    if (name === "remove-project") { await window.manager.removeProject(path); return toast(t("toast.projectRemoved")); }
     if (name === "new") return await launch(() => window.manager.launchNew(el.dataset.agent, path));
     if (name === "terminal") return await launch(() => window.manager.launchFolder(path));
     if (name === "explorer") { const err = await window.manager.openPath(path); if (err) throw new Error(err); return hide(); }
     if (name === "copy") { await window.manager.copyText(path); return toast(t("toast.copied", { path })); }
     if (name === "show-live") { setQuery(""); return selectTile("live"); }
+    if (name === "toggle-hidden") {
+      const set = el.dataset.kind === "project" ? hidden.projects : hidden.sessions;
+      set.has(el.dataset.key) ? set.delete(el.dataset.key) : set.add(el.dataset.key);
+      return applyHidden();
+    }
   } catch (e) { toast(e.message, true); }
 }
 function selectTile(key) {
   if (!key || key === st.tile) return;
-  st.tile = key; st.row = q.value ? 0 : -1; st.confirm = "";
+  st.tile = key; st.row = q.value ? 0 : -1; st.confirm = ""; st.del = "";
   render({ strip: false });
   document.querySelector(`.tile[data-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
@@ -252,18 +321,21 @@ const looksLikePath = v => /^[a-zA-Z]:[\\/]/.test(v) || v.startsWith("\\\\");
 let dirCheck = 0;
 async function setQuery(value) {
   if (q.value !== value) q.value = value;
-  st.confirm = ""; st.row = value ? 0 : -1;
+  st.confirm = ""; st.del = ""; st.row = value ? 0 : -1;
   // Typing pins the menu open in hover mode, so moving the mouse away does not lose the query.
   window.manager.barCommand("pin", Boolean(value));
   const v = value.trim(), ticket = ++dirCheck;
   st.dir = looksLikePath(v) ? await window.manager.isDir(v) : "";
   if (ticket !== dirCheck) return; // a newer keystroke won
   if (value) st.tile = "results";
+  ftsSearch(value);
   render();
 }
 
 // ---------- data ----------
-function applyData(d) { raw = d; model = buildData(raw, live); if (st.shown) render(); }
+function applyHidden() { writeHidden(hidden); model = remodel(); if (st.shown) render(); }
+window.addEventListener("storage", e => { if (e.key === HIDDEN_KEY) { hidden = readHidden(); model = remodel(); if (st.shown) render(); } });
+function applyData(d) { raw = d; model = remodel(); if (st.shown) render(); }
 async function pollLive() {
   if (!st.shown) return;
   let list;
@@ -272,7 +344,7 @@ async function pollLive() {
   const sig = list.map(l => `${sessionKey(l)}:${l.status}`).sort().join("|");
   if (sig === liveSig) return updateLiveTexts();
   liveSig = sig;
-  model = buildData(raw, live);
+  model = remodel();
   render();
 }
 
@@ -308,14 +380,16 @@ watchUsage(() => { if (st.shown) render({ strip: false }); });
 watchGit(() => { if (st.shown) render(); });
 window.manager.onBarEvent(ev => {
   if (ev.type === "show") {
-    st.shown = true; st.opened++; st.tile = ""; st.row = -1; st.confirm = ""; st.dir = ""; q.value = "";
+    st.shown = true; st.opened++; st.tile = ""; st.row = -1; st.confirm = ""; st.del = ""; st.dir = ""; q.value = "";
     $("hotkey").textContent = openHint(ev);
-    model = buildData(raw, live);
+    model = remodel();
     render();
     $("strip").scrollLeft = 0; updateNav();
     $("shell").classList.add("in");
+    window.dayUi?.reset();
     reveal(ev.origin, ev.motion);
     pollLive();
+    window.limitsUi?.refresh();
     if (ev.mode === "hotkey") q.focus();
   }
   if (ev.type === "hide") { st.shown = false; reveal(null); $("shell").classList.remove("in"); q.blur(); }
@@ -324,6 +398,16 @@ window.manager.onBarEvent(ev => {
 
 q.addEventListener("input", () => setQuery(q.value));
 $("openManager").addEventListener("click", () => window.manager.barCommand("open-manager"));
+// Scan again; the result comes back as "data:changed" and redraws the menu.
+async function refresh() {
+  const el = $("refreshBtn");
+  if (el.disabled) return;
+  el.disabled = true; el.classList.add("spin");
+  try { await window.manager.getData(); } catch (e) { toast(e.message, true); }
+  finally { el.disabled = false; el.classList.remove("spin"); }
+}
+$("refreshBtn").addEventListener("click", refresh);
+$("hiddenToggle").addEventListener("click", () => { hidden.reveal = !hidden.reveal; applyHidden(); });
 $("navL").addEventListener("click", () => $("strip").scrollBy({ left: -$("strip").clientWidth * 0.7 }));
 $("navR").addEventListener("click", () => $("strip").scrollBy({ left: $("strip").clientWidth * 0.7 }));
 $("strip").addEventListener("scroll", updateNav);
@@ -353,9 +437,10 @@ $("detail").addEventListener("mousemove", e => {
 
 document.addEventListener("keydown", e => {
   const inQ = e.target === q;
+  if (e.key === "F5") { e.preventDefault(); refresh(); return; }
   if (e.key === "Escape") {
     e.preventDefault();
-    if (st.confirm) { st.confirm = ""; render({ strip: false }); }
+    if (st.confirm || st.del) { st.confirm = ""; st.del = ""; render({ strip: false }); }
     else if (q.value) setQuery("");
     else hide();
     return;
@@ -371,6 +456,7 @@ document.addEventListener("keydown", e => {
   if (e.key === "Enter") {
     e.preventDefault();
     if (st.confirm) return act("resume-anyway", e.target);
+    if (st.del) return;
     return activateRow();
   }
   // Typing anywhere goes to the search box.
