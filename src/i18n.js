@@ -188,6 +188,10 @@
       "bar.terminalIn": "Terminal in {path}",
       "bar.alreadyOpen": "Already open in a terminal",
       "bar.showLive": "Show the open sessions",
+      "bar.hidden.concealed": "Hidden items are left out ({n} tagged) - click to show them",
+      "bar.hidden.revealed": "Hidden items are shown dimmed ({n} tagged) - click to leave them out",
+      "bar.hidden.tag": "Tag as hidden",
+      "bar.hidden.untag": "Remove the hidden tag",
 
       "settings.title": "Settings",
       "settings.subtitle": "Language, theme, voice and network",
@@ -996,6 +1000,10 @@
       "bar.terminalIn": "Терминал в {path}",
       "bar.alreadyOpen": "Вече е отворена в терминал",
       "bar.showLive": "Покажи отворените сесии",
+      "bar.hidden.concealed": "Скритите не се показват ({n} маркирани) - цъкни, за да се покажат",
+      "bar.hidden.revealed": "Скритите се показват бледи ({n} маркирани) - цъкни, за да се скрият",
+      "bar.hidden.tag": "Маркирай като скрит",
+      "bar.hidden.untag": "Махни маркировката за скрит",
 
       "settings.title": "Настройки",
       "settings.subtitle": "Език, тема, глас и мрежа",

@@ -123,3 +123,8 @@ kbd { font-size: 10.5px; border-bottom-width: 1px; border-radius: 4px; padding: 
 .keys kbd + kbd { margin-left: -2px; }
 .keys kbd:not(:first-child) { margin-left: 8px; }
 .keys kbd + kbd:not(:first-child) { margin-left: 0; }
+
+/* Hidden items: dimmed while revealed; the top-bar eye is tinted while they are left out. */
+.tile.concealed, .row.concealed { opacity: .45; }
+.tile.concealed.sel, .row.concealed.sel { opacity: .7; }
+.icon-btn.hide-toggle.on, .icon-btn.hide-tag.on { color: var(--accent); background: var(--accent-weak); border-color: var(--accent-line); }

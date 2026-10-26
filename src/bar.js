@@ -9,6 +9,8 @@ let shownDetail = ""; // the list #detail shows: which opening of the menu, tile
 const st = { tile: "", row: -1, confirm: "", dir: "", shown: false, opened: 0 };
 const q = $("q");
 const liveOf = s => live.get(sessionKey(s));
+let hidden = readHidden();
+const remodel = () => conceal(buildData(raw, live), hidden);
 
 function initials(name) {
   const words = String(name).replace(/([a-z])([A-Z])/g, "$1 $2").split(/[\s\-_.]+/).filter(Boolean);
@@ -65,14 +67,24 @@ function render({ strip = true } = {}) {
   if (strip) renderStrip(toks); else markTiles();
   renderDetail(cur, toks);
   renderLiveSum();
+  renderHiddenToggle();
 }
+// The eye in the top bar: crossed out while the hidden items are left out, open while they are shown (dimmed).
+function renderHiddenToggle() {
+  const el = $("hiddenToggle"), n = hidden.projects.size + hidden.sessions.size;
+  el.classList.toggle("on", !hidden.reveal);
+  el.title = t(hidden.reveal ? "bar.hidden.revealed" : "bar.hidden.concealed", { n });
+  el.innerHTML = icon(hidden.reveal ? "eye" : "eyeOff");
+}
+const hideBtn = (kind, key, on) => `<button class="icon-btn hide-tag ${on ? "on" : ""}" data-act="toggle-hidden" data-kind="${kind}" data-key="${esc(key)}"
+  title="${esc(t(on ? "bar.hidden.untag" : "bar.hidden.tag"))}">${icon(on ? "eyeOff" : "eye")}</button>`;
 
 function tileHtml(tile, toks) {
   const badge = tile.busy ? '<span class="badge"><span class="spinner"></span></span>' : tile.idle ? '<span class="badge"><span class="pulse"></span></span>' : "";
   const mono = tile.kind === "project"
     ? `<span class="mono" style="--h:${hue(tile.p.n)}">${esc(initials(tile.label))}${badge}</span>`
     : `<span class="mono special ${tile.kind}">${icon(tile.kind === "live" ? "pulse" : "search")}</span>`;
-  return `<button class="tile ${tile.key === st.tile ? "sel" : ""}" data-key="${esc(tile.key)}" title="${esc(tile.kind === "project" ? `${tile.label}\n${tile.p.path}${gitTip(tile.p.path)}` : tile.label)}">
+  return `<button class="tile ${tile.key === st.tile ? "sel" : ""} ${tile.p?.concealed ? "concealed" : ""}" data-key="${esc(tile.key)}" title="${esc(tile.kind === "project" ? `${tile.label}\n${tile.p.path}${gitTip(tile.p.path)}` : tile.label)}">
     ${mono}<span class="tname">${tile.kind === "project" ? hl(tile.label, toks) : esc(tile.label)}</span><span class="tcount">${tile.count}</span>${tile.kind === "project" ? gitTile(tile.p.path) : ""}</button>`;
 }
 function renderStrip(toks) {
@@ -101,6 +113,7 @@ function renderDetail(tile, toks) {
     ? `<div class="dhead"><span class="mono sm" style="--h:${hue(tile.p.n)}">${esc(initials(tile.label))}</span>
         <div class="dtitle"><div class="dname">${hl(tile.label, toks)}${usageTotal(tile.p.sessions)}${gitLine(tile.p.path)}</div>${pathHtml(tile.p.path, toks)}</div>
         <button class="icon-btn" data-act="copy" data-path="${esc(tile.p.path)}" title="${esc(t("action.copyPath"))}">${icon("copy")}</button>
+        ${hideBtn("project", tile.p.n, hidden.projects.has(tile.p.n))}
         <div class="dactions">${newButtons(tile.p.path)}
           <button class="btn" data-act="terminal" data-path="${esc(tile.p.path)}">${icon("terminal")}${esc(t("action.terminal"))}</button>
           <button class="btn" data-act="explorer" data-path="${esc(tile.p.path)}">${icon("open")}${esc(t("action.explorer"))}</button></div></div>`
@@ -136,11 +149,11 @@ function rowHtml(r, i, toks) {
     ? `<div class="confirm">${esc(t("bar.confirm.openAgain", { pid: l.pid }))}
         <button class="btn warn" data-act="resume-anyway">${esc(t("action.openAgain"))}</button><button class="btn" data-act="cancel">${esc(t("common.cancel"))}</button></div>`
     : "";
-  return `<div class="row ${i === st.row ? "sel" : ""} ${l ? "is-live" : ""}" data-i="${i}">
+  return `<div class="row ${i === st.row ? "sel" : ""} ${l ? "is-live" : ""} ${s.concealed ? "concealed" : ""}" data-i="${i}">
     <span class="adot ${s.agent.toLowerCase()}" title="${esc(s.agent)}"></span>
     <div class="rmain"><div class="t" title="${esc(s.title)}">${hl(s.title, toks)}</div>${r.showPath && s.cwd ? pathHtml(s.cwd, toks) : ""}</div>
     ${livePill(l, key)}${usageCost(s)}<span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span>
-    <span class="ract">${s.cwd ? `<button class="icon-btn" data-act="terminal" data-path="${esc(s.cwd)}" title="${esc(t("bar.terminalIn", { path: s.cwd }))}">${icon("terminal")}</button>
+    <span class="ract">${hideBtn("session", key, hidden.sessions.has(key))}${s.cwd ? `<button class="icon-btn" data-act="terminal" data-path="${esc(s.cwd)}" title="${esc(t("bar.terminalIn", { path: s.cwd }))}">${icon("terminal")}</button>
       <button class="icon-btn" data-act="copy" data-path="${esc(s.cwd)}" title="${esc(t("action.copyPath"))}">${icon("copy")}</button>` : ""}
       ${l ? `<button class="icon-btn" data-act="resume" title="${esc(t("bar.alreadyOpen"))}">${icon("play")}</button>
       <button class="icon-btn go" data-act="show-terminal" title="${esc(t("term.showTitle", { pid: l.pid }))}">${icon("raise")}</button>`
@@ -149,7 +162,7 @@ function rowHtml(r, i, toks) {
 }
 function renderLiveSum() {
   let busy = 0, idle = 0;
-  for (const l of live.values()) l.status === "busy" ? busy++ : idle++;
+  for (const l of model.sessions.map(liveOf).filter(Boolean)) l.status === "busy" ? busy++ : idle++;
   $("liveSum").innerHTML = busy || idle
     ? `<button class="sum" data-act="show-live" title="${esc(t("bar.showLive"))}">${busy ? `<span class="spinner"></span>${esc(tn("live.count.busy", busy))}` : ""}${busy && idle ? '<span class="sep"></span>' : ""}${idle ? `<span class="pulse"></span>${esc(tn("live.count.idle", idle))}` : ""}</button>`
     : "";
@@ -220,6 +233,11 @@ async function act(name, el) {
     if (name === "explorer") { const err = await window.manager.openPath(path); if (err) throw new Error(err); return hide(); }
     if (name === "copy") { await window.manager.copyText(path); return toast(t("toast.copied", { path })); }
     if (name === "show-live") { setQuery(""); return selectTile("live"); }
+    if (name === "toggle-hidden") {
+      const set = el.dataset.kind === "project" ? hidden.projects : hidden.sessions;
+      set.has(el.dataset.key) ? set.delete(el.dataset.key) : set.add(el.dataset.key);
+      return applyHidden();
+    }
   } catch (e) { toast(e.message, true); }
 }
 function selectTile(key) {
@@ -263,7 +281,9 @@ async function setQuery(value) {
 }
 
 // ---------- data ----------
-function applyData(d) { raw = d; model = buildData(raw, live); if (st.shown) render(); }
+function applyHidden() { writeHidden(hidden); model = remodel(); if (st.shown) render(); }
+window.addEventListener("storage", e => { if (e.key === HIDDEN_KEY) { hidden = readHidden(); model = remodel(); if (st.shown) render(); } });
+function applyData(d) { raw = d; model = remodel(); if (st.shown) render(); }
 async function pollLive() {
   if (!st.shown) return;
   let list;
@@ -272,7 +292,7 @@ async function pollLive() {
   const sig = list.map(l => `${sessionKey(l)}:${l.status}`).sort().join("|");
   if (sig === liveSig) return updateLiveTexts();
   liveSig = sig;
-  model = buildData(raw, live);
+  model = remodel();
   render();
 }
 
@@ -310,7 +330,7 @@ window.manager.onBarEvent(ev => {
   if (ev.type === "show") {
     st.shown = true; st.opened++; st.tile = ""; st.row = -1; st.confirm = ""; st.dir = ""; q.value = "";
     $("hotkey").textContent = openHint(ev);
-    model = buildData(raw, live);
+    model = remodel();
     render();
     $("strip").scrollLeft = 0; updateNav();
     $("shell").classList.add("in");
@@ -324,6 +344,7 @@ window.manager.onBarEvent(ev => {
 
 q.addEventListener("input", () => setQuery(q.value));
 $("openManager").addEventListener("click", () => window.manager.barCommand("open-manager"));
+$("hiddenToggle").addEventListener("click", () => { hidden.reveal = !hidden.reveal; applyHidden(); });
 $("navL").addEventListener("click", () => $("strip").scrollBy({ left: -$("strip").clientWidth * 0.7 }));
 $("navR").addEventListener("click", () => $("strip").scrollBy({ left: $("strip").clientWidth * 0.7 }));
 $("strip").addEventListener("scroll", updateNav);
