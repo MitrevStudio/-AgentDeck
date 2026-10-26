@@ -167,3 +167,14 @@ kbd { font-size: 10.5px; border-bottom-width: 1px; border-radius: 4px; padding: 
 .dsum .pv-title { padding-bottom: 8px; border-bottom: 1px solid var(--line); }
 .dsum-text { flex: 1; min-height: 0; overflow: auto; padding: 12px 14px; font-size: 13px; line-height: 1.55; white-space: pre-wrap; user-select: text; }
 .empty.err { color: var(--danger); }
+
+/* The shortcuts panel, under the keyboard button. */
+.kbd-panel { position: absolute; top: 58px; right: 16px; z-index: 30; width: 410px; max-height: calc(100% - 80px); overflow: auto; padding: 10px 14px 12px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line-2); box-shadow: 0 16px 40px rgba(0, 0, 0, .35); }
+.kbd-panel[hidden] { display: none; }
+.kbd-head { display: flex; align-items: center; justify-content: space-between; }
+.kbd-head .icon-btn { width: 28px; height: 28px; }
+.kbd-panel h3 { margin: 10px 0 4px; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.kbd-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 0; font-size: 13px; }
+.kbd-keys { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; color: var(--muted); font-size: 12px; }
+.kbd-keys .plus { color: var(--faint); }
+.kbd-note { margin-top: 10px; font-size: 11.5px; color: var(--muted); }

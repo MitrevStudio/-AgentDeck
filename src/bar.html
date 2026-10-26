@@ -25,6 +25,7 @@
     <button class="icon-btn voice-cmd" id="voiceCmd" hidden><span data-icon="mic"></span></button>
     <button class="icon-btn hide-toggle" id="hiddenToggle"></button>
     <button class="icon-btn" id="refreshBtn" data-i18n-title="manager.refresh.title"><span data-icon="refresh"></span></button>
+    <button class="icon-btn" id="shortcutsBtn" data-i18n-title="bar.shortcuts.title"><span data-icon="keyboard"></span></button>
     <button class="icon-btn" id="openManager" data-i18n-title="common.openManager"><span data-icon="window"></span></button>
   </div>
   <div class="strip-wrap">
@@ -34,6 +35,7 @@
   </div>
   <div class="detail" id="detail"></div>
   <div class="keys"><kbd>↑</kbd><kbd>↓</kbd><span data-i18n="bar.keys.session"></span><kbd>←</kbd><kbd>→</kbd><span data-i18n="bar.keys.project"></span><kbd>Enter</kbd><span data-i18n="bar.keys.open"></span><kbd>Esc</kbd><span data-i18n="bar.keys.close"></span><span class="grow"></span><span id="hotkey"></span></div>
+  <div id="kbdPanel" class="kbd-panel" hidden></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 </div>
 <script src="common.js"></script>
@@ -42,6 +44,7 @@
 <script src="preview-ui.js"></script>
 <script src="limits-ui.js"></script>
 <script src="day-ui.js"></script>
+<script src="shortcuts-ui.js"></script>
 <script src="bar.js"></script>
 <script src="bar-voice.js"></script>
 </body>

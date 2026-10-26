@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld("manager", {
   copyText: text => ipcRenderer.invoke("clipboard:write", text),
   getLive: () => ipcRenderer.invoke("live:get"),
   getUsage: () => ipcRenderer.invoke("usage:get"),
+  getShortcuts: () => ipcRenderer.invoke("app:shortcuts"),
   getDay: date => ipcRenderer.invoke("day:get", date),
   summarizeDay: (date, skip) => ipcRenderer.invoke("day:summary", date, skip),
   searchText: q => ipcRenderer.invoke("search:text", q),

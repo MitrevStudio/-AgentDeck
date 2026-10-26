@@ -496,6 +496,14 @@ function registerIpc() {
   handle("live:get", () => liveSessions());
   // Tokens and API-equivalent cost (usage.js): the last result at once, or a fresh pass over the transcripts.
   handle("usage:get", () => usage.get());
+  // The shortcuts as set now: the menu's hotkey and the voice ones (labels such as "Ctrl + Shift + Space").
+  handle("app:shortcuts", () => {
+    let v = {};
+    try { v = require("./voice/settings").load() || {}; } catch {}
+    const k = a => (a ? keyLabel(a, " + ") : "");
+    return { menu: hotkeyLabel(), dictate: k(v.hotkeys?.dictate), readAloud: k(v.hotkeys?.readAloud), editSelection: k(v.hotkeys?.editSelection),
+      ask: k(v.hotkeys?.ask), commandHold: Boolean(voice) && v.commands?.enabled !== false && v.commands?.trigger === "hold" };
+  });
   // One day's work (day.js); the summary leaves out the sessions the menu hides (skip: "Agent:id" keys).
   const DAY = /^\d{4}-\d{2}-\d{2}$/;
   const dayReport = async date => {
