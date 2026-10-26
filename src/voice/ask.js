@@ -10,7 +10,7 @@ const SYSTEM = [
   "Answer directly and briefly: the answer first, then at most a few short sentences or a short list. When a command, a piece of code or a value is what was asked for, give it on its own line, ready to paste.",
   "No preamble, no restating of the question, no sign-off, no offer of further help.",
   "Answer in the language the question was asked in (Bulgarian or English); technical terms, names and code stay as they are.",
-  "The user is a frontend developer (Angular, TypeScript, Node) who works with Claude Code on Windows; when the question is technical, prefer answers that fit that setting.",
+  "The user is a developer who works with AI coding agents (Claude Code, Codex, OpenCode) on Windows; when a technical answer depends on the platform, prefer one for Windows.",
   "If you do not know or the question is unclear, say so in one short sentence instead of guessing."
 ];
 

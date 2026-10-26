@@ -508,14 +508,14 @@ function registerIpc() {
   const DAY = /^\d{4}-\d{2}-\d{2}$/;
   const dayReport = async date => {
     if (!DAY.test(text(date, 10))) throw new Error(t("errors.invalidData"));
-    return day.report({ date, sessions: (cache ?? await scan()).sessions, projects: readRegistry().projects });
+    return day.reportAsync({ date, sessions: (cache ?? await scan()).sessions, projects: readRegistry().projects });
   };
   handle("day:get", dayReport);
   handle("day:summary", async (date, skip) => {
     const rep = day.exclude(await dayReport(date), Array.isArray(skip) ? skip.filter(k => typeof k === "string") : []);
-    const claude = await findOnPath("claude");
+    const claude = day.findClaude();
     if (!claude) throw new Error(t("bar.day.noClaude"));
-    return day.summarize(rep, { claude });
+    return day.summarize(rep, { claude, language: require("./i18n").language() });
   });
   handle("search:text", q => fullText.query(text(q, 500)));
   handle("limits:get", () => limits.refresh());
