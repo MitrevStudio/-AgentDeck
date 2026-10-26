@@ -57,6 +57,7 @@ function computeTiles() {
   if (toks.length) out.push({ key: "results", kind: "results", label: t("bar.tile.results"), count: hits.length + (st.dir ? 1 : 0) });
   const running = model.sessions.filter(liveOf);
   if (running.length && !toks.length) out.push({ key: "live", kind: "live", label: t("bar.tile.live"), count: running.length });
+  if (!toks.length && window.dayUi?.enabled()) out.push({ key: "day", kind: "day", label: t("bar.tile.day"), count: "" });
   for (const p of model.projects) {
     const inside = toks.length ? p.sessions.filter(s => hitSet.has(s)) : p.sessions;
     if (toks.length && !inside.length && !matches(p.hay, toks)) continue;
@@ -75,6 +76,7 @@ function rowsFor(tile, toks, hits) {
     const dir = st.dir ? [{ type: "dir", path: st.dir }] : [];
     return [...dir, ...liveFirst(hits).slice(0, 150).map(s => ({ type: "session", s, showPath: true }))];
   }
+  if (tile.kind === "day") return [];
   if (tile.kind === "live") return model.sessions.filter(liveOf).sort(byLive).map(s => ({ type: "session", s, showPath: true }));
   const list = toks.length ? tile.p.sessions.filter(s => found(s, toks)) : tile.p.sessions;
   return liveFirst(list).map(s => ({ type: "session", s, showPath: s.cwdN !== tile.p.n }));
@@ -84,7 +86,7 @@ function rowsFor(tile, toks, hits) {
 function render({ strip = true } = {}) {
   const { toks, hits, tiles: list } = computeTiles();
   tiles = list;
-  if (!tiles.some(tile => tile.key === st.tile)) { st.tile = tiles[0]?.key || ""; st.row = q.value ? 0 : -1; }
+  if (!tiles.some(tile => tile.key === st.tile)) { st.tile = (tiles.find(x => x.kind !== "day") || tiles[0])?.key || ""; st.row = q.value ? 0 : -1; }
   const cur = tiles.find(tile => tile.key === st.tile);
   rows = rowsFor(cur, toks, hits);
   if (st.row >= rows.length) st.row = rows.length ? 0 : -1;
@@ -107,7 +109,7 @@ function tileHtml(tile, toks) {
   const badge = tile.busy ? '<span class="badge"><span class="spinner"></span></span>' : tile.idle ? '<span class="badge"><span class="pulse"></span></span>' : "";
   const mono = tile.kind === "project"
     ? `<span class="mono" style="--h:${hue(tile.p.n)}">${esc(initials(tile.label))}${badge}</span>`
-    : `<span class="mono special ${tile.kind}">${icon(tile.kind === "live" ? "pulse" : "search")}</span>`;
+    : `<span class="mono special ${tile.kind}">${icon(tile.kind === "live" ? "pulse" : tile.kind === "day" ? "clock" : "search")}</span>`;
   return `<button class="tile ${tile.key === st.tile ? "sel" : ""} ${tile.p?.concealed ? "concealed" : ""}" data-key="${esc(tile.key)}" title="${esc(tile.kind === "project" ? `${tile.label}\n${tile.p.path}${gitTip(tile.p.path)}` : tile.label)}">
     ${mono}<span class="tname">${tile.kind === "project" ? hl(tile.label, toks) : esc(tile.label)}</span><span class="tcount">${tile.count}</span>${tile.kind === "project" ? gitTile(tile.p.path) : ""}</button>`;
 }
@@ -129,6 +131,7 @@ function newButtons(cwd) {
     `<button class="btn new ${a.toLowerCase()}" data-act="new" data-agent="${a}" data-path="${esc(cwd)}" title="${esc(t("bar.newSession", { agent: a, path: cwd }))}">${icon("plus")}${a}</button>`).join("");
 }
 function renderDetail(tile, toks) {
+  if (tile?.kind === "day") { $("detail").innerHTML = window.dayUi.html(); shownDetail = ""; return; }
   if (!tile) {
     $("detail").innerHTML = `<div class="empty">${esc(t(model.projects.length ? "bar.nothingFound" : "bar.loading"))}</div>`;
     return;
@@ -383,6 +386,7 @@ window.manager.onBarEvent(ev => {
     render();
     $("strip").scrollLeft = 0; updateNav();
     $("shell").classList.add("in");
+    window.dayUi?.reset();
     reveal(ev.origin, ev.motion);
     pollLive();
     window.limitsUi?.refresh();

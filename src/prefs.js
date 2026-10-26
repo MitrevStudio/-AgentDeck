@@ -18,7 +18,7 @@ const THEMES = ["system", "dark", "light"];
 const BACKGROUND = { dark: "#0d1015", light: "#f2f4f8" };
 
 const prefs = new EventEmitter();
-const state = { language: "bg", theme: "dark", edgeHandle: true, autoUpdate: true, newWindow: true };
+const state = { language: "bg", theme: "dark", edgeHandle: true, autoUpdate: true, newWindow: true, dayView: false };
 let handleX = 0.5; // the edge handle's centre, as a fraction of the display width
 const fraction = v => (typeof v === "number" && v >= 0 && v <= 1 ? v : null);
 
@@ -39,6 +39,7 @@ function load() {
   handleX = fraction(handle.x) ?? handleX;
   state.autoUpdate = ui.autoUpdate !== false;
   state.newWindow = !(isObj(root.terminal) && root.terminal.newWindow === false);
+  state.dayView = isObj(root.dayView) && root.dayView.show === true;
   i18n.setLanguage(state.language, { dev: !app.isPackaged });
   nativeTheme.themeSource = state.theme;
   // Windows switched between light and dark while the theme follows it.
@@ -71,6 +72,10 @@ async function set(patch) {
     state.newWindow = patch.newWindow;
     keys.push("newWindow");
   }
+  if (typeof patch.dayView === "boolean" && patch.dayView !== state.dayView) {
+    state.dayView = patch.dayView;
+    keys.push("dayView");
+  }
   if (!keys.length) return get();
   prefs.emit("changed", get(), keys);
   await save();
@@ -92,6 +97,7 @@ function save() {
     ui: { language: state.language, theme: state.theme, autoUpdate: state.autoUpdate },
     edgeHandle: { show: state.edgeHandle, x: Math.round(handleX * 10000) / 10000 },
     terminal: { newWindow: state.newWindow },
+    dayView: { show: state.dayView },
     hoverEdge: undefined
   }).catch(e => console.error("Could not save settings:", e.message));
 }

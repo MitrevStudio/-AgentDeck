@@ -23,6 +23,7 @@ const prefs = require("./prefs");
 const network = require("./network");
 const updater = require("./updater");
 const usage = require("./usage");
+const day = require("./day");
 const fullText = require("./search").createSearch({ dbFile: path.join(app.getPath("userData"), "search.db") });
 const voiceContext = require("./voice-context").createVoiceContext({ liveSessions: (...a) => liveSessions(...a), findTranscript: id => findTranscript(id) });
 const { createLimits } = require("./limits");
@@ -494,6 +495,19 @@ function registerIpc() {
   handle("live:get", () => liveSessions());
   // Tokens and API-equivalent cost (usage.js): the last result at once, or a fresh pass over the transcripts.
   handle("usage:get", () => usage.get());
+  // One day's work (day.js); the summary leaves out the sessions the menu hides (skip: "Agent:id" keys).
+  const DAY = /^\d{4}-\d{2}-\d{2}$/;
+  const dayReport = async date => {
+    if (!DAY.test(text(date, 10))) throw new Error(t("errors.invalidData"));
+    return day.report({ date, sessions: (cache ?? await scan()).sessions, projects: readRegistry().projects });
+  };
+  handle("day:get", dayReport);
+  handle("day:summary", async (date, skip) => {
+    const rep = day.exclude(await dayReport(date), Array.isArray(skip) ? skip.filter(k => typeof k === "string") : []);
+    const claude = await findOnPath("claude");
+    if (!claude) throw new Error(t("bar.day.noClaude"));
+    return day.summarize(rep, { claude });
+  });
   handle("search:text", q => fullText.query(text(q, 500)));
   handle("limits:get", () => limits.refresh());
   // The figures themselves come as "usage:changed" when they changed; the answer only says when they were checked.
