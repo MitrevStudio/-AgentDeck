@@ -7,6 +7,9 @@
 (() => {
   const STRINGS = {
     en: {
+      "voice.edit.hint": "Say what to change in the selected text · press the key again to finish · Esc cancels",
+      "voice.edit.nothing.title": "No text selected",
+      "voice.edit.nothing.detail": "Select the text to edit first, then press the edit key and say what to change.",
       "bar.search.inText": "Found in the conversation",
       "bar.limits.five": "5h",
       "bar.limits.week": "Week",
@@ -852,6 +855,9 @@
     },
 
     bg: {
+      "voice.edit.hint": "Кажи какво да се промени в маркирания текст · натисни клавиша пак за край · Esc отказва",
+      "voice.edit.nothing.title": "Няма маркиран текст",
+      "voice.edit.nothing.detail": "Първо маркирай текста, после натисни клавиша за редакция и кажи какво да се промени.",
       "bar.search.inText": "Намерено в разговора",
       "bar.limits.five": "5ч",
       "bar.limits.week": "Седм.",

@@ -126,6 +126,18 @@ function createQueue(deps = {}) {
   // failure falls back to the transcript, so the dictation is never lost to it.
   async function finish(id, job, raw, s, terms, signal) {
     const fixed = applyReplacements(raw, s.dictionary?.replacements);
+    if (job.EditSource) {
+      if (!fixed) return { text: job.EditSource, rewriteError: null };
+      emit("rewriting", id);
+      try {
+        const { editText } = require("./edit");
+        return { text: await editText(job.EditSource, fixed, { dictionary: terms, language: job.Language, provider: job.Provider || s.provider, signal }), rewriteError: null };
+      } catch (error) {
+        if (signal.aborted) throw error;
+        console.error("Voice edit failed, pasting the selection back:", error?.longMessage || error?.message || error);
+        return { text: job.EditSource, rewriteError: error?.shortMessage || String(error?.message || error) };
+      }
+    }
     const mode = job.Mode || "verbatim";
     if (!fixed || mode === "verbatim") return { text: fixed, rewriteError: null };
     emit("rewriting", id);
