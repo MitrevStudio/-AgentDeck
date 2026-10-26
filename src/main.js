@@ -23,6 +23,8 @@ const prefs = require("./prefs");
 const network = require("./network");
 const updater = require("./updater");
 const usage = require("./usage");
+const { createNotifier } = require("./notify");
+let notifier = null;
 const sessionPreview = require("./session-preview");
 const gitStatus = require("./git-status");
 const autostart = require("./autostart");
@@ -366,21 +368,29 @@ function balloon(content, { title = t("app.name"), iconType = "info", jobId = nu
 function buildTrayMenu() {
   if (!tray || tray.isDestroyed()) return;
   const v = voice ? voice.trayMenu() : { failures: [], items: [], failureCount: 0 };
-  const failed = v.failureCount;
-  if (badged !== failed > 0) { badged = failed > 0; tray.setImage(makeIcon(32, 2, { badge: badged })); }
-  tray.setToolTip(`${t("app.name")}${hotkey ? ` — ${hotkeyLabel()}` : ""}${failed ? ` · ${tn("tray.failed", failed)}` : ""}`);
+  const failed = v.failureCount, waits = notifier ? notifier.list() : [];
+  if (badged !== (failed > 0 || waits.length > 0)) { badged = failed > 0 || waits.length > 0; tray.setImage(makeIcon(32, 2, { badge: badged })); }
+  const cut = s => (s.length > 60 ? s.slice(0, 59) + "…" : s).replace(/&/g, "&&");
+  const waitItems = waits.length ? [
+    { label: tn("notify.waiting", waits.length), enabled: false },
+    ...waits.slice(0, 8).map(w => ({ label: cut(`${w.title} · ${w.project}`), click: () => notifier.bringUp(w.key) })),
+    { label: t("notify.clear"), click: () => notifier.clear() }
+  ] : [];
+  tray.setToolTip(`${t("app.name")}${hotkey ? ` — ${hotkeyLabel()}` : ""}${failed ? ` · ${tn("tray.failed", failed)}` : ""}${waits.length ? ` · ${tn("notify.waiting", waits.length)}` : ""}`);
   const sep = list => (list.length ? [...list, { type: "separator" }] : []);
   const p = prefs.get();
   const radio = (key, values, label) => values.map(value => ({
     label: label(value), type: "radio", checked: p[key] === value, click: () => prefs.set({ [key]: value })
   }));
   tray.setContextMenu(Menu.buildFromTemplate([
+    ...sep(waitItems),
     ...sep(v.failures),
     { label: t("tray.openMenu"), accelerator: hotkey || undefined, click: () => bar.show("hotkey") },
     { label: t("common.openManager"), click: showManager },
     { type: "separator" },
     ...sep(v.items),
     { label: t("tray.edgeHandle"), type: "checkbox", checked: p.edgeHandle, click: item => prefs.set({ edgeHandle: item.checked }) },
+    { label: t("notify.toggle"), type: "checkbox", checked: notifier ? notifier.enabled() : true, enabled: Boolean(notifier), click: item => notifier?.setEnabled(item.checked) },
     { label: t("tray.language"), submenu: radio("language", Object.keys(LANGUAGES), l => LANGUAGES[l]) },
     { label: t("tray.theme"), submenu: radio("theme", prefs.THEMES, th => t(`theme.${th}`)) },
     { label: t("tray.settings"), enabled: Boolean(voice), click: () => voice?.openSettings() },
@@ -518,6 +528,7 @@ function registerIpc() {
   // Brings a running session's own terminal (tab) to the front; pid and folder come from the live registry.
   handle("terminal:focus", (agent, id) => {
     if (!SESSION_ID.test(text(id))) throw new Error(t("errors.invalidSession"));
+    notifier?.seen(agent, id);
     return focusSession({ agent: text(agent), id });
   });
   // A path typed into the menu's search: offer a new session there if it is an existing directory.
@@ -571,6 +582,18 @@ if (!app.requestSingleInstanceLock()) {
     tray.on("balloon-click", () => { const click = balloonClick; balloonClick = null; click?.(); });
     updater.on("changed", onUpdateChanged);
     updater.start({ auto: prefs.get().autoUpdate });
+    notifier = createNotifier({
+      liveSessions, focus: focusSession, balloon, t, tn, onChange: buildTrayMenu,
+      quiet: () => Boolean(bar?.isVisible()),
+      file: path.join(app.getPath("userData"), "notify.json"),
+      describe: (agent, id, cwd) => {
+        const s = cache?.sessions.find(x => x.agent === agent && x.id === id);
+        const dir = s?.cwd || cwd || "";
+        const p = dir ? cache?.registry.projects.find(x => norm(x.path) === norm(dir)) : null;
+        return { title: s?.title, project: p?.name || path.basename(dir) };
+      }
+    });
+    notifier.start();
     buildTrayMenu();
 
     // Started with Windows: the tray and the edge menu only, until the user asks for the window.

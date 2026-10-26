@@ -7,6 +7,14 @@
 (() => {
   const STRINGS = {
     en: {
+      "notify.title": "Stopped: {title}",
+      "notify.body": "{project} - finished, or waiting for you. Click to bring its terminal up.",
+      "notify.many.one": "{n} session stopped",
+      "notify.many.other": "{n} sessions stopped",
+      "notify.waiting.one": "{n} session waiting",
+      "notify.waiting.other": "{n} sessions waiting",
+      "notify.clear": "Clear the list",
+      "notify.toggle": "Notify when a session stops",
       "app.name": "AgentDeck",
       "app.tagline": "AI sessions, projects and voice in one place",
 
@@ -828,6 +836,14 @@
     },
 
     bg: {
+      "notify.title": "Спря: {title}",
+      "notify.body": "{project} - готова е или те чака. Щракни, за да отвориш терминала ѝ.",
+      "notify.many.one": "{n} сесия спря",
+      "notify.many.other": "{n} сесии спряха",
+      "notify.waiting.one": "{n} сесия чака",
+      "notify.waiting.other": "{n} сесии чакат",
+      "notify.clear": "Изчисти списъка",
+      "notify.toggle": "Известие, когато сесия спре",
       "app.name": "AgentDeck",
       "app.tagline": "AI сесии, проекти и глас на едно място",
 
