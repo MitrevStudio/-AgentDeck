@@ -9,6 +9,30 @@ let shownDetail = ""; // the list #detail shows: which opening of the menu, tile
 const st = { tile: "", row: -1, confirm: "", del: "", dir: "", shown: false, opened: 0 };
 const q = $("q");
 const liveOf = s => live.get(sessionKey(s));
+// Whole conversations, searched in main's index (search.js): a session whose text matches joins the hits even when
+// its title does not, with the matching passage under its title. Words under three letters are not searched there.
+const fts = { q: "", hits: new Map() };
+let ftsTimer = 0, ftsTicket = 0;
+function ftsSearch(value) {
+  clearTimeout(ftsTimer);
+  const v = value.trim();
+  if (!v.split(/\s+/).some(w => [...w].length >= 3)) { fts.q = ""; fts.hits = new Map(); return; }
+  const ticket = ++ftsTicket;
+  ftsTimer = setTimeout(async () => {
+    let hits = [];
+    try { hits = await window.manager.searchText(v); } catch {}
+    if (ticket !== ftsTicket || q.value.trim() !== v) return;
+    fts.q = v; fts.hits = new Map(hits.map(h => [h.key, h.snippet]));
+    render();
+  }, 220);
+}
+const ftsHit = s => fts.q !== "" && fts.q === q.value.trim() && fts.hits.has(sessionKey(s));
+const found = (s, toks) => matches(s.hay, toks) || ftsHit(s);
+function snipHtml(s, toks) {
+  if (!ftsHit(s) || matches(s.hay, toks)) return "";
+  const text = esc(fts.hits.get(sessionKey(s)).replace(/\s+/g, " ")).replace(/\u0002/g, "<mark>").replace(/\u0003/g, "</mark>");
+  return `<div class="snip" title="${esc(t("bar.search.inText"))}">${text}</div>`;
+}
 let hidden = readHidden();
 const remodel = () => conceal(buildData(raw, live), hidden);
 
@@ -27,7 +51,7 @@ const liveFirst = list => [...list.filter(liveOf).sort(byLive), ...list.filter(s
 // ---------- model ----------
 function computeTiles() {
   const toks = tokenize(q.value);
-  const hits = toks.length ? model.sessions.filter(s => matches(s.hay, toks)) : model.sessions;
+  const hits = toks.length ? model.sessions.filter(s => found(s, toks)) : model.sessions;
   const hitSet = new Set(hits);
   const out = [];
   if (toks.length) out.push({ key: "results", kind: "results", label: t("bar.tile.results"), count: hits.length + (st.dir ? 1 : 0) });
@@ -52,7 +76,7 @@ function rowsFor(tile, toks, hits) {
     return [...dir, ...liveFirst(hits).slice(0, 150).map(s => ({ type: "session", s, showPath: true }))];
   }
   if (tile.kind === "live") return model.sessions.filter(liveOf).sort(byLive).map(s => ({ type: "session", s, showPath: true }));
-  const list = toks.length ? tile.p.sessions.filter(s => matches(s.hay, toks)) : tile.p.sessions;
+  const list = toks.length ? tile.p.sessions.filter(s => found(s, toks)) : tile.p.sessions;
   return liveFirst(list).map(s => ({ type: "session", s, showPath: s.cwdN !== tile.p.n }));
 }
 
@@ -158,7 +182,7 @@ function rowHtml(r, i, toks) {
     : "";
   return `<div class="row ${i === st.row ? "sel" : ""} ${l ? "is-live" : ""} ${s.concealed ? "concealed" : ""}" data-i="${i}">
     <span class="adot ${s.agent.toLowerCase()}" title="${esc(s.agent)}"></span>
-    <div class="rmain"><div class="t" title="${esc(s.title)}">${hl(s.title, toks)}</div>${r.showPath && s.cwd ? pathHtml(s.cwd, toks) : ""}</div>
+    <div class="rmain"><div class="t" title="${esc(s.title)}">${hl(s.title, toks)}</div>${r.showPath && s.cwd ? pathHtml(s.cwd, toks) : ""}${snipHtml(s, toks)}</div>
     ${livePill(l, key)}${usageCost(s)}<span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span>
     <span class="ract">${hideBtn("session", key, hidden.sessions.has(key))}${s.cwd ? `<button class="icon-btn" data-act="terminal" data-path="${esc(s.cwd)}" title="${esc(t("bar.terminalIn", { path: s.cwd }))}">${icon("terminal")}</button>
       <button class="icon-btn" data-act="copy" data-path="${esc(s.cwd)}" title="${esc(t("action.copyPath"))}">${icon("copy")}</button>` : ""}
@@ -301,6 +325,7 @@ async function setQuery(value) {
   st.dir = looksLikePath(v) ? await window.manager.isDir(v) : "";
   if (ticket !== dirCheck) return; // a newer keystroke won
   if (value) st.tile = "results";
+  ftsSearch(value);
   render();
 }
 

@@ -7,6 +7,7 @@
 (() => {
   const STRINGS = {
     en: {
+      "bar.search.inText": "Found in the conversation",
       "bar.limits.five": "5h",
       "bar.limits.week": "Week",
       "bar.limits.five.long": "5-hour limit: {u}% used, {e}% of the window gone",
@@ -851,6 +852,7 @@
     },
 
     bg: {
+      "bar.search.inText": "Намерено в разговора",
       "bar.limits.five": "5ч",
       "bar.limits.week": "Седм.",
       "bar.limits.five.long": "5-часов лимит: изразходвани {u}%, минали {e}% от прозореца",

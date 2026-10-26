@@ -23,6 +23,7 @@ const prefs = require("./prefs");
 const network = require("./network");
 const updater = require("./updater");
 const usage = require("./usage");
+const fullText = require("./search").createSearch({ dbFile: path.join(app.getPath("userData"), "search.db") });
 const voiceContext = require("./voice-context").createVoiceContext({ liveSessions: (...a) => liveSessions(...a), findTranscript: id => findTranscript(id) });
 const { createLimits } = require("./limits");
 const limits = createLimits({ fetch: (url, init) => network.fetch(url, init), onChange: l => broadcast("limits:changed", l) });
@@ -309,6 +310,7 @@ function scan() {
   scanning ??= scanSessions().then(async sessions => {
     // Scan first: it auto-indexes projects into the registry, which must be read afterwards.
     cache = { registry: readRegistry(), sessions, agents: await agentsReady, at: Date.now() };
+    fullText.index(sessions);
     broadcast("data:changed", cache);
     // Transcripts may have grown too, and there may be new folders: their results are broadcast on their own.
     usage.refresh().catch(err => console.error("Usage scan failed:", err.message));
@@ -492,6 +494,7 @@ function registerIpc() {
   handle("live:get", () => liveSessions());
   // Tokens and API-equivalent cost (usage.js): the last result at once, or a fresh pass over the transcripts.
   handle("usage:get", () => usage.get());
+  handle("search:text", q => fullText.query(text(q, 500)));
   handle("limits:get", () => limits.refresh());
   // The figures themselves come as "usage:changed" when they changed; the answer only says when they were checked.
   handle("usage:refresh", async () => { const u = await usage.refresh(); return u && { at: u.at, stats: u.stats, version: u.version }; });

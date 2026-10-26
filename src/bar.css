@@ -150,3 +150,6 @@ kbd { font-size: 10.5px; border-bottom-width: 1px; border-radius: 4px; padding: 
 #limits .lim.danger { border-color: var(--danger-line); color: var(--danger); }
 #limits .lim.danger .lim-bar i { background: var(--danger); }
 #limits .lim.err { color: var(--muted); }
+
+/* A full-text hit: the matching passage under the session's title. */
+.snip { margin-top: 2px; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
