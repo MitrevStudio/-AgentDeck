@@ -368,6 +368,15 @@ window.manager.onBarEvent(ev => {
 
 q.addEventListener("input", () => setQuery(q.value));
 $("openManager").addEventListener("click", () => window.manager.barCommand("open-manager"));
+// Scan again; the result comes back as "data:changed" and redraws the menu.
+async function refresh() {
+  const el = $("refreshBtn");
+  if (el.disabled) return;
+  el.disabled = true; el.classList.add("spin");
+  try { await window.manager.getData(); } catch (e) { toast(e.message, true); }
+  finally { el.disabled = false; el.classList.remove("spin"); }
+}
+$("refreshBtn").addEventListener("click", refresh);
 $("hiddenToggle").addEventListener("click", () => { hidden.reveal = !hidden.reveal; applyHidden(); });
 $("navL").addEventListener("click", () => $("strip").scrollBy({ left: -$("strip").clientWidth * 0.7 }));
 $("navR").addEventListener("click", () => $("strip").scrollBy({ left: $("strip").clientWidth * 0.7 }));
@@ -398,6 +407,7 @@ $("detail").addEventListener("mousemove", e => {
 
 document.addEventListener("keydown", e => {
   const inQ = e.target === q;
+  if (e.key === "F5") { e.preventDefault(); refresh(); return; }
   if (e.key === "Escape") {
     e.preventDefault();
     if (st.confirm || st.del) { st.confirm = ""; st.del = ""; render({ strip: false }); }
