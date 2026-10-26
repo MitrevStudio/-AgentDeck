@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld("manager", {
   refreshGit: () => ipcRenderer.invoke("git:refresh"),
   onGitChanged: cb => ipcRenderer.on("git:changed", (_e, g) => cb(g)),
   focusTerminal: (agent, id) => ipcRenderer.invoke("terminal:focus", agent, id),
+  deleteSession: (agent, id) => ipcRenderer.invoke("session:delete", agent, id),
   isDir: p => ipcRenderer.invoke("fs:is-dir", p),
   openVoiceHistory: () => ipcRenderer.invoke("voice:open-history"),
   openSettings: () => ipcRenderer.invoke("voice:open-settings"),

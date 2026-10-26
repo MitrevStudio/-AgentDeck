@@ -128,3 +128,12 @@ kbd { font-size: 10.5px; border-bottom-width: 1px; border-radius: 4px; padding: 
 .tile.concealed, .row.concealed { opacity: .45; }
 .tile.concealed.sel, .row.concealed.sel { opacity: .7; }
 .icon-btn.hide-toggle.on, .icon-btn.hide-tag.on { color: var(--accent); background: var(--accent-weak); border-color: var(--accent-line); }
+
+/* Session delete: the confirm under the row, and its button. */
+.confirm.danger { background: var(--danger-bg); color: var(--danger-text); }
+.btn.danger { border-color: var(--danger-line); color: var(--danger); }
+.ract .icon-btn.danger:hover { color: var(--danger); border-color: var(--danger-line); }
+/* Same right edge, padding and gap as the row, so the buttons line up under .ract's last two. */
+.confirm.del { flex-wrap: nowrap; gap: 2px; margin: 2px 0 8px 30px; padding: 6px 10px 6px 12px; }
+.confirm.del .msg { flex: 1; min-width: 0; margin-right: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.confirm.del .btn, .confirm.del .icon-btn { flex: none; height: 32px; }

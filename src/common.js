@@ -140,7 +140,7 @@ function writeHidden(h) {
 // every project it belongs to is hidden - so a hidden project's sessions do not turn up in search or the live tile.
 function conceal(data, h) {
   const hid = p => h.projects.has(p.n);
-  for (const p of data.projects) p.concealed = hid(p);
+  for (const p of data.projects) { p.concealed = hid(p); p.total = p.sessions.length; }
   for (const s of data.sessions) {
     const owners = data.projects.filter(p => inProject(s, p));
     s.concealed = h.sessions.has(sessionKey(s)) || (owners.length > 0 && owners.every(hid));

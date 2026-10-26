@@ -6,7 +6,7 @@ let tiles = [], rows = [];
 let shownDetail = ""; // the list #detail shows: which opening of the menu, tile and query
 // tile: selected tile key; row: highlighted row (-1 = none); confirm: session key awaiting "open again"; dir: typed directory;
 // opened: counts the times the menu came out
-const st = { tile: "", row: -1, confirm: "", dir: "", shown: false, opened: 0 };
+const st = { tile: "", row: -1, confirm: "", del: "", dir: "", shown: false, opened: 0 };
 const q = $("q");
 const liveOf = s => live.get(sessionKey(s));
 let hidden = readHidden();
@@ -114,6 +114,7 @@ function renderDetail(tile, toks) {
         <div class="dtitle"><div class="dname">${hl(tile.label, toks)}${usageTotal(tile.p.sessions)}${gitLine(tile.p.path)}</div>${pathHtml(tile.p.path, toks)}</div>
         <button class="icon-btn" data-act="copy" data-path="${esc(tile.p.path)}" title="${esc(t("action.copyPath"))}">${icon("copy")}</button>
         ${hideBtn("project", tile.p.n, hidden.projects.has(tile.p.n))}
+        ${tile.p.total === 0 ? `<button class="icon-btn danger" data-act="remove-project" data-path="${esc(tile.p.path)}" title="${esc(t("action.remove"))}">${icon("trash")}</button>` : ""}
         <div class="dactions">${newButtons(tile.p.path)}
           <button class="btn" data-act="terminal" data-path="${esc(tile.p.path)}">${icon("terminal")}${esc(t("action.terminal"))}</button>
           <button class="btn" data-act="explorer" data-path="${esc(tile.p.path)}">${icon("open")}${esc(t("action.explorer"))}</button></div></div>`
@@ -149,6 +150,12 @@ function rowHtml(r, i, toks) {
     ? `<div class="confirm">${esc(t("bar.confirm.openAgain", { pid: l.pid }))}
         <button class="btn warn" data-act="resume-anyway">${esc(t("action.openAgain"))}</button><button class="btn" data-act="cancel">${esc(t("common.cancel"))}</button></div>`
     : "";
+  // One line; "delete" ends right under the row's trash button and "cancel" sits under its play button.
+  const delMsg = t(s.agent === "OpenCode" ? "bar.confirm.deleteForever" : "bar.confirm.delete", { title: s.title });
+  const del = st.del === key
+    ? `<div class="confirm danger del"><span class="msg" title="${esc(delMsg)}">${esc(delMsg)}</span>
+        <button class="btn danger" data-act="delete-yes">${icon("trash")}${esc(t("action.delete"))}</button><button class="icon-btn" data-act="cancel" title="${esc(t("common.cancel"))}">${icon("x")}</button></div>`
+    : "";
   return `<div class="row ${i === st.row ? "sel" : ""} ${l ? "is-live" : ""} ${s.concealed ? "concealed" : ""}" data-i="${i}">
     <span class="adot ${s.agent.toLowerCase()}" title="${esc(s.agent)}"></span>
     <div class="rmain"><div class="t" title="${esc(s.title)}">${hl(s.title, toks)}</div>${r.showPath && s.cwd ? pathHtml(s.cwd, toks) : ""}</div>
@@ -157,8 +164,9 @@ function rowHtml(r, i, toks) {
       <button class="icon-btn" data-act="copy" data-path="${esc(s.cwd)}" title="${esc(t("action.copyPath"))}">${icon("copy")}</button>` : ""}
       ${l ? `<button class="icon-btn" data-act="resume" title="${esc(t("bar.alreadyOpen"))}">${icon("play")}</button>
       <button class="icon-btn go" data-act="show-terminal" title="${esc(t("term.showTitle", { pid: l.pid }))}">${icon("raise")}</button>`
-        : `<button class="icon-btn go" data-act="resume" title="${esc(t("action.resume"))}">${icon("play")}</button>`}</span>
-  </div>${confirm}`;
+        : `<button class="icon-btn danger" data-act="delete" title="${esc(t("bar.delete"))}">${icon("trash")}</button>
+      <button class="icon-btn go" data-act="resume" title="${esc(t("action.resume"))}">${icon("play")}</button>`}</span>
+  </div>${confirm}${del}`;
 }
 function renderLiveSum() {
   let busy = 0, idle = 0;
@@ -227,7 +235,23 @@ async function act(name, el) {
       if (s) await launch(() => window.manager.launchAgent(s.agent, s.id, s.cwd));
       return;
     }
-    if (name === "cancel") { st.confirm = ""; return render({ strip: false }); }
+    if (name === "cancel") { st.confirm = ""; st.del = ""; return render({ strip: false }); }
+    if (name === "delete") {
+      const s = rows[Number(el.closest(".row")?.dataset.i)]?.s;
+      if (s) { st.del = sessionKey(s); st.confirm = ""; render({ strip: false }); }
+      return;
+    }
+    if (name === "delete-yes") {
+      const s = rows.find(r => r.s && sessionKey(r.s) === st.del)?.s;
+      st.del = "";
+      if (!s) return render({ strip: false });
+      // Projects this was the last session of leave the list with it (their folders stay).
+      const emptied = model.projects.filter(p => p.total === 1 && p.sessions.includes(s));
+      await window.manager.deleteSession(s.agent, s.id);
+      for (const p of emptied) await window.manager.removeProject(p.path);
+      return toast(t(s.agent === "OpenCode" ? "toast.deletedForever" : "toast.deleted"));
+    }
+    if (name === "remove-project") { await window.manager.removeProject(path); return toast(t("toast.projectRemoved")); }
     if (name === "new") return await launch(() => window.manager.launchNew(el.dataset.agent, path));
     if (name === "terminal") return await launch(() => window.manager.launchFolder(path));
     if (name === "explorer") { const err = await window.manager.openPath(path); if (err) throw new Error(err); return hide(); }
@@ -242,7 +266,7 @@ async function act(name, el) {
 }
 function selectTile(key) {
   if (!key || key === st.tile) return;
-  st.tile = key; st.row = q.value ? 0 : -1; st.confirm = "";
+  st.tile = key; st.row = q.value ? 0 : -1; st.confirm = ""; st.del = "";
   render({ strip: false });
   document.querySelector(`.tile[data-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
@@ -270,7 +294,7 @@ const looksLikePath = v => /^[a-zA-Z]:[\\/]/.test(v) || v.startsWith("\\\\");
 let dirCheck = 0;
 async function setQuery(value) {
   if (q.value !== value) q.value = value;
-  st.confirm = ""; st.row = value ? 0 : -1;
+  st.confirm = ""; st.del = ""; st.row = value ? 0 : -1;
   // Typing pins the menu open in hover mode, so moving the mouse away does not lose the query.
   window.manager.barCommand("pin", Boolean(value));
   const v = value.trim(), ticket = ++dirCheck;
@@ -328,7 +352,7 @@ watchUsage(() => { if (st.shown) render({ strip: false }); });
 watchGit(() => { if (st.shown) render(); });
 window.manager.onBarEvent(ev => {
   if (ev.type === "show") {
-    st.shown = true; st.opened++; st.tile = ""; st.row = -1; st.confirm = ""; st.dir = ""; q.value = "";
+    st.shown = true; st.opened++; st.tile = ""; st.row = -1; st.confirm = ""; st.del = ""; st.dir = ""; q.value = "";
     $("hotkey").textContent = openHint(ev);
     model = remodel();
     render();
@@ -376,7 +400,7 @@ document.addEventListener("keydown", e => {
   const inQ = e.target === q;
   if (e.key === "Escape") {
     e.preventDefault();
-    if (st.confirm) { st.confirm = ""; render({ strip: false }); }
+    if (st.confirm || st.del) { st.confirm = ""; st.del = ""; render({ strip: false }); }
     else if (q.value) setQuery("");
     else hide();
     return;
@@ -392,6 +416,7 @@ document.addEventListener("keydown", e => {
   if (e.key === "Enter") {
     e.preventDefault();
     if (st.confirm) return act("resume-anyway", e.target);
+    if (st.del) return;
     return activateRow();
   }
   // Typing anywhere goes to the search box.

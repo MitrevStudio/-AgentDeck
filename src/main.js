@@ -489,6 +489,29 @@ function registerIpc() {
       ?? { agent, id, file: agent === "Claude" ? findTranscript(id) : "" };
     return sessionPreview.preview(s, { openCodeDb: OPENCODE_DB });
   });
+  // Deletes a session. A Claude or Codex transcript goes to the Recycle Bin (a Claude session's folder of subagent and
+  // tool-result files with it), only from the agent's own folder; an OpenCode session is deleted by its CLI, for good.
+  // A session open in a terminal is refused. A transcript already gone (Claude Code drops those older than
+  // cleanupPeriodDays, possibly after the last scan) only leaves the list. The windows hear about it as "data:changed".
+  handle("session:delete", async (agent, id) => {
+    if (!SESSION_ID.test(text(id)) || !isAgent(agent)) throw new Error(t("errors.invalidSession"));
+    if ((await liveSessions()).some(l => l.agent === agent && l.id === id)) throw new Error(t("errors.sessionRunning"));
+    if (agent === "OpenCode") {
+      if (!/^[\w-]+$/.test(id)) throw new Error(t("errors.invalidSession"));
+      await runOpenCode(["session", "delete", id], USER, 15000);
+    } else {
+      const root = agent === "Claude" ? CLAUDE_DIR : CODEX_DIR;
+      const s = cache?.sessions.find(x => x.agent === agent && x.id === id);
+      const file = s?.file || (agent === "Claude" ? findTranscript(id) : "");
+      const rel = file ? path.relative(root, file) : "";
+      if (file && (!rel || rel.startsWith("..") || path.isAbsolute(rel) || !file.endsWith(".jsonl"))) throw new Error(t("errors.sessionNoFile"));
+      if (file && fs.existsSync(file)) await shell.trashItem(file);
+      const extra = file ? file.slice(0, -".jsonl".length) : "";
+      if (agent === "Claude" && isDir(extra)) await shell.trashItem(extra);
+    }
+    if (cache) { cache = { ...cache, sessions: cache.sessions.filter(x => !(x.agent === agent && x.id === id)) }; broadcast("data:changed", cache); }
+    return true;
+  });
   // Branch and changes of the projects' and sessions' folders (git-status.js); a refresh is answered by "git:changed".
   handle("git:get", () => gitStatus.get());
   handle("git:refresh", () => { gitStatus.refresh().catch(err => console.error("Git status failed:", err.message)); return true; });
