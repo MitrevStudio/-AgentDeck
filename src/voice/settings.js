@@ -26,7 +26,7 @@ const defaults = Object.freeze({
   readAloudModel: "", // empty = default
   readAloudVoice: "",
   readAloudSpeed: 1.0, // remembered from the last reading
-  hotkeys: Object.freeze({ dictate: "Control+Space", readAloud: "Control+Shift+Space", editSelection: "Control+Alt+Space" }),
+  hotkeys: Object.freeze({ dictate: "Control+Space", readAloud: "Control+Shift+Space", editSelection: "Control+Alt+Space", ask: "Control+Shift+/" }),
   importedFromVoiceTray: null,
   // dictationMode, promptLanguage, pushToTalk and the dictionary (dictation-options.js).
   ...dictation.DEFAULTS,

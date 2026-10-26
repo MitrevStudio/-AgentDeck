@@ -7,6 +7,10 @@
 (() => {
   const STRINGS = {
     en: {
+      "voice.ask.hint": "Ask your question · press the key again to finish · Esc cancels",
+      "voice.ask.copy": "Copy",
+      "voice.ask.copied": "Copied to the clipboard",
+      "voice.ask.notCopied": "Not copied - press Copy",
       "bar.tile.day": "Day",
       "bar.day.today": "Today",
       "bar.day.yesterday": "Yesterday",
@@ -875,6 +879,10 @@
     },
 
     bg: {
+      "voice.ask.hint": "Задай въпроса си · натисни клавиша пак за край · Esc отказва",
+      "voice.ask.copy": "Копирай",
+      "voice.ask.copied": "Копирано в клипборда",
+      "voice.ask.notCopied": "Не се копира - натисни Копирай",
       "bar.tile.day": "Ден",
       "bar.day.today": "Днес",
       "bar.day.yesterday": "Вчера",

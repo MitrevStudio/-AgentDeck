@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="bg">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+<title>AgentDeck</title>
+<link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="answer.css">
+<script src="i18n.js"></script>
+</head>
+<body>
+<div class="ans" id="ans">
+  <div class="ans-head">
+    <span class="ans-ico" data-icon="mic"></span>
+    <div class="ans-q" id="question"></div>
+    <button class="icon-btn" id="close" data-i18n-title="common.close"><span data-icon="x"></span></button>
+  </div>
+  <div class="ans-body" id="answer"></div>
+  <div class="ans-foot">
+    <span class="ans-note" id="note"></span>
+    <span class="grow"></span>
+    <button class="btn" id="copy"><span data-icon="copy"></span><span data-i18n="voice.ask.copy"></span></button>
+  </div>
+  <div class="ans-timer" id="timer"></div>
+</div>
+<script src="common.js"></script>
+<script src="answer.js"></script>
+</body>
+</html>

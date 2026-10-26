@@ -31,7 +31,7 @@ const LIMITS = Object.freeze({
 // rewriteError, outcome, note}).
 const FIELDS = ["Id", "Kind", "AudioPath", "CreatedAt", "CompletedAt", "DurationSeconds", "Provider", "Model", "Language",
   "Voice", "Status", "AttemptCount", "LastError", "LastErrorShort", "LastStatusCode", "LastErrorTransient", "ResultText",
-  "Mode", "RawText", "RewriteError", "Command", "EditSource"];
+  "Mode", "RawText", "RewriteError", "Command", "Ask", "EditSource"];
 
 let root = null;
 let jobs = null; // Map id -> record, loaded by recoverOnStartup()

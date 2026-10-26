@@ -23,6 +23,9 @@ contextBridge.exposeInMainWorld("manager", {
   refreshGit: () => ipcRenderer.invoke("git:refresh"),
   onGitChanged: cb => ipcRenderer.on("git:changed", (_e, g) => cb(g)),
   focusTerminal: (agent, id) => ipcRenderer.invoke("terminal:focus", agent, id),
+  // The voice question's answer window only.
+  onAnswer: cb => ipcRenderer.on("answer:show", (_e, a) => cb(a)),
+  answerAction: a => ipcRenderer.send("answer:action", a),
   deleteSession: (agent, id) => ipcRenderer.invoke("session:delete", agent, id),
   isDir: p => ipcRenderer.invoke("fs:is-dir", p),
   openVoiceHistory: () => ipcRenderer.invoke("voice:open-history"),

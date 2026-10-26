@@ -23,6 +23,7 @@ const prefs = require("./prefs");
 const network = require("./network");
 const updater = require("./updater");
 const usage = require("./usage");
+let answerPopup = null;
 const day = require("./day");
 const fullText = require("./search").createSearch({ dbFile: path.join(app.getPath("userData"), "search.db") });
 const voiceContext = require("./voice-context").createVoiceContext({ liveSessions: (...a) => liveSessions(...a), findTranscript: id => findTranscript(id) });
@@ -632,12 +633,13 @@ if (!app.requestSingleInstanceLock()) {
       active: () => Boolean(bar?.isVisible() || (managerWin && !managerWin.isDestroyed() && managerWin.isVisible() && !managerWin.isMinimized()))
     });
     scan().catch(err => console.error("Initial scan failed:", err.message));
+    answerPopup = require("./answer-popup").createAnswerPopup({ preload: PRELOAD, background: prefs.background, copy: async s => clipboard.writeText(s), icon: makeIcon(64) });
     voiceContext.start();
     // Started once the windows are up: the first run copies VoiceTray's history first, and a voice part that cannot
     // start (native module, broken data) must not take the session manager down with it.
     voiceStarting = Promise.resolve()
       .then(() => require("./voice/controller").initVoice({
-        balloon, onTrayChanged: buildTrayMenu, icon: makeIcon(64), prefs,
+        balloon, onTrayChanged: buildTrayMenu, icon: makeIcon(64), prefs, showAnswer: a => answerPopup?.show(a),
         // The dictionary may include the projects' names.
         projectNames: () => [...readRegistry().projects.map(p => p.name), ...voiceContext.terms()],
         general: { set: patch => prefs.set(patch), hotkey: () => ({ current: hotkeyLabel(), candidates: HOTKEYS.map(k => keyLabel(k, " + ")) }), updates: updater, network,

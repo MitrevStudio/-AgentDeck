@@ -126,6 +126,11 @@ function createQueue(deps = {}) {
   // failure falls back to the transcript, so the dictation is never lost to it.
   async function finish(id, job, raw, s, terms, signal) {
     const fixed = applyReplacements(raw, s.dictionary?.replacements);
+    if (job.Ask) {
+      if (!fixed) return { text: "", rewriteError: null };
+      const { askText } = require("./ask");
+      return { text: await askText(fixed, { dictionary: terms, language: job.Language, provider: job.Provider || s.provider, signal }), rewriteError: null };
+    }
     if (job.EditSource) {
       if (!fixed) return { text: job.EditSource, rewriteError: null };
       emit("rewriting", id);
