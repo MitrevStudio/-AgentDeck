@@ -9,9 +9,9 @@ const liveOf = s => live.get(sessionKey(s));
 function livePill(s) {
   const l = liveOf(s);
   if (!l) return "";
-  const kind = liveKind(l);
+  const kind = getLiveKind(l);
   const label = kind === "other" ? esc(l.status) : esc(t(`live.label.${kind}`));
-  return `<span class="live ${kind} ${isStale(l) ? "stale" : ""}" data-live="${esc(sessionKey(s))}" title="${esc(liveHint(l))} · PID ${l.pid}">
+  return `<span class="live ${kind} ${isStale(l) ? "stale" : ""}" data-live="${esc(sessionKey(s))}" title="${esc(getLiveHint(l))} · PID ${l.pid}">
     <span class="${kind === "busy" ? "spinner" : kind === "waiting" ? "pulse attn" : "pulse"}"></span>${label}<span class="live-t">${esc(liveText(l))}</span></span>`;
 }
 
@@ -60,7 +60,7 @@ function compute() {
   const byAgent = ui.agent ? scoped.filter(s => s.agent === ui.agent) : scoped;
   const liveCounts = countLiveGroups(byAgent.map(liveOf).filter(Boolean));
   // Running sessions go first (blocked on the user, working, stalled, waiting for input); the rest keep their date order.
-  const running = byAgent.filter(liveOf).sort((a, b) => liveRank(liveOf(a)) - liveRank(liveOf(b)) || lastSign(liveOf(b)) - lastSign(liveOf(a)));
+  const running = byAgent.filter(liveOf).sort((a, b) => getLiveRank(liveOf(a)) - getLiveRank(liveOf(b)) || lastSign(liveOf(b)) - lastSign(liveOf(a)));
   const sessions = ui.liveOnly ? running : [...running, ...byAgent.filter(s => !liveOf(s))];
   return { toks, hits, projects, sel, scoped, agentCounts, liveCounts, sessions };
 }
@@ -165,12 +165,12 @@ function sessionHtml(s, i, toks) {
     ? `<div class="dir">${icon("folder")}${pathHtml(s.cwd, toks)}${gitChip(s.cwd)}<button class="icon-btn" data-action="copy" data-path="${esc(s.cwd)}" title="${esc(t("action.copyPath"))}">${icon("copy")}</button></div>`
     : `<div class="dir unknown">${icon("alert")}${esc(t("manager.session.noDir"))}</div>`;
   const l = liveOf(s);
-  const liveCls = l ? `live-${liveGroup(l) === "busy" && isStale(l) ? "stale" : liveGroup(l)}` : "";
+  const liveCls = l ? `live-${getLiveGroup(l) === "busy" && isStale(l) ? "stale" : getLiveGroup(l)}` : "";
   // A running session: its terminal is brought up; a second instance stays possible, but quieter. The secondary
   // actions' labels (.bl) give way to their icon and tooltip in a narrow panel (styles.css).
   const resumeBtn = l
     ? `<button class="btn sm primary" data-action="show-terminal" title="${esc(t("term.showTitle", { pid: l.pid }))}">${icon("raise")}${esc(t("term.show"))}</button>
-      ${canMoveHere(s) ? `<button class="btn sm" data-action="move-here" title="${esc(t("term.moveHereTitle"))}">${icon("download")}<span class="bl">${esc(t("term.moveHere"))}</span></button>` : ""}
+      ${isMoveHereOffered(s) ? `<button class="btn sm" data-action="move-here" title="${esc(t("term.moveHereTitle"))}">${icon("download")}<span class="bl">${esc(t("term.moveHere"))}</span></button>` : ""}
       <button class="btn sm ghost" data-action="resume" title="${esc(t("manager.session.openAgainTitle", { pid: l.pid }))}" aria-label="${esc(t("action.openAgain"))}">${icon("play")}<span class="bl">${esc(t("action.openAgain"))}</span></button>`
     : `<button class="btn sm primary" data-action="resume" ${s.cwd ? "" : "disabled"}>${icon("play")}${esc(t("action.resume"))}</button>`;
   return `<article class="card sess ${liveCls} ${i === ui.active ? "active" : ""}" data-i="${i}">
@@ -182,7 +182,7 @@ function sessionHtml(s, i, toks) {
     ${s.recap ? `<p class="sess-recap" title="${esc(t("manager.session.recapTitle", { recap: s.recap }))}"><span class="recap-label">${esc(t("manager.session.recap"))}</span>${hl(s.recap, toks)}</p>` : ""}
     ${dir}
     <div class="sess-foot"><span class="sid" title="${esc(t("manager.session.id"))}">${hl(s.id, toks)}</span>
-      ${contextChip(s)}${usageChip(s)}
+      ${getContextChip(s)}${usageChip(s)}
       ${resumeBtn}
       ${s.cwd ? `<button class="btn sm" data-action="terminal" data-path="${esc(s.cwd)}" title="${esc(t("action.terminalHere"))}" aria-label="${esc(t("action.terminal"))}">${icon("terminal")}<span class="bl">${esc(t("action.terminal"))}</span></button>
       <button class="btn sm" data-action="explorer" data-path="${esc(s.cwd)}" title="${esc(t("action.explorerTitle"))}" aria-label="${esc(t("action.explorer"))}">${icon("open")}<span class="bl">${esc(t("action.explorer"))}</span></button>` : ""}

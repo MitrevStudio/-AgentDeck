@@ -255,11 +255,13 @@ static class DockPty
                 byte[] payload = ReadExactly(stdin, BitConverter.ToInt32(header, 1));
                 if (payload == null)
                 {
-                    return;
+                    break;
                 }
                 HandleFrame(header[0], payload, target);
             }
         }
+        // stdin closed: the host is gone, and exiting closes the job, which ends the whole tree
+        Environment.Exit(0);
     }
 
     static void HandleFrame(byte type, byte[] payload, FileStream target)

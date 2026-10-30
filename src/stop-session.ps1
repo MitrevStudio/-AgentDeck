@@ -1,7 +1,6 @@
-# Stops a Claude Code process running in another terminal ("Move here") and switches off the terminal modes it left
-# on, so the shell in that tab does not print escape codes for mouse moves, focus changes or keys. Run by main.js
-# through -EncodedCommand with $ClaudePid set in front (this file may sit inside app.asar).
-# Exit codes: 0 stopped, 3 not a Claude Code process, 1 error
+# "Move here": stops a Claude Code process in another terminal and switches off the terminal modes it left on (or
+# that tab prints escape codes). Run with -EncodedCommand, $ClaudePid set in front. Exit: 0 stopped, 3 not Claude, 1 error
+
 $ErrorActionPreference = 'Stop'
 $resetModes = (@('?1000l', '?1002l', '?1003l', '?1006l', '?1015l', '?1004l', '?2004l', '<u', '<u', '<u', '>4m', '?1049l', '?25h', '0m') |
     ForEach-Object { [char]27 + '[' + $_ }) -join ''
@@ -38,13 +37,18 @@ public static class StopNative
 '@
 }
 
+# A child counts only when it started after its parent: Windows keeps a dead parent's id in ParentProcessId, so an
+# unrelated older process can carry a recycled one.
 function Get-ProcessTree($rootId)
 {
-    $all = Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId
+    $all = Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId, CreationDate
+    $byId = @{}
+    $all | ForEach-Object { $byId[[int]$_.ProcessId] = $_ }
     $ids = @($rootId)
     for ($i = 0; $i -lt $ids.Count; $i++)
     {
-        $ids += @($all | Where-Object { $_.ParentProcessId -eq $ids[$i] } | ForEach-Object { [int]$_.ProcessId })
+        $parent = $byId[[int]$ids[$i]]
+        $ids += @($all | Where-Object { $_.ParentProcessId -eq $ids[$i] -and $parent -and $_.CreationDate -ge $parent.CreationDate } | ForEach-Object { [int]$_.ProcessId })
     }
     return $ids
 }

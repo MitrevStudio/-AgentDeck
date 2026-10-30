@@ -98,7 +98,7 @@ function getContextTitle(c, state) {
   }
   return t(state === "large" ? "context.tip.large" : "context.tip.cold", { n });
 }
-function contextChip(s) {
+function getContextChip(s) {
   const c = contextBySession.get(sessionKey(s));
   if (!c) {
     return "";

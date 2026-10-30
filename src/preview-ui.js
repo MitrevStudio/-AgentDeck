@@ -52,7 +52,7 @@ function getHandoff(s, d) {
     outcome: getHandoffPart(answers[answers.length - 1]?.text) || t("preview.handoff.unknown")
   });
 }
-function previewActions(s) {
+function getPreviewActions(s) {
   if (!s.cwd) {
     return "";
   }
@@ -111,7 +111,7 @@ function previewHtml(s, d) {
     : "";
   const gap = d.more ? `<div class="pv-gap"><span>${esc(t("preview.earlier"))}</span></div>` : "";
   const msgs = d.messages.length ? d.messages.map(m => previewMessage(s, m)).join("") : `<div class="pv-empty">${esc(t("preview.noMessages"))}</div>`;
-  return `${title}<div class="pv-head">${previewFacts(s, d)}${previewActions(s)}</div>${body(first + gap + msgs)}`;
+  return `${title}<div class="pv-head">${previewFacts(s, d)}${getPreviewActions(s)}</div>${body(first + gap + msgs)}`;
 }
 
 // ---------- filling ----------
@@ -148,7 +148,11 @@ function showPreview(box, s) {
     if (box.isConnected && box.dataset.key === key && JSON.stringify(d) !== JSON.stringify(box.pvData)) setPreview(box, s, d);
   });
 }
-function setPreview(box, s, d) { box.pvData = d; box.pvSession = s; fillPreview(box, s, d); }
+function setPreview(box, s, d) {
+  box.pvData = d;
+  box.pvSession = s;
+  fillPreview(box, s, d);
+}
 // A click on a clipped message opens it in full.
 document.addEventListener("click", e => {
   const el = e.target.closest?.(".pv-text.clipped");

@@ -1,8 +1,6 @@
-// Terminals hosted in AgentDeck's own window (Settings: "Open sessions in: AgentDeck tabs"). Each runs a command in a
-// Windows pseudo console through DockPty (native/DockPty.cs), compiled once into userData with the C# compiler that
-// ships with Windows - nothing is downloaded. Output is kept (the last SCROLLBACK_CHARS) and streamed to the manager
-// window; every chunk carries `end`, the output's length so far, so a page attaching midway skips what the scrollback
-// it got already holds. The terminals live as long as AgentDeck runs.
+// AgentDeck's own terminal tabs: each runs a command in a pseudo console through DockPty (native/DockPty.cs, compiled
+// once into userData with the C# compiler that ships with Windows). Output chunks carry `end`, the output's length so
+// far, so a page attaching midway skips what its scrollback already holds.
 //
 // DockPty's stdin frames: [type:1][length:4 LE][payload]; type 0 = input, type 1 = resize (cols:2 LE, rows:2 LE).
 const crypto = require("node:crypto");
@@ -16,39 +14,41 @@ const CSC = path.join(process.env.WINDIR || "C:\\Windows", "Microsoft.NET", "Fra
 const SCROLLBACK_CHARS = 512 * 1024;
 const DEFAULT_COLS = 120, DEFAULT_ROWS = 32, MAX_SIZE = 1000;
 const FRAME_INPUT = 0, FRAME_RESIZE = 1;
-// Variables of a Claude Code session AgentDeck itself may have been started from: a nested `claude` would take them
-// for its own and act as a child session.
-const INHERITED_CLAUDE_VARS = /^CLAUDE(_?CODE|_PID$)/i;
 
-// onData(id, data, end), onExit(id, code), onChange(list): to the manager window.
+// onData(id, data, end), onExit(id, code), onChange(tabs): to the manager window.
 function createTerminals({ userDataDir, onData, onExit, onChange }) {
   const terminals = new Map();
   let bridge = null;
 
+  function compile(source, exe) {
+    // csc reads a real file (the source may sit inside app.asar) and writes to a temporary name: an interrupted build
+    // leaves no exe that would be trusted later.
+    const copy = `${exe}.cs`, partial = `${exe}.partial`;
+    fs.writeFileSync(copy, source);
+    return new Promise((resolve, reject) => {
+      execFile(CSC, ["/nologo", "/optimize", "/target:exe", `/out:${partial}`, copy], { windowsHide: true }, err => {
+        fs.rm(copy, { force: true }, () => {});
+        if (err) {
+          reject(new Error(`DockPty could not be compiled: ${err.message}`));
+          return;
+        }
+        fs.renameSync(partial, exe);
+        resolve(exe);
+      });
+    });
+  }
   function buildBridge() {
     const source = fs.readFileSync(BRIDGE_SOURCE, "utf8");
     const hash = crypto.createHash("sha1").update(source).digest("hex").slice(0, 10);
     const exe = path.join(userDataDir, `DockPty-${hash}.exe`);
-    if (fs.existsSync(exe)) {
-      return Promise.resolve(exe);
-    }
-    // csc reads a real file: the source may sit inside app.asar.
-    const copy = path.join(userDataDir, `DockPty-${hash}.cs`);
     fs.mkdirSync(userDataDir, { recursive: true });
-    fs.writeFileSync(copy, source);
-    return new Promise((resolve, reject) => {
-      execFile(CSC, ["/nologo", "/optimize", "/target:exe", `/out:${exe}`, copy], { windowsHide: true }, err => {
-        fs.rm(copy, { force: true }, () => {});
-        if (err) {
-          reject(new Error(`DockPty could not be compiled: ${err.message}`));
-        } else {
-          resolve(exe);
-        }
-      });
-    });
+    return fs.existsSync(exe) ? Promise.resolve(exe) : compile(source, exe);
   }
   function getBridge() {
-    bridge ||= buildBridge().catch(e => { bridge = null; throw e; });
+    bridge ||= buildBridge().catch(e => {
+      bridge = null;
+      throw e;
+    });
     return bridge;
   }
 
@@ -58,15 +58,24 @@ function createTerminals({ userDataDir, onData, onExit, onChange }) {
     header.writeInt32LE(payload.length, 1);
     return Buffer.concat([header, payload]);
   }
-  function getChildEnv(id, env) {
-    const clean = Object.fromEntries(Object.entries(env).filter(([name]) => !INHERITED_CLAUDE_VARS.test(name)));
-    return { ...clean, AGENTDECK_TERMINAL: id };
-  }
 
+  // The scrollback is kept as chunks and trimmed once it holds twice its size, not copied on every chunk.
+  function appendScrollback(terminal, data) {
+    terminal.chunks.push(data);
+    terminal.chunkChars += data.length;
+    if (terminal.chunkChars > 2 * SCROLLBACK_CHARS) {
+      const text = terminal.chunks.join("").slice(-SCROLLBACK_CHARS);
+      terminal.chunks = [text];
+      terminal.chunkChars = text.length;
+    }
+  }
+  function getScrollback(terminal) {
+    return terminal.chunks.join("").slice(-SCROLLBACK_CHARS);
+  }
   function handleOutput(terminal, decoder, chunk) {
     const data = decoder.write(chunk);
     terminal.end += data.length;
-    terminal.scrollback = (terminal.scrollback + data).slice(-SCROLLBACK_CHARS);
+    appendScrollback(terminal, data);
     onData(terminal.id, data, terminal.end);
   }
   function handleExit(terminal, code) {
@@ -75,24 +84,26 @@ function createTerminals({ userDataDir, onData, onExit, onChange }) {
     }
     terminal.exitCode = code ?? -1;
     onExit(terminal.id, terminal.exitCode);
-    onChange(list());
+    onChange(getTabs());
   }
 
-  // commandLine: what runs in the pseudo console, e.g. `powershell.exe -NoLogo -NoExit -EncodedCommand ...`.
+  // commandLine: what runs in the pseudo console. env: already prepared by terminal-env.js.
   async function open({ cwd, commandLine, title, agent = "", sessionId = "", env = process.env }) {
     const exe = await getBridge();
     const id = crypto.randomUUID();
     const child = spawn(exe, [String(DEFAULT_COLS), String(DEFAULT_ROWS), cwd, commandLine], {
-      cwd, env: getChildEnv(id, env), stdio: ["pipe", "pipe", "ignore"], windowsHide: true
+      cwd, env: { ...env, AGENTDECK_TERMINAL: id }, stdio: ["pipe", "pipe", "ignore"], windowsHide: true
     });
-    const terminal = { id, cwd, title, agent, sessionId, child, scrollback: "", end: 0, exitCode: null, createdAt: Date.now(), lastInputAt: 0, note: "" };
+    const terminal = {
+      id, cwd, title, agent, sessionId, child, chunks: [], chunkChars: 0, end: 0, exitCode: null, createdAt: Date.now(), lastInputAt: 0, note: ""
+    };
     const decoder = new StringDecoder("utf8");
     child.stdout.on("data", chunk => handleOutput(terminal, decoder, chunk));
     child.on("exit", code => handleExit(terminal, code));
     child.on("error", () => handleExit(terminal, -1));
     child.stdin.on("error", () => {});
     terminals.set(id, terminal);
-    onChange(list());
+    onChange(getTabs());
     return id;
   }
 
@@ -118,7 +129,7 @@ function createTerminals({ userDataDir, onData, onExit, onChange }) {
     const terminal = terminals.get(id);
     if (terminal && terminal.note !== note) {
       terminal.note = note;
-      onChange(list());
+      onChange(getTabs());
     }
   }
   function resize(id, cols, rows) {
@@ -133,7 +144,7 @@ function createTerminals({ userDataDir, onData, onExit, onChange }) {
   }
   function attach(id) {
     const terminal = terminals.get(id);
-    return terminal ? { scrollback: terminal.scrollback, end: terminal.end, exitCode: terminal.exitCode } : null;
+    return terminal ? { scrollback: getScrollback(terminal), end: terminal.end, exitCode: terminal.exitCode } : null;
   }
   function close(id) {
     const terminal = terminals.get(id);
@@ -144,31 +155,32 @@ function createTerminals({ userDataDir, onData, onExit, onChange }) {
     if (terminal.exitCode === null) {
       terminal.child.kill();
     }
-    onChange(list());
+    onChange(getTabs());
     return true;
   }
   function closeAll() {
     [...terminals.keys()].forEach(close);
   }
-  // A new session's id is known only once it runs: the page links the tab to it.
+  // A new session's id is known only once it runs (tab-links.js finds it).
   function link(id, agent, sessionId) {
     const terminal = terminals.get(id);
     if (terminal && !terminal.sessionId) {
       terminal.agent = agent;
       terminal.sessionId = sessionId;
-      onChange(list());
+      onChange(getTabs());
     }
   }
-  function list() {
+  function getTabs() {
     return [...terminals.values()].map(x => ({
       id: x.id, cwd: x.cwd, title: x.title, agent: x.agent, sessionId: x.sessionId, exited: x.exitCode !== null, createdAt: x.createdAt, note: x.note
     }));
   }
-  function findBySession(agent, sessionId) {
-    return [...terminals.values()].find(x => x.agent === agent && x.sessionId === sessionId && x.exitCode === null) || null;
+  // Running tabs not linked to a session yet, with their DockPty's process id.
+  function getUnlinkedTabs() {
+    return [...terminals.values()].filter(x => !x.sessionId && x.exitCode === null).map(x => ({ id: x.id, pid: x.child.pid }));
   }
 
-  return { open, input, type, getLastInputAt, setNote, resize, attach, close, closeAll, link, list, findBySession };
+  return { open, input, type, getLastInputAt, setNote, resize, attach, close, closeAll, link, getTabs, getUnlinkedTabs };
 }
 
 module.exports = { createTerminals };

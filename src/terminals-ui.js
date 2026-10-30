@@ -1,41 +1,33 @@
-// AgentDeck's own terminal tabs (terminals.js in main): a strip over the sessions panel - "Sessions" first, then a tab
-// per terminal - and an xterm.js view per tab, coloured from theme.css. Classic script for the manager, loaded before
-// renderer.js, which calls showSessionTab, canMoveHere and moveSessionHere; renderer's globals (live, liveOf, toast)
-// are used only once the page runs.
-const TERM_ANSI = {
-  dark: {
-    black: "#20252e", red: "#ff8a8a", green: "#5ee0a0", yellow: "#f2b55f", blue: "#7aa7ff", magenta: "#d7a6ff", cyan: "#6fd6e8", white: "#c9d1dc",
-    brightBlack: "#6b7686", brightRed: "#ffb0b0", brightGreen: "#8ff0c0", brightYellow: "#ffd08a", brightBlue: "#a8c6ff", brightMagenta: "#e6c6ff",
-    brightCyan: "#9be6f2", brightWhite: "#ffffff"
-  },
-  light: {
-    black: "#18202c", red: "#c93434", green: "#12854f", yellow: "#a35a00", blue: "#2563d9", magenta: "#8a3fc7", cyan: "#0e7490", white: "#9aa4b2",
-    brightBlack: "#5b6676", brightRed: "#e04848", brightGreen: "#16a362", brightYellow: "#c27000", brightBlue: "#3b7bf0", brightMagenta: "#a456e0",
-    brightCyan: "#1590ad", brightWhite: "#6b7686"
-  }
-};
-// A new session's tab is linked to the running session that started in its folder this long after it, at most.
-const LINK_WINDOW_MS = 10000;
-const LINK_POLL_MS = 3000;
+// AgentDeck's own terminal tabs (terminals.js in main): a strip over the sessions panel and an xterm.js view per tab.
+// Loaded before renderer.js, which calls showSessionTab, isMoveHereOffered and moveSessionHere.
+const ANSI_NAMES = [
+  "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
+  "brightBlack", "brightRed", "brightGreen", "brightYellow", "brightBlue", "brightMagenta", "brightCyan", "brightWhite"
+];
+const TABS_REFRESH_MS = 3000;
 const termViews = new Map(); // tab id -> { el, term, fit, attachedEnd, queue }
 let termTabs = [];
 let activeTab = ""; // "" = the sessions list
+let tabsHtml = "";
 let sessionsIn = window.prefs.sessionsIn || "windows";
 
 // ---------- looks ----------
 function getCssVar(styles, name) {
   return styles.getPropertyValue(name).trim();
 }
+// theme.css --term-* tokens: --term-ansi-black ... --term-ansi-bright-white for the 16 colours.
 function getTermTheme() {
   const styles = getComputedStyle(document.documentElement);
-  const mode = document.documentElement.dataset.theme === "light" ? "light" : "dark";
-  return {
+  const theme = {
     background: getCssVar(styles, "--term-bg"),
     foreground: getCssVar(styles, "--term-fg"),
     cursor: getCssVar(styles, "--term-cursor"),
-    selectionBackground: getCssVar(styles, "--term-selection"),
-    ...TERM_ANSI[mode]
+    selectionBackground: getCssVar(styles, "--term-selection")
   };
+  for (const name of ANSI_NAMES) {
+    theme[name] = getCssVar(styles, `--term-ansi-${name.replace(/[A-Z]/g, c => `-${c.toLowerCase()}`)}`);
+  }
+  return theme;
 }
 function applyTermTheme() {
   const theme = getTermTheme();
@@ -87,7 +79,6 @@ function createTermView(id) {
   term.open(el);
   term.attachCustomKeyEventHandler(e => handleTermKey(term, e));
   term.onData(data => window.terminals.input(id, data));
-  term.onResize(size => window.terminals.resize(id, size.cols, size.rows));
   const view = { el, term, fit, attachedEnd: null, queue: [] };
   termViews.set(id, view);
   attachView(id, view).catch(e => toast(e.message, true));
@@ -120,7 +111,7 @@ function getTabStatus(tab) {
   if (!l) {
     return "";
   }
-  return liveGroup(l);
+  return getLiveGroup(l);
 }
 function getTabTitle(tab) {
   const s = tab.sessionId && typeof data !== "undefined" ? data.sessions.find(x => x.agent === tab.agent && x.id === tab.sessionId) : null;
@@ -134,12 +125,17 @@ function renderTermTabs() {
     return;
   }
   const sessionsTab = `<button class="term-tab ${activeTab ? "" : "active"}" data-term-tab="" role="tab">${icon("layers")}${esc(t("manager.sessions"))}</button>`;
-  strip.innerHTML = sessionsTab + termTabs.map(tab => {
+  const html = sessionsTab + termTabs.map(tab => {
     const status = getTabStatus(tab);
     return `<div class="term-tab ${tab.id === activeTab ? "active" : ""} ${tab.exited ? "exited" : ""}" data-term-tab="${esc(tab.id)}" role="tab" title="${esc(tab.cwd)}">
       <span class="term-dot ${status}"></span><span class="term-title">${esc(getTabTitle(tab))}</span>${tab.note ? `<span class="term-note">${esc(tab.note)}</span>` : ""}
       <button class="term-close" data-term-close="${esc(tab.id)}" title="${esc(t("term.tab.close"))}">${icon("x")}</button></div>`;
   }).join("");
+  // Rebuilt only when something shows differently, so a click in progress is not lost.
+  if (html !== tabsHtml) {
+    tabsHtml = html;
+    strip.innerHTML = html;
+  }
 }
 function activateTab(id) {
   activeTab = termViews.has(id) ? id : "";
@@ -160,7 +156,6 @@ function syncTermTabs(list) {
     activeTab = "";
   }
   activateTab(activeTab);
-  linkNewTabs();
 }
 async function closeTermTab(id) {
   const tab = termTabs.find(x => x.id === id);
@@ -170,23 +165,7 @@ async function closeTermTab(id) {
   await window.terminals.close(id);
 }
 
-// ---------- sessions <-> tabs ----------
-// A tab that started a new session learns its id from the live registry: the one that began in the tab's folder
-// right after the tab, and is no other tab's yet.
-function linkNewTabs() {
-  if (typeof live === "undefined") {
-    return;
-  }
-  const taken = new Set(termTabs.filter(tab => tab.sessionId).map(tab => `${tab.agent}:${tab.sessionId}`));
-  for (const tab of termTabs.filter(x => !x.sessionId && !x.exited)) {
-    const match = [...live.values()].find(l => !taken.has(`${l.agent}:${l.id}`) && normPath(l.cwd) === normPath(tab.cwd)
-      && l.startedAt >= tab.createdAt - 2000 && l.startedAt <= tab.createdAt + LINK_WINDOW_MS);
-    if (match) {
-      taken.add(`${match.agent}:${match.id}`);
-      window.terminals.link(tab.id, match.agent, match.id).catch(() => {});
-    }
-  }
-}
+// ---------- sessions <-> tabs (main links a new session's tab: tab-links.js) ----------
 function findSessionTab(s) {
   return termTabs.find(tab => tab.agent === s.agent && tab.sessionId === s.id && !tab.exited) || null;
 }
@@ -199,7 +178,7 @@ function showSessionTab(s) {
   activateTab(tab.id);
   return true;
 }
-function canMoveHere(s) {
+function isMoveHereOffered(s) {
   return sessionsIn === "tabs" && s.agent === "Claude" && !findSessionTab(s);
 }
 async function moveSessionHere(s) {
@@ -248,11 +227,9 @@ $("termTabs").addEventListener("click", e => {
   }
 });
 new ResizeObserver(fitActiveTab).observe($("termPanes"));
-setInterval(() => {
-  linkNewTabs();
-  renderTermTabs();
-}, LINK_POLL_MS);
-window.terminals.list().then(({ tabs, activate }) => {
+// The status dots and titles follow the live registry.
+setInterval(renderTermTabs, TABS_REFRESH_MS);
+window.terminals.getTabs().then(({ tabs, activate }) => {
   syncTermTabs(tabs);
   if (activate) {
     activateTab(activate);

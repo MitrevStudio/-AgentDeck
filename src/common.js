@@ -57,14 +57,14 @@ const lastSign = l => Math.max(l.activityAt || 0, l.statusAt || 0);
 const isStale = l => l.status === "busy" && Date.now() - lastSign(l) > STALE_MS;
 // "waiting": blocked on the user (a permission, a question, a dialog), so it goes first everywhere.
 const LIVE_RANKS = { waiting: 0, busy: 1, idle: 3 };
-function liveRank(l) {
+function getLiveRank(l) {
   if (isStale(l)) {
     return 2;
   }
   return LIVE_RANKS[l.status] ?? 3;
 }
 // The group a running session is counted and drawn in: busy, waiting (on the user) or idle (anything else).
-function liveGroup(l) {
+function getLiveGroup(l) {
   if (l.status === "busy" || l.status === "waiting") {
     return l.status;
   }
@@ -73,19 +73,19 @@ function liveGroup(l) {
 function countLiveGroups(states) {
   const counts = { busy: 0, waiting: 0, idle: 0 };
   for (const l of states) {
-    counts[liveGroup(l)]++;
+    counts[getLiveGroup(l)]++;
   }
   return counts;
 }
 // The state as drawn: busy, waiting, idle, or other for a status this version does not know.
-function liveKind(l) {
+function getLiveKind(l) {
   if (l.status === "busy" || l.status === "waiting" || l.status === "idle") {
     return l.status;
   }
   return "other";
 }
-function liveHint(l) {
-  return t(`live.hint.${liveKind(l)}`, { reason: l.waitingFor || t("live.reason.unknown") });
+function getLiveHint(l) {
+  return t(`live.hint.${getLiveKind(l)}`, { reason: l.waitingFor || t("live.reason.unknown") });
 }
 function shortAgo(ms) {
   const s = Math.max(0, Math.round((Date.now() - ms) / 1000));

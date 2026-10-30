@@ -41,12 +41,16 @@ const terminals = createTerminals({
   userDataDir: app.getPath("userData"),
   onData: (id, data, end) => sendToManager("terminal:data", { id, data, end }),
   onExit: (id, code) => sendToManager("terminal:exit", { id, code }),
-  onChange: list => sendToManager("terminals:changed", list)
+  onChange: tabs => sendToManager("terminals:changed", tabs)
 });
 let pendingTab = ""; // the tab to bring up once the manager window has loaded
+function getSessionContext(key) {
+  return usage.get()?.sessions.find(s => s.key === key)?.context || null;
+}
 const autopilot = require("./autopilot").createAutopilot({
-  terminals, liveSessions: (...a) => liveSessions(...a), findTranscript: id => findTranscript(id), getPrefs: () => prefs.get(), t: (...a) => t(...a)
+  terminals, liveSessions: (...a) => liveSessions(...a), getContext: getSessionContext, getPrefs: () => prefs.get(), t: (...a) => t(...a)
 });
+const tabLinks = require("./tab-links").createTabLinks({ terminals, liveSessions: (...a) => liveSessions(...a) });
 let notifier = null;
 const sessionPreview = require("./session-preview");
 const gitStatus = require("./git-status");
@@ -108,9 +112,9 @@ function mtime(file) { try { return fs.statSync(file).mtimeMs; } catch { return 
 const { NOISE_PROMPT, contentText } = sessionPreview;
 // Claude Code transcripts only ever grow, so each is read once and then only from where the last scan stopped (a file
 // that shrank is read again from the start). What was gathered so far stays here, per file.
-const claudeReads = new Map(); // file -> { offset, cwd, prompt, aiTitle, customTitle, answerLine }
+const claudeReads = new Map(); // file -> { offset, cwd, prompt, aiTitle, customTitle, answerLine, recap }
 function readClaudeLine(st, line) {
-  // Only the last answer is parsed (getAnswerRecap): most lines are tool output that never needs decoding.
+  // Only the last answer is parsed (getAnswerRecap, once per read): most lines are tool output never decoded.
   if (line.includes('"type":"assistant"') && line.includes('"type":"text"')) st.answerLine = line;
   // Titles can be appended at any point (/rename, AI title refresh); everything else is only needed once.
   const titleLine = line.includes('"custom-title"') || line.includes('"ai-title"');
@@ -135,24 +139,42 @@ function readClaudeAppended(file, st, size) {
       if (line) readClaudeLine(st, line);
     }
     st.offset += end;
+    if (st.answerLine) {
+      st.recap = getAnswerRecap(st.answerLine);
+      st.answerLine = "";
+    }
   } finally {
     fs.closeSync(fd);
   }
 }
+function getStat(file) {
+  try {
+    return fs.statSync(file);
+  } catch {
+    return null;
+  }
+}
 function parseClaude(file) {
-  let stat;
-  try { stat = fs.statSync(file); } catch { claudeReads.delete(file); return null; }
+  const stat = getStat(file);
+  if (!stat) {
+    claudeReads.delete(file);
+    return null;
+  }
   let st = claudeReads.get(file);
   if (!st || stat.size < st.offset) {
-    st = { offset: 0, cwd: "", prompt: "", aiTitle: "", customTitle: "", answerLine: "" };
+    st = { offset: 0, cwd: "", prompt: "", aiTitle: "", customTitle: "", answerLine: "", recap: "" };
     claudeReads.set(file, st);
   }
   if (stat.size > st.offset) {
-    try { readClaudeAppended(file, st, stat.size); } catch { return null; }
+    try {
+      readClaudeAppended(file, st, stat.size);
+    } catch {
+      return null;
+    }
   }
   const id = path.basename(file, ".jsonl");
   const title = titleFromText(st.customTitle || st.aiTitle) || st.prompt || t("session.untitled", { agent: "Claude", id: id.slice(0, 8) });
-  return { id, agent: "Claude", cwd: st.cwd, title, prompt: st.prompt !== title ? st.prompt : "", recap: getAnswerRecap(st.answerLine), updatedAt: stat.mtimeMs, file };
+  return { id, agent: "Claude", cwd: st.cwd, title, prompt: st.prompt !== title ? st.prompt : "", recap: st.recap, updatedAt: stat.mtimeMs, file };
 }
 function getAnswerRecap(line) {
   let x;
@@ -174,6 +196,21 @@ function readHead(file, bytes) {
   } finally {
     fs.closeSync(fd);
   }
+}
+// Kept while the file's size and time stay the same: a rescan reads only Codex transcripts that changed.
+const codexReads = new Map(); // file -> { mtime, size, session }
+function parseCodexCached(file) {
+  const stat = getStat(file);
+  if (!stat) {
+    codexReads.delete(file);
+    return null;
+  }
+  let known = codexReads.get(file);
+  if (!known || known.mtime !== stat.mtimeMs || known.size !== stat.size) {
+    known = { mtime: stat.mtimeMs, size: stat.size, session: parseCodex(file) };
+    codexReads.set(file, known);
+  }
+  return known.session ? { ...known.session } : null;
 }
 function parseCodex(file) {
   let lines;
@@ -264,13 +301,17 @@ async function scanOpenCode(registry) {
   }
   return found;
 }
+// Files gone since the last scan leave the read caches.
+function forgetMissing(reads, files) {
+  const present = new Set(files);
+  for (const f of reads.keys()) {
+    if (!present.has(f)) reads.delete(f);
+  }
+}
 function scanTranscripts(registry, found) {
   // Claude Code transcripts. Subagent transcripts live in `subagents/` and cannot be resumed on their own.
   const claudeFiles = walkFiles(CLAUDE_DIR, ".jsonl", [], 0, ["subagents"]);
-  const present = new Set(claudeFiles);
-  for (const f of claudeReads.keys()) {
-    if (!present.has(f)) claudeReads.delete(f);
-  }
+  forgetMissing(claudeReads, claudeFiles);
   for (const f of claudeFiles) {
     const s = parseClaude(f);
     if (s) {
@@ -283,8 +324,10 @@ function scanTranscripts(registry, found) {
     }
   }
   // Codex transcripts.
-  for (const f of walkFiles(CODEX_DIR, ".jsonl")) {
-    const s = parseCodex(f);
+  const codexFiles = walkFiles(CODEX_DIR, ".jsonl");
+  forgetMissing(codexReads, codexFiles);
+  for (const f of codexFiles) {
+    const s = parseCodexCached(f);
     if (s) {
       const p = registry.projects.find(p => s.cwd && norm(p.path) === norm(s.cwd));
       if (p) s.projectName = p.name;
@@ -448,20 +491,39 @@ function broadcast(channel, payload) {
 }
 // full: OpenCode's CLI and the git status are asked too (first scan, Refresh); a rescan after changed transcripts
 // skips both. A full scan asked for while a lighter one runs follows it.
+// A light rescan refreshes the full-text index at most this often: the search worker re-reads grown transcripts.
+const LIGHT_INDEX_MS = 60000;
+let lastSessionsSig = "", lastKeysSig = "", lastIndexAt = 0;
+function updateCache(sessions, registry, agents, full) {
+  const sig = JSON.stringify(sessions);
+  const changed = sig !== lastSessionsSig;
+  lastSessionsSig = sig;
+  if (!changed && !full && cache) return;
+  cache = { registry, sessions, agents, at: Date.now() };
+  // New or removed sessions are indexed at once; text added to known ones waits for the next index.
+  const keysSig = sessions.map(s => `${s.agent}:${s.id}`).join(",");
+  const newKeys = keysSig !== lastKeysSig;
+  lastKeysSig = keysSig;
+  if (full || newKeys || Date.now() - lastIndexAt >= LIGHT_INDEX_MS) {
+    lastIndexAt = Date.now();
+    fullText.index(sessions);
+  }
+  broadcast("data:changed", cache);
+}
 function scan({ full = true } = {}) {
-  if (scanning && full && !scanningFull) return scanning.then(() => scan({ full }));
+  if (scanning && full && !scanningFull) return scanning.catch(() => {}).then(() => scan({ full }));
   if (scanning) return scanning;
   scanningFull = full;
   scanning = scanSessions({ openCode: full }).then(async sessions => {
     // Scan first: it auto-indexes projects into the registry, which must be read afterwards.
-    cache = { registry: readRegistry(), sessions, agents: await agentsReady, at: Date.now() };
-    fullText.index(sessions);
-    broadcast("data:changed", cache);
+    updateCache(sessions, readRegistry(), await agentsReady, full);
     // Transcripts may have grown too, and there may be new folders: their results are broadcast on their own.
     usage.refresh().catch(err => console.error("Usage scan failed:", err.message));
     if (full) gitStatus.refresh().catch(err => console.error("Git status failed:", err.message));
     return cache;
-  }).finally(() => { scanning = null; });
+  }).finally(() => {
+    scanning = null;
+  });
   return scanning;
 }
 // Sessions that go on, start or end change their transcripts: the list, the search index and the figures follow by
@@ -673,14 +735,20 @@ function registerIpc() {
   handle("terminals:list", () => {
     const activate = pendingTab;
     pendingTab = "";
-    return { tabs: terminals.list(), activate };
+    return { tabs: terminals.getTabs(), activate };
   });
   handle("terminal:attach", id => terminals.attach(text(id, 64)));
   handle("terminal:close", id => terminals.close(text(id, 64)));
-  handle("terminal:link", (id, agent, sessionId) => { checkAgent(agent); checkSessionId(sessionId); terminals.link(text(id, 64), agent, sessionId); return true; });
-  handle("terminal:move", async (agent, id) => { await moveToTab(text(agent), text(id)); return true; });
-  ipcMain.on("terminal:input", (e, id, data) => { if (trusted(e) && typeof data === "string" && data.length <= 1_000_000) terminals.input(id, data); });
-  ipcMain.on("terminal:resize", (e, id, cols, rows) => { if (trusted(e)) terminals.resize(id, Number(cols), Number(rows)); });
+  handle("terminal:move", async (agent, id) => {
+    await moveToTab(text(agent), text(id));
+    return true;
+  });
+  ipcMain.on("terminal:input", (e, id, data) => {
+    if (trusted(e) && typeof data === "string" && data.length <= 1_000_000) terminals.input(id, data);
+  });
+  ipcMain.on("terminal:resize", (e, id, cols, rows) => {
+    if (trusted(e)) terminals.resize(id, Number(cols), Number(rows));
+  });
   // Tokens and API-equivalent cost (usage.js): the last result at once, or a fresh pass over the transcripts.
   handle("usage:get", () => usage.get());
   // The shortcuts as set now: the menu's hotkey and the voice ones (labels such as "Ctrl + Shift + Space").
@@ -784,6 +852,7 @@ if (!app.requestSingleInstanceLock()) {
     network.start();
     registerIpc();
     autopilot.start();
+    tabLinks.start();
     watchTranscripts();
 
     bar = createEdgeBar({
@@ -867,7 +936,10 @@ if (!app.requestSingleInstanceLock()) {
       .catch(err => console.error("Voice shutdown failed:", err))
       .finally(() => app.quit());
   });
-  app.on("will-quit", () => { globalShortcut.unregisterAll(); terminals.closeAll(); });
+  app.on("will-quit", () => {
+    globalShortcut.unregisterAll();
+    terminals.closeAll();
+  });
   // The hidden edge menu keeps the app alive after the manager window is closed; quitting is done from the tray.
   app.on("window-all-closed", () => {});
 }

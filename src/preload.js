@@ -42,10 +42,9 @@ contextBridge.exposeInMainWorld("manager", {
 });
 // AgentDeck's own terminal tabs (manager window; terminals.js in main).
 contextBridge.exposeInMainWorld("terminals", {
-  list: () => ipcRenderer.invoke("terminals:list"),
+  getTabs: () => ipcRenderer.invoke("terminals:list"),
   attach: id => ipcRenderer.invoke("terminal:attach", id),
   close: id => ipcRenderer.invoke("terminal:close", id),
-  link: (id, agent, sessionId) => ipcRenderer.invoke("terminal:link", id, agent, sessionId),
   move: (agent, id) => ipcRenderer.invoke("terminal:move", agent, id),
   input: (id, data) => ipcRenderer.send("terminal:input", id, data),
   resize: (id, cols, rows) => ipcRenderer.send("terminal:resize", id, cols, rows),

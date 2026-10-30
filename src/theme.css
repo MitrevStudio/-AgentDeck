@@ -51,6 +51,22 @@
   --term-fg: #e2e7ee;
   --term-cursor: #7aa7ff;
   --term-selection: rgba(122, 167, 255, .3);
+  --term-ansi-black: #20252e;
+  --term-ansi-red: #ff8a8a;
+  --term-ansi-green: #5ee0a0;
+  --term-ansi-yellow: #f2b55f;
+  --term-ansi-blue: #7aa7ff;
+  --term-ansi-magenta: #d7a6ff;
+  --term-ansi-cyan: #6fd6e8;
+  --term-ansi-white: #c9d1dc;
+  --term-ansi-bright-black: #6b7686;
+  --term-ansi-bright-red: #ffb0b0;
+  --term-ansi-bright-green: #8ff0c0;
+  --term-ansi-bright-yellow: #ffd08a;
+  --term-ansi-bright-blue: #a8c6ff;
+  --term-ansi-bright-magenta: #e6c6ff;
+  --term-ansi-bright-cyan: #9be6f2;
+  --term-ansi-bright-white: #ffffff;
 
   /* ---------- status ---------- */
   --busy: #5ee0a0;          /* working, done, saved */
@@ -163,6 +179,22 @@
   --term-fg: #18202c;
   --term-cursor: #2563d9;
   --term-selection: rgba(37, 99, 217, .22);
+  --term-ansi-black: #18202c;
+  --term-ansi-red: #c93434;
+  --term-ansi-green: #12854f;
+  --term-ansi-yellow: #a35a00;
+  --term-ansi-blue: #2563d9;
+  --term-ansi-magenta: #8a3fc7;
+  --term-ansi-cyan: #0e7490;
+  --term-ansi-white: #9aa4b2;
+  --term-ansi-bright-black: #5b6676;
+  --term-ansi-bright-red: #e04848;
+  --term-ansi-bright-green: #16a362;
+  --term-ansi-bright-yellow: #c27000;
+  --term-ansi-bright-blue: #3b7bf0;
+  --term-ansi-bright-magenta: #a456e0;
+  --term-ansi-bright-cyan: #1590ad;
+  --term-ansi-bright-white: #6b7686;
 
   --busy: #12854f;
   --busy-bg: rgba(18, 133, 79, .11);
