@@ -143,6 +143,7 @@ function sessionHtml(s, i, toks) {
   // actions' labels (.bl) give way to their icon and tooltip in a narrow panel (styles.css).
   const resumeBtn = l
     ? `<button class="btn sm primary" data-action="show-terminal" title="${esc(t("term.showTitle", { pid: l.pid }))}">${icon("raise")}${esc(t("term.show"))}</button>
+      ${canMoveHere(s) ? `<button class="btn sm" data-action="move-here" title="${esc(t("term.moveHereTitle"))}">${icon("download")}<span class="bl">${esc(t("term.moveHere"))}</span></button>` : ""}
       <button class="btn sm ghost" data-action="resume" title="${esc(t("manager.session.openAgainTitle", { pid: l.pid }))}" aria-label="${esc(t("action.openAgain"))}">${icon("play")}<span class="bl">${esc(t("action.openAgain"))}</span></button>`
     : `<button class="btn sm primary" data-action="resume" ${s.cwd ? "" : "disabled"}>${icon("play")}${esc(t("action.resume"))}</button>`;
   return `<article class="card sess ${liveCls} ${i === ui.active ? "active" : ""}" data-i="${i}">
@@ -266,6 +267,7 @@ function setActive(i) {
 }
 
 async function resume(s) {
+  if (showSessionTab(s)) return;
   if (!s?.cwd) return toast(t("errors.sessionNoDir"), true);
   const l = liveOf(s);
   if (l && !confirm(t("manager.confirm.openAgain", { pid: l.pid }))) return;
@@ -273,7 +275,7 @@ async function resume(s) {
   toast(t("manager.toast.resuming", { agent: s.agent, cwd: s.cwd }));
 }
 async function showTerminal(s) {
-  if (!s) return;
+  if (!s || showSessionTab(s)) return;
   const r = await window.manager.focusTerminal(s.agent, s.id);
   const note = focusNote(r);
   if (note) toast(note, !r.ok);
@@ -297,6 +299,7 @@ async function runAction(action, btn) {
   switch (action) {
     case "resume": return resume(visible[Number(btn.closest(".sess").dataset.i)]);
     case "show-terminal": return showTerminal(visible[Number(btn.closest(".sess").dataset.i)]);
+    case "move-here": return moveSessionHere(visible[Number(btn.closest(".sess").dataset.i)]);
     case "terminal": await window.manager.launchFolder(path); return toast(t("manager.toast.terminal", { path }));
     case "explorer": { const err = await window.manager.openPath(path); if (err) throw new Error(err); return; }
     case "copy": await window.manager.copyText(path); return toast(t("toast.copied", { path }));
@@ -369,6 +372,8 @@ $("sessions").addEventListener("dblclick", e => {
 });
 
 document.addEventListener("keydown", e => {
+  // Keys typed into a terminal tab belong to what runs there (Ctrl+K included).
+  if (e.target.closest?.(".term-panes")) return;
   const inSearch = e.target === $("search");
   const typing = !inSearch && e.target.matches?.("input, textarea");
   if ((e.ctrlKey && (e.key === "k" || e.key === "f")) || (e.key === "/" && !typing && !inSearch)) {

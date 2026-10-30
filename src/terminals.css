@@ -1,0 +1,37 @@
+/* AgentDeck's own terminal tabs (terminals-ui.js): the strip over the sessions panel and a pane per terminal. Colours
+   come from theme.css tokens (--term-* for the terminal itself), so both themes are covered. */
+
+.term-tabs {
+  display: flex; gap: 2px; padding: 6px 8px 0; overflow-x: auto; flex: none;
+  border-bottom: 1px solid var(--line); background: var(--panel-2);
+}
+.term-tab {
+  flex: none; display: flex; align-items: center; gap: 7px; max-width: 240px; height: 32px; padding: 0 6px 0 10px;
+  border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0; background: none;
+  color: var(--muted); font: inherit; font-size: 12.5px; cursor: pointer;
+}
+.term-tab .i { width: 15px; height: 15px; }
+.term-tab:hover { background: var(--btn-hover); color: var(--text); }
+.term-tab.active { margin-bottom: -1px; border-color: var(--line); background: var(--term-bg); color: var(--text); }
+button.term-tab { padding-right: 10px; }
+.term-title { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.term-tab.exited .term-title { text-decoration: line-through; opacity: .7; }
+.term-note { flex: none; padding: 0 6px; border-radius: var(--r-pill); background: var(--accent-weak); color: var(--accent); font-size: 11px; }
+.term-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--line-2); }
+.term-dot.busy { background: var(--busy); }
+.term-dot.idle { background: var(--wait); }
+.term-close {
+  flex: none; width: 20px; height: 20px; display: grid; place-items: center; padding: 0;
+  border: 0; border-radius: 5px; background: none; color: var(--muted); cursor: pointer;
+}
+.term-close .i { width: 13px; height: 13px; }
+.term-close:hover { background: var(--line); color: var(--text); }
+
+/* While a tab is up, the sessions list makes room for its terminal. */
+#sessionsPanel.showing-term > .panel-head,
+#sessionsPanel.showing-term > #scope,
+#sessionsPanel.showing-term > #sessions { display: none; }
+.term-panes { position: relative; flex: 1; min-height: 0; background: var(--term-bg); }
+.term-panes[hidden] { display: none; }
+.term-pane { position: absolute; inset: 0; padding: 8px 4px 4px 12px; visibility: hidden; }
+.term-pane.active { visibility: visible; }

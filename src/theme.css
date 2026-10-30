@@ -46,6 +46,12 @@
   --on-solid: #ffffff;                  /* text on the brand gradient and on solid danger */
   --grad-accent: linear-gradient(135deg, #3b5fa9, #7aa7ff);
 
+  /* ---------- terminal tabs (terminals-ui.js) ---------- */
+  --term-bg: #0a0d12;
+  --term-fg: #e2e7ee;
+  --term-cursor: #7aa7ff;
+  --term-selection: rgba(122, 167, 255, .3);
+
   /* ---------- status ---------- */
   --busy: #5ee0a0;          /* working, done, saved */
   --busy-bg: rgba(94, 224, 160, .13);
@@ -152,6 +158,11 @@
   --accent-line: rgba(37, 99, 217, .45);
   --accent-glow: rgba(37, 99, 217, .28);
   --on-accent: #ffffff;
+
+  --term-bg: #fbfcfe;
+  --term-fg: #18202c;
+  --term-cursor: #2563d9;
+  --term-selection: rgba(37, 99, 217, .22);
 
   --busy: #12854f;
   --busy-bg: rgba(18, 133, 79, .11);

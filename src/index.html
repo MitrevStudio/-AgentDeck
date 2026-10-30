@@ -10,6 +10,8 @@
 <link rel="stylesheet" href="usage.css">
 <link rel="stylesheet" href="preview.css">
 <link rel="stylesheet" href="git.css">
+<link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css">
+<link rel="stylesheet" href="terminals.css">
 <script src="i18n.js"></script>
 </head>
 <body>
@@ -37,10 +39,12 @@
     <div class="panel-head"><h2 data-i18n="manager.projects"></h2><span class="count" id="projectCount">0</span></div>
     <div class="panel-body" id="projects"></div>
   </aside>
-  <section class="panel">
+  <section class="panel" id="sessionsPanel">
+    <div class="term-tabs" id="termTabs" role="tablist" hidden></div>
     <div class="panel-head"><h2 data-i18n="manager.sessions"></h2><span class="count" id="sessionCount">0</span><div id="liveFilter"></div><div class="grow"></div><div class="chips" id="agentChips"></div></div>
     <div id="scope"></div>
     <div class="panel-body" id="sessions"></div>
+    <div class="term-panes" id="termPanes" hidden></div>
   </section>
 </main>
 <section id="usageView" class="usage-view" tabindex="-1" data-i18n-aria-label="usage.title" hidden></section>
@@ -53,6 +57,9 @@
 <script src="usage-ui.js"></script>
 <script src="git-ui.js"></script>
 <script src="preview-ui.js"></script>
+<script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
+<script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+<script src="terminals-ui.js"></script>
 <script src="renderer.js"></script>
 <script src="usage-view.js"></script>
 </body>

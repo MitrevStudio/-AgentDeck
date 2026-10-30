@@ -40,6 +40,20 @@ contextBridge.exposeInMainWorld("manager", {
   voiceCommandState: () => ipcRenderer.invoke("voice:command-state"),
   onVoiceCommand: cb => ipcRenderer.on("voice:command-state", (_e, s) => cb(s))
 });
+// AgentDeck's own terminal tabs (manager window; terminals.js in main).
+contextBridge.exposeInMainWorld("terminals", {
+  list: () => ipcRenderer.invoke("terminals:list"),
+  attach: id => ipcRenderer.invoke("terminal:attach", id),
+  close: id => ipcRenderer.invoke("terminal:close", id),
+  link: (id, agent, sessionId) => ipcRenderer.invoke("terminal:link", id, agent, sessionId),
+  move: (agent, id) => ipcRenderer.invoke("terminal:move", agent, id),
+  input: (id, data) => ipcRenderer.send("terminal:input", id, data),
+  resize: (id, cols, rows) => ipcRenderer.send("terminal:resize", id, cols, rows),
+  onData: cb => ipcRenderer.on("terminal:data", (_e, d) => cb(d)),
+  onExit: cb => ipcRenderer.on("terminal:exit", (_e, d) => cb(d)),
+  onChanged: cb => ipcRenderer.on("terminals:changed", (_e, list) => cb(list)),
+  onActivate: cb => ipcRenderer.on("terminal:activate", (_e, id) => cb(id))
+});
 // UI language and theme, read before the page renders; i18n.js applies them.
 contextBridge.exposeInMainWorld("prefs", {
   ...ipcRenderer.sendSync("prefs:get"),
