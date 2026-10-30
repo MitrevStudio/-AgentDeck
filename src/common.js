@@ -191,7 +191,7 @@ function buildData(raw, live) {
   const fresh = [...live.values()].filter(l => !known.has(sessionKey(l)))
     .map(l => ({ agent: l.agent, id: l.id, cwd: l.cwd, title: t("session.new"), prompt: "", updatedAt: l.startedAt }));
   const sessions = [...(raw.sessions || []), ...fresh].map(s => ({
-    ...s, cwdN: normPath(s.cwd), hay: searchable(s.title, s.prompt, s.id, s.cwd, s.projectName, s.agent)
+    ...s, cwdN: normPath(s.cwd), hay: searchable(s.title, s.prompt, s.recap, s.id, s.cwd, s.projectName, s.agent)
   }));
   const projects = (raw.registry?.projects || []).map(p => {
     const proj = { ...p, n: normPath(p.path), hay: searchable(p.name, p.path) };

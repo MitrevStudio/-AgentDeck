@@ -151,6 +151,7 @@ function sessionHtml(s, i, toks) {
       ${livePill(s)}
       <span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span></div>
     ${s.prompt ? `<p class="sess-prompt" title="${esc(s.prompt)}">${hl(s.prompt, toks)}</p>` : ""}
+    ${s.recap ? `<p class="sess-recap" title="${esc(t("manager.session.recapTitle", { recap: s.recap }))}"><span class="recap-label">${esc(t("manager.session.recap"))}</span>${hl(s.recap, toks)}</p>` : ""}
     ${dir}
     <div class="sess-foot"><span class="sid" title="${esc(t("manager.session.id"))}">${hl(s.id, toks)}</span>
       ${contextChip(s)}${usageChip(s)}

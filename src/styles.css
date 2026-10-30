@@ -80,6 +80,12 @@ main {
 .sess-title { flex: 1; min-width: 0; margin: 0; font-size: 15.5px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
 .when { flex: none; margin-top: 2px; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
 .sess-prompt { margin: 5px 0 0; color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Where the session ended: its last answer, in brief. */
+.sess-recap {
+  margin: 4px 0 0; padding-left: 8px; border-left: 2px solid var(--accent-line);
+  color: var(--text); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sess-recap .recap-label { margin-right: 6px; font-weight: 600; color: var(--accent); }
 .sess-foot { display: flex; align-items: center; gap: 8px; margin-top: 11px; }
 .sid { flex: 1; min-width: 0; font: 12px var(--mono); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sess-foot .btn { flex: none; }
