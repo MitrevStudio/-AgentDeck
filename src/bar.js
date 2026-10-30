@@ -188,7 +188,7 @@ function rowHtml(r, i, toks) {
   return `<div class="row ${i === st.row ? "sel" : ""} ${l ? "is-live" : ""} ${s.concealed ? "concealed" : ""}" data-i="${i}">
     <span class="adot ${s.agent.toLowerCase()}" title="${esc(s.agent)}"></span>
     <div class="rmain"><div class="t" title="${esc(s.title)}">${hl(s.title, toks)}</div>${r.showPath && s.cwd ? pathHtml(s.cwd, toks) : ""}${snipHtml(s, toks)}</div>
-    ${livePill(l, key)}${usageCost(s)}<span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span>
+    ${livePill(l, key)}${contextChip(s)}${usageCost(s)}<span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span>
     <span class="ract">${hideBtn("session", key, hidden.sessions.has(key))}${s.cwd ? `<button class="icon-btn" data-act="terminal" data-path="${esc(s.cwd)}" title="${esc(t("bar.terminalIn", { path: s.cwd }))}">${icon("terminal")}</button>
       <button class="icon-btn" data-act="copy" data-path="${esc(s.cwd)}" title="${esc(t("action.copyPath"))}">${icon("copy")}</button>` : ""}
       ${l ? `<button class="icon-btn" data-act="resume" title="${esc(t("bar.alreadyOpen"))}">${icon("play")}</button>

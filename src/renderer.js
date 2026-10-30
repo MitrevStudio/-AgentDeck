@@ -153,7 +153,7 @@ function sessionHtml(s, i, toks) {
     ${s.prompt ? `<p class="sess-prompt" title="${esc(s.prompt)}">${hl(s.prompt, toks)}</p>` : ""}
     ${dir}
     <div class="sess-foot"><span class="sid" title="${esc(t("manager.session.id"))}">${hl(s.id, toks)}</span>
-      ${usageChip(s)}
+      ${contextChip(s)}${usageChip(s)}
       ${resumeBtn}
       ${s.cwd ? `<button class="btn sm" data-action="terminal" data-path="${esc(s.cwd)}" title="${esc(t("action.terminalHere"))}" aria-label="${esc(t("action.terminal"))}">${icon("terminal")}<span class="bl">${esc(t("action.terminal"))}</span></button>
       <button class="btn sm" data-action="explorer" data-path="${esc(s.cwd)}" title="${esc(t("action.explorerTitle"))}" aria-label="${esc(t("action.explorer"))}">${icon("open")}<span class="bl">${esc(t("action.explorer"))}</span></button>` : ""}
