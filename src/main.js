@@ -44,6 +44,9 @@ const terminals = createTerminals({
   onChange: list => sendToManager("terminals:changed", list)
 });
 let pendingTab = ""; // the tab to bring up once the manager window has loaded
+const autopilot = require("./autopilot").createAutopilot({
+  terminals, liveSessions: (...a) => liveSessions(...a), findTranscript: id => findTranscript(id), getPrefs: () => prefs.get(), t: (...a) => t(...a)
+});
 let notifier = null;
 const sessionPreview = require("./session-preview");
 const gitStatus = require("./git-status");
@@ -454,6 +457,13 @@ function buildTrayMenu() {
     { label: t("tray.language"), submenu: radio("language", Object.keys(LANGUAGES), l => LANGUAGES[l]) },
     { label: t("tray.theme"), submenu: radio("theme", prefs.THEMES, th => t(`theme.${th}`)) },
     { label: t("tray.sessionsIn"), submenu: radio("sessionsIn", prefs.SESSIONS_IN, m => t(`tray.sessionsIn.${m}`)) },
+    {
+      label: t("tray.autoCompact"), submenu: [
+        { label: t("tray.autoCompact.on"), type: "checkbox", checked: p.autoCompact, click: item => prefs.set({ autoCompact: item.checked }) },
+        { type: "separator" },
+        ...radio("autoCompactTokens", prefs.AUTO_COMPACT_TOKENS, n => t("tray.autoCompact.from", { n: `${n / 1000}k` }))
+      ]
+    },
     { label: t("tray.settings"), enabled: Boolean(voice), click: () => voice?.openSettings() },
     updateMenuItem(),
     { type: "separator" },
@@ -662,6 +672,7 @@ if (!app.requestSingleInstanceLock()) {
     // The proxy settings, before anything goes online (requests made meanwhile wait for them).
     network.start();
     registerIpc();
+    autopilot.start();
 
     bar = createEdgeBar({
       preload: PRELOAD, onOpenManager: showManager, hotkeyLabel,

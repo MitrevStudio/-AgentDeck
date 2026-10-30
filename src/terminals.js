@@ -85,7 +85,7 @@ function createTerminals({ userDataDir, onData, onExit, onChange }) {
     const child = spawn(exe, [String(DEFAULT_COLS), String(DEFAULT_ROWS), cwd, commandLine], {
       cwd, env: getChildEnv(id, env), stdio: ["pipe", "pipe", "ignore"], windowsHide: true
     });
-    const terminal = { id, cwd, title, agent, sessionId, child, scrollback: "", end: 0, exitCode: null, createdAt: Date.now() };
+    const terminal = { id, cwd, title, agent, sessionId, child, scrollback: "", end: 0, exitCode: null, createdAt: Date.now(), lastInputAt: 0, note: "" };
     const decoder = new StringDecoder("utf8");
     child.stdout.on("data", chunk => handleOutput(terminal, decoder, chunk));
     child.on("exit", code => handleExit(terminal, code));
@@ -96,10 +96,29 @@ function createTerminals({ userDataDir, onData, onExit, onChange }) {
     return id;
   }
 
-  function input(id, data) {
+  // Typed by AgentDeck itself (autopilot.js): unlike input(), not counted as the user's typing.
+  function type(id, data) {
     const terminal = terminals.get(id);
     if (terminal && terminal.exitCode === null && typeof data === "string") {
       terminal.child.stdin.write(getFrame(FRAME_INPUT, Buffer.from(data, "utf8")));
+    }
+  }
+  function input(id, data) {
+    const terminal = terminals.get(id);
+    if (terminal) {
+      terminal.lastInputAt = Date.now();
+    }
+    type(id, data);
+  }
+  function getLastInputAt(id) {
+    return terminals.get(id)?.lastInputAt || 0;
+  }
+  // A short status beside the tab's title ("Compacting…"); "" clears it.
+  function setNote(id, note) {
+    const terminal = terminals.get(id);
+    if (terminal && terminal.note !== note) {
+      terminal.note = note;
+      onChange(list());
     }
   }
   function resize(id, cols, rows) {
@@ -142,14 +161,14 @@ function createTerminals({ userDataDir, onData, onExit, onChange }) {
   }
   function list() {
     return [...terminals.values()].map(x => ({
-      id: x.id, cwd: x.cwd, title: x.title, agent: x.agent, sessionId: x.sessionId, exited: x.exitCode !== null, createdAt: x.createdAt
+      id: x.id, cwd: x.cwd, title: x.title, agent: x.agent, sessionId: x.sessionId, exited: x.exitCode !== null, createdAt: x.createdAt, note: x.note
     }));
   }
   function findBySession(agent, sessionId) {
     return [...terminals.values()].find(x => x.agent === agent && x.sessionId === sessionId && x.exitCode === null) || null;
   }
 
-  return { open, input, resize, attach, close, closeAll, link, list, findBySession };
+  return { open, input, type, getLastInputAt, setNote, resize, attach, close, closeAll, link, list, findBySession };
 }
 
 module.exports = { createTerminals };

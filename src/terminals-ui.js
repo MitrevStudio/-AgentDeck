@@ -137,7 +137,7 @@ function renderTermTabs() {
   strip.innerHTML = sessionsTab + termTabs.map(tab => {
     const status = getTabStatus(tab);
     return `<div class="term-tab ${tab.id === activeTab ? "active" : ""} ${tab.exited ? "exited" : ""}" data-term-tab="${esc(tab.id)}" role="tab" title="${esc(tab.cwd)}">
-      <span class="term-dot ${status}"></span><span class="term-title">${esc(getTabTitle(tab))}</span>
+      <span class="term-dot ${status}"></span><span class="term-title">${esc(getTabTitle(tab))}</span>${tab.note ? `<span class="term-note">${esc(tab.note)}</span>` : ""}
       <button class="term-close" data-term-close="${esc(tab.id)}" title="${esc(t("term.tab.close"))}">${icon("x")}</button></div>`;
   }).join("");
 }
