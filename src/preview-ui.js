@@ -35,6 +35,68 @@ function previewFacts(s, d) {
   return `<div class="pv-facts">${facts.join('<span class="pv-sep">·</span>')}</div>
     ${times.length ? `<div class="pv-times" title="${esc([d.startedAt && fullDate(d.startedAt), d.lastAt && fullDate(d.lastAt)].filter(Boolean).join(" – "))}">${esc(times.join(" · "))}</div>` : ""}`;
 }
+// ---------- resume or continue fresh ----------
+// Resume re-reads the whole conversation on the first prompt; a fresh session starts from a short handoff (the task
+// and where it ended) that goes to the clipboard - pasted, edited and sent by the user, never sent by itself, and
+// without a pointer to the old transcript, so the old context stays out.
+const HANDOFF_PART_CHARS = 600;
+function getHandoffPart(text) {
+  const plain = String(text || "").replace(/```[\s\S]*?```/g, " ").replace(/\s+/g, " ").trim();
+  return plain.length > HANDOFF_PART_CHARS ? `${plain.slice(0, HANDOFF_PART_CHARS).trimEnd()}…` : plain;
+}
+function getHandoff(s, d) {
+  const answers = (d?.messages || []).filter(m => m.role !== "user");
+  return t("preview.handoff", {
+    title: s.title,
+    task: getHandoffPart(d?.firstPrompt) || t("preview.handoff.unknown"),
+    outcome: getHandoffPart(answers[answers.length - 1]?.text) || t("preview.handoff.unknown")
+  });
+}
+function previewActions(s) {
+  if (!s.cwd) {
+    return "";
+  }
+  const running = typeof liveOf === "function" && liveOf(s);
+  return `<div class="pv-actions">
+      ${running ? "" : `<button class="btn sm primary" data-pv-act="resume">${icon("play")}${esc(t("preview.resume"))}</button>`}
+      <button class="btn sm" data-pv-act="fresh">${icon("plus")}${esc(t("preview.fresh"))}</button>
+    </div>
+    <div class="pv-costs">${running ? "" : `<div><b>${esc(t("preview.resume"))}</b> ${esc(t("preview.resume.cost"))}</div>`}<div><b>${esc(t("preview.fresh"))}</b> ${esc(t("preview.fresh.cost"))}</div></div>`;
+}
+function previewNotice(box, message, isError = false) {
+  if (typeof toast === "function") {
+    toast(message, isError);
+    return;
+  }
+  const note = box.querySelector(".pv-notice") || box.querySelector(".pv-head")?.appendChild(document.createElement("div"));
+  if (note) {
+    note.className = `pv-notice ${isError ? "error" : ""}`;
+    note.textContent = message;
+  }
+}
+async function runPreviewAction(box, action, s) {
+  try {
+    if (action === "resume") {
+      await window.manager.launchAgent(s.agent, s.id, s.cwd);
+      return;
+    }
+    await window.manager.copyText(getHandoff(s, box.pvData));
+    await window.manager.launchNew(s.agent, s.cwd);
+    previewNotice(box, t("preview.fresh.started"));
+  } catch (e) {
+    previewNotice(box, e.message, true);
+  }
+}
+document.addEventListener("click", e => {
+  const button = e.target.closest?.("[data-pv-act]");
+  const box = button?.closest("[data-key]");
+  if (!box?.pvSession) {
+    return;
+  }
+  e.stopPropagation();
+  runPreviewAction(box, button.dataset.pvAct, box.pvSession);
+});
+
 // d: main's answer; undefined while it is on its way (a skeleton), null when the session cannot be read.
 function previewHtml(s, d) {
   const title = `<div class="pv-title"><span class="adot ${s.agent.toLowerCase()}"></span><span class="t" title="${esc(s.title)}">${esc(s.title)}</span></div>`;
@@ -49,7 +111,7 @@ function previewHtml(s, d) {
     : "";
   const gap = d.more ? `<div class="pv-gap"><span>${esc(t("preview.earlier"))}</span></div>` : "";
   const msgs = d.messages.length ? d.messages.map(m => previewMessage(s, m)).join("") : `<div class="pv-empty">${esc(t("preview.noMessages"))}</div>`;
-  return `${title}<div class="pv-head">${previewFacts(s, d)}</div>${body(first + gap + msgs)}`;
+  return `${title}<div class="pv-head">${previewFacts(s, d)}${previewActions(s)}</div>${body(first + gap + msgs)}`;
 }
 
 // ---------- filling ----------
@@ -86,7 +148,7 @@ function showPreview(box, s) {
     if (box.isConnected && box.dataset.key === key && JSON.stringify(d) !== JSON.stringify(box.pvData)) setPreview(box, s, d);
   });
 }
-function setPreview(box, s, d) { box.pvData = d; fillPreview(box, s, d); }
+function setPreview(box, s, d) { box.pvData = d; box.pvSession = s; fillPreview(box, s, d); }
 // A click on a clipped message opens it in full.
 document.addEventListener("click", e => {
   const el = e.target.closest?.(".pv-text.clipped");
