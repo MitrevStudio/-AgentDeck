@@ -51,6 +51,8 @@
   --busy-bg: rgba(94, 224, 160, .13);
   --wait: #f2b55f;          /* waiting for you, in progress, nearly out of time */
   --wait-bg: rgba(242, 181, 95, .14);
+  --attn: #ff7eb0;          /* blocked on the user: a permission, a question */
+  --attn-bg: rgba(255, 126, 176, .14);
   --warn: #f0b86a;
   --danger: #ff8a8a;
   --danger-bg: rgba(255, 138, 138, .12);
@@ -155,6 +157,8 @@
   --busy-bg: rgba(18, 133, 79, .11);
   --wait: #a95c00;
   --wait-bg: rgba(214, 137, 16, .15);
+  --attn: #c0266a;
+  --attn-bg: rgba(192, 38, 106, .11);
   --warn: #a35a00;
   --danger: #c93434;
   --danger-bg: rgba(201, 52, 52, .08);
@@ -372,6 +376,12 @@ kbd {
 .live .live-t:empty { display: none; }
 .live.busy { color: var(--busy); background: var(--busy-bg); }
 .live.idle { color: var(--wait); background: var(--wait-bg); }
+.live.waiting { color: var(--attn); background: var(--attn-bg); }
+.pulse.attn { background: var(--attn); animation-name: pulse-attn; }
+@keyframes pulse-attn {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--attn) 55%, transparent); }
+  70%, 100% { box-shadow: 0 0 0 7px transparent; }
+}
 .live.other { color: var(--accent); background: var(--accent-weak); }
 .live.stale { color: var(--muted); background: var(--panel-2); }
 .live.stale .spinner { border-color: color-mix(in srgb, var(--muted) 25%, transparent); border-top-color: var(--muted); animation-duration: 2.4s; }

@@ -95,6 +95,7 @@ kbd { font-size: 10.5px; border-bottom-width: 1px; border-radius: 4px; padding: 
 .row.is-live { box-shadow: inset 3px 0 0 var(--busy); }
 .row.is-live.sel { box-shadow: inset 3px 0 0 var(--busy), inset 0 0 0 1px var(--line-2); }
 .row:has(.live.idle) { box-shadow: inset 3px 0 0 var(--wait); }
+.row:has(.live.waiting) { box-shadow: inset 3px 0 0 var(--attn); }
 .adot { width: 9px; height: 9px; flex: none; border-radius: 50%; }
 .adot.claude { background: var(--claude); }
 .adot.opencode { background: var(--opencode); }

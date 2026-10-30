@@ -52,7 +52,9 @@ function createNotifier({ liveSessions, describe, balloon, focus, quiet = () => 
           if (waiting.delete(key)) changed = true;
           continue;
         }
-        if (p?.status === "busy" && now - p.since >= MIN_BUSY_MS && !waiting.has(key)) {
+        // Blocked on the user (a permission, a question) rings at once; a finished turn only after real work.
+        const blocked = l.status === "waiting" && p?.status !== "waiting";
+        if ((blocked || p?.status === "busy" && now - p.since >= MIN_BUSY_MS) && !waiting.has(key)) {
           const d = describe(l.agent, l.id, l.cwd) || {};
           const w = { key, agent: l.agent, id: l.id, cwd: l.cwd, title: d.title || l.id.slice(0, 8), project: d.project || path.basename(l.cwd || ""), at: now };
           waiting.set(key, w);

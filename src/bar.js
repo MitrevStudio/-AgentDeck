@@ -64,6 +64,7 @@ function computeTiles() {
     const states = p.sessions.map(liveOf).filter(Boolean);
     out.push({
       key: "p:" + p.n, kind: "project", p, label: p.name, count: inside.length,
+      waiting: states.some(l => l.status === "waiting"),
       busy: states.some(l => l.status === "busy" && !isStale(l)), idle: states.some(l => l.status !== "busy")
     });
   }
@@ -106,7 +107,8 @@ const hideBtn = (kind, key, on) => `<button class="icon-btn hide-tag ${on ? "on"
   title="${esc(t(on ? "bar.hidden.untag" : "bar.hidden.tag"))}">${icon(on ? "eyeOff" : "eye")}</button>`;
 
 function tileHtml(tile, toks) {
-  const badge = tile.busy ? '<span class="badge"><span class="spinner"></span></span>' : tile.idle ? '<span class="badge"><span class="pulse"></span></span>' : "";
+  const badge = tile.waiting ? '<span class="badge"><span class="pulse attn"></span></span>'
+    : tile.busy ? '<span class="badge"><span class="spinner"></span></span>' : tile.idle ? '<span class="badge"><span class="pulse"></span></span>' : "";
   const mono = tile.kind === "project"
     ? `<span class="mono" style="--h:${hue(tile.p.n)}">${esc(initials(tile.label))}${badge}</span>`
     : `<span class="mono special ${tile.kind}">${icon(tile.kind === "live" ? "pulse" : tile.kind === "day" ? "clock" : "search")}</span>`;
@@ -162,9 +164,9 @@ function renderDetail(tile, toks) {
 const syncPreview = () => showPreview($("pv"), rows[st.row]?.s || rows.find(r => r.s)?.s);
 function livePill(l, key) {
   if (!l) return "";
-  const busy = l.status === "busy";
-  return `<span class="live ${busy ? "busy" : "idle"} ${isStale(l) ? "stale" : ""}" data-live="${esc(key)}">
-    <span class="${busy ? "spinner" : "pulse"}"></span>${esc(t(busy ? "live.label.busy" : "live.label.idle"))}<span class="live-t">${esc(liveText(l))}</span></span>`;
+  const group = liveGroup(l);
+  return `<span class="live ${group} ${isStale(l) ? "stale" : ""}" data-live="${esc(key)}" title="${esc(liveHint(l))}">
+    <span class="${group === "busy" ? "spinner" : group === "waiting" ? "pulse attn" : "pulse"}"></span>${esc(t(`live.label.${group}`))}<span class="live-t">${esc(liveText(l))}</span></span>`;
 }
 function rowHtml(r, i, toks) {
   if (r.type === "dir") {
@@ -196,10 +198,14 @@ function rowHtml(r, i, toks) {
   </div>${confirm}${del}`;
 }
 function renderLiveSum() {
-  let busy = 0, idle = 0;
-  for (const l of model.sessions.map(liveOf).filter(Boolean)) l.status === "busy" ? busy++ : idle++;
-  $("liveSum").innerHTML = busy || idle
-    ? `<button class="sum" data-act="show-live" title="${esc(t("bar.showLive"))}">${busy ? `<span class="spinner"></span>${esc(tn("live.count.busy", busy))}` : ""}${busy && idle ? '<span class="sep"></span>' : ""}${idle ? `<span class="pulse"></span>${esc(tn("live.count.idle", idle))}` : ""}</button>`
+  const { busy, waiting, idle } = countLiveGroups(model.sessions.map(liveOf).filter(Boolean));
+  const parts = [
+    waiting && `<span class="pulse attn"></span>${esc(tn("live.count.waiting", waiting))}`,
+    busy && `<span class="spinner"></span>${esc(tn("live.count.busy", busy))}`,
+    idle && `<span class="pulse"></span>${esc(tn("live.count.idle", idle))}`
+  ].filter(Boolean);
+  $("liveSum").innerHTML = parts.length
+    ? `<button class="sum" data-act="show-live" title="${esc(t("bar.showLive"))}">${parts.join('<span class="sep"></span>')}</button>`
     : "";
 }
 function updateLiveTexts() {

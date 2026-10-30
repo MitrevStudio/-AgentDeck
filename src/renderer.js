@@ -9,10 +9,10 @@ const liveOf = s => live.get(sessionKey(s));
 function livePill(s) {
   const l = liveOf(s);
   if (!l) return "";
-  const kind = l.status === "busy" ? "busy" : l.status === "idle" ? "idle" : "other";
+  const kind = liveKind(l);
   const label = kind === "other" ? esc(l.status) : esc(t(`live.label.${kind}`));
-  return `<span class="live ${kind} ${isStale(l) ? "stale" : ""}" data-live="${esc(sessionKey(s))}" title="${esc(t(`live.hint.${kind}`))} · PID ${l.pid}">
-    <span class="${kind === "busy" ? "spinner" : "pulse"}"></span>${label}<span class="live-t">${esc(liveText(l))}</span></span>`;
+  return `<span class="live ${kind} ${isStale(l) ? "stale" : ""}" data-live="${esc(sessionKey(s))}" title="${esc(liveHint(l))} · PID ${l.pid}">
+    <span class="${kind === "busy" ? "spinner" : kind === "waiting" ? "pulse attn" : "pulse"}"></span>${label}<span class="live-t">${esc(liveText(l))}</span></span>`;
 }
 
 function prepare() {
@@ -31,9 +31,8 @@ function compute() {
   const scoped = sel ? hits.filter(s => inProject(s, sel)) : hits;
   const agentCounts = Object.fromEntries(AGENTS.map(a => [a, scoped.filter(s => s.agent === a).length]));
   const byAgent = ui.agent ? scoped.filter(s => s.agent === ui.agent) : scoped;
-  const liveCounts = { busy: 0, idle: 0 };
-  for (const s of byAgent) { const l = liveOf(s); if (l) liveCounts[l.status === "busy" ? "busy" : "idle"]++; }
-  // Running sessions go first (working, then stalled, then waiting for input); the rest keep their date order.
+  const liveCounts = countLiveGroups(byAgent.map(liveOf).filter(Boolean));
+  // Running sessions go first (blocked on the user, working, stalled, waiting for input); the rest keep their date order.
   const running = byAgent.filter(liveOf).sort((a, b) => liveRank(liveOf(a)) - liveRank(liveOf(b)) || lastSign(liveOf(b)) - lastSign(liveOf(a)));
   const sessions = ui.liveOnly ? running : [...running, ...byAgent.filter(s => !liveOf(s))];
   return { toks, hits, projects, sel, scoped, agentCounts, liveCounts, sessions };
@@ -86,17 +85,22 @@ function renderProjects(v) {
 function projectLive(p) {
   const states = p.sessions.map(liveOf).filter(Boolean);
   if (!states.length) return "";
-  const busy = states.filter(l => l.status === "busy").length, idle = states.length - busy;
-  const title = [busy && tn("live.count.busy", busy), idle && tn("live.count.idle", idle)].filter(Boolean).join(", ");
-  return `<span class="proj-live" title="${esc(title)}">${busy ? `<span class="spinner"></span>${busy}` : ""}${idle ? `<span class="pulse"></span>${idle}` : ""}</span>`;
+  const { busy, waiting, idle } = countLiveGroups(states);
+  const title = [waiting && tn("live.count.waiting", waiting), busy && tn("live.count.busy", busy), idle && tn("live.count.idle", idle)].filter(Boolean).join(", ");
+  return `<span class="proj-live" title="${esc(title)}">${waiting ? `<span class="pulse attn"></span>${waiting}` : ""}${busy ? `<span class="spinner"></span>${busy}` : ""}${idle ? `<span class="pulse"></span>${idle}` : ""}</span>`;
 }
 
 function renderLiveFilter(v) {
-  const { busy, idle } = v.liveCounts;
-  document.title = busy ? `(${busy}) ${t("app.name")}` : t("app.name");
-  $("liveFilter").innerHTML = busy || idle || ui.liveOnly
+  const { busy, waiting, idle } = v.liveCounts;
+  document.title = waiting ? `(${waiting}!) ${t("app.name")}` : busy ? `(${busy}) ${t("app.name")}` : t("app.name");
+  const parts = [
+    waiting && `<span class="pulse attn"></span>${esc(tn("live.count.waiting", waiting))}`,
+    busy && `<span class="spinner"></span>${esc(tn("live.count.busy", busy))}`,
+    idle && `<span class="pulse"></span>${esc(tn("live.count.idle", idle))}`
+  ].filter(Boolean);
+  $("liveFilter").innerHTML = parts.length || ui.liveOnly
     ? `<button class="live-filter ${ui.liveOnly ? "on" : ""}" data-action="live-only" title="${esc(t(ui.liveOnly ? "manager.live.showAll" : "manager.live.showOpen"))}">
-        ${busy ? `<span class="spinner"></span>${esc(tn("live.count.busy", busy))}` : ""}${busy && idle ? '<span class="sep"></span>' : ""}${idle ? `<span class="pulse"></span>${esc(tn("live.count.idle", idle))}` : ""}${!busy && !idle ? esc(t("manager.live.noneActive")) : ""}
+        ${parts.length ? parts.join('<span class="sep"></span>') : esc(t("manager.live.noneActive"))}
       </button>`
     : `<span class="live-none">${esc(t("manager.live.none"))}</span>`;
 }
@@ -134,7 +138,7 @@ function sessionHtml(s, i, toks) {
     ? `<div class="dir">${icon("folder")}${pathHtml(s.cwd, toks)}${gitChip(s.cwd)}<button class="icon-btn" data-action="copy" data-path="${esc(s.cwd)}" title="${esc(t("action.copyPath"))}">${icon("copy")}</button></div>`
     : `<div class="dir unknown">${icon("alert")}${esc(t("manager.session.noDir"))}</div>`;
   const l = liveOf(s);
-  const liveCls = l ? `live-${l.status === "busy" ? (isStale(l) ? "stale" : "busy") : "idle"}` : "";
+  const liveCls = l ? `live-${liveGroup(l) === "busy" && isStale(l) ? "stale" : liveGroup(l)}` : "";
   // A running session: its terminal is brought up; a second instance stays possible, but quieter. The secondary
   // actions' labels (.bl) give way to their icon and tooltip in a narrow panel (styles.css).
   const resumeBtn = l

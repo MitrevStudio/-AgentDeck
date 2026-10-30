@@ -55,7 +55,38 @@ const sessionKey = s => `${s.agent}:${s.id}`;
 const STALE_MS = 10 * 60 * 1000;
 const lastSign = l => Math.max(l.activityAt || 0, l.statusAt || 0);
 const isStale = l => l.status === "busy" && Date.now() - lastSign(l) > STALE_MS;
-const liveRank = l => (l.status === "busy" ? (isStale(l) ? 1 : 0) : 2);
+// "waiting": blocked on the user (a permission, a question, a dialog), so it goes first everywhere.
+const LIVE_RANKS = { waiting: 0, busy: 1, idle: 3 };
+function liveRank(l) {
+  if (isStale(l)) {
+    return 2;
+  }
+  return LIVE_RANKS[l.status] ?? 3;
+}
+// The group a running session is counted and drawn in: busy, waiting (on the user) or idle (anything else).
+function liveGroup(l) {
+  if (l.status === "busy" || l.status === "waiting") {
+    return l.status;
+  }
+  return "idle";
+}
+function countLiveGroups(states) {
+  const counts = { busy: 0, waiting: 0, idle: 0 };
+  for (const l of states) {
+    counts[liveGroup(l)]++;
+  }
+  return counts;
+}
+// The state as drawn: busy, waiting, idle, or other for a status this version does not know.
+function liveKind(l) {
+  if (l.status === "busy" || l.status === "waiting" || l.status === "idle") {
+    return l.status;
+  }
+  return "other";
+}
+function liveHint(l) {
+  return t(`live.hint.${liveKind(l)}`, { reason: l.waitingFor || t("live.reason.unknown") });
+}
 function shortAgo(ms) {
   const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
   if (s < 60) return t("time.short.sec", { n: s });
@@ -64,7 +95,7 @@ function shortAgo(ms) {
 }
 function liveText(l) {
   if (l.status === "busy") return t(isStale(l) ? "live.staleFor" : "live.busyFor", { t: shortAgo(lastSign(l)) });
-  if (l.status === "idle") return t("live.idleFor", { t: shortAgo(lastSign(l)) });
+  if (l.status === "idle" || l.status === "waiting") return t("live.idleFor", { t: shortAgo(lastSign(l)) });
   return "";
 }
 // What to say after "show terminal" (terminal-focus.js): nothing when the session's own tab or window came up.

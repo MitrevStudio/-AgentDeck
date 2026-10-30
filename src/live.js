@@ -1,8 +1,9 @@
 // Live status of running agent sessions.
 //
 // Claude Code registers every running session in ~/.claude/sessions/<pid>.json with its sessionId, cwd and
-// status ("busy" while it works, "idle" while it waits for input). A file can outlive its process (crash, kill)
-// and Windows reuses PIDs, so an entry only counts when the PID is alive *and* was started at `procStart`.
+// status ("busy" while it works, "shell" while it runs a shell command - reported here as "busy" -, "waiting" while
+// it is blocked on the user, with `waitingFor` saying on what, "idle" while it waits for input). A file can outlive
+// its process (crash, kill) and Windows reuses PIDs, so an entry only counts when the PID is alive *and* was started at `procStart`.
 // "busy" alone does not tell whether anything is still happening, so the newest write to the transcript or to
 // one of its subagent transcripts is reported as `activityAt`.
 //
@@ -81,7 +82,8 @@ async function claudeLive() {
     .filter(x => !x.procStart || startVerified.get(`${x.pid}:${x.procStart}`) !== false)
     .map(x => ({
       agent: "Claude", id: x.sessionId, pid: x.pid, cwd: x.cwd || "", name: x.name || "",
-      status: x.status || "running",
+      status: x.status === "shell" ? "busy" : x.status || "running",
+      waitingFor: x.waitingFor || "",
       statusAt: x.statusUpdatedAt || x.updatedAt || x.startedAt || 0,
       startedAt: x.startedAt || 0,
       activityAt: lastActivity(x.sessionId)

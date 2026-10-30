@@ -118,9 +118,12 @@
 
       "live.label.busy": "Working",
       "live.label.idle": "Waiting for you",
+      "live.label.waiting": "Needs you",
       "live.hint.busy": "The agent is working right now",
       "live.hint.idle": "Open in a terminal, waiting for your reply",
+      "live.hint.waiting": "Blocked until you answer it: {reason}",
       "live.hint.other": "Open in a terminal",
+      "live.reason.unknown": "a question or a permission",
       "live.busyFor": "active {t} ago",
       "live.staleFor": "no activity for {t}",
       "live.idleFor": "for {t}",
@@ -128,6 +131,8 @@
       "live.count.busy.other": "{n} working",
       "live.count.idle.one": "{n} waiting",
       "live.count.idle.other": "{n} waiting",
+      "live.count.waiting.one": "{n} needs you",
+      "live.count.waiting.other": "{n} need you",
 
       "errors.folderMissing": "The folder does not exist.",
       "errors.unknownAgent": "Unknown agent.",
@@ -1010,9 +1015,12 @@
 
       "live.label.busy": "Работи",
       "live.label.idle": "Чака те",
+      "live.label.waiting": "Нужен си",
       "live.hint.busy": "Агентът работи в момента",
       "live.hint.idle": "Отворена в терминал и чака твой отговор",
+      "live.hint.waiting": "Спряна, докато не отговориш: {reason}",
       "live.hint.other": "Отворена в терминал",
+      "live.reason.unknown": "въпрос или разрешение",
       "live.busyFor": "активност преди {t}",
       "live.staleFor": "без активност от {t}",
       "live.idleFor": "от {t}",
@@ -1020,6 +1028,8 @@
       "live.count.busy.other": "{n} работят",
       "live.count.idle.one": "{n} чака",
       "live.count.idle.other": "{n} чакат",
+      "live.count.waiting.one": "{n} иска действие",
+      "live.count.waiting.other": "{n} искат действие",
 
       "errors.folderMissing": "Папката не съществува.",
       "errors.unknownAgent": "Непознат агент.",

@@ -99,9 +99,11 @@ main {
 /* ---------- live status ---------- */
 .sess.live-busy { border-color: color-mix(in srgb, var(--busy) 40%, transparent); box-shadow: inset 3px 0 0 var(--busy); }
 .sess.live-idle { border-color: color-mix(in srgb, var(--wait) 35%, transparent); box-shadow: inset 3px 0 0 var(--wait); }
+.sess.live-waiting { border-color: color-mix(in srgb, var(--attn) 45%, transparent); box-shadow: inset 3px 0 0 var(--attn); }
 .sess.live-stale { box-shadow: inset 3px 0 0 var(--muted); }
 .sess.active.live-busy { box-shadow: inset 3px 0 0 var(--busy), var(--ring); }
 .sess.active.live-idle { box-shadow: inset 3px 0 0 var(--wait), var(--ring); }
+.sess.active.live-waiting { box-shadow: inset 3px 0 0 var(--attn), var(--ring); }
 .sess.active.live-stale { box-shadow: inset 3px 0 0 var(--muted), var(--ring); }
 .proj-live { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 650; color: var(--muted); }
 .proj-live .pulse { margin-left: 3px; }
