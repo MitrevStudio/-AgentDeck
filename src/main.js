@@ -30,6 +30,20 @@ const voiceContext = require("./voice-context").createVoiceContext({ liveSession
 const { createLimits } = require("./limits");
 const limits = createLimits({ fetch: (url, init) => network.fetch(url, init), onChange: l => broadcast("limits:changed", l) });
 const { createNotifier } = require("./notify");
+const { createTerminals } = require("./terminals");
+// AgentDeck's own terminal tabs (prefs "sessionsIn": "tabs"); their output goes to the manager window only.
+function sendToManager(channel, payload) {
+  if (managerWin && !managerWin.isDestroyed()) {
+    managerWin.webContents.send(channel, payload);
+  }
+}
+const terminals = createTerminals({
+  userDataDir: app.getPath("userData"),
+  onData: (id, data, end) => sendToManager("terminal:data", { id, data, end }),
+  onExit: (id, code) => sendToManager("terminal:exit", { id, code }),
+  onChange: list => sendToManager("terminals:changed", list)
+});
+let pendingTab = ""; // the tab to bring up once the manager window has loaded
 let notifier = null;
 const sessionPreview = require("./session-preview");
 const gitStatus = require("./git-status");
@@ -223,8 +237,24 @@ function spawnDetached(file, args, opts) {
   child.unref();
   return new Promise((resolve, reject) => { child.once("spawn", resolve); child.once("error", reject); });
 }
-async function launchTerminal(cwd, command = null) {
+// A tab of AgentDeck's own: the command reaches PowerShell encoded, so no quoting of it can break the command line.
+async function openTab(cwd, command, meta, env) {
+  const encoded = command ? Buffer.from(command, "utf16le").toString("base64") : "";
+  const commandLine = command ? `powershell.exe -NoLogo -NoExit -EncodedCommand ${encoded}` : "powershell.exe -NoLogo";
+  const id = await terminals.open({ cwd, commandLine, title: meta.title || path.basename(cwd), agent: meta.agent, sessionId: meta.sessionId, env });
+  launchLog("agentdeck tab", `cwd="${cwd}" cmd=${command ? `"${command.slice(0, 120)}"` : "-"}`);
+  // An open window switches to the tab now; one that is still to load asks for it when it lists the tabs.
+  if (managerWin && !managerWin.isDestroyed()) sendToManager("terminal:activate", id);
+  else pendingTab = id;
+  showManager();
+}
+// meta: {title, agent, sessionId} of what runs, for the tab; inTab: an AgentDeck tab whatever the setting ("Move here").
+async function launchTerminal(cwd, command = null, meta = {}, inTab = false) {
   if (!cwd || !fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) throw new Error(t("errors.folderMissing"));
+  if (inTab || prefs.get().sessionsIn === "tabs") {
+    const proxy = await network.terminalProxy().catch(() => null);
+    return openTab(cwd, command, meta, terminalEnv(process.env, proxy));
+  }
   // Pass fixed argument arrays to wt.exe. No user-supplied shell command is evaluated. "-w new" gives the session a
   // window of its own (Settings -> General); "-w 0" adds a tab to the last used window.
   const newWindow = prefs.get().newWindow;
@@ -270,17 +300,40 @@ const NEW_SESSION = { Claude: "claude", OpenCode: "opencode", Codex: "codex" };
 const isAgent = agent => typeof agent === "string" && Object.hasOwn(NEW_SESSION, agent);
 function checkAgent(agent) { if (!isAgent(agent)) throw new Error(t("errors.unknownAgent")); }
 function checkSessionId(id) { if (typeof id !== "string" || !SESSION_ID.test(id)) throw new Error(t("errors.invalidSession")); }
-function launchAgent(agent, id, cwd) {
+function getSessionTitle(agent, id) {
+  return cache?.sessions.find(s => s.agent === agent && s.id === id)?.title || `${agent} ${id.slice(0, 8)}`;
+}
+function launchAgent(agent, id, cwd, inTab = false) {
   checkAgent(agent);
   checkSessionId(id);
   if (!cwd || !fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory())
     throw new Error(t("errors.sessionFolderUnknown"));
   const cmd = agentCommand(agent, id).map(psQuote).join(" ");
-  return launchTerminal(cwd, "& " + cmd);
+  return launchTerminal(cwd, "& " + cmd, { title: getSessionTitle(agent, id), agent, sessionId: id }, inTab);
 }
 function launchNew(agent, cwd) {
   checkAgent(agent);
-  return launchTerminal(cwd, "& " + psQuote(NEW_SESSION[agent]));
+  return launchTerminal(cwd, "& " + psQuote(NEW_SESSION[agent]), { title: `${agent} · ${path.basename(cwd)}`, agent });
+}
+// "Move here": a session running in another terminal is stopped there (its terminal modes reset) and resumed in an
+// AgentDeck tab. Not while it works - that would cut the turn off.
+const STOP_SCRIPT = path.join(__dirname, "stop-session.ps1");
+function stopExternalSession(pid) {
+  const script = `$ClaudePid = ${Number(pid)}\n${fs.readFileSync(STOP_SCRIPT, "utf8")}`;
+  const encoded = Buffer.from(script, "utf16le").toString("base64");
+  return new Promise(resolve => {
+    execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded], { windowsHide: true, timeout: 20000 }, err => resolve(err ? err.code ?? 1 : 0));
+  });
+}
+async function moveToTab(agent, id) {
+  checkAgent(agent);
+  checkSessionId(id);
+  const entry = (await liveSessions()).find(l => l.agent === agent && l.id === id);
+  if (!entry) throw new Error(t("errors.moveNotRunning"));
+  if (entry.status === "busy") throw new Error(t("errors.moveBusy"));
+  const code = await stopExternalSession(entry.pid);
+  if (code !== 0 && code !== 3) throw new Error(t("errors.moveStopFailed"));
+  await launchAgent(agent, id, entry.cwd, true);
 }
 // A new session that starts on a prompt (voice commands): the prompt travels in a file, never on a command line. The
 // terminal deletes the file once read; one whose terminal never started goes at once.
@@ -400,6 +453,7 @@ function buildTrayMenu() {
     { label: t("notify.toggle"), type: "checkbox", checked: notifier ? notifier.enabled() : true, enabled: Boolean(notifier), click: item => notifier?.setEnabled(item.checked) },
     { label: t("tray.language"), submenu: radio("language", Object.keys(LANGUAGES), l => LANGUAGES[l]) },
     { label: t("tray.theme"), submenu: radio("theme", prefs.THEMES, th => t(`theme.${th}`)) },
+    { label: t("tray.sessionsIn"), submenu: radio("sessionsIn", prefs.SESSIONS_IN, m => t(`tray.sessionsIn.${m}`)) },
     { label: t("tray.settings"), enabled: Boolean(voice), click: () => voice?.openSettings() },
     updateMenuItem(),
     { type: "separator" },
@@ -494,6 +548,18 @@ function registerIpc() {
   handle("open:path", p => (isDir(p) ? shell.openPath(p) : t("errors.folderMissing")));
   handle("clipboard:write", async value => { await clipboard.writeText(text(value, 1_000_000)); return true; });
   handle("live:get", () => liveSessions());
+  // AgentDeck's own terminal tabs. Keystrokes and sizes come as plain messages (many, no answer needed).
+  handle("terminals:list", () => {
+    const activate = pendingTab;
+    pendingTab = "";
+    return { tabs: terminals.list(), activate };
+  });
+  handle("terminal:attach", id => terminals.attach(text(id, 64)));
+  handle("terminal:close", id => terminals.close(text(id, 64)));
+  handle("terminal:link", (id, agent, sessionId) => { checkAgent(agent); checkSessionId(sessionId); terminals.link(text(id, 64), agent, sessionId); return true; });
+  handle("terminal:move", async (agent, id) => { await moveToTab(text(agent), text(id)); return true; });
+  ipcMain.on("terminal:input", (e, id, data) => { if (trusted(e) && typeof data === "string" && data.length <= 1_000_000) terminals.input(id, data); });
+  ipcMain.on("terminal:resize", (e, id, cols, rows) => { if (trusted(e)) terminals.resize(id, Number(cols), Number(rows)); });
   // Tokens and API-equivalent cost (usage.js): the last result at once, or a fresh pass over the transcripts.
   handle("usage:get", () => usage.get());
   // The shortcuts as set now: the menu's hotkey and the voice ones (labels such as "Ctrl + Shift + Space").
@@ -678,7 +744,7 @@ if (!app.requestSingleInstanceLock()) {
       .catch(err => console.error("Voice shutdown failed:", err))
       .finally(() => app.quit());
   });
-  app.on("will-quit", () => globalShortcut.unregisterAll());
+  app.on("will-quit", () => { globalShortcut.unregisterAll(); terminals.closeAll(); });
   // The hidden edge menu keeps the app alive after the manager window is closed; quitting is done from the tray.
   app.on("window-all-closed", () => {});
 }
