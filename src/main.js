@@ -106,29 +106,53 @@ function mtime(file) { try { return fs.statSync(file).mtimeMs; } catch { return 
 // Slash-command echoes, caveats and hook output are not something the user typed as a prompt (the previews skip
 // them too).
 const { NOISE_PROMPT, contentText } = sessionPreview;
-function parseClaude(file) {
-  let raw;
-  try { raw = fs.readFileSync(file, "utf8"); } catch { return null; }
-  const id = path.basename(file, ".jsonl");
-  let cwd = "", prompt = "", aiTitle = "", customTitle = "", answerLine = "";
-  for (const line of raw.split(/\r?\n/)) {
-    if (!line) continue;
-    // Only the last answer is parsed (below): most lines are tool output that never needs decoding.
-    if (line.includes('"type":"assistant"') && line.includes('"type":"text"')) answerLine = line;
-    // Titles can be appended at any point (/rename, AI title refresh); everything else is only needed once.
-    const titleLine = line.includes('"custom-title"') || line.includes('"ai-title"');
-    if (!titleLine && cwd && prompt) continue;
-    let x; try { x = JSON.parse(line); } catch { continue; }
-    if (x.type === "custom-title" && x.customTitle) customTitle = x.customTitle;
-    if (x.type === "ai-title" && x.aiTitle) aiTitle = x.aiTitle;
-    if (!cwd && typeof x.cwd === "string") cwd = x.cwd;
-    if (!prompt && x.type === "user" && !x.isMeta && !x.isSidechain) {
-      const text = contentText(x.message?.content);
-      if (text.trim() && !NOISE_PROMPT.test(text)) prompt = titleFromText(text.replace(/<\/?[a-z][\w-]*(\s[^>]*)?>/gi, " "));
-    }
+// Claude Code transcripts only ever grow, so each is read once and then only from where the last scan stopped (a file
+// that shrank is read again from the start). What was gathered so far stays here, per file.
+const claudeReads = new Map(); // file -> { offset, cwd, prompt, aiTitle, customTitle, answerLine }
+function readClaudeLine(st, line) {
+  // Only the last answer is parsed (getAnswerRecap): most lines are tool output that never needs decoding.
+  if (line.includes('"type":"assistant"') && line.includes('"type":"text"')) st.answerLine = line;
+  // Titles can be appended at any point (/rename, AI title refresh); everything else is only needed once.
+  const titleLine = line.includes('"custom-title"') || line.includes('"ai-title"');
+  if (!titleLine && st.cwd && st.prompt) return;
+  let x; try { x = JSON.parse(line); } catch { return; }
+  if (x.type === "custom-title" && x.customTitle) st.customTitle = x.customTitle;
+  if (x.type === "ai-title" && x.aiTitle) st.aiTitle = x.aiTitle;
+  if (!st.cwd && typeof x.cwd === "string") st.cwd = x.cwd;
+  if (!st.prompt && x.type === "user" && !x.isMeta && !x.isSidechain) {
+    const text = contentText(x.message?.content);
+    if (text.trim() && !NOISE_PROMPT.test(text)) st.prompt = titleFromText(text.replace(/<\/?[a-z][\w-]*(\s[^>]*)?>/gi, " "));
   }
-  const title = titleFromText(customTitle || aiTitle) || prompt || t("session.untitled", { agent: "Claude", id: id.slice(0, 8) });
-  return { id, agent: "Claude", cwd, title, prompt: prompt !== title ? prompt : "", recap: getAnswerRecap(answerLine), updatedAt: mtime(file), file };
+}
+// Reads the complete lines added since the last read; a line still being written waits for the next scan.
+function readClaudeAppended(file, st, size) {
+  const fd = fs.openSync(file, "r");
+  try {
+    const buf = Buffer.alloc(size - st.offset);
+    const read = fs.readSync(fd, buf, 0, buf.length, st.offset);
+    const end = buf.lastIndexOf(10, read - 1) + 1;
+    for (const line of buf.toString("utf8", 0, end).split(/\r?\n/)) {
+      if (line) readClaudeLine(st, line);
+    }
+    st.offset += end;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+function parseClaude(file) {
+  let stat;
+  try { stat = fs.statSync(file); } catch { claudeReads.delete(file); return null; }
+  let st = claudeReads.get(file);
+  if (!st || stat.size < st.offset) {
+    st = { offset: 0, cwd: "", prompt: "", aiTitle: "", customTitle: "", answerLine: "" };
+    claudeReads.set(file, st);
+  }
+  if (stat.size > st.offset) {
+    try { readClaudeAppended(file, st, stat.size); } catch { return null; }
+  }
+  const id = path.basename(file, ".jsonl");
+  const title = titleFromText(st.customTitle || st.aiTitle) || st.prompt || t("session.untitled", { agent: "Claude", id: id.slice(0, 8) });
+  return { id, agent: "Claude", cwd: st.cwd, title, prompt: st.prompt !== title ? st.prompt : "", recap: getAnswerRecap(st.answerLine), updatedAt: stat.mtimeMs, file };
 }
 function getAnswerRecap(line) {
   let x;
@@ -139,9 +163,21 @@ function getAnswerRecap(line) {
   }
   return x?.isSidechain ? "" : getRecap(contentText(x?.message?.content));
 }
+// Only the head of a Codex transcript is read: the first lines hold everything the list needs.
+const CODEX_HEAD_BYTES = 256 * 1024;
+function readHead(file, bytes) {
+  const fd = fs.openSync(file, "r");
+  try {
+    const buf = Buffer.alloc(bytes);
+    const read = fs.readSync(fd, buf, 0, bytes, 0);
+    return buf.toString("utf8", 0, read);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
 function parseCodex(file) {
   let lines;
-  try { lines = fs.readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean); } catch { return null; }
+  try { lines = readHead(file, CODEX_HEAD_BYTES).split(/\r?\n/).filter(Boolean); } catch { return null; }
   let id = path.basename(file, ".jsonl"), cwd = "", title = "", updatedAt = 0;
   for (const line of lines.slice(0, 35)) {
     let x; try { x = JSON.parse(line); } catch { continue; }
@@ -189,10 +225,19 @@ function openCodeSession(s, cwd, projectName) {
     updatedAt: Number(s.updated || s.time?.updated || s.updatedAt || 0)
   };
 }
-async function scanSessions() {
+// OpenCode's sessions come from its CLI, which takes seconds: a rescan started by a changed transcript keeps the last
+// answer (openCode: false), the Refresh button and the first scan ask it again.
+let lastOpenCode = [];
+async function scanSessions({ openCode = true } = {}) {
+  const registry = readRegistry();
+  if (openCode) lastOpenCode = await scanOpenCode(registry);
+  const found = lastOpenCode.map(s => ({ ...s }));
+  scanTranscripts(registry, found);
+  return indexProjects(found);
+}
+async function scanOpenCode(registry) {
   const found = [];
   // OpenCode: query globally first, then use registered projects as a fallback.
-  let registry = readRegistry();
   let openCodeFound = false, openCodeInstalled = false;
   try {
     const { stdout } = await runOpenCode(["session", "list", "--format", "json", "--max-count", "300"], USER, 12000);
@@ -217,8 +262,16 @@ async function scanSessions() {
       } catch { /* project not available */ }
     }
   }
+  return found;
+}
+function scanTranscripts(registry, found) {
   // Claude Code transcripts. Subagent transcripts live in `subagents/` and cannot be resumed on their own.
-  for (const f of walkFiles(CLAUDE_DIR, ".jsonl", [], 0, ["subagents"])) {
+  const claudeFiles = walkFiles(CLAUDE_DIR, ".jsonl", [], 0, ["subagents"]);
+  const present = new Set(claudeFiles);
+  for (const f of claudeReads.keys()) {
+    if (!present.has(f)) claudeReads.delete(f);
+  }
+  for (const f of claudeFiles) {
     const s = parseClaude(f);
     if (s) {
       const projectFolder = path.basename(path.dirname(f));
@@ -238,8 +291,10 @@ async function scanSessions() {
       found.push(s);
     }
   }
+}
+function indexProjects(found) {
   // Auto-index projects that can be reliably resolved from local session metadata.
-  registry = readRegistry();
+  const registry = readRegistry();
   let changed = false;
   for (const s of found) {
     if (!s.cwd || !path.isAbsolute(s.cwd) || !fs.existsSync(s.cwd)) continue;
@@ -387,22 +442,51 @@ const agentsReady = Promise.all(Object.entries(NEW_SESSION).map(([agent, exe]) =
 // ---------- shared data ----------
 // The edge menu must open instantly, so the last scan is kept and pushed to the two windows that list sessions
 // when it changes (the voice windows have no use for it).
-let cache = null, scanning = null;
+let cache = null, scanning = null, scanningFull = false;
 function broadcast(channel, payload) {
   for (const w of [managerWin, bar?.win]) if (w && !w.isDestroyed()) w.webContents.send(channel, payload);
 }
-function scan() {
-  scanning ??= scanSessions().then(async sessions => {
+// full: OpenCode's CLI and the git status are asked too (first scan, Refresh); a rescan after changed transcripts
+// skips both. A full scan asked for while a lighter one runs follows it.
+function scan({ full = true } = {}) {
+  if (scanning && full && !scanningFull) return scanning.then(() => scan({ full }));
+  if (scanning) return scanning;
+  scanningFull = full;
+  scanning = scanSessions({ openCode: full }).then(async sessions => {
     // Scan first: it auto-indexes projects into the registry, which must be read afterwards.
     cache = { registry: readRegistry(), sessions, agents: await agentsReady, at: Date.now() };
     fullText.index(sessions);
     broadcast("data:changed", cache);
     // Transcripts may have grown too, and there may be new folders: their results are broadcast on their own.
     usage.refresh().catch(err => console.error("Usage scan failed:", err.message));
-    gitStatus.refresh().catch(err => console.error("Git status failed:", err.message));
+    if (full) gitStatus.refresh().catch(err => console.error("Git status failed:", err.message));
     return cache;
   }).finally(() => { scanning = null; });
   return scanning;
+}
+// Sessions that go on, start or end change their transcripts: the list, the search index and the figures follow by
+// themselves - at most every RESCAN_MS while transcripts keep changing, so a working session costs one light rescan
+// (only the lines it added are read) every few seconds.
+const RESCAN_MS = 5000;
+let rescanTimer = null;
+function scheduleRescan() {
+  if (rescanTimer) return;
+  rescanTimer = setTimeout(() => {
+    rescanTimer = null;
+    scan({ full: false }).catch(err => console.error("Rescan failed:", err.message));
+  }, RESCAN_MS);
+}
+function watchTranscripts() {
+  for (const dir of [CLAUDE_DIR, CODEX_DIR]) {
+    try {
+      fs.watch(dir, { recursive: true }, (_event, name) => {
+        if (name && String(name).endsWith(".jsonl")) scheduleRescan();
+      }).on("error", err => console.error(`Watching ${dir} failed:`, err.message));
+    } catch (err) {
+      // Not there (the agent is not installed): its sessions still come with Refresh.
+      if (err.code !== "ENOENT") console.error(`Could not watch ${dir}:`, err.message);
+    }
+  }
 }
 function registryChanged(registry) {
   if (cache) { cache = { ...cache, registry }; broadcast("data:changed", cache); }
@@ -700,6 +784,7 @@ if (!app.requestSingleInstanceLock()) {
     network.start();
     registerIpc();
     autopilot.start();
+    watchTranscripts();
 
     bar = createEdgeBar({
       preload: PRELOAD, onOpenManager: showManager, hotkeyLabel,
