@@ -9,7 +9,7 @@ const scan = require("./usage-scan");
 const atomic = require("./voice/atomic-file");
 const { readAt, lineChunks } = require("./file-chunks");
 
-const VERSION = 1;          // of the cache layout and of what the parsers extract
+const VERSION = 2;          // of the cache layout and of what the parsers extract
 const MARK = 64;            // bytes compared to tell a rewritten file from one that only grew
 const PARALLEL = 4;         // files read at once
 const SAVE_AFTER_MS = 90 * 1000;
