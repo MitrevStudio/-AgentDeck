@@ -58,6 +58,22 @@ function norm(p) { return path.resolve(p).replace(/\\/g, "/").toLowerCase(); }
 function titleFromText(s) {
   return String(s || "").replace(/\s+/g, " ").trim().slice(0, 110);
 }
+const RECAP_CHARS = 220;
+// The gist of where a session ended: its last answer without markdown, cut at a sentence end where one is near.
+function getRecap(text) {
+  const plain = String(text || "")
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/[-=*_:]{3,}/g, " ")
+    .replace(/[#*_`>|]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (plain.length <= RECAP_CHARS) {
+    return plain;
+  }
+  const cut = plain.slice(0, RECAP_CHARS);
+  const end = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("! "), cut.lastIndexOf("? "));
+  return end > RECAP_CHARS / 2 ? cut.slice(0, end + 1) : `${cut.trimEnd()}…`;
+}
 function walkFiles(dir, ext, out = [], depth = 0, skipDirs = []) {
   if (depth > 8 || out.length > 12000) return out;
   let entries;
@@ -77,9 +93,11 @@ function parseClaude(file) {
   let raw;
   try { raw = fs.readFileSync(file, "utf8"); } catch { return null; }
   const id = path.basename(file, ".jsonl");
-  let cwd = "", prompt = "", aiTitle = "", customTitle = "";
+  let cwd = "", prompt = "", aiTitle = "", customTitle = "", answerLine = "";
   for (const line of raw.split(/\r?\n/)) {
     if (!line) continue;
+    // Only the last answer is parsed (below): most lines are tool output that never needs decoding.
+    if (line.includes('"type":"assistant"') && line.includes('"type":"text"')) answerLine = line;
     // Titles can be appended at any point (/rename, AI title refresh); everything else is only needed once.
     const titleLine = line.includes('"custom-title"') || line.includes('"ai-title"');
     if (!titleLine && cwd && prompt) continue;
@@ -93,7 +111,16 @@ function parseClaude(file) {
     }
   }
   const title = titleFromText(customTitle || aiTitle) || prompt || t("session.untitled", { agent: "Claude", id: id.slice(0, 8) });
-  return { id, agent: "Claude", cwd, title, prompt: prompt !== title ? prompt : "", updatedAt: mtime(file), file };
+  return { id, agent: "Claude", cwd, title, prompt: prompt !== title ? prompt : "", recap: getAnswerRecap(answerLine), updatedAt: mtime(file), file };
+}
+function getAnswerRecap(line) {
+  let x;
+  try {
+    x = JSON.parse(line);
+  } catch {
+    return "";
+  }
+  return x?.isSidechain ? "" : getRecap(contentText(x?.message?.content));
 }
 function parseCodex(file) {
   let lines;
