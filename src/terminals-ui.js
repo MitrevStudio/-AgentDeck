@@ -120,7 +120,7 @@ function getTabStatus(tab) {
   if (!l) {
     return "";
   }
-  return l.status === "busy" ? "busy" : "idle";
+  return liveGroup(l);
 }
 function getTabTitle(tab) {
   const s = tab.sessionId && typeof data !== "undefined" ? data.sessions.find(x => x.agent === tab.agent && x.id === tab.sessionId) : null;
