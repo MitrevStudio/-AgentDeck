@@ -52,16 +52,22 @@ function getHandoff(s, d) {
     outcome: getHandoffPart(answers[answers.length - 1]?.text) || t("preview.handoff.unknown")
   });
 }
+// Continue fresh pays off only when resuming would re-read a large context at full price (the red context chip).
+function isFreshOffered(s) {
+  const c = typeof contextBySession !== "undefined" && contextBySession.get(sessionKey(s));
+  return Boolean(c) && getContextState(c) === "large";
+}
 function previewActions(s) {
-  if (!s.cwd) {
+  const running = typeof liveOf === "function" && liveOf(s);
+  const fresh = isFreshOffered(s);
+  if (!s.cwd || (running && !fresh)) {
     return "";
   }
-  const running = typeof liveOf === "function" && liveOf(s);
   return `<div class="pv-actions">
       ${running ? "" : `<button class="btn sm primary" data-pv-act="resume">${icon("play")}${esc(t("preview.resume"))}</button>`}
-      <button class="btn sm" data-pv-act="fresh">${icon("plus")}${esc(t("preview.fresh"))}</button>
+      ${fresh ? `<button class="btn sm" data-pv-act="fresh">${icon("plus")}${esc(t("preview.fresh"))}</button>` : ""}
     </div>
-    <div class="pv-costs">${running ? "" : `<div><b>${esc(t("preview.resume"))}</b> ${esc(t("preview.resume.cost"))}</div>`}<div><b>${esc(t("preview.fresh"))}</b> ${esc(t("preview.fresh.cost"))}</div></div>`;
+    <div class="pv-costs">${running ? "" : `<div><b>${esc(t("preview.resume"))}</b> ${esc(t("preview.resume.cost"))}</div>`}${fresh ? `<div><b>${esc(t("preview.fresh"))}</b> ${esc(t("preview.fresh.cost"))}</div>` : ""}</div>`;
 }
 function previewNotice(box, message, isError = false) {
   if (typeof toast === "function") {
