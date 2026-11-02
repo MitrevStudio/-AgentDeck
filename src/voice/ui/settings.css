@@ -104,6 +104,7 @@ body:not([data-tab="network"]) [data-for="network"] { display: none; }
 
 .vs-hint { margin-top: 5px; font-size: 12px; line-height: 1.45; color: var(--faint); }
 .vs-grid > .vs-hint { margin-top: -3px; }
+.vs-list { white-space: pre-line; }
 
 /* ---------- hotkeys: capture chips ----------
    The input stays the keyboard target (a combination is recorded, or one can be typed) but is invisible; the
