@@ -75,13 +75,13 @@ function getFreshMissingReason(s) {
 // fresh is missing.
 function getSessionActions(s) {
   const fresh = isFreshOffered(s);
-  const resumeTip = [getActionTip("resume", !fresh), fresh ? "" : getFreshMissingReason(s)].filter(Boolean).join("\n\n");
-  return `${fresh ? `<button class="btn sm primary" data-action="fresh" data-tip="${esc(getActionTip("fresh", true))}">${icon("plus")}${esc(t("preview.fresh"))}</button>` : ""}
-      <button class="btn sm ${fresh ? "" : "primary"}" data-action="resume" data-tip="${esc(resumeTip)}" ${s.cwd ? "" : "disabled"}>${icon("play")}${esc(t("preview.resume"))}</button>`;
+  const resumeTip = [t("preview.resume.cost"), fresh ? "" : getFreshMissingReason(s)].filter(Boolean).join("\n\n");
+  return `${fresh ? `<button class="btn sm primary" data-action="fresh" data-tip-name="${esc(getActionName("fresh", true))}" data-tip="${esc(t("preview.fresh.cost"))}">${icon("plus")}${esc(t("preview.fresh"))}</button>` : ""}
+      <button class="btn sm ${fresh ? "" : "primary"}" data-action="resume" data-tip-name="${esc(getActionName("resume", !fresh))}" data-tip="${esc(resumeTip)}" ${s.cwd ? "" : "disabled"}>${icon("play")}${esc(t("preview.resume"))}</button>`;
 }
-function getActionTip(action, recommended) {
-  const name = recommended ? `${t(`preview.${action}`)} ${t("preview.recommended")}` : t(`preview.${action}`);
-  return `${name}: ${t(`preview.${action}.cost`)}`;
+// A button's name for its tooltip (shown in bold), "(recommended)" added for the blue one.
+function getActionName(action, recommended) {
+  return `${t(`preview.${action}`)}${recommended ? ` ${t("preview.recommended")}` : ""}:`;
 }
 // The handoff comes from the session's preview (its first prompt and last answer).
 async function continueFresh(s) {

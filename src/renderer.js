@@ -444,33 +444,6 @@ window.manager.onDataChanged(d => {
 watchGit(() => { if (!ui.loaded) return; if (ui.renaming) pendingRender = true; else render(); });
 previewHoverCard($("sessions"), card => visible[Number(card.dataset.i)]);
 
-// ---------- tooltips that stay inside the window (data-tip): the system ones spill out of it ----------
-const TIP_GAP_PX = 8, TIP_MARGIN_PX = 12;
-const tip = document.createElement("div");
-tip.className = "tip";
-tip.hidden = true;
-document.body.appendChild(tip);
-function showTip(el) {
-  tip.textContent = el.dataset.tip;
-  tip.hidden = false;
-  const r = el.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
-  const left = Math.min(Math.max(TIP_MARGIN_PX, r.right - w), innerWidth - w - TIP_MARGIN_PX);
-  const top = r.top - h - TIP_GAP_PX >= TIP_MARGIN_PX ? r.top - h - TIP_GAP_PX : r.bottom + TIP_GAP_PX;
-  tip.style.left = `${left}px`;
-  tip.style.top = `${top}px`;
-}
-document.addEventListener("mouseover", e => {
-  const el = e.target.closest?.("[data-tip]");
-  if (el) {
-    showTip(el);
-  } else {
-    tip.hidden = true;
-  }
-});
-document.addEventListener("scroll", () => {
-  tip.hidden = true;
-}, true);
-
 // ---------- projects | sessions divider: dragged, moved with the arrow keys, reset by a double-click ----------
 const PROJECTS_WIDTH_KEY = "agentdeck.projectsWidth";
 const MIN_PROJECTS_PX = 220, MIN_SESSIONS_PX = 420, SPLITTER_STEP_PX = 16;

@@ -50,6 +50,64 @@ const icon = name => `<svg class="i" viewBox="0 0 24 24" fill="none" stroke="cur
 I18N.applyI18n(); // the body is parsed by now, and the page's own script has not written into it yet
 document.querySelectorAll("[data-icon]").forEach(el => { el.outerHTML = icon(el.dataset.icon); });
 
+// ---------- tooltips ----------
+// Hover texts in AgentDeck's own style, kept inside the window (the system ones spill out of it). A title becomes
+// data-tip when first pointed at; data-tip-name goes in bold in front of the text.
+const TIP_DELAY_MS = 400, TIP_GAP_PX = 8, TIP_MARGIN_PX = 12;
+let tipBox = null, tipFor = null, tipTimer = 0;
+function getTipBox() {
+  if (!tipBox) {
+    tipBox = document.createElement("div");
+    tipBox.className = "tip";
+    tipBox.hidden = true;
+    document.body.appendChild(tipBox);
+  }
+  return tipBox;
+}
+function takeTitle(el) {
+  if (!el.title) {
+    return;
+  }
+  el.dataset.tip = el.title;
+  if (!el.hasAttribute("aria-label") && !el.textContent.trim()) {
+    el.setAttribute("aria-label", el.title);
+  }
+  el.removeAttribute("title");
+}
+function showTip(el) {
+  const box = getTipBox();
+  box.innerHTML = `${el.dataset.tipName ? `<b>${esc(el.dataset.tipName)}</b> ` : ""}${esc(el.dataset.tip)}`;
+  box.hidden = false;
+  const r = el.getBoundingClientRect(), w = box.offsetWidth, h = box.offsetHeight;
+  const left = Math.min(Math.max(TIP_MARGIN_PX, r.left + r.width / 2 - w / 2), innerWidth - w - TIP_MARGIN_PX);
+  const top = r.top - h - TIP_GAP_PX >= TIP_MARGIN_PX ? r.top - h - TIP_GAP_PX : Math.min(r.bottom + TIP_GAP_PX, innerHeight - h - TIP_MARGIN_PX);
+  box.style.left = `${Math.max(TIP_MARGIN_PX, left)}px`;
+  box.style.top = `${Math.max(TIP_MARGIN_PX, top)}px`;
+}
+function hideTip() {
+  clearTimeout(tipTimer);
+  tipFor = null;
+  if (tipBox) {
+    tipBox.hidden = true;
+  }
+}
+document.addEventListener("mouseover", e => {
+  const el = e.target.closest?.("[title], [data-tip]");
+  if (el === tipFor) {
+    return;
+  }
+  hideTip();
+  if (!el) {
+    return;
+  }
+  takeTitle(el);
+  tipFor = el;
+  tipTimer = setTimeout(() => el.isConnected && el.dataset.tip && showTip(el), TIP_DELAY_MS);
+});
+document.addEventListener("mousedown", hideTip, true);
+document.addEventListener("scroll", hideTip, true);
+window.addEventListener("blur", hideTip);
+
 // ---------- live status ----------
 const sessionKey = s => `${s.agent}:${s.id}`;
 const STALE_MS = 10 * 60 * 1000;

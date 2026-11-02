@@ -407,6 +407,15 @@ kbd {
 .path .leaf { color: var(--path-leaf); font-weight: 700; }
 .path mark { color: var(--path-mark); }
 
+/* An in-window tooltip, every page (common.js). */
+.tip {
+  position: fixed; z-index: 1000; max-width: 340px; padding: 8px 10px; pointer-events: none;
+  background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: var(--r-md);
+  box-shadow: var(--shadow-pop); font-size: 12px; font-weight: 400; line-height: 1.45; white-space: pre-line;
+  overflow-wrap: anywhere; text-align: left;
+}
+.tip b { font-weight: 700; }
+
 /* ---------- live status ---------- */
 .spinner {
   width: 12px; height: 12px; flex: none; border-radius: 50%;

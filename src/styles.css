@@ -24,12 +24,6 @@ main {
   flex: 1; min-height: 0; display: grid; gap: 4px; padding: 16px 20px;
   grid-template-columns: var(--projects-w, clamp(310px, 25vw, 390px)) 8px minmax(0, 1fr);
 }
-/* An in-window tooltip (data-tip, renderer.js). */
-.tip {
-  position: fixed; z-index: 40; max-width: 340px; padding: 8px 10px; pointer-events: none;
-  background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: var(--r-md);
-  box-shadow: var(--shadow-pop); font-size: 12px; line-height: 1.45; white-space: pre-line;
-}
 /* Between the projects and the sessions (renderer.js): a line that shows while pointed at, dragged or focused. */
 .splitter { position: relative; cursor: col-resize; outline: none; touch-action: none; }
 .splitter::after {
