@@ -196,8 +196,9 @@ function previewHoverCard(list, sessionOf) {
     card.style.top = `${Math.max(12, Math.min(r.top, innerHeight - height - 12))}px`;
     showPreview(card, s);
   }
+  // A session's buttons show their own tooltip, not the preview.
   list.addEventListener("mouseover", e => {
-    const el = e.target.closest(".sess");
+    const el = e.target.closest("button") ? null : e.target.closest(".sess");
     if (el === over) return;
     over = el;
     clearTimeout(showTimer);

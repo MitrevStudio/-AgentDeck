@@ -166,26 +166,24 @@ function sessionHtml(s, i, toks) {
     : `<div class="dir unknown">${icon("alert")}${esc(t("manager.session.noDir"))}</div>`;
   const l = liveOf(s);
   const liveCls = l ? `live-${getLiveGroup(l) === "busy" && isStale(l) ? "stale" : getLiveGroup(l)}` : "";
-  // A running session: its terminal is brought up; a second instance stays possible, but quieter. The secondary
-  // actions' labels (.bl) give way to their icon and tooltip in a narrow panel (styles.css).
-  const resumeBtn = l
+  // A running session: its terminal is brought up, or moved into a tab. Resume and Continue fresh are in the preview
+  // (preview-ui.js). The secondary actions' labels (.bl) give way to their icon and tooltip in a narrow panel.
+  const runningBtns = l
     ? `<button class="btn sm primary" data-action="show-terminal" title="${esc(t("term.showTitle", { pid: l.pid }))}">${icon("raise")}${esc(t("term.show"))}</button>
-      ${isMoveHereOffered(s) ? `<button class="btn sm" data-action="move-here" title="${esc(t("term.moveHereTitle"))}">${icon("download")}<span class="bl">${esc(t("term.moveHere"))}</span></button>` : ""}
-      <button class="btn sm ghost" data-action="resume" title="${esc(t("manager.session.openAgainTitle", { pid: l.pid }))}" aria-label="${esc(t("action.openAgain"))}">${icon("play")}<span class="bl">${esc(t("action.openAgain"))}</span></button>`
-    : `<button class="btn sm primary" data-action="resume" ${s.cwd ? "" : "disabled"}>${icon("play")}${esc(t("action.resume"))}</button>`;
+      ${isMoveHereOffered(s) ? `<button class="btn sm" data-action="move-here" title="${esc(t("term.moveHereTitle"))}">${icon("download")}<span class="bl">${esc(t("term.moveHere"))}</span></button>` : ""}`
+    : "";
   return `<article class="card sess ${liveCls} ${i === ui.active ? "active" : ""}" data-i="${i}">
     <div class="sess-head"><span class="agent ${s.agent.toLowerCase()}">${esc(s.agent)}</span>
       <h3 class="sess-title">${hl(s.title, toks)}</h3>
       ${livePill(s)}
       <span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span></div>
-    ${s.prompt ? `<p class="sess-prompt" title="${esc(s.prompt)}">${hl(s.prompt, toks)}</p>` : ""}
-    ${s.recap ? `<p class="sess-recap" title="${esc(t("manager.session.recapTitle", { recap: s.recap }))}"><span class="recap-label">${esc(t("manager.session.recap"))}</span>${hl(s.recap, toks)}</p>` : ""}
+    ${s.recap ? `<p class="sess-recap" title="${esc(s.recap)}">${hl(s.recap, toks)}</p>` : ""}
+    <div class="sid" title="${esc(t("manager.session.id"))}">${hl(s.id, toks)}</div>
     ${dir}
-    <div class="sess-foot"><span class="sid" title="${esc(t("manager.session.id"))}">${hl(s.id, toks)}</span>
-      ${getContextChip(s)}${usageChip(s)}
-      ${resumeBtn}
-      ${s.cwd ? `<button class="btn sm" data-action="terminal" data-path="${esc(s.cwd)}" title="${esc(t("action.terminalHere"))}" aria-label="${esc(t("action.terminal"))}">${icon("terminal")}<span class="bl">${esc(t("action.terminal"))}</span></button>
-      <button class="btn sm" data-action="explorer" data-path="${esc(s.cwd)}" title="${esc(t("action.explorerTitle"))}" aria-label="${esc(t("action.explorer"))}">${icon("open")}<span class="bl">${esc(t("action.explorer"))}</span></button>` : ""}
+    <div class="sess-foot">${getContextChip(s)}${usageChip(s)}<div class="grow"></div>
+      ${runningBtns}
+      ${s.cwd && !l ? `<button class="btn sm" data-action="terminal" data-path="${esc(s.cwd)}" title="${esc(t("action.terminalHere"))}" aria-label="${esc(t("action.terminal"))}">${icon("terminal")}<span class="bl">${esc(t("action.terminal"))}</span></button>` : ""}
+      ${s.cwd ? `<button class="btn sm" data-action="explorer" data-path="${esc(s.cwd)}" title="${esc(t("action.explorerTitle"))}" aria-label="${esc(t("action.explorer"))}">${icon("open")}<span class="bl">${esc(t("action.explorer"))}</span></button>` : ""}
     </div></article>`;
 }
 
@@ -439,6 +437,53 @@ window.manager.onDataChanged(d => {
 // Git branches beside projects and session folders, and a session's last messages on hover (git-ui.js, preview-ui.js).
 watchGit(() => { if (!ui.loaded) return; if (ui.renaming) pendingRender = true; else render(); });
 previewHoverCard($("sessions"), card => visible[Number(card.dataset.i)]);
+
+// ---------- projects | sessions divider: dragged, moved with the arrow keys, reset by a double-click ----------
+const PROJECTS_WIDTH_KEY = "agentdeck.projectsWidth";
+const MIN_PROJECTS_PX = 220, MIN_SESSIONS_PX = 420, SPLITTER_STEP_PX = 16;
+function getProjectsWidth(left) {
+  const main = document.querySelector("main").getBoundingClientRect();
+  const projects = left - document.querySelector("main > .panel").getBoundingClientRect().left;
+  return Math.round(Math.max(MIN_PROJECTS_PX, Math.min(projects, main.width - MIN_SESSIONS_PX)));
+}
+function setProjectsWidth(px) {
+  document.querySelector("main").style.setProperty("--projects-w", `${px}px`);
+  try {
+    localStorage.setItem(PROJECTS_WIDTH_KEY, String(px));
+  } catch {}
+}
+function resetProjectsWidth() {
+  document.querySelector("main").style.removeProperty("--projects-w");
+  try {
+    localStorage.removeItem(PROJECTS_WIDTH_KEY);
+  } catch {}
+}
+function restoreProjectsWidth() {
+  let px = 0;
+  try {
+    px = Number(localStorage.getItem(PROJECTS_WIDTH_KEY));
+  } catch {}
+  if (px > 0) {
+    document.querySelector("main").style.setProperty("--projects-w", `${px}px`);
+  }
+}
+$("splitter").addEventListener("pointerdown", e => {
+  const el = e.currentTarget;
+  const move = ev => setProjectsWidth(getProjectsWidth(ev.clientX));
+  e.preventDefault();
+  el.setPointerCapture(e.pointerId);
+  el.addEventListener("pointermove", move);
+  el.addEventListener("pointerup", () => el.removeEventListener("pointermove", move), { once: true });
+});
+$("splitter").addEventListener("dblclick", resetProjectsWidth);
+$("splitter").addEventListener("keydown", e => {
+  const step = { ArrowLeft: -SPLITTER_STEP_PX, ArrowRight: SPLITTER_STEP_PX }[e.key];
+  if (step) {
+    e.preventDefault();
+    setProjectsWidth(getProjectsWidth(e.currentTarget.getBoundingClientRect().left + step));
+  }
+});
+restoreProjectsWidth();
 
 load();
 setInterval(pollLive, 2000);

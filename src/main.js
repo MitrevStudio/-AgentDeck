@@ -114,8 +114,9 @@ const { NOISE_PROMPT, contentText } = sessionPreview;
 // that shrank is read again from the start). What was gathered so far stays here, per file.
 const claudeReads = new Map(); // file -> { offset, cwd, prompt, aiTitle, customTitle, answerLine, recap }
 function readClaudeLine(st, line) {
-  // Only the last answer is parsed (getAnswerRecap, once per read): most lines are tool output never decoded.
+  // Only the last answer and the last recap are parsed (once per read): most lines are tool output never decoded.
   if (line.includes('"type":"assistant"') && line.includes('"type":"text"')) st.answerLine = line;
+  if (line.includes('"subtype":"away_summary"')) st.summaryLine = line;
   // Titles can be appended at any point (/rename, AI title refresh); everything else is only needed once.
   const titleLine = line.includes('"custom-title"') || line.includes('"ai-title"');
   if (!titleLine && st.cwd && st.prompt) return;
@@ -142,6 +143,10 @@ function readClaudeAppended(file, st, size) {
     if (st.answerLine) {
       st.recap = getAnswerRecap(st.answerLine);
       st.answerLine = "";
+    }
+    if (st.summaryLine) {
+      st.summary = getAwaySummary(st.summaryLine);
+      st.summaryLine = "";
     }
   } finally {
     fs.closeSync(fd);
@@ -174,7 +179,17 @@ function parseClaude(file) {
   }
   const id = path.basename(file, ".jsonl");
   const title = titleFromText(st.customTitle || st.aiTitle) || st.prompt || t("session.untitled", { agent: "Claude", id: id.slice(0, 8) });
-  return { id, agent: "Claude", cwd: st.cwd, title, prompt: st.prompt !== title ? st.prompt : "", recap: st.recap, updatedAt: stat.mtimeMs, file };
+  return { id, agent: "Claude", cwd: st.cwd, title, prompt: st.prompt !== title ? st.prompt : "", recap: st.summary || st.recap, updatedAt: stat.mtimeMs, file };
+}
+// Claude Code's own recap of a session ("away_summary"), without its "(disable recaps in /config)" hint.
+function getAwaySummary(line) {
+  let x;
+  try {
+    x = JSON.parse(line);
+  } catch {
+    return "";
+  }
+  return x?.isSidechain || typeof x?.content !== "string" ? "" : x.content.replace(/\s*\(disable recaps[^)]*\)\s*$/i, "").replace(/\s+/g, " ").trim();
 }
 function getAnswerRecap(line) {
   let x;
