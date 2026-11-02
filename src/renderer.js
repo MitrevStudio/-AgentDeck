@@ -432,9 +432,11 @@ document.addEventListener("keydown", e => {
 // A scan started elsewhere (e.g. by the edge menu) updates this window as well.
 // Main rescans by itself when transcripts change: the list, the status line and an open search follow.
 // A session just opened shows "Loading" at once (common.js keeps the launches).
+// Re-rendering would throw away a half-typed project name.
+const renderSoon = () => (ui.renaming ? (pendingRender = true) : render());
 window.manager.onLaunch(() => {
-  render();
-  setTimeout(render, LOADING_MAX_MS + 1000);
+  renderSoon();
+  setTimeout(renderSoon, LOADING_MAX_MS + 1000);
 });
 window.manager.onDataChanged(d => {
   if (!ui.loaded || ui.loading) return;

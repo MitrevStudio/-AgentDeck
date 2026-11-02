@@ -43,8 +43,9 @@ function createEdgeHandle({ shown, position, displayId, savePosition, onIntent, 
 
   const getDisplay = () => screen.getAllDisplays().find(d => d.id === displayId()) || screen.getPrimaryDisplay();
   const area = () => getDisplay().bounds;
-  // While dragging: the display the pointer is on.
-  const getPointerDisplay = () => screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  // While dragging, the pointer as main sees it: the page's coordinates go wrong once it crosses onto a display with
+  // another scale.
+  const getPointer = () => screen.getCursorScreenPoint();
   const clampX = (x, b) => Math.round(Math.min(Math.max(x, b.x), b.x + b.width - WIDTH));
   function place() {
     const b = area();
@@ -73,15 +74,16 @@ function createEdgeHandle({ shown, position, displayId, savePosition, onIntent, 
       if (x === true && !open && !drag) intent = setTimeout(() => { intent = null; onIntent(); }, INTENT_MS);
     } else if (type === "press") cancelIntent();
     else if (type === "click") onClick();
-    else if (type === "drag-start" && Number.isFinite(x)) {
+    else if (type === "drag-start") {
       cancelIntent();
-      drag = { offset: x - win.getBounds().x, display: getDisplay() };
+      drag = { offset: getPointer().x - win.getBounds().x, display: getDisplay() };
       onDragStart();
       send();
-    } else if (type === "drag" && drag && Number.isFinite(x)) {
-      drag.display = getPointerDisplay();
+    } else if (type === "drag" && drag) {
+      const p = getPointer();
+      drag.display = screen.getDisplayNearestPoint(p);
       const b = drag.display.bounds;
-      win.setBounds({ x: clampX(x - drag.offset, b), y: b.y, width: WIDTH, height: HEIGHT });
+      win.setBounds({ x: clampX(p.x - drag.offset, b), y: b.y, width: WIDTH, height: HEIGHT });
     } else if (type === "drag-end" && drag) {
       const b = drag.display.bounds, r = win.getBounds();
       const id = drag.display.id;

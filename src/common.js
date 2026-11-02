@@ -70,6 +70,11 @@ function takeTitle(el) {
     return;
   }
   if (!el.title) {
+    for (const attr of ["aria-description", "aria-label"]) {
+      if (el.getAttribute(attr) === el.dataset.tip) {
+        el.removeAttribute(attr);
+      }
+    }
     delete el.dataset.tip;
   } else {
     el.dataset.tip = el.title;
