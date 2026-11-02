@@ -414,15 +414,14 @@ window.manager.onBarEvent(ev => {
 
 q.addEventListener("input", () => setQuery(q.value));
 $("openManager").addEventListener("click", () => window.manager.barCommand("open-manager"));
-// Scan again; the result comes back as "data:changed" and redraws the menu.
+// F5 scans now (main scans by itself every few minutes); the result comes back as "data:changed".
 async function refresh() {
-  const el = $("refreshBtn");
-  if (el.disabled) return;
-  el.disabled = true; el.classList.add("spin");
-  try { await window.manager.getData(); } catch (e) { toast(e.message, true); }
-  finally { el.disabled = false; el.classList.remove("spin"); }
+  try {
+    await window.manager.getData();
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
-$("refreshBtn").addEventListener("click", refresh);
 $("hiddenToggle").addEventListener("click", () => { hidden.reveal = !hidden.reveal; applyHidden(); });
 $("navL").addEventListener("click", () => $("strip").scrollBy({ left: -$("strip").clientWidth * 0.7 }));
 $("navR").addEventListener("click", () => $("strip").scrollBy({ left: $("strip").clientWidth * 0.7 }));
