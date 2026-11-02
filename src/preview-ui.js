@@ -56,18 +56,36 @@ function isFreshOffered(s) {
   const c = typeof contextBySession !== "undefined" && contextBySession.get(sessionKey(s));
   return Boolean(c) && getContextState(c) === "large";
 }
+// Why Continue fresh is left out for a session, from its context.
+function getFreshMissingReason(s) {
+  if (s.agent !== "Claude") {
+    return t("preview.fresh.none.agent");
+  }
+  const c = typeof contextBySession !== "undefined" ? contextBySession.get(sessionKey(s)) : null;
+  if (!c) {
+    return t("preview.fresh.none.empty");
+  }
+  if (getContextState(c) === "warm") {
+    return t("preview.fresh.none.warm", { until: I18N.formatTime(c.warmUntil) });
+  }
+  return t("preview.fresh.none.small", { n: I18N.formatNumber(c.tokens), limit: I18N.formatNumber(LARGE_CONTEXT) });
+}
 function getPreviewActions(s) {
+  if (!s.cwd) {
+    return "";
+  }
   const running = typeof liveOf === "function" && liveOf(s);
   const fresh = isFreshOffered(s);
-  if (!s.cwd || (running && !fresh)) {
-    return "";
+  const why = fresh ? "" : `<div class="pv-why">${esc(getFreshMissingReason(s))}</div>`;
+  if (running && !fresh) {
+    return `<div class="pv-costs">${why}</div>`;
   }
   // Offered only when cheaper, Continue fresh is then the recommended (primary) action.
   return `<div class="pv-actions">
       ${fresh ? `<button class="btn sm primary" data-pv-act="fresh">${icon("plus")}${esc(t("preview.fresh"))}</button>` : ""}
       ${running ? "" : `<button class="btn sm ${fresh ? "" : "primary"}" data-pv-act="resume">${icon("play")}${esc(t("preview.resume"))}</button>`}
     </div>
-    <div class="pv-costs">${fresh ? getCostLine("fresh", true) : ""}${running ? "" : getCostLine("resume", !fresh)}</div>`;
+    <div class="pv-costs">${fresh ? getCostLine("fresh", true) : ""}${running ? "" : getCostLine("resume", !fresh)}${why}</div>`;
 }
 function getCostLine(action, recommended) {
   const name = recommended ? `${t(`preview.${action}`)} ${t("preview.recommended")}` : t(`preview.${action}`);
