@@ -68,6 +68,7 @@ function nextTab(step) {
 
 // ---------- General ----------
 const THEMES = ["system", "dark", "light"];
+const SESSIONS_IN = ["windows", "tabs"];
 let general = { ...window.prefs };
 const dirty = new Set(); // tabs with unsaved edits: a language switch reloads the window
 function setDirty(tab, on) {
@@ -87,9 +88,11 @@ function renderGeneral() {
   $("uiTheme").innerHTML = segHtml(THEMES.map(th => [th, t(`theme.${th}`)]), general.theme);
   $("edgeHandle").checked = general.edgeHandle;
   $("autoUpdate").checked = general.autoUpdate;
+  $("sessionsIn").innerHTML = segHtml(SESSIONS_IN.map(m => [m, t(`tray.sessionsIn.${m}`)]), general.sessionsIn || "windows");
   $("newWindow").checked = general.newWindow !== false;
+  $("newWindow").disabled = general.sessionsIn === "tabs";
   $("dayView").checked = general.dayView === true;
-  if (focused === "uiLanguage" || focused === "uiTheme") $(focused).querySelector(".on")?.focus();
+  if (["uiLanguage", "uiTheme", "sessionsIn"].includes(focused)) $(focused).querySelector(".on")?.focus();
 }
 async function setPref(key, value) {
   if (value === undefined || value === general[key]) return;
@@ -118,7 +121,7 @@ function segKey(e, choose) {
   e.preventDefault();
   choose(values[(to + values.length) % values.length]);
 }
-for (const [id, key] of [["uiLanguage", "language"], ["uiTheme", "theme"]]) {
+for (const [id, key] of [["uiLanguage", "language"], ["uiTheme", "theme"], ["sessionsIn", "sessionsIn"]]) {
   $(id).addEventListener("click", e => setPref(key, e.target.closest("[data-value]")?.dataset.value));
   $(id).addEventListener("keydown", e => segKey(e, v => setPref(key, v)));
 }
