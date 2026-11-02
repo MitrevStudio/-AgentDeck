@@ -7,10 +7,10 @@ const ui = { query: "", agent: "", selected: "", active: -1, renaming: "", loadi
 let live = new Map(), liveSig = "", pendingRender = false;
 const liveOf = s => live.get(sessionKey(s));
 function livePill(s) {
-  if (isSessionLoading(s)) {
-    return `<span class="live loading" title="${esc(t("live.hint.loading"))}"><span class="spinner"></span>${esc(t("live.label.loading"))}</span>`;
-  }
   const l = liveOf(s);
+  if (isLoading(sessionKey(s), l)) {
+    return getLoadingPill();
+  }
   if (!l) return "";
   const kind = getLiveKind(l);
   const label = kind === "other" ? esc(l.status) : esc(t(`live.label.${kind}`));
@@ -168,7 +168,7 @@ function sessionHtml(s, i, toks) {
     ? `<div class="dir">${icon("folder")}${pathHtml(s.cwd, toks)}${gitChip(s.cwd)}<button class="icon-btn" data-action="copy" data-path="${esc(s.cwd)}" title="${esc(t("action.copyPath"))}">${icon("copy")}</button></div>`
     : `<div class="dir unknown">${icon("alert")}${esc(t("manager.session.noDir"))}</div>`;
   const l = liveOf(s);
-  const liveCls = isSessionLoading(s) ? "live-loading" : l ? `live-${getLiveGroup(l) === "busy" && isStale(l) ? "stale" : getLiveGroup(l)}` : "";
+  const liveCls = isLoading(sessionKey(s), l) ? "live-loading" : l ? `live-${getLiveGroup(l) === "busy" && isStale(l) ? "stale" : getLiveGroup(l)}` : "";
   // A running session: its terminal is brought up, or moved into a tab. Resume and Continue fresh are in the preview
   // (preview-ui.js). The secondary actions' labels (.bl) give way to their icon and tooltip in a narrow panel.
   const runningBtns = l
@@ -430,6 +430,8 @@ document.addEventListener("keydown", e => {
 
 // A scan started elsewhere (e.g. by the edge menu) updates this window as well.
 // Main rescans by itself when transcripts change: the list, the status line and an open search follow.
+// A session just opened shows "Loading" at once (common.js keeps the launches).
+window.manager.onLaunch(() => render());
 window.manager.onDataChanged(d => {
   if (!ui.loaded || ui.loading) return;
   raw = d;

@@ -33,6 +33,7 @@ contextBridge.exposeInMainWorld("manager", {
   openVoiceHistory: () => ipcRenderer.invoke("voice:open-history"),
   openSettings: () => ipcRenderer.invoke("voice:open-settings"),
   onDataChanged: cb => ipcRenderer.on("data:changed", (_e, data) => cb(data)),
+  onLaunch: cb => ipcRenderer.on("launch:started", (_e, key) => cb(key)),
   // Edge menu only.
   onBarEvent: cb => ipcRenderer.on("bar:event", (_e, ev) => cb(ev)),
   barCommand: (cmd, arg) => ipcRenderer.send("bar:command", cmd, arg),

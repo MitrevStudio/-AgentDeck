@@ -462,6 +462,7 @@ function launchAgent(agent, id, cwd, inTab = false) {
     throw new Error(t("errors.conversationMissing"));
   }
   const cmd = agentCommand(agent, id).map(psQuote).join(" ");
+  broadcast("launch:started", `${agent}:${id}`);
   return launchTerminal(cwd, "& " + cmd, { title: getSessionTitle(agent, id), agent, sessionId: id }, inTab);
 }
 // Continue fresh: a new Claude session that starts with the earlier one's handoff in its system prompt, so nothing is

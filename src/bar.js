@@ -163,6 +163,9 @@ function renderDetail(tile, toks) {
 // The preview beside the rows (preview-ui.js) follows the highlighted session, or shows the first one while none is.
 const syncPreview = () => showPreview($("pv"), rows[st.row]?.s || rows.find(r => r.s)?.s);
 function livePill(l, key) {
+  if (isLoading(key, l)) {
+    return getLoadingPill();
+  }
   if (!l) return "";
   const group = getLiveGroup(l);
   return `<span class="live ${group} ${isStale(l) ? "stale" : ""}" data-live="${esc(key)}" title="${esc(getLiveHint(l))}">

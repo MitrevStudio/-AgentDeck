@@ -55,6 +55,28 @@ const sessionKey = s => `${s.agent}:${s.id}`;
 const STALE_MS = 10 * 60 * 1000;
 const lastSign = l => Math.max(l.activityAt || 0, l.statusAt || 0);
 const isStale = l => l.status === "busy" && Date.now() - lastSign(l) > STALE_MS;
+// A session AgentDeck has just opened (main's "launch:started"), in any terminal, is loading until its new process first
+// waits for input, for at most LOADING_MAX_MS. An entry older than the launch (the terminal it was moved from) does
+// not count.
+const LOADING_MAX_MS = 120000;
+const START_SLACK_MS = 5000;
+const launches = new Map(); // sessionKey -> when it was opened
+window.manager?.onLaunch?.(key => launches.set(key, Date.now()));
+// l: the session's live entry, if it has one.
+function isLoading(key, l) {
+  const at = launches.get(key);
+  if (!at) {
+    return false;
+  }
+  if (Date.now() - at > LOADING_MAX_MS || (l && l.startedAt >= at - START_SLACK_MS && getLiveGroup(l) !== "busy")) {
+    launches.delete(key);
+    return false;
+  }
+  return true;
+}
+function getLoadingPill() {
+  return `<span class="live loading" title="${esc(t("live.hint.loading"))}"><span class="spinner"></span>${esc(t("live.label.loading"))}</span>`;
+}
 // "waiting": blocked on the user (a permission, a question, a dialog), so it goes first everywhere.
 const LIVE_RANKS = { waiting: 0, busy: 1, idle: 3 };
 function getLiveRank(l) {

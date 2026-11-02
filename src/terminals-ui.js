@@ -112,25 +112,9 @@ function getTabStatus(tab) {
   }
   return getLiveGroup(l);
 }
-// A session resumed in a tab is loading until its new process first waits for input (the live registry), for at most
-// LOADING_MAX_MS. The entry of the terminal it was moved from is older than the tab and does not count.
-const LOADING_MAX_MS = 120000;
-const START_SLACK_MS = 5000;
-const readyTabs = new Set();
 function isTabLoading(tab) {
-  if (tab.exited || !tab.sessionId || readyTabs.has(tab.id) || Date.now() - tab.createdAt > LOADING_MAX_MS) {
-    return false;
-  }
-  const l = typeof live !== "undefined" ? live.get(`${tab.agent}:${tab.sessionId}`) : null;
-  if (l && l.startedAt >= tab.createdAt - START_SLACK_MS && getLiveGroup(l) !== "busy") {
-    readyTabs.add(tab.id);
-    return false;
-  }
-  return true;
-}
-function isSessionLoading(s) {
-  const tab = findSessionTab(s);
-  return Boolean(tab) && isTabLoading(tab);
+  const key = `${tab.agent}:${tab.sessionId}`;
+  return !tab.exited && Boolean(tab.sessionId) && isLoading(key, typeof live !== "undefined" ? live.get(key) : null);
 }
 function getTabTitle(tab) {
   const s = tab.sessionId && typeof data !== "undefined" ? data.sessions.find(x => x.agent === tab.agent && x.id === tab.sessionId) : null;
