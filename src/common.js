@@ -68,7 +68,8 @@ function isLoading(key, l) {
   if (!at) {
     return false;
   }
-  if (Date.now() - at > LOADING_MAX_MS || (l && l.startedAt >= at - START_SLACK_MS && getLiveGroup(l) !== "busy")) {
+  // Ready once it waits for the user; "running" (registered, no status yet) is still starting.
+  if (Date.now() - at > LOADING_MAX_MS || (l && l.startedAt >= at - START_SLACK_MS && (l.status === "idle" || l.status === "waiting"))) {
     launches.delete(key);
     return false;
   }
