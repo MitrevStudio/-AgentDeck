@@ -177,8 +177,8 @@ function sessionHtml(s, i, toks) {
       <h3 class="sess-title">${hl(s.title, toks)}</h3>
       ${livePill(s)}
       <span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span></div>
-    ${s.recap ? `<p class="sess-recap" title="${esc(s.recap)}">${hl(s.recap, toks)}</p>` : ""}
     <div class="sid" title="${esc(t("manager.session.id"))}">${hl(s.id, toks)}</div>
+    ${s.recap ? `<p class="sess-recap" title="${esc(s.recap)}"><span class="recap-label">${esc(t("manager.session.recap"))}</span>${hl(s.recap, toks)}</p>` : ""}
     ${dir}
     <div class="sess-foot">${getContextChip(s)}${usageChip(s)}<div class="grow"></div>
       ${runningBtns}

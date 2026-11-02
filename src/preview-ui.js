@@ -63,11 +63,12 @@ function getPreviewActions(s) {
   if (!s.cwd || (running && !fresh)) {
     return "";
   }
+  // Offered only when cheaper, Continue fresh is then the recommended (primary) action.
   return `<div class="pv-actions">
-      ${running ? "" : `<button class="btn sm primary" data-pv-act="resume">${icon("play")}${esc(t("preview.resume"))}</button>`}
-      ${fresh ? `<button class="btn sm" data-pv-act="fresh">${icon("plus")}${esc(t("preview.fresh"))}</button>` : ""}
+      ${fresh ? `<button class="btn sm primary" data-pv-act="fresh">${icon("plus")}${esc(t("preview.fresh"))}</button>` : ""}
+      ${running ? "" : `<button class="btn sm ${fresh ? "" : "primary"}" data-pv-act="resume">${icon("play")}${esc(t("preview.resume"))}</button>`}
     </div>
-    <div class="pv-costs">${running ? "" : `<div><b>${esc(t("preview.resume"))}</b> ${esc(t("preview.resume.cost"))}</div>`}${fresh ? `<div><b>${esc(t("preview.fresh"))}</b> ${esc(t("preview.fresh.cost"))}</div>` : ""}</div>`;
+    <div class="pv-costs">${fresh ? `<div><b>${esc(t("preview.fresh"))}</b> ${esc(t("preview.fresh.cost"))}</div>` : ""}${running ? "" : `<div><b>${esc(t("preview.resume"))}</b> ${esc(t("preview.resume.cost"))}</div>`}</div>`;
 }
 function previewNotice(box, message, isError = false) {
   if (typeof toast === "function") {
