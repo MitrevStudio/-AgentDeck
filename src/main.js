@@ -259,6 +259,11 @@ async function launchTerminal(cwd, command = null, meta = {}, inTab = false) {
   // window of its own (Settings -> General); "-w 0" adds a tab to the last used window.
   const newWindow = prefs.get().newWindow;
   const args = ["-w", newWindow ? "new" : "0", "new-tab", "-d", cwd];
+  // A resumed session's tab keeps its title: PowerShell would name it after the command ("claude"). wt.exe splits
+  // its command line at ";".
+  if (meta.sessionId) {
+    args.push("--title", meta.title.replace(/;/g, ","), "--suppressApplicationTitle");
+  }
   if (command) {
     args.push("powershell.exe", "-NoExit", "-Command", command);
   }
