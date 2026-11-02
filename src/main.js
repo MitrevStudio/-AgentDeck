@@ -595,6 +595,12 @@ function watchTranscripts() {
     }
   }
 }
+// OpenCode sessions and git branches are not watched (and Windows may drop a change notice): a full scan picks them
+// up every few minutes, so Refresh is never needed.
+const FULL_SCAN_MS = 5 * 60 * 1000;
+function scanPeriodically() {
+  setInterval(() => scan().catch(err => console.error("Full scan failed:", err.message)), FULL_SCAN_MS);
+}
 function registryChanged(registry) {
   if (cache) { cache = { ...cache, registry }; broadcast("data:changed", cache); }
   return registry;
@@ -903,6 +909,7 @@ if (!app.requestSingleInstanceLock()) {
     autopilot.start();
     tabLinks.start();
     watchTranscripts();
+    scanPeriodically();
 
     bar = createEdgeBar({
       preload: PRELOAD, onOpenManager: showManager, hotkeyLabel,
