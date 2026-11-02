@@ -220,7 +220,8 @@ function showSummary() {
 async function load() {
   if (ui.loading) return;
   ui.loading = true;
-  $("refresh").classList.add("spin"); $("refresh").disabled = true;
+  // Refresh is hidden: main.js scans by itself (FULL_SCAN_MS); F5 still scans. To bring the button back, uncomment it in index.html, styles.css and renderer.js.
+  // $("refresh").classList.add("spin"); $("refresh").disabled = true;
   setStatus(t("manager.status.scanning"));
   if (!ui.loaded) render();
   try {
@@ -236,7 +237,7 @@ async function load() {
     toast(e.message, true);
   } finally {
     ui.loading = false;
-    $("refresh").classList.remove("spin"); $("refresh").disabled = false;
+    // $("refresh").classList.remove("spin"); $("refresh").disabled = false;
   }
 }
 
@@ -355,7 +356,7 @@ function setQuery(q) {
 // ---------- events ----------
 $("search").addEventListener("input", e => setQuery(e.target.value));
 $("clearSearch").addEventListener("click", () => { setQuery(""); $("search").focus(); });
-$("refresh").addEventListener("click", load);
+// $("refresh").addEventListener("click", load);
 for (const [id, open] of [["voiceHistory", window.manager.openVoiceHistory], ["settings", window.manager.openSettings]]) {
   $(id).addEventListener("click", async () => { if (!(await open())) toast(t("manager.unavailable"), true); });
 }

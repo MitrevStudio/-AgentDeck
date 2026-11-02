@@ -14,9 +14,10 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 .brand p { margin: 0; color: var(--muted); font-size: 12px; }
 .search { flex: 1; max-width: 780px; margin: 0 auto; }
 .top-actions { display: flex; gap: 8px; flex: none; }
-/* Scans run by themselves (main.js), so Refresh stays in the background: an icon that comes up when pointed at. */
+/* Refresh is hidden: main.js scans by itself (FULL_SCAN_MS); F5 still scans. To bring the button back, uncomment it in index.html, styles.css and renderer.js.
 #refresh { width: 38px; padding: 0; justify-content: center; opacity: .45; }
 #refresh:hover, #refresh:focus-visible { opacity: 1; }
+*/
 
 /* ---------- layout ---------- */
 main {
