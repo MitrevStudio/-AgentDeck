@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("manager", {
   launchFolder: p => ipcRenderer.invoke("launch:folder", p),
   launchAgent: (agent, id, cwd) => ipcRenderer.invoke("launch:agent", agent, id, cwd),
   launchNew: (agent, cwd) => ipcRenderer.invoke("launch:new", agent, cwd),
+  launchFresh: (cwd, handoff) => ipcRenderer.invoke("launch:fresh", cwd, handoff),
   openPath: p => ipcRenderer.invoke("open:path", p),
   copyText: text => ipcRenderer.invoke("clipboard:write", text),
   getLive: () => ipcRenderer.invoke("live:get"),

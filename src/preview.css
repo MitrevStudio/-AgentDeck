@@ -37,7 +37,7 @@
   max-height: calc(12.5px * 1.45 * 7); overflow: hidden; padding: 0 2px;
   font-size: 12.5px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text;
 }
-.pv-msg.user .pv-text, .pv-first .pv-text { padding: 6px 10px; border-radius: var(--r-md); background: var(--accent-weak); }
+.pv-msg.user .pv-text, .pv-first .pv-text { padding: 6px 10px; border-radius: var(--r-md); background: var(--accent-weak); color: var(--prompt-fg); }
 .pv-text.clipped { cursor: pointer; -webkit-mask-image: linear-gradient(180deg, #000 62%, transparent); mask-image: linear-gradient(180deg, #000 62%, transparent); }
 .pv-text.clipped.open { max-height: none; -webkit-mask-image: none; mask-image: none; }
 .pv-text code { font: 11.5px var(--mono); padding: 0 4px; border-radius: 4px; background: var(--panel-2); }

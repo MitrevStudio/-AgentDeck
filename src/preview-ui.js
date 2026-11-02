@@ -36,9 +36,8 @@ function previewFacts(s, d) {
     ${times.length ? `<div class="pv-times" title="${esc([d.startedAt && fullDate(d.startedAt), d.lastAt && fullDate(d.lastAt)].filter(Boolean).join(" – "))}">${esc(times.join(" · "))}</div>` : ""}`;
 }
 // ---------- resume or continue fresh ----------
-// Resume re-reads the whole conversation on the first prompt; a fresh session starts from a short handoff (the task
-// and where it ended) that goes to the clipboard - pasted, edited and sent by the user, never sent by itself, and
-// without a pointer to the old transcript, so the old context stays out.
+// Resume re-reads the whole conversation on the first prompt; a fresh session starts with a short handoff (the task
+// and where it ended) already loaded by Claude, without a pointer to the old transcript, so the old context stays out.
 const HANDOFF_PART_CHARS = 600;
 function getHandoffPart(text) {
   const plain = String(text || "").replace(/```[\s\S]*?```/g, " ").replace(/\s+/g, " ").trim();
@@ -68,7 +67,11 @@ function getPreviewActions(s) {
       ${fresh ? `<button class="btn sm primary" data-pv-act="fresh">${icon("plus")}${esc(t("preview.fresh"))}</button>` : ""}
       ${running ? "" : `<button class="btn sm ${fresh ? "" : "primary"}" data-pv-act="resume">${icon("play")}${esc(t("preview.resume"))}</button>`}
     </div>
-    <div class="pv-costs">${fresh ? `<div><b>${esc(t("preview.fresh"))}</b> ${esc(t("preview.fresh.cost"))}</div>` : ""}${running ? "" : `<div><b>${esc(t("preview.resume"))}</b> ${esc(t("preview.resume.cost"))}</div>`}</div>`;
+    <div class="pv-costs">${fresh ? getCostLine("fresh", true) : ""}${running ? "" : getCostLine("resume", !fresh)}</div>`;
+}
+function getCostLine(action, recommended) {
+  const name = recommended ? `${t(`preview.${action}`)} ${t("preview.recommended")}` : t(`preview.${action}`);
+  return `<div><b>${esc(name)}:</b> ${esc(t(`preview.${action}.cost`))}</div>`;
 }
 function previewNotice(box, message, isError = false) {
   if (typeof toast === "function") {
@@ -87,8 +90,7 @@ async function runPreviewAction(box, action, s) {
       await window.manager.launchAgent(s.agent, s.id, s.cwd);
       return;
     }
-    await window.manager.copyText(getHandoff(s, box.pvData));
-    await window.manager.launchNew(s.agent, s.cwd);
+    await window.manager.launchFresh(s.cwd, getHandoff(s, box.pvData));
     previewNotice(box, t("preview.fresh.started"));
   } catch (e) {
     previewNotice(box, e.message, true);

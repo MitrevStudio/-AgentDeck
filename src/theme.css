@@ -40,6 +40,7 @@
   --accent-strong: #9dbdff;
   --accent-deep: #3b5fa9;
   --accent-weak: rgba(122, 167, 255, .14);
+  --prompt-fg: var(--text);
   --accent-line: rgba(122, 167, 255, .5);
   --accent-glow: rgba(122, 167, 255, .35);
   --on-accent: #0b1220;
@@ -171,6 +172,7 @@
   --accent-strong: #1b4fb5;
   --accent-deep: #3b5fa9;
   --accent-weak: rgba(37, 99, 217, .10);
+  --prompt-fg: #1d4fb8;
   --accent-line: rgba(37, 99, 217, .45);
   --accent-glow: rgba(37, 99, 217, .28);
   --on-accent: #ffffff;

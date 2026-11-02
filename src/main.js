@@ -464,6 +464,26 @@ function launchAgent(agent, id, cwd, inTab = false) {
   const cmd = agentCommand(agent, id).map(psQuote).join(" ");
   return launchTerminal(cwd, "& " + cmd, { title: getSessionTitle(agent, id), agent, sessionId: id }, inTab);
 }
+// Continue fresh: a new Claude session that starts with the earlier one's handoff in its system prompt, so nothing is
+// pasted or sent. Claude Code reads the file as it starts; files older than a week are removed.
+const HANDOFFS_DIR = path.join(app.getPath("userData"), "handoffs");
+const HANDOFF_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
+function removeOldHandoffs() {
+  for (const name of fs.readdirSync(HANDOFFS_DIR)) {
+    const file = path.join(HANDOFFS_DIR, name);
+    if (Date.now() - fs.statSync(file).mtimeMs > HANDOFF_KEEP_MS) {
+      fs.rmSync(file, { force: true });
+    }
+  }
+}
+function launchFresh(cwd, handoff) {
+  fs.mkdirSync(HANDOFFS_DIR, { recursive: true });
+  removeOldHandoffs();
+  const file = path.join(HANDOFFS_DIR, `${Date.now()}-${process.pid}.md`);
+  fs.writeFileSync(file, handoff);
+  const cmd = [NEW_SESSION.Claude, "--append-system-prompt-file", file].map(psQuote).join(" ");
+  return launchTerminal(cwd, "& " + cmd, { title: `Claude · ${path.basename(cwd)}`, agent: "Claude" });
+}
 function launchNew(agent, cwd) {
   checkAgent(agent);
   return launchTerminal(cwd, "& " + psQuote(NEW_SESSION[agent]), { title: `${agent} · ${path.basename(cwd)}`, agent });
@@ -752,6 +772,10 @@ function registerIpc() {
   handle("launch:folder", async p => { await launchTerminal(text(p)); return true; });
   handle("launch:agent", async (agent, id, cwd) => { await launchAgent(text(agent), text(id), text(cwd)); return true; });
   handle("launch:new", async (agent, cwd) => { await launchNew(text(agent), text(cwd)); return true; });
+  handle("launch:fresh", async (cwd, handoff) => {
+    await launchFresh(text(cwd), text(handoff, 20000));
+    return true;
+  });
   // Folders only: shell.openPath() on a file runs it.
   handle("open:path", p => (isDir(p) ? shell.openPath(p) : t("errors.folderMissing")));
   handle("clipboard:write", async value => { await clipboard.writeText(text(value, 1_000_000)); return true; });
