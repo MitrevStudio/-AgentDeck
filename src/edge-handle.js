@@ -1,6 +1,6 @@
-// The edge handle: a small frosted tab hugging the top edge of the primary display, where the edge menu comes out
-// (like the Remote Desktop connection bar). Pointing at it for a moment or clicking it opens the menu; dragging it
-// moves it left or right, and the spot is kept as a fraction of the display width.
+// The edge handle: a small frosted tab hugging the top edge of a display, where the edge menu comes out (like the
+// Remote Desktop connection bar). Pointing at it for a moment or clicking it opens the menu; dragging it moves it
+// along the edge and onto another display, and the spot is kept as that display and a fraction of its width.
 //
 // Only the tab takes clicks, so nothing around it is ever blocked: Windows will not make a window this short (it
 // keeps about 39 px), and setShape() cuts it down to the tab. It never takes focus either, and it steps aside while
@@ -17,9 +17,10 @@ const HEIGHT = 14;              // the tab's height in handle.css (--hd-h)
 const INTENT_MS = 120;          // the pointer must rest this long, so passing over the handle opens nothing
 const FULL_SCREEN_POLL_MS = 1000;
 
-// shown(): the user wants the handle; position() / savePosition(x): its centre, 0..1 across the display.
+// shown(): the user wants the handle; position() / displayId() / savePosition(x, displayId): its centre, 0..1
+// across the display, and that display (the primary one while it is unknown or gone).
 // onIntent / onClick open the menu, onDragStart closes it.
-function createEdgeHandle({ shown, position, savePosition, onIntent, onClick, onDragStart }) {
+function createEdgeHandle({ shown, position, displayId, savePosition, onIntent, onClick, onDragStart }) {
   const win = new BrowserWindow({
     width: WIDTH, height: HEIGHT, show: false, frame: false, transparent: true, backgroundColor: "#00000000",
     hasShadow: false, thickFrame: false, resizable: false, movable: false, minimizable: false, maximizable: false,
@@ -40,7 +41,10 @@ function createEdgeHandle({ shown, position, savePosition, onIntent, onClick, on
   };
   const cancelIntent = () => { clearTimeout(intent); intent = null; };
 
-  const area = () => screen.getPrimaryDisplay().bounds;
+  const getDisplay = () => screen.getAllDisplays().find(d => d.id === displayId()) || screen.getPrimaryDisplay();
+  const area = () => getDisplay().bounds;
+  // While dragging: the display the pointer is on.
+  const getPointerDisplay = () => screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
   const clampX = (x, b) => Math.round(Math.min(Math.max(x, b.x), b.x + b.width - WIDTH));
   function place() {
     const b = area();
@@ -71,16 +75,19 @@ function createEdgeHandle({ shown, position, savePosition, onIntent, onClick, on
     else if (type === "click") onClick();
     else if (type === "drag-start" && Number.isFinite(x)) {
       cancelIntent();
-      drag = { offset: x - win.getBounds().x };
+      drag = { offset: x - win.getBounds().x, display: getDisplay() };
       onDragStart();
       send();
     } else if (type === "drag" && drag && Number.isFinite(x)) {
-      const b = area();
-      win.setPosition(clampX(x - drag.offset, b), b.y);
+      drag.display = getPointerDisplay();
+      const b = drag.display.bounds;
+      win.setBounds({ x: clampX(x - drag.offset, b), y: b.y, width: WIDTH, height: HEIGHT });
     } else if (type === "drag-end" && drag) {
+      const b = drag.display.bounds, r = win.getBounds();
+      const id = drag.display.id;
       drag = null;
-      const b = area(), r = win.getBounds();
-      savePosition((r.x + WIDTH / 2 - b.x) / b.width);
+      savePosition((r.x + WIDTH / 2 - b.x) / b.width, id);
+      place();
       send();
     }
   });

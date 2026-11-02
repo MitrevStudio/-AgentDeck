@@ -98,11 +98,15 @@ function getContextTitle(c, state) {
   }
   return t(state === "large" ? "context.tip.large" : "context.tip.cold", { n });
 }
+// The usage scan has read the session's transcript as it is now.
+function isUsageCurrent(s) {
+  return Boolean(usage) && usage.at >= s.updatedAt;
+}
 function getContextChip(s) {
   const c = contextBySession.get(sessionKey(s));
   // A Claude session that never reached the model (only commands such as /clear) has nothing to re-read.
   if (!c) {
-    return s.agent === "Claude" && usage ? `<span class="ctx-chip empty" title="${esc(t("context.tip.empty"))}">${esc(t("context.label", { n: 0 }))}</span>` : "";
+    return s.agent === "Claude" && isUsageCurrent(s) ? `<span class="ctx-chip empty" title="${esc(t("context.tip.empty"))}">${esc(t("context.label", { n: 0 }))}</span>` : "";
   }
   const state = getContextState(c);
   return `<span class="ctx-chip ${state}" data-ctx="${esc(sessionKey(s))}" title="${esc(getContextTitle(c, state))}">${esc(t("context.label", { n: fmtTokens(c.tokens).replace(/\.$/, "") }))}</span>`;

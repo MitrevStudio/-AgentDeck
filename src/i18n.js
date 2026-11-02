@@ -118,7 +118,7 @@
 
       "live.label.busy": "Working",
       "live.label.loading": "Loading",
-      "live.hint.loading": "The session is loading in an AgentDeck tab",
+      "live.hint.loading": "The session is loading",
       "live.label.idle": "Waiting for you",
       "live.label.waiting": "Needs you",
       "live.hint.busy": "The agent is working right now",
@@ -1055,7 +1055,7 @@
 
       "live.label.busy": "Работи",
       "live.label.loading": "Зарежда",
-      "live.hint.loading": "Сесията се зарежда в таб на AgentDeck",
+      "live.hint.loading": "Сесията се зарежда",
       "live.label.idle": "Чака те",
       "live.label.waiting": "Нужен си",
       "live.hint.busy": "Агентът работи в момента",

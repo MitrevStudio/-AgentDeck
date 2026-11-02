@@ -22,7 +22,7 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 /* ---------- layout ---------- */
 main {
   flex: 1; min-height: 0; display: grid; gap: 4px; padding: 16px 20px;
-  grid-template-columns: var(--projects-w, clamp(310px, 25vw, 390px)) 8px minmax(0, 1fr);
+  grid-template-columns: min(var(--projects-w, clamp(310px, 25vw, 390px)), calc(100% - 432px)) 8px minmax(0, 1fr);
 }
 /* Between the projects and the sessions (renderer.js): a line that shows while pointed at, dragged or focused. */
 .splitter { position: relative; cursor: col-resize; outline: none; touch-action: none; }
@@ -99,9 +99,8 @@ main {
 .sid { margin-top: 4px; font: 12px var(--mono); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sess-foot { display: flex; align-items: center; gap: 8px; margin-top: 11px; }
 .sess-foot .btn { flex: none; }
-/* A narrower sessions panel (#sessions is a size container, usage.css): the main action keeps its label; Move here,
-   Terminal and Explorer become icon buttons with their tooltip. A live pill leaves out its activity time, so the
-   title keeps its words whole. */
+/* A narrower sessions panel (#sessions is a size container, usage.css): Move here becomes an icon button with its
+   tooltip, and a live pill leaves out its activity time, so the title keeps its words whole. */
 @container (max-width: 640px) {
   .sess-foot .bl { display: none; }
   .sess-foot .btn:has(.bl) { width: 32px; padding: 0; justify-content: center; }

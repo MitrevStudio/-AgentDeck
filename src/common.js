@@ -64,13 +64,16 @@ function getTipBox() {
   }
   return tipBox;
 }
+// An emptied title clears the tooltip too; the text stays available to screen readers.
 function takeTitle(el) {
-  if (!el.title) {
+  if (!el.hasAttribute("title")) {
     return;
   }
-  el.dataset.tip = el.title;
-  if (!el.hasAttribute("aria-label") && !el.textContent.trim()) {
-    el.setAttribute("aria-label", el.title);
+  if (!el.title) {
+    delete el.dataset.tip;
+  } else {
+    el.dataset.tip = el.title;
+    el.setAttribute(el.hasAttribute("aria-label") || el.textContent.trim() ? "aria-description" : "aria-label", el.title);
   }
   el.removeAttribute("title");
 }
@@ -91,7 +94,11 @@ function hideTip() {
     tipBox.hidden = true;
   }
 }
+// A shaped window (the voice overlay) keeps the system tooltips: <body data-native-tips>.
 document.addEventListener("mouseover", e => {
+  if (document.body?.hasAttribute("data-native-tips")) {
+    return;
+  }
   const el = e.target.closest?.("[title], [data-tip]");
   if (el === tipFor) {
     return;
@@ -113,25 +120,26 @@ const sessionKey = s => `${s.agent}:${s.id}`;
 const STALE_MS = 10 * 60 * 1000;
 const lastSign = l => Math.max(l.activityAt || 0, l.statusAt || 0);
 const isStale = l => l.status === "busy" && Date.now() - lastSign(l) > STALE_MS;
-// A session AgentDeck has just opened (main's "launch:started"), in any terminal, is loading until its new process first
-// waits for input, for at most LOADING_MAX_MS. An entry older than the launch (the terminal it was moved from) does
-// not count.
+// A session AgentDeck has just opened loads until its new process waits for the user; an entry older than the launch
+// (the terminal it was moved from) does not count, and "running" (registered, no status yet) is still starting.
 const LOADING_MAX_MS = 120000;
 const START_SLACK_MS = 5000;
 const launches = new Map(); // sessionKey -> when it was opened
 window.manager?.onLaunch?.(key => launches.set(key, Date.now()));
-// l: the session's live entry, if it has one.
+function isLaunchEnded(at, l) {
+  return Date.now() - at > LOADING_MAX_MS || Boolean(l && l.startedAt >= at - START_SLACK_MS && (l.status === "idle" || l.status === "waiting"));
+}
 function isLoading(key, l) {
   const at = launches.get(key);
-  if (!at) {
-    return false;
+  return Boolean(at) && !isLaunchEnded(at, l);
+}
+// Once ready, a session stays ready even when it works again. getLive(key): the live entry, if any.
+function removeEndedLaunches(getLive) {
+  for (const [key, at] of launches) {
+    if (isLaunchEnded(at, getLive(key))) {
+      launches.delete(key);
+    }
   }
-  // Ready once it waits for the user; "running" (registered, no status yet) is still starting.
-  if (Date.now() - at > LOADING_MAX_MS || (l && l.startedAt >= at - START_SLACK_MS && (l.status === "idle" || l.status === "waiting"))) {
-    launches.delete(key);
-    return false;
-  }
-  return true;
 }
 function getLoadingPill() {
   return `<span class="live loading" title="${esc(t("live.hint.loading"))}"><span class="spinner"></span>${esc(t("live.label.loading"))}</span>`;

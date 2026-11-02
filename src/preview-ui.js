@@ -51,39 +51,40 @@ function getHandoff(s, d) {
     outcome: getHandoffPart(answers[answers.length - 1]?.text) || t("preview.handoff.unknown")
   });
 }
+function getSessionContext(s) {
+  return typeof contextBySession !== "undefined" ? contextBySession.get(sessionKey(s)) || null : null;
+}
 // Continue fresh pays off only when resuming would re-read a large context at full price (the red context chip).
-function isFreshOffered(s) {
-  const c = typeof contextBySession !== "undefined" && contextBySession.get(sessionKey(s));
+function isFreshOffered(c) {
   return Boolean(c) && getContextState(c) === "large";
 }
-// Why Continue fresh is left out for a session, from its context.
-function getFreshMissingReason(s) {
+// Why Continue fresh is left out for a session; nothing while the usage scan has not reached it yet.
+function getFreshMissingReason(s, c) {
   if (s.agent !== "Claude") {
     return t("preview.fresh.none.agent");
   }
-  const c = typeof contextBySession !== "undefined" ? contextBySession.get(sessionKey(s)) : null;
   if (!c) {
-    return t("preview.fresh.none.empty");
+    return isUsageCurrent(s) ? t("preview.fresh.none.empty") : "";
   }
   if (getContextState(c) === "warm") {
     return t("preview.fresh.none.warm", { until: I18N.formatTime(c.warmUntil) });
   }
   return t("preview.fresh.none.small", { n: I18N.formatNumber(c.tokens), limit: I18N.formatNumber(LARGE_CONTEXT) });
 }
-// Resume and Continue fresh on a past session's card (renderer.js). Offered only when cheaper, Continue fresh is then
-// the recommended (blue) one; what each does is its tooltip (data-tip, renderer.js), and Resume's says why Continue
-// fresh is missing.
+// Resume and Continue fresh on a past session's card (renderer.js): the cheaper one is blue, and Resume's tooltip says
+// why Continue fresh is missing.
 function getSessionActions(s) {
-  const fresh = isFreshOffered(s);
-  const resumeTip = [t("preview.resume.cost"), fresh ? "" : getFreshMissingReason(s)].filter(Boolean).join("\n\n");
-  return `${fresh ? `<button class="btn sm primary" data-action="fresh" data-tip-name="${esc(getActionName("fresh", true))}" data-tip="${esc(t("preview.fresh.cost"))}">${icon("plus")}${esc(t("preview.fresh"))}</button>` : ""}
-      <button class="btn sm ${fresh ? "" : "primary"}" data-action="resume" data-tip-name="${esc(getActionName("resume", !fresh))}" data-tip="${esc(resumeTip)}" ${s.cwd ? "" : "disabled"}>${icon("play")}${esc(t("preview.resume"))}</button>`;
+  const c = getSessionContext(s);
+  const fresh = Boolean(s.cwd) && isFreshOffered(c);
+  const resumeTip = [t("preview.resume.cost"), fresh ? "" : getFreshMissingReason(s, c)].filter(Boolean).join("\n\n");
+  return `${fresh ? getActionButton("fresh", "plus", true, t("preview.fresh.cost"), "") : ""}
+      ${getActionButton("resume", "play", !fresh, resumeTip, s.cwd ? "" : "disabled")}`;
 }
-// A button's name for its tooltip (shown in bold), "(recommended)" added for the blue one.
-function getActionName(action, recommended) {
-  return `${t(`preview.${action}`)}${recommended ? ` ${t("preview.recommended")}` : ""}:`;
+function getActionButton(action, iconName, recommended, tip, attrs) {
+  const name = `${t(`preview.${action}`)}${recommended ? ` ${t("preview.recommended")}` : ""}:`;
+  return `<button class="btn sm ${recommended ? "primary" : ""}" data-action="${action}" data-tip-name="${esc(name)}" data-tip="${esc(tip)}"
+      aria-description="${esc(`${name} ${tip}`)}" ${attrs}>${icon(iconName)}${esc(t(`preview.${action}`))}</button>`;
 }
-// The handoff comes from the session's preview (its first prompt and last answer).
 async function continueFresh(s) {
   const d = await window.manager.getPreview(s.agent, s.id).catch(() => null);
   await window.manager.launchFresh(s.cwd, getHandoff(s, d));

@@ -24,6 +24,7 @@ const BACKGROUND = { dark: "#0d1015", light: "#f2f4f8" };
 const prefs = new EventEmitter();
 const state = { language: "bg", theme: "dark", edgeHandle: true, autoUpdate: true, newWindow: true, sessionsIn: "windows", autoCompact: true, autoCompactTokens: 150000, dayView: false };
 let handleX = 0.5; // the edge handle's centre, as a fraction of the display width
+let handleDisplay = null; // the id of the display it is on (null: the primary one)
 const fraction = v => (typeof v === "number" && v >= 0 && v <= 1 ? v : null);
 
 // themeSource also gives native title bars and dialogs the chosen look; "system" follows Windows.
@@ -41,6 +42,7 @@ function load() {
   const handle = isObj(root.edgeHandle) ? root.edgeHandle : {};
   state.edgeHandle = typeof handle.show === "boolean" ? handle.show : root.hoverEdge !== false;
   handleX = fraction(handle.x) ?? handleX;
+  handleDisplay = Number.isInteger(handle.display) ? handle.display : null;
   state.autoUpdate = ui.autoUpdate !== false;
   state.newWindow = !(isObj(root.terminal) && root.terminal.newWindow === false);
   if (isObj(root.terminal) && SESSIONS_IN.includes(root.terminal.sessionsIn)) state.sessionsIn = root.terminal.sessionsIn;
@@ -102,12 +104,15 @@ async function set(patch) {
   return get();
 }
 
-// Where the edge handle was dropped (0..1 across the display). Saved quietly: no "changed" event.
+// Where the edge handle was dropped (0..1 across that display). Saved quietly: no "changed" event.
 const handlePosition = () => handleX;
-function setHandlePosition(x) {
+const handleDisplayId = () => handleDisplay;
+function setHandlePosition(x, display) {
   const v = fraction(x);
-  if (v === null || v === handleX) return Promise.resolve();
+  const id = Number.isInteger(display) ? display : handleDisplay;
+  if (v === null || (v === handleX && id === handleDisplay)) return Promise.resolve();
   handleX = v;
+  handleDisplay = id;
   return save();
 }
 
@@ -115,7 +120,7 @@ function setHandlePosition(x) {
 function save() {
   return settings.writeRoot({
     ui: { language: state.language, theme: state.theme, autoUpdate: state.autoUpdate },
-    edgeHandle: { show: state.edgeHandle, x: Math.round(handleX * 10000) / 10000 },
+    edgeHandle: { show: state.edgeHandle, x: Math.round(handleX * 10000) / 10000, display: handleDisplay ?? undefined },
     terminal: {
       newWindow: state.newWindow,
       sessionsIn: state.sessionsIn,
@@ -126,4 +131,4 @@ function save() {
   }).catch(e => console.error("Could not save settings:", e.message));
 }
 
-module.exports = Object.assign(prefs, { load, get, set, handlePosition, setHandlePosition, background, LANGUAGES, THEMES, SESSIONS_IN, AUTO_COMPACT_TOKENS });
+module.exports = Object.assign(prefs, { load, get, set, handlePosition, handleDisplayId, setHandlePosition, background, LANGUAGES, THEMES, SESSIONS_IN, AUTO_COMPACT_TOKENS });

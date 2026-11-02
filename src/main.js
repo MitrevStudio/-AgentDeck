@@ -3,6 +3,7 @@ const { spawn, execFile } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
+const crypto = require("node:crypto");
 const { promisify } = require("node:util");
 // Both have to be in place before anything below reads userData.
 // Tests run a second, isolated instance against a throwaway profile (the single-instance lock is per profile too).
@@ -451,7 +452,7 @@ function checkSessionId(id) { if (typeof id !== "string" || !SESSION_ID.test(id)
 function getSessionTitle(agent, id) {
   return cache?.sessions.find(s => s.agent === agent && s.id === id)?.title || `${agent} ${id.slice(0, 8)}`;
 }
-function launchAgent(agent, id, cwd, inTab = false) {
+async function launchAgent(agent, id, cwd, inTab = false) {
   checkAgent(agent);
   checkSessionId(id);
   if (!cwd || !fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory())
@@ -462,28 +463,28 @@ function launchAgent(agent, id, cwd, inTab = false) {
     throw new Error(t("errors.conversationMissing"));
   }
   const cmd = agentCommand(agent, id).map(psQuote).join(" ");
-  broadcast("launch:started", `${agent}:${id}`);
-  return launchTerminal(cwd, "& " + cmd, { title: getSessionTitle(agent, id), agent, sessionId: id }, inTab);
-}
-// Continue fresh: a new Claude session that starts with the earlier one's handoff in its system prompt, so nothing is
-// pasted or sent. Claude Code reads the file as it starts; files older than a week are removed.
-const HANDOFFS_DIR = path.join(app.getPath("userData"), "handoffs");
-const HANDOFF_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
-function removeOldHandoffs() {
-  for (const name of fs.readdirSync(HANDOFFS_DIR)) {
-    const file = path.join(HANDOFFS_DIR, name);
-    if (Date.now() - fs.statSync(file).mtimeMs > HANDOFF_KEEP_MS) {
-      fs.rmSync(file, { force: true });
-    }
+  await launchTerminal(cwd, "& " + cmd, { title: getSessionTitle(agent, id), agent, sessionId: id }, inTab);
+  // Only Claude reports when it is ready (live.js), which ends the windows' "Loading".
+  if (agent === "Claude") {
+    broadcast("launch:started", `${agent}:${id}`);
   }
 }
-function launchFresh(cwd, handoff) {
+// Continue fresh: a new Claude session that starts with the earlier one's handoff in its system prompt (Claude Code
+// keeps it for later resumes too), so nothing is pasted or sent.
+const HANDOFFS_DIR = path.join(app.getPath("userData"), "handoffs");
+const HANDOFF_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
+async function launchFresh(cwd, handoff) {
+  promptLaunch.sweep(HANDOFFS_DIR, { maxAge: HANDOFF_KEEP_MS });
   fs.mkdirSync(HANDOFFS_DIR, { recursive: true });
-  removeOldHandoffs();
-  const file = path.join(HANDOFFS_DIR, `${Date.now()}-${process.pid}.md`);
+  const file = path.join(HANDOFFS_DIR, `prompt-${crypto.randomBytes(8).toString("hex")}.txt`);
   fs.writeFileSync(file, handoff);
   const cmd = [NEW_SESSION.Claude, "--append-system-prompt-file", file].map(psQuote).join(" ");
-  return launchTerminal(cwd, "& " + cmd, { title: `Claude · ${path.basename(cwd)}`, agent: "Claude" });
+  try {
+    await launchTerminal(cwd, "& " + cmd, { title: `Claude · ${path.basename(cwd)}`, agent: "Claude" });
+  } catch (e) {
+    promptLaunch.remove(file);
+    throw e;
+  }
 }
 function launchNew(agent, cwd) {
   checkAgent(agent);
@@ -596,8 +597,7 @@ function watchTranscripts() {
     }
   }
 }
-// OpenCode sessions and git branches are not watched (and Windows may drop a change notice): a full scan picks them
-// up every few minutes, so Refresh is never needed.
+// OpenCode sessions and git branches are not watched.
 const FULL_SCAN_MS = 5 * 60 * 1000;
 function scanPeriodically() {
   setInterval(() => scan().catch(err => console.error("Full scan failed:", err.message)), FULL_SCAN_MS);
@@ -914,7 +914,7 @@ if (!app.requestSingleInstanceLock()) {
 
     bar = createEdgeBar({
       preload: PRELOAD, onOpenManager: showManager, hotkeyLabel,
-      handle: { shown: () => prefs.get().edgeHandle, position: prefs.handlePosition, savePosition: prefs.setHandlePosition }
+      handle: { shown: () => prefs.get().edgeHandle, position: prefs.handlePosition, displayId: prefs.handleDisplayId, savePosition: prefs.setHandlePosition }
     });
     tray = new Tray(makeIcon(32, 2));
     // A press opens or closes the menu at once (here, where Windows lets it take the focus); held down after opening

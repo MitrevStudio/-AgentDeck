@@ -85,6 +85,7 @@ function rowsFor(tile, toks, hits) {
 
 // ---------- rendering ----------
 function render({ strip = true } = {}) {
+  removeEndedLaunches(key => live.get(key));
   const { toks, hits, tiles: list } = computeTiles();
   tiles = list;
   if (!tiles.some(tile => tile.key === st.tile)) { st.tile = (tiles.find(x => x.kind !== "day") || tiles[0])?.key || ""; st.row = q.value ? 0 : -1; }
@@ -241,6 +242,11 @@ async function resume(s) {
   if (!s) return;
   if (!s.cwd) return toast(t("errors.sessionNoDir"), true);
   if (liveOf(s)) { st.confirm = sessionKey(s); return render({ strip: false }); }
+  // Whichever costs less: Continue fresh for a large session whose cache went cold, Resume otherwise.
+  if (isFreshOffered(getSessionContext(s))) {
+    await launch(() => continueFresh(s));
+    return;
+  }
   await launch(() => window.manager.launchAgent(s.agent, s.id, s.cwd));
 }
 // A running session's terminal comes up and the menu goes. The terminal taking the focus would close the menu at
@@ -385,6 +391,7 @@ function openHint({ hotkey, handle }) {
 
 // ---------- events ----------
 window.manager.onDataChanged(applyData);
+window.manager.onLaunch(() => setTimeout(() => st.shown && render({ strip: false }), LOADING_MAX_MS + 1000));
 watchUsage(() => { if (st.shown) render({ strip: false }); });
 watchGit(() => { if (st.shown) render(); });
 window.manager.onBarEvent(ev => {

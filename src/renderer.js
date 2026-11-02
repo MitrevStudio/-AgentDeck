@@ -6,15 +6,14 @@ const ui = { query: "", agent: "", selected: "", active: -1, renaming: "", loadi
 // Running sessions, keyed like `Claude:<id>`; refreshed every couple of seconds from the agents' own registries.
 let live = new Map(), liveSig = "", pendingRender = false;
 const liveOf = s => live.get(sessionKey(s));
-function livePill(s) {
-  const l = liveOf(s);
-  if (isLoading(sessionKey(s), l)) {
+function livePill(l, loading) {
+  if (loading) {
     return getLoadingPill();
   }
   if (!l) return "";
   const kind = getLiveKind(l);
   const label = kind === "other" ? esc(l.status) : esc(t(`live.label.${kind}`));
-  return `<span class="live ${kind} ${isStale(l) ? "stale" : ""}" data-live="${esc(sessionKey(s))}" title="${esc(getLiveHint(l))} · PID ${l.pid}">
+  return `<span class="live ${kind} ${isStale(l) ? "stale" : ""}" data-live="${esc(sessionKey(l))}" title="${esc(getLiveHint(l))} · PID ${l.pid}">
     <span class="${kind === "busy" ? "spinner" : kind === "waiting" ? "pulse attn" : "pulse"}"></span>${label}<span class="live-t">${esc(liveText(l))}</span></span>`;
 }
 
@@ -71,6 +70,7 @@ function compute() {
 // ---------- rendering ----------
 function render({ resetScroll = false } = {}) {
   pendingRender = false;
+  removeEndedLaunches(key => live.get(key));
   const v = compute();
   visible = v.sessions;
   if (ui.active >= visible.length) ui.active = -1;
@@ -168,8 +168,9 @@ function sessionHtml(s, i, toks) {
     ? `<div class="dir">${icon("folder")}${pathHtml(s.cwd, toks)}${gitChip(s.cwd)}<button class="icon-btn" data-action="copy" data-path="${esc(s.cwd)}" title="${esc(t("action.copyPath"))}">${icon("copy")}</button></div>`
     : `<div class="dir unknown">${icon("alert")}${esc(t("manager.session.noDir"))}</div>`;
   const l = liveOf(s);
-  const liveCls = isLoading(sessionKey(s), l) ? "live-loading" : l ? `live-${getLiveGroup(l) === "busy" && isStale(l) ? "stale" : getLiveGroup(l)}` : "";
-  // A running session: its terminal is brought up, or moved into a tab. Resume and Continue fresh are in the preview
+  const loading = isLoading(sessionKey(s), l);
+  const liveCls = loading ? "live-loading" : l ? `live-${getLiveGroup(l) === "busy" && isStale(l) ? "stale" : getLiveGroup(l)}` : "";
+  // A running session: its terminal is brought up, or moved into a tab; a past one is resumed or continued fresh
   // (preview-ui.js). The secondary actions' labels (.bl) give way to their icon and tooltip in a narrow panel.
   const runningBtns = l
     ? `<button class="btn sm primary" data-action="show-terminal" title="${esc(t("term.showTitle", { pid: l.pid }))}">${icon("raise")}${esc(t("term.show"))}</button>
@@ -178,7 +179,7 @@ function sessionHtml(s, i, toks) {
   return `<article class="card sess ${liveCls} ${i === ui.active ? "active" : ""}" data-i="${i}">
     <div class="sess-head"><span class="agent ${s.agent.toLowerCase()}">${esc(s.agent)}</span>
       <h3 class="sess-title">${hl(s.title, toks)}</h3>
-      ${livePill(s)}
+      ${livePill(l, loading)}
       <span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span></div>
     <div class="sid" title="${esc(t("manager.session.id"))}">${hl(s.id, toks)}</div>
     ${s.recap ? `<p class="sess-recap" title="${esc(s.recap)}"><span class="recap-label">${esc(t("manager.session.recap"))}</span>${hl(s.recap, toks)}</p>` : ""}
@@ -431,7 +432,10 @@ document.addEventListener("keydown", e => {
 // A scan started elsewhere (e.g. by the edge menu) updates this window as well.
 // Main rescans by itself when transcripts change: the list, the status line and an open search follow.
 // A session just opened shows "Loading" at once (common.js keeps the launches).
-window.manager.onLaunch(() => render());
+window.manager.onLaunch(() => {
+  render();
+  setTimeout(render, LOADING_MAX_MS + 1000);
+});
 window.manager.onDataChanged(d => {
   if (!ui.loaded || ui.loading) return;
   raw = d;
@@ -479,14 +483,14 @@ $("splitter").addEventListener("pointerdown", e => {
   e.preventDefault();
   el.setPointerCapture(e.pointerId);
   el.addEventListener("pointermove", move);
-  el.addEventListener("pointerup", () => el.removeEventListener("pointermove", move), { once: true });
+  el.addEventListener("lostpointercapture", () => el.removeEventListener("pointermove", move), { once: true });
 });
 $("splitter").addEventListener("dblclick", resetProjectsWidth);
 $("splitter").addEventListener("keydown", e => {
   const step = { ArrowLeft: -SPLITTER_STEP_PX, ArrowRight: SPLITTER_STEP_PX }[e.key];
   if (step) {
     e.preventDefault();
-    setProjectsWidth(getProjectsWidth(e.currentTarget.getBoundingClientRect().left + step));
+    setProjectsWidth(getProjectsWidth(document.querySelector("main > .panel").getBoundingClientRect().right + step));
   }
 });
 restoreProjectsWidth();
