@@ -429,6 +429,8 @@ kbd {
 }
 .live.other { color: var(--accent); background: var(--accent-weak); }
 .live.stale { color: var(--muted); background: var(--panel-2); }
+.live.loading { color: var(--accent); background: var(--accent-weak); }
+.live.loading .spinner { border-color: color-mix(in srgb, var(--accent) 25%, transparent); border-top-color: var(--accent); }
 .live.stale .spinner { border-color: color-mix(in srgb, var(--muted) 25%, transparent); border-top-color: var(--muted); animation-duration: 2.4s; }
 
 /* ---------- empty & loading ---------- */

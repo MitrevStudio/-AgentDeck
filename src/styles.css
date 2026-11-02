@@ -110,6 +110,7 @@ main {
 
 /* ---------- live status ---------- */
 .sess.live-busy { border-color: color-mix(in srgb, var(--busy) 40%, transparent); box-shadow: inset 3px 0 0 var(--busy); }
+.sess.live-loading { border-color: color-mix(in srgb, var(--accent) 40%, transparent); box-shadow: inset 3px 0 0 var(--accent); }
 .sess.live-idle { border-color: color-mix(in srgb, var(--wait) 35%, transparent); box-shadow: inset 3px 0 0 var(--wait); }
 .sess.live-waiting { border-color: color-mix(in srgb, var(--attn) 45%, transparent); box-shadow: inset 3px 0 0 var(--attn); }
 .sess.live-stale { box-shadow: inset 3px 0 0 var(--muted); }

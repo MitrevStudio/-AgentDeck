@@ -21,6 +21,10 @@ button.term-tab { padding-right: 10px; }
 .term-dot.busy { background: var(--busy); }
 .term-dot.idle { background: var(--wait); }
 .term-dot.waiting { background: var(--attn); }
+.term-dot.loading {
+  width: 10px; height: 10px; background: none; border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  border-top-color: var(--accent); animation: spin .8s linear infinite;
+}
 .term-close {
   flex: none; width: 20px; height: 20px; display: grid; place-items: center; padding: 0;
   border: 0; border-radius: 5px; background: none; color: var(--muted); cursor: pointer;

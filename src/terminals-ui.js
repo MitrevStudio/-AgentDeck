@@ -112,6 +112,26 @@ function getTabStatus(tab) {
   }
   return getLiveGroup(l);
 }
+// A session resumed in a tab is loading until its new process first waits for input (the live registry), for at most
+// LOADING_MAX_MS. The entry of the terminal it was moved from is older than the tab and does not count.
+const LOADING_MAX_MS = 120000;
+const START_SLACK_MS = 5000;
+const readyTabs = new Set();
+function isTabLoading(tab) {
+  if (tab.exited || !tab.sessionId || readyTabs.has(tab.id) || Date.now() - tab.createdAt > LOADING_MAX_MS) {
+    return false;
+  }
+  const l = typeof live !== "undefined" ? live.get(`${tab.agent}:${tab.sessionId}`) : null;
+  if (l && l.startedAt >= tab.createdAt - START_SLACK_MS && getLiveGroup(l) !== "busy") {
+    readyTabs.add(tab.id);
+    return false;
+  }
+  return true;
+}
+function isSessionLoading(s) {
+  const tab = findSessionTab(s);
+  return Boolean(tab) && isTabLoading(tab);
+}
 function getTabTitle(tab) {
   const s = tab.sessionId && typeof data !== "undefined" ? data.sessions.find(x => x.agent === tab.agent && x.id === tab.sessionId) : null;
   return s?.title || tab.title;
@@ -127,7 +147,7 @@ function renderTermTabs() {
   const html = sessionsTab + termTabs.map(tab => {
     const status = getTabStatus(tab);
     return `<div class="term-tab ${tab.id === activeTab ? "active" : ""} ${tab.exited ? "exited" : ""}" data-term-tab="${esc(tab.id)}" role="tab" title="${esc(tab.cwd)}">
-      <span class="term-dot ${status}"></span><span class="term-title">${esc(getTabTitle(tab))}</span>${tab.note ? `<span class="term-note">${esc(tab.note)}</span>` : ""}
+      <span class="term-dot ${isTabLoading(tab) ? "loading" : status}"></span><span class="term-title">${esc(getTabTitle(tab))}</span>${tab.note ? `<span class="term-note">${esc(tab.note)}</span>` : ""}
       <button class="term-close" data-term-close="${esc(tab.id)}" title="${esc(t("term.tab.close"))}">${icon("x")}</button></div>`;
   }).join("");
   // Rebuilt only when something shows differently, so a click in progress is not lost.
