@@ -20,7 +20,6 @@ const LINK_POLL_MS = 3000;
 const termViews = new Map(); // tab id -> { el, term, fit, attachedEnd, queue }
 let termTabs = [];
 let activeTab = ""; // "" = the sessions list
-let sessionsIn = window.prefs.sessionsIn || "windows";
 
 // ---------- looks ----------
 function getCssVar(styles, name) {
@@ -200,7 +199,7 @@ function showSessionTab(s) {
   return true;
 }
 function canMoveHere(s) {
-  return sessionsIn === "tabs" && s.agent === "Claude" && !findSessionTab(s);
+  return s.agent === "Claude" && !findSessionTab(s);
 }
 async function moveSessionHere(s) {
   toast(t("term.moving"));
@@ -231,8 +230,7 @@ window.terminals.onExit(({ id, code }) => {
 });
 window.terminals.onChanged(syncTermTabs);
 window.terminals.onActivate(id => activateTab(id));
-window.prefs.onChanged(p => {
-  sessionsIn = p.sessionsIn || sessionsIn;
+window.prefs.onChanged(() => {
   requestAnimationFrame(applyTermTheme);
 });
 $("termTabs").addEventListener("click", e => {
