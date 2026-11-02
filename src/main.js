@@ -441,6 +441,11 @@ function launchAgent(agent, id, cwd, inTab = false) {
   checkSessionId(id);
   if (!cwd || !fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory())
     throw new Error(t("errors.sessionFolderUnknown"));
+  // Claude Code may have dropped the transcript since the scan; resuming it would only print "No conversation found".
+  if (agent === "Claude" && !findTranscript(id)) {
+    scan().catch(err => console.error("Scan failed:", err.message));
+    throw new Error(t("errors.conversationMissing"));
+  }
   const cmd = agentCommand(agent, id).map(psQuote).join(" ");
   return launchTerminal(cwd, "& " + cmd, { title: getSessionTitle(agent, id), agent, sessionId: id }, inTab);
 }
