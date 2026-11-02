@@ -185,8 +185,8 @@ function sessionHtml(s, i, toks) {
     ${dir}
     <div class="sess-foot">${getContextChip(s)}${usageChip(s)}<div class="grow"></div>
       ${runningBtns}
-      ${s.cwd && !l ? `<button class="btn sm" data-action="terminal" data-path="${esc(s.cwd)}" title="${esc(t("action.terminalHere"))}" aria-label="${esc(t("action.terminal"))}">${icon("terminal")}<span class="bl">${esc(t("action.terminal"))}</span></button>` : ""}
-      ${s.cwd ? `<button class="btn sm" data-action="explorer" data-path="${esc(s.cwd)}" title="${esc(t("action.explorerTitle"))}" aria-label="${esc(t("action.explorer"))}">${icon("open")}<span class="bl">${esc(t("action.explorer"))}</span></button>` : ""}
+      ${l ? "" : getSessionActions(s)}
+      ${s.cwd && l ? `<button class="btn sm" data-action="explorer" data-path="${esc(s.cwd)}" title="${esc(t("action.explorerTitle"))}" aria-label="${esc(t("action.explorer"))}">${icon("open")}<span class="bl">${esc(t("action.explorer"))}</span></button>` : ""}
     </div></article>`;
 }
 
@@ -326,6 +326,7 @@ async function runAction(action, btn) {
   const path = btn.dataset.path || btn.closest("[data-path]")?.dataset.path;
   switch (action) {
     case "resume": return resume(visible[Number(btn.closest(".sess").dataset.i)]);
+    case "fresh": await continueFresh(visible[Number(btn.closest(".sess").dataset.i)]); return toast(t("preview.fresh.started"));
     case "show-terminal": return showTerminal(visible[Number(btn.closest(".sess").dataset.i)]);
     case "move-here": return moveSessionHere(visible[Number(btn.closest(".sess").dataset.i)]);
     case "terminal": await window.manager.launchFolder(path); return toast(t("manager.toast.terminal", { path }));

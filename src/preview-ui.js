@@ -70,59 +70,23 @@ function getFreshMissingReason(s) {
   }
   return t("preview.fresh.none.small", { n: I18N.formatNumber(c.tokens), limit: I18N.formatNumber(LARGE_CONTEXT) });
 }
-function getPreviewActions(s) {
-  if (!s.cwd) {
-    return "";
-  }
-  const running = typeof liveOf === "function" && liveOf(s);
+// Resume and Continue fresh on a past session's card (renderer.js). Offered only when cheaper, Continue fresh is then
+// the recommended (blue) one; what each does is its tooltip, and Resume's says why Continue fresh is missing.
+function getSessionActions(s) {
   const fresh = isFreshOffered(s);
-  const why = fresh ? "" : `<div class="pv-why">${esc(getFreshMissingReason(s))}</div>`;
-  if (running && !fresh) {
-    return `<div class="pv-costs">${why}</div>`;
-  }
-  // Offered only when cheaper, Continue fresh is then the recommended (primary) action.
-  return `<div class="pv-actions">
-      ${fresh ? `<button class="btn sm primary" data-pv-act="fresh">${icon("plus")}${esc(t("preview.fresh"))}</button>` : ""}
-      ${running ? "" : `<button class="btn sm ${fresh ? "" : "primary"}" data-pv-act="resume">${icon("play")}${esc(t("preview.resume"))}</button>`}
-    </div>
-    <div class="pv-costs">${fresh ? getCostLine("fresh", true) : ""}${running ? "" : getCostLine("resume", !fresh)}${why}</div>`;
+  const resumeTip = [getActionTip("resume", !fresh), fresh ? "" : getFreshMissingReason(s)].filter(Boolean).join("\n\n");
+  return `${fresh ? `<button class="btn sm primary" data-action="fresh" title="${esc(getActionTip("fresh", true))}">${icon("plus")}${esc(t("preview.fresh"))}</button>` : ""}
+      <button class="btn sm ${fresh ? "" : "primary"}" data-action="resume" title="${esc(resumeTip)}" ${s.cwd ? "" : "disabled"}>${icon("play")}${esc(t("preview.resume"))}</button>`;
 }
-function getCostLine(action, recommended) {
+function getActionTip(action, recommended) {
   const name = recommended ? `${t(`preview.${action}`)} ${t("preview.recommended")}` : t(`preview.${action}`);
-  return `<div><b>${esc(name)}:</b> ${esc(t(`preview.${action}.cost`))}</div>`;
+  return `${name}: ${t(`preview.${action}.cost`)}`;
 }
-function previewNotice(box, message, isError = false) {
-  if (typeof toast === "function") {
-    toast(message, isError);
-    return;
-  }
-  const note = box.querySelector(".pv-notice") || box.querySelector(".pv-head")?.appendChild(document.createElement("div"));
-  if (note) {
-    note.className = `pv-notice ${isError ? "error" : ""}`;
-    note.textContent = message;
-  }
+// The handoff comes from the session's preview (its first prompt and last answer).
+async function continueFresh(s) {
+  const d = await window.manager.getPreview(s.agent, s.id).catch(() => null);
+  await window.manager.launchFresh(s.cwd, getHandoff(s, d));
 }
-async function runPreviewAction(box, action, s) {
-  try {
-    if (action === "resume") {
-      await window.manager.launchAgent(s.agent, s.id, s.cwd);
-      return;
-    }
-    await window.manager.launchFresh(s.cwd, getHandoff(s, box.pvData));
-    previewNotice(box, t("preview.fresh.started"));
-  } catch (e) {
-    previewNotice(box, e.message, true);
-  }
-}
-document.addEventListener("click", e => {
-  const button = e.target.closest?.("[data-pv-act]");
-  const box = button?.closest("[data-key]");
-  if (!box?.pvSession) {
-    return;
-  }
-  e.stopPropagation();
-  runPreviewAction(box, button.dataset.pvAct, box.pvSession);
-});
 
 // d: main's answer; undefined while it is on its way (a skeleton), null when the session cannot be read.
 function previewHtml(s, d) {
@@ -138,7 +102,7 @@ function previewHtml(s, d) {
     : "";
   const gap = d.more ? `<div class="pv-gap"><span>${esc(t("preview.earlier"))}</span></div>` : "";
   const msgs = d.messages.length ? d.messages.map(m => previewMessage(s, m)).join("") : `<div class="pv-empty">${esc(t("preview.noMessages"))}</div>`;
-  return `${title}<div class="pv-head">${previewFacts(s, d)}${getPreviewActions(s)}</div>${body(first + gap + msgs)}`;
+  return `${title}<div class="pv-head">${previewFacts(s, d)}</div>${body(first + gap + msgs)}`;
 }
 
 // ---------- filling ----------
