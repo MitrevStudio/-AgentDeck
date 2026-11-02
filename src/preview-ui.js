@@ -71,12 +71,13 @@ function getFreshMissingReason(s) {
   return t("preview.fresh.none.small", { n: I18N.formatNumber(c.tokens), limit: I18N.formatNumber(LARGE_CONTEXT) });
 }
 // Resume and Continue fresh on a past session's card (renderer.js). Offered only when cheaper, Continue fresh is then
-// the recommended (blue) one; what each does is its tooltip, and Resume's says why Continue fresh is missing.
+// the recommended (blue) one; what each does is its tooltip (data-tip, renderer.js), and Resume's says why Continue
+// fresh is missing.
 function getSessionActions(s) {
   const fresh = isFreshOffered(s);
   const resumeTip = [getActionTip("resume", !fresh), fresh ? "" : getFreshMissingReason(s)].filter(Boolean).join("\n\n");
-  return `${fresh ? `<button class="btn sm primary" data-action="fresh" title="${esc(getActionTip("fresh", true))}">${icon("plus")}${esc(t("preview.fresh"))}</button>` : ""}
-      <button class="btn sm ${fresh ? "" : "primary"}" data-action="resume" title="${esc(resumeTip)}" ${s.cwd ? "" : "disabled"}>${icon("play")}${esc(t("preview.resume"))}</button>`;
+  return `${fresh ? `<button class="btn sm primary" data-action="fresh" data-tip="${esc(getActionTip("fresh", true))}">${icon("plus")}${esc(t("preview.fresh"))}</button>` : ""}
+      <button class="btn sm ${fresh ? "" : "primary"}" data-action="resume" data-tip="${esc(resumeTip)}" ${s.cwd ? "" : "disabled"}>${icon("play")}${esc(t("preview.resume"))}</button>`;
 }
 function getActionTip(action, recommended) {
   const name = recommended ? `${t(`preview.${action}`)} ${t("preview.recommended")}` : t(`preview.${action}`);
