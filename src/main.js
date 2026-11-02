@@ -678,7 +678,7 @@ function buildTrayMenu() {
     { type: "separator" },
     ...sep(v.items),
     { label: t("tray.edgeHandle"), type: "checkbox", checked: p.edgeHandle, click: item => prefs.set({ edgeHandle: item.checked }) },
-    { label: t("notify.toggle"), type: "checkbox", checked: notifier ? notifier.enabled() : true, enabled: Boolean(notifier), click: item => notifier?.setEnabled(item.checked) },
+    { label: t("notify.toggle"), type: "checkbox", checked: prefs.get().notify !== false, click: item => prefs.set({ notify: item.checked }) },
     { label: t("tray.language"), submenu: radio("language", Object.keys(LANGUAGES), l => LANGUAGES[l]) },
     { label: t("tray.theme"), submenu: radio("theme", prefs.THEMES, th => t(`theme.${th}`)) },
     { label: t("tray.sessionsIn"), submenu: radio("sessionsIn", prefs.SESSIONS_IN, m => t(`tray.sessionsIn.${m}`)) },
@@ -885,6 +885,17 @@ function registerIpc() {
 
 // ---------- preferences ----------
 // A new language reloads every page (main's own strings follow at once); a new theme only swaps the page's tokens.
+// Before Settings had it, the notification switch was kept in notify.json.
+function carryOverNotify() {
+  if (prefs.get().notify !== null) {
+    return;
+  }
+  let on = true;
+  try {
+    on = JSON.parse(fs.readFileSync(path.join(app.getPath("userData"), "notify.json"), "utf8")).enabled !== false;
+  } catch {}
+  prefs.set({ notify: on });
+}
 function onPrefsChanged(p, keys) {
   for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send("prefs:changed", p);
   if (keys.includes("theme") && managerWin && !managerWin.isDestroyed()) managerWin.setBackgroundColor(prefs.background());
@@ -903,6 +914,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on("second-instance", showManager);
   app.whenReady().then(() => {
     prefs.load();
+    carryOverNotify();
     prefs.on("changed", onPrefsChanged);
     // The proxy settings, before anything goes online (requests made meanwhile wait for them).
     network.start();
@@ -931,7 +943,7 @@ if (!app.requestSingleInstanceLock()) {
     notifier = createNotifier({
       liveSessions, focus: focusSession, balloon, t, tn, onChange: buildTrayMenu,
       quiet: () => Boolean(bar?.isVisible()),
-      file: path.join(app.getPath("userData"), "notify.json"),
+      isEnabled: () => prefs.get().notify !== false,
       describe: (agent, id, cwd) => {
         const s = cache?.sessions.find(x => x.agent === agent && x.id === id);
         const dir = s?.cwd || cwd || "";

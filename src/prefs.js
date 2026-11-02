@@ -22,7 +22,7 @@ const AUTO_COMPACT_TOKENS = [100000, 150000, 200000, 300000];
 const BACKGROUND = { dark: "#0d1015", light: "#f2f4f8" };
 
 const prefs = new EventEmitter();
-const state = { language: "bg", theme: "dark", edgeHandle: true, autoUpdate: true, newWindow: true, sessionsIn: "windows", autoCompact: true, autoCompactTokens: 150000, dayView: false };
+const state = { language: "bg", theme: "dark", edgeHandle: true, autoUpdate: true, newWindow: true, sessionsIn: "windows", autoCompact: true, autoCompactTokens: 150000, dayView: false, notify: null };
 let handleX = 0.5; // the edge handle's centre, as a fraction of the display width
 let handleDisplay = null; // the id of the display it is on (null: the primary one)
 const fraction = v => (typeof v === "number" && v >= 0 && v <= 1 ? v : null);
@@ -50,6 +50,8 @@ function load() {
   state.autoCompact = auto.on !== false;
   if (AUTO_COMPACT_TOKENS.includes(auto.tokens)) state.autoCompactTokens = auto.tokens;
   state.dayView = isObj(root.dayView) && root.dayView.show === true;
+  // null: not saved here yet (main carries the earlier choice over).
+  state.notify = isObj(root.notify) && typeof root.notify.on === "boolean" ? root.notify.on : null;
   i18n.setLanguage(state.language, { dev: !app.isPackaged });
   nativeTheme.themeSource = state.theme;
   // Windows switched between light and dark while the theme follows it.
@@ -94,6 +96,10 @@ async function set(patch) {
     state.autoCompactTokens = patch.autoCompactTokens;
     keys.push("autoCompactTokens");
   }
+  if (typeof patch.notify === "boolean" && patch.notify !== state.notify) {
+    state.notify = patch.notify;
+    keys.push("notify");
+  }
   if (typeof patch.dayView === "boolean" && patch.dayView !== state.dayView) {
     state.dayView = patch.dayView;
     keys.push("dayView");
@@ -127,6 +133,7 @@ function save() {
       autoCompact: { on: state.autoCompact, tokens: state.autoCompactTokens }
     },
     dayView: { show: state.dayView },
+    notify: { on: state.notify !== false },
     hoverEdge: undefined
   }).catch(e => console.error("Could not save settings:", e.message));
 }

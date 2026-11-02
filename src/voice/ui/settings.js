@@ -92,6 +92,7 @@ function renderGeneral() {
   $("newWindow").checked = general.newWindow !== false;
   $("newWindow").disabled = general.sessionsIn === "tabs";
   $("dayView").checked = general.dayView === true;
+  $("notify").checked = general.notify !== false;
   if (["uiLanguage", "uiTheme", "sessionsIn"].includes(focused)) $(focused).querySelector(".on")?.focus();
 }
 async function setPref(key, value) {
@@ -129,6 +130,7 @@ $("edgeHandle").addEventListener("change", e => setPref("edgeHandle", e.target.c
 $("autoUpdate").addEventListener("change", e => setPref("autoUpdate", e.target.checked));
 $("newWindow").addEventListener("change", e => setPref("newWindow", e.target.checked));
 $("dayView").addEventListener("change", e => setPref("dayView", e.target.checked));
+$("notify").addEventListener("change", e => setPref("notify", e.target.checked));
 // Start with Windows, applied at once: the installed app only - a copy run from source shows it off and says why.
 function renderAutostart(a) {
   if (!a) return;
