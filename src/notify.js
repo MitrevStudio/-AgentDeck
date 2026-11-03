@@ -5,7 +5,6 @@
 // counts after it worked for a while, so a quick reply does not ring; a balloon is skipped while the edge menu is
 // out (the user is looking at the sessions already). A waiting session leaves the list when it works again, when it
 // is brought up from here, or when its process ends.
-const fs = require("node:fs");
 const path = require("node:path");
 
 const POLL_MS = 3000;
@@ -13,20 +12,14 @@ const MIN_BUSY_MS = 15000;
 
 // liveSessions() -> [{agent, id, cwd, status, ...}]; describe(agent, id, cwd) -> {title, project}; balloon(text,
 // {title, onClick}); focus({agent, id}); quiet() -> true while balloons should wait; onChange() when the list changed;
-// t/tn: i18n; file: where "enabled" is kept.
-function createNotifier({ liveSessions, describe, balloon, focus, quiet = () => false, onChange = () => {}, t, tn, file }) {
+// t/tn: i18n; isEnabled(): the user wants the balloons (Settings, prefs.js).
+function createNotifier({ liveSessions, describe, balloon, focus, quiet = () => false, onChange = () => {}, t, tn, isEnabled }) {
   const prev = new Map();    // key -> {status, since}
   const waiting = new Map(); // key -> {key, agent, id, cwd, title, project, at}
-  let enabled = true, timer = null, polling = false;
-  try { enabled = JSON.parse(fs.readFileSync(file, "utf8")).enabled !== false; } catch {}
-
-  function save() {
-    try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify({ enabled })); }
-    catch (e) { console.error("Could not save the notification setting:", e.message); }
-  }
+  let timer = null, polling = false;
 
   function announce(fresh) {
-    if (!enabled || !fresh.length || quiet()) return;
+    if (!isEnabled() || !fresh.length || quiet()) return;
     if (fresh.length === 1) {
       const w = fresh[0];
       balloon(t("notify.body", { project: w.project }), { title: t("notify.title", { title: w.title }), onClick: () => bringUp(w.key) });
@@ -52,7 +45,9 @@ function createNotifier({ liveSessions, describe, balloon, focus, quiet = () => 
           if (waiting.delete(key)) changed = true;
           continue;
         }
-        if (p?.status === "busy" && now - p.since >= MIN_BUSY_MS && !waiting.has(key)) {
+        // Blocked on the user (a permission, a question) rings at once; a finished turn only after real work.
+        const blocked = l.status === "waiting" && p?.status !== "waiting";
+        if ((blocked || p?.status === "busy" && now - p.since >= MIN_BUSY_MS) && !waiting.has(key)) {
           const d = describe(l.agent, l.id, l.cwd) || {};
           const w = { key, agent: l.agent, id: l.id, cwd: l.cwd, title: d.title || l.id.slice(0, 8), project: d.project || path.basename(l.cwd || ""), at: now };
           waiting.set(key, w);
@@ -85,8 +80,6 @@ function createNotifier({ liveSessions, describe, balloon, focus, quiet = () => 
     clear() { if (waiting.size) { waiting.clear(); onChange(); } },
     // A session brought up some other way (the menu's "show terminal") is no longer waiting for the user.
     seen(agent, id) { if (waiting.delete(`${agent}:${id}`)) onChange(); },
-    enabled: () => enabled,
-    setEnabled(on) { enabled = Boolean(on); save(); onChange(); }
   };
 }
 

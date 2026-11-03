@@ -50,12 +50,137 @@ const icon = name => `<svg class="i" viewBox="0 0 24 24" fill="none" stroke="cur
 I18N.applyI18n(); // the body is parsed by now, and the page's own script has not written into it yet
 document.querySelectorAll("[data-icon]").forEach(el => { el.outerHTML = icon(el.dataset.icon); });
 
+// ---------- tooltips ----------
+// Hover texts in AgentDeck's own style, kept inside the window (the system ones spill out of it). A title becomes
+// data-tip when first pointed at; data-tip-name goes in bold in front of the text.
+const TIP_DELAY_MS = 400, TIP_GAP_PX = 8, TIP_MARGIN_PX = 12;
+let tipBox = null, tipFor = null, tipTimer = 0;
+function getTipBox() {
+  if (!tipBox) {
+    tipBox = document.createElement("div");
+    tipBox.className = "tip";
+    tipBox.hidden = true;
+    document.body.appendChild(tipBox);
+  }
+  return tipBox;
+}
+// An emptied title clears the tooltip too; the text stays available to screen readers.
+function takeTitle(el) {
+  if (!el.hasAttribute("title")) {
+    return;
+  }
+  if (!el.title) {
+    for (const attr of ["aria-description", "aria-label"]) {
+      if (el.getAttribute(attr) === el.dataset.tip) {
+        el.removeAttribute(attr);
+      }
+    }
+    delete el.dataset.tip;
+  } else {
+    el.dataset.tip = el.title;
+    el.setAttribute(el.hasAttribute("aria-label") || el.textContent.trim() ? "aria-description" : "aria-label", el.title);
+  }
+  el.removeAttribute("title");
+}
+function showTip(el) {
+  const box = getTipBox();
+  box.innerHTML = `${el.dataset.tipName ? `<b>${esc(el.dataset.tipName)}</b> ` : ""}${esc(el.dataset.tip)}`;
+  box.hidden = false;
+  const r = el.getBoundingClientRect(), w = box.offsetWidth, h = box.offsetHeight;
+  const left = Math.min(Math.max(TIP_MARGIN_PX, r.left + r.width / 2 - w / 2), innerWidth - w - TIP_MARGIN_PX);
+  const top = r.top - h - TIP_GAP_PX >= TIP_MARGIN_PX ? r.top - h - TIP_GAP_PX : Math.min(r.bottom + TIP_GAP_PX, innerHeight - h - TIP_MARGIN_PX);
+  box.style.left = `${Math.max(TIP_MARGIN_PX, left)}px`;
+  box.style.top = `${Math.max(TIP_MARGIN_PX, top)}px`;
+}
+function hideTip() {
+  clearTimeout(tipTimer);
+  tipFor = null;
+  if (tipBox) {
+    tipBox.hidden = true;
+  }
+}
+// A shaped window (the voice overlay) keeps the system tooltips: <body data-native-tips>.
+document.addEventListener("mouseover", e => {
+  if (document.body?.hasAttribute("data-native-tips")) {
+    return;
+  }
+  const el = e.target.closest?.("[title], [data-tip]");
+  if (el === tipFor) {
+    return;
+  }
+  hideTip();
+  if (!el) {
+    return;
+  }
+  takeTitle(el);
+  tipFor = el;
+  tipTimer = setTimeout(() => el.isConnected && el.dataset.tip && showTip(el), TIP_DELAY_MS);
+});
+document.addEventListener("mousedown", hideTip, true);
+document.addEventListener("scroll", hideTip, true);
+window.addEventListener("blur", hideTip);
+
 // ---------- live status ----------
 const sessionKey = s => `${s.agent}:${s.id}`;
 const STALE_MS = 10 * 60 * 1000;
 const lastSign = l => Math.max(l.activityAt || 0, l.statusAt || 0);
 const isStale = l => l.status === "busy" && Date.now() - lastSign(l) > STALE_MS;
-const liveRank = l => (l.status === "busy" ? (isStale(l) ? 1 : 0) : 2);
+// A session AgentDeck has just opened loads until its new process waits for the user; an entry older than the launch
+// (the terminal it was moved from) does not count, and "running" (registered, no status yet) is still starting.
+const LOADING_MAX_MS = 120000;
+const START_SLACK_MS = 5000;
+const launches = new Map(); // sessionKey -> when it was opened
+window.manager?.onLaunch?.(key => launches.set(key, Date.now()));
+function isLaunchEnded(at, l) {
+  return Date.now() - at > LOADING_MAX_MS || Boolean(l && l.startedAt >= at - START_SLACK_MS && (l.status === "idle" || l.status === "waiting"));
+}
+function isLoading(key, l) {
+  const at = launches.get(key);
+  return Boolean(at) && !isLaunchEnded(at, l);
+}
+// Once ready, a session stays ready even when it works again. getLive(key): the live entry, if any.
+function removeEndedLaunches(getLive) {
+  for (const [key, at] of launches) {
+    if (isLaunchEnded(at, getLive(key))) {
+      launches.delete(key);
+    }
+  }
+}
+function getLoadingPill() {
+  return `<span class="live loading" title="${esc(t("live.hint.loading"))}"><span class="spinner"></span>${esc(t("live.label.loading"))}</span>`;
+}
+// "waiting": blocked on the user (a permission, a question, a dialog), so it goes first everywhere.
+const LIVE_RANKS = { waiting: 0, busy: 1, idle: 3 };
+function getLiveRank(l) {
+  if (isStale(l)) {
+    return 2;
+  }
+  return LIVE_RANKS[l.status] ?? 3;
+}
+// The group a running session is counted and drawn in: busy, waiting (on the user) or idle (anything else).
+function getLiveGroup(l) {
+  if (l.status === "busy" || l.status === "waiting") {
+    return l.status;
+  }
+  return "idle";
+}
+function countLiveGroups(states) {
+  const counts = { busy: 0, waiting: 0, idle: 0 };
+  for (const l of states) {
+    counts[getLiveGroup(l)]++;
+  }
+  return counts;
+}
+// The state as drawn: busy, waiting, idle, or other for a status this version does not know.
+function getLiveKind(l) {
+  if (l.status === "busy" || l.status === "waiting" || l.status === "idle") {
+    return l.status;
+  }
+  return "other";
+}
+function getLiveHint(l) {
+  return t(`live.hint.${getLiveKind(l)}`, { reason: l.waitingFor || t("live.reason.unknown") });
+}
 function shortAgo(ms) {
   const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
   if (s < 60) return t("time.short.sec", { n: s });
@@ -64,7 +189,7 @@ function shortAgo(ms) {
 }
 function liveText(l) {
   if (l.status === "busy") return t(isStale(l) ? "live.staleFor" : "live.busyFor", { t: shortAgo(lastSign(l)) });
-  if (l.status === "idle") return t("live.idleFor", { t: shortAgo(lastSign(l)) });
+  if (l.status === "idle" || l.status === "waiting") return t("live.idleFor", { t: shortAgo(lastSign(l)) });
   return "";
 }
 // What to say after "show terminal" (terminal-focus.js): nothing when the session's own tab or window came up.
@@ -160,7 +285,7 @@ function buildData(raw, live) {
   const fresh = [...live.values()].filter(l => !known.has(sessionKey(l)))
     .map(l => ({ agent: l.agent, id: l.id, cwd: l.cwd, title: t("session.new"), prompt: "", updatedAt: l.startedAt }));
   const sessions = [...(raw.sessions || []), ...fresh].map(s => ({
-    ...s, cwdN: normPath(s.cwd), hay: searchable(s.title, s.prompt, s.id, s.cwd, s.projectName, s.agent)
+    ...s, cwdN: normPath(s.cwd), hay: searchable(s.title, s.prompt, s.recap, s.id, s.cwd, s.projectName, s.agent)
   }));
   const projects = (raw.registry?.projects || []).map(p => {
     const proj = { ...p, n: normPath(p.path), hay: searchable(p.name, p.path) };

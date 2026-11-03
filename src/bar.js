@@ -45,7 +45,7 @@ function hue(str) {
   for (const c of str) h = (h * 31 + c.charCodeAt(0)) >>> 0;
   return h % 360;
 }
-const byLive = (a, b) => liveRank(liveOf(a)) - liveRank(liveOf(b)) || lastSign(liveOf(b)) - lastSign(liveOf(a));
+const byLive = (a, b) => getLiveRank(liveOf(a)) - getLiveRank(liveOf(b)) || lastSign(liveOf(b)) - lastSign(liveOf(a));
 const liveFirst = list => [...list.filter(liveOf).sort(byLive), ...list.filter(s => !liveOf(s))];
 
 // ---------- model ----------
@@ -64,6 +64,7 @@ function computeTiles() {
     const states = p.sessions.map(liveOf).filter(Boolean);
     out.push({
       key: "p:" + p.n, kind: "project", p, label: p.name, count: inside.length,
+      waiting: states.some(l => l.status === "waiting"),
       busy: states.some(l => l.status === "busy" && !isStale(l)), idle: states.some(l => l.status !== "busy")
     });
   }
@@ -84,6 +85,7 @@ function rowsFor(tile, toks, hits) {
 
 // ---------- rendering ----------
 function render({ strip = true } = {}) {
+  removeEndedLaunches(key => live.get(key));
   const { toks, hits, tiles: list } = computeTiles();
   tiles = list;
   if (!tiles.some(tile => tile.key === st.tile)) { st.tile = (tiles.find(x => x.kind !== "day") || tiles[0])?.key || ""; st.row = q.value ? 0 : -1; }
@@ -106,7 +108,8 @@ const hideBtn = (kind, key, on) => `<button class="icon-btn hide-tag ${on ? "on"
   title="${esc(t(on ? "bar.hidden.untag" : "bar.hidden.tag"))}">${icon(on ? "eyeOff" : "eye")}</button>`;
 
 function tileHtml(tile, toks) {
-  const badge = tile.busy ? '<span class="badge"><span class="spinner"></span></span>' : tile.idle ? '<span class="badge"><span class="pulse"></span></span>' : "";
+  const badge = tile.waiting ? '<span class="badge"><span class="pulse attn"></span></span>'
+    : tile.busy ? '<span class="badge"><span class="spinner"></span></span>' : tile.idle ? '<span class="badge"><span class="pulse"></span></span>' : "";
   const mono = tile.kind === "project"
     ? `<span class="mono" style="--h:${hue(tile.p.n)}">${esc(initials(tile.label))}${badge}</span>`
     : `<span class="mono special ${tile.kind}">${icon(tile.kind === "live" ? "pulse" : tile.kind === "day" ? "clock" : "search")}</span>`;
@@ -161,10 +164,13 @@ function renderDetail(tile, toks) {
 // The preview beside the rows (preview-ui.js) follows the highlighted session, or shows the first one while none is.
 const syncPreview = () => showPreview($("pv"), rows[st.row]?.s || rows.find(r => r.s)?.s);
 function livePill(l, key) {
+  if (isLoading(key, l)) {
+    return getLoadingPill();
+  }
   if (!l) return "";
-  const busy = l.status === "busy";
-  return `<span class="live ${busy ? "busy" : "idle"} ${isStale(l) ? "stale" : ""}" data-live="${esc(key)}">
-    <span class="${busy ? "spinner" : "pulse"}"></span>${esc(t(busy ? "live.label.busy" : "live.label.idle"))}<span class="live-t">${esc(liveText(l))}</span></span>`;
+  const group = getLiveGroup(l);
+  return `<span class="live ${group} ${isStale(l) ? "stale" : ""}" data-live="${esc(key)}" title="${esc(getLiveHint(l))}">
+    <span class="${group === "busy" ? "spinner" : group === "waiting" ? "pulse attn" : "pulse"}"></span>${esc(t(`live.label.${group}`))}<span class="live-t">${esc(liveText(l))}</span></span>`;
 }
 function rowHtml(r, i, toks) {
   if (r.type === "dir") {
@@ -186,7 +192,7 @@ function rowHtml(r, i, toks) {
   return `<div class="row ${i === st.row ? "sel" : ""} ${l ? "is-live" : ""} ${s.concealed ? "concealed" : ""}" data-i="${i}">
     <span class="adot ${s.agent.toLowerCase()}" title="${esc(s.agent)}"></span>
     <div class="rmain"><div class="t" title="${esc(s.title)}">${hl(s.title, toks)}</div>${r.showPath && s.cwd ? pathHtml(s.cwd, toks) : ""}${snipHtml(s, toks)}</div>
-    ${livePill(l, key)}${usageCost(s)}<span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span>
+    ${livePill(l, key)}${getContextChip(s)}${usageCost(s)}<span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span>
     <span class="ract">${hideBtn("session", key, hidden.sessions.has(key))}${s.cwd ? `<button class="icon-btn" data-act="terminal" data-path="${esc(s.cwd)}" title="${esc(t("bar.terminalIn", { path: s.cwd }))}">${icon("terminal")}</button>
       <button class="icon-btn" data-act="copy" data-path="${esc(s.cwd)}" title="${esc(t("action.copyPath"))}">${icon("copy")}</button>` : ""}
       ${l ? `<button class="icon-btn" data-act="resume" title="${esc(t("bar.alreadyOpen"))}">${icon("play")}</button>
@@ -196,10 +202,14 @@ function rowHtml(r, i, toks) {
   </div>${confirm}${del}`;
 }
 function renderLiveSum() {
-  let busy = 0, idle = 0;
-  for (const l of model.sessions.map(liveOf).filter(Boolean)) l.status === "busy" ? busy++ : idle++;
-  $("liveSum").innerHTML = busy || idle
-    ? `<button class="sum" data-act="show-live" title="${esc(t("bar.showLive"))}">${busy ? `<span class="spinner"></span>${esc(tn("live.count.busy", busy))}` : ""}${busy && idle ? '<span class="sep"></span>' : ""}${idle ? `<span class="pulse"></span>${esc(tn("live.count.idle", idle))}` : ""}</button>`
+  const { busy, waiting, idle } = countLiveGroups(model.sessions.map(liveOf).filter(Boolean));
+  const parts = [
+    waiting && `<span class="pulse attn"></span>${esc(tn("live.count.waiting", waiting))}`,
+    busy && `<span class="spinner"></span>${esc(tn("live.count.busy", busy))}`,
+    idle && `<span class="pulse"></span>${esc(tn("live.count.idle", idle))}`
+  ].filter(Boolean);
+  $("liveSum").innerHTML = parts.length
+    ? `<button class="sum" data-act="show-live" title="${esc(t("bar.showLive"))}">${parts.join('<span class="sep"></span>')}</button>`
     : "";
 }
 function updateLiveTexts() {
@@ -232,6 +242,11 @@ async function resume(s) {
   if (!s) return;
   if (!s.cwd) return toast(t("errors.sessionNoDir"), true);
   if (liveOf(s)) { st.confirm = sessionKey(s); return render({ strip: false }); }
+  // Whichever costs less: Continue fresh for a large session whose cache went cold, Resume otherwise.
+  if (isFreshOffered(s, getSessionContext(s))) {
+    await launch(() => continueFresh(s));
+    return;
+  }
   await launch(() => window.manager.launchAgent(s.agent, s.id, s.cwd));
 }
 // A running session's terminal comes up and the menu goes. The terminal taking the focus would close the menu at
@@ -376,6 +391,7 @@ function openHint({ hotkey, handle }) {
 
 // ---------- events ----------
 window.manager.onDataChanged(applyData);
+window.manager.onLaunch(() => setTimeout(() => st.shown && render({ strip: false }), LOADING_MAX_MS + 1000));
 watchUsage(() => { if (st.shown) render({ strip: false }); });
 watchGit(() => { if (st.shown) render(); });
 window.manager.onBarEvent(ev => {
@@ -398,15 +414,14 @@ window.manager.onBarEvent(ev => {
 
 q.addEventListener("input", () => setQuery(q.value));
 $("openManager").addEventListener("click", () => window.manager.barCommand("open-manager"));
-// Scan again; the result comes back as "data:changed" and redraws the menu.
+// F5 scans now (main scans by itself every few minutes); the result comes back as "data:changed".
 async function refresh() {
-  const el = $("refreshBtn");
-  if (el.disabled) return;
-  el.disabled = true; el.classList.add("spin");
-  try { await window.manager.getData(); } catch (e) { toast(e.message, true); }
-  finally { el.disabled = false; el.classList.remove("spin"); }
+  try {
+    await window.manager.getData();
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
-$("refreshBtn").addEventListener("click", refresh);
 $("hiddenToggle").addEventListener("click", () => { hidden.reveal = !hidden.reveal; applyHidden(); });
 $("navL").addEventListener("click", () => $("strip").scrollBy({ left: -$("strip").clientWidth * 0.7 }));
 $("navR").addEventListener("click", () => $("strip").scrollBy({ left: $("strip").clientWidth * 0.7 }));

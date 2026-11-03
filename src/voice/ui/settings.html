@@ -74,13 +74,33 @@
       <section class="vs-sec">
         <h2><span data-icon="terminal"></span><span data-i18n="settings.general.terminal"></span></h2>
         <div class="vs-grid">
+          <span class="vs-label" id="sessionsInLabel" data-i18n="settings.general.openIn"></span>
+          <div class="vs-field">
+            <div class="seg" id="sessionsIn" role="radiogroup" aria-labelledby="sessionsInLabel"></div>
+            <div class="vs-hint vs-list" data-i18n="settings.general.openInHint"></div>
+          </div>
+
           <span class="vs-label" data-i18n="settings.general.windows"></span>
           <div class="vs-field">
             <label class="vs-toggle" for="newWindow">
               <span><b data-i18n="settings.general.newWindow"></b></span>
               <input type="checkbox" id="newWindow" class="switch">
             </label>
-            <div class="vs-hint" data-i18n="settings.general.newWindowHint"></div>
+            <div class="vs-hint vs-list" data-i18n="settings.general.newWindowHint"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="vs-sec">
+        <h2><span data-icon="alert"></span><span data-i18n="settings.general.notifications"></span></h2>
+        <div class="vs-grid">
+          <span class="vs-label" data-i18n="settings.general.notifyLabel"></span>
+          <div class="vs-field">
+            <label class="vs-toggle" for="notify">
+              <span><b data-i18n="notify.toggle"></b></span>
+              <input type="checkbox" id="notify" class="switch">
+            </label>
+            <div class="vs-hint vs-list" data-i18n="settings.general.notifyHint"></div>
           </div>
         </div>
       </section>

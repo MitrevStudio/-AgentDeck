@@ -14,12 +14,22 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 .brand p { margin: 0; color: var(--muted); font-size: 12px; }
 .search { flex: 1; max-width: 780px; margin: 0 auto; }
 .top-actions { display: flex; gap: 8px; flex: none; }
+/* Refresh is hidden: main.js scans by itself (FULL_SCAN_MS); F5 still scans. To bring the button back, uncomment it in index.html, styles.css and renderer.js.
+#refresh { width: 38px; padding: 0; justify-content: center; opacity: .45; }
+#refresh:hover, #refresh:focus-visible { opacity: 1; }
+*/
 
 /* ---------- layout ---------- */
 main {
-  flex: 1; min-height: 0; display: grid; gap: 16px; padding: 16px 20px;
-  grid-template-columns: minmax(310px, 390px) 1fr;
+  flex: 1; min-height: 0; display: grid; gap: 4px; padding: 16px 20px;
+  grid-template-columns: min(var(--projects-w, clamp(310px, 25vw, 390px)), calc(100% - 432px)) 8px minmax(0, 1fr);
 }
+/* Between the projects and the sessions (renderer.js): a line that shows while pointed at, dragged or focused. */
+.splitter { position: relative; cursor: col-resize; outline: none; touch-action: none; }
+.splitter::after {
+  content: ""; position: absolute; inset: 8px 3px; border-radius: 2px; background: transparent; transition: background .15s;
+}
+.splitter:hover::after, .splitter:focus-visible::after, .splitter:active::after { background: var(--accent); }
 
 /* ---------- paths ---------- */
 .dir {
@@ -79,17 +89,18 @@ main {
 .agent.codex { color: var(--codex); background: var(--codex-bg); }
 .sess-title { flex: 1; min-width: 0; margin: 0; font-size: 15.5px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
 .when { flex: none; margin-top: 2px; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
-.sess-prompt { margin: 5px 0 0; color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sess-foot { display: flex; align-items: center; gap: 8px; margin-top: 11px; }
-.sid { flex: 1; min-width: 0; font: 12px var(--mono); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sess-foot .btn { flex: none; }
-/* A narrower sessions panel (#sessions is a size container, usage.css): the main action keeps its label; "Open again",
-   then Terminal and Explorer become icon buttons with their tooltip; the session id gives way first. A live pill
-   leaves out its activity time, so the title keeps its words whole. */
-@container (max-width: 760px) {
-  .sess-foot .ghost .bl { display: none; }
-  .sess-foot .btn.ghost:has(.bl) { width: 32px; padding: 0; justify-content: center; border-color: var(--line); }
+/* The session in brief: Claude Code's own recap, or its last answer. */
+.sess-recap {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+  margin: 5px 0 0; padding-left: 8px; border-left: 2px solid var(--accent-line);
+  color: var(--text); font-size: 12.5px; line-height: 1.45;
 }
+.sess-recap .recap-label { margin-right: 6px; font-weight: 600; color: var(--accent); }
+.sid { margin-top: 4px; font: 12px var(--mono); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sess-foot { display: flex; align-items: center; gap: 8px; margin-top: 11px; }
+.sess-foot .btn { flex: none; }
+/* A narrower sessions panel (#sessions is a size container, usage.css): Move here becomes an icon button with its
+   tooltip, and a live pill leaves out its activity time, so the title keeps its words whole. */
 @container (max-width: 640px) {
   .sess-foot .bl { display: none; }
   .sess-foot .btn:has(.bl) { width: 32px; padding: 0; justify-content: center; }
@@ -98,10 +109,13 @@ main {
 
 /* ---------- live status ---------- */
 .sess.live-busy { border-color: color-mix(in srgb, var(--busy) 40%, transparent); box-shadow: inset 3px 0 0 var(--busy); }
+.sess.live-loading { border-color: color-mix(in srgb, var(--accent) 40%, transparent); box-shadow: inset 3px 0 0 var(--accent); }
 .sess.live-idle { border-color: color-mix(in srgb, var(--wait) 35%, transparent); box-shadow: inset 3px 0 0 var(--wait); }
+.sess.live-waiting { border-color: color-mix(in srgb, var(--attn) 45%, transparent); box-shadow: inset 3px 0 0 var(--attn); }
 .sess.live-stale { box-shadow: inset 3px 0 0 var(--muted); }
 .sess.active.live-busy { box-shadow: inset 3px 0 0 var(--busy), var(--ring); }
 .sess.active.live-idle { box-shadow: inset 3px 0 0 var(--wait), var(--ring); }
+.sess.active.live-waiting { box-shadow: inset 3px 0 0 var(--attn), var(--ring); }
 .sess.active.live-stale { box-shadow: inset 3px 0 0 var(--muted), var(--ring); }
 .proj-live { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 650; color: var(--muted); }
 .proj-live .pulse { margin-left: 3px; }
@@ -130,7 +144,6 @@ main {
 @media (max-width: 1180px) {
   .keys { display: none; }
   .top-actions .btn:not(.primary) .label { display: none; }
-  main { grid-template-columns: 310px 1fr; }
   /* The narrower project list: a project's branch is in its tooltip, its name keeps the room, and the tools take
      their place only while they show (pointed at, chosen or focused), so the time is not cut short. */
   .proj-row .git-chip .gb { display: none; }

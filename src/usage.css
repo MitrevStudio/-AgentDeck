@@ -15,6 +15,17 @@
 #sessions { container-type: inline-size; }
 @container (max-width: 760px) { .usage-chip .uc-tokens { display: none; } }
 @container (max-width: 440px) { .usage-chip { display: none; } }
+/* The context the next reply re-reads: green while the cache is warm, yellow once cold, red when cold and large. */
+.ctx-chip {
+  flex: none; height: 22px; display: inline-block; line-height: 20px; padding: 0 8px;
+  border-radius: var(--r-pill); border: 1px solid transparent;
+  font-size: 11.5px; font-weight: 550; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.ctx-chip.warm { color: var(--busy); background: var(--busy-bg); }
+.ctx-chip.cold { color: var(--wait); background: var(--wait-bg); }
+.ctx-chip.large { color: var(--danger); background: var(--danger-bg); border-color: var(--danger-line); }
+.ctx-chip.empty { color: var(--faint); border-color: var(--line); }
+@container (max-width: 440px) { .sess-foot .ctx-chip { display: none; } }
 /* Right-aligned in a column of its own, so the live pills before it line up from row to row. */
 .rusage { flex: none; min-width: 52px; text-align: right; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .dusage { margin-left: 8px; font-size: 12.5px; font-weight: 550; color: var(--muted); white-space: nowrap; }

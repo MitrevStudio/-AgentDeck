@@ -8,7 +8,8 @@
 const prices = require("./usage-prices");
 
 const K = 0, TIME = 1, MODEL = 2, IN = 3, OUT = 4, W5 = 5, W1 = 6, READ = 7, FLAGS = 8, REPORTED = 9;
-const FAST = 1, GEO_US = 2;
+const FAST = 1, GEO_US = 2, SIDE = 4; // SIDE: a subagent's reply, not the session's own conversation
+const CACHE_5M = 5 * 60 * 1000, CACHE_1H = 60 * 60 * 1000;
 const n = v => (Number.isFinite(v) && v > 0 ? v : 0);
 
 // Complete lines only: a line still being written stays for the next pass. Calls fn(line) for each line containing
@@ -58,7 +59,7 @@ function claudeRecord(x) {
   const w5 = Math.max(n(u.cache_creation?.ephemeral_5m_input_tokens), written - w1);
   const rec = [m.id && x.requestId ? `${m.id}:${x.requestId}` : m.id || x.uuid || "", Date.parse(x.timestamp) || 0,
     String(m.model || ""), n(u.input_tokens), n(u.output_tokens), w5, w1, n(u.cache_read_input_tokens),
-    (u.speed === "fast" ? FAST : 0) | (u.inference_geo === "us" ? GEO_US : 0), 0];
+    (u.speed === "fast" ? FAST : 0) | (u.inference_geo === "us" ? GEO_US : 0) | (x.isSidechain ? SIDE : 0), 0];
   return rec[K] && rec[IN] + rec[OUT] + rec[W5] + rec[W1] + rec[READ] > 0 ? rec : null;
 }
 // state: { msgs: Map, cwd } - updated in place; returns the bytes consumed.
@@ -123,6 +124,33 @@ function localDay(ms) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+// What the session's next reply re-reads - its own last reply's prompt, cache and answer - and until when the cache
+// it left stays warm: an hour when its latest cache write went to the 1-hour cache, five minutes otherwise (a reply
+// that only read the cache keeps what the write before it chose).
+function updateContext(contexts, session, rec) {
+  if (rec[FLAGS] & SIDE) {
+    return;
+  }
+  let c = contexts.get(session);
+  if (!c) {
+    contexts.set(session, c = { tokens: 0, at: 0, oneHour: false, writtenAt: 0 });
+  }
+  if (rec[W5] + rec[W1] > 0 && rec[TIME] >= c.writtenAt) {
+    c.writtenAt = rec[TIME];
+    c.oneHour = rec[W1] > 0;
+  }
+  if (rec[TIME] >= c.at) {
+    c.at = rec[TIME];
+    c.tokens = rec[IN] + rec[OUT] + rec[W5] + rec[W1] + rec[READ];
+  }
+}
+function getContextSummary(c) {
+  if (!c) {
+    return null;
+  }
+  return { tokens: c.tokens, at: c.at, warmUntil: c.at + (c.oneHour ? CACHE_1H : CACHE_5M) };
+}
+
 // sources: [{ key: "Claude:<id>", cwd, title, msgs: iterable of records }], in priority order - a record seen again
 // later (a copied reply) only completes the first one. Returns the summary the windows receive.
 function aggregate(sources) {
@@ -136,7 +164,7 @@ function aggregate(sources) {
       owner.set(copy, src.key);
     }
   }
-  const sessions = [], sIndex = new Map(), models = [], mIndex = new Map(), rows = new Map();
+  const sessions = [], sIndex = new Map(), models = [], mIndex = new Map(), rows = new Map(), contexts = new Map();
   for (const src of sources) {
     if (sIndex.has(src.key)) { const s = sessions[sIndex.get(src.key)]; s.cwd ||= src.cwd || ""; s.title ||= src.title || ""; continue; }
     sIndex.set(src.key, sessions.length);
@@ -153,13 +181,14 @@ function aggregate(sources) {
     const usd = recordCost(rec);
     if (usd != null) row[7] = (row[7] || 0) + usd;
     row[8]++;
+    updateContext(contexts, s, rec);
   }
   // Sessions without a single record are left out.
   const used = [...new Set([...rows.values()].map(r => r[0]))].sort((a, b) => a - b);
   const remap = new Map(used.map((i, j) => [i, j]));
   return {
     models,
-    sessions: used.map(i => sessions[i]),
+    sessions: used.map(i => ({ ...sessions[i], context: getContextSummary(contexts.get(i)) })),
     // [session, "YYYY-MM-DD" (local), model, input, output, cacheWrite, cacheRead, usd|null, replies]
     rows: [...rows.values()].map(r => [remap.get(r[0]), ...r.slice(1)]),
     prices: { asOf: prices.AS_OF, sources: prices.SOURCES }

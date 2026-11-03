@@ -4,15 +4,17 @@ let visible = [];
 const ui = { query: "", agent: "", selected: "", active: -1, renaming: "", loading: false, loaded: false, liveOnly: false };
 
 // Running sessions, keyed like `Claude:<id>`; refreshed every couple of seconds from the agents' own registries.
-let live = new Map(), liveSig = "", lastAutoScan = 0, pendingRender = false;
+let live = new Map(), liveSig = "", pendingRender = false;
 const liveOf = s => live.get(sessionKey(s));
-function livePill(s) {
-  const l = liveOf(s);
+function livePill(l, loading) {
+  if (loading) {
+    return getLoadingPill();
+  }
   if (!l) return "";
-  const kind = l.status === "busy" ? "busy" : l.status === "idle" ? "idle" : "other";
+  const kind = getLiveKind(l);
   const label = kind === "other" ? esc(l.status) : esc(t(`live.label.${kind}`));
-  return `<span class="live ${kind} ${isStale(l) ? "stale" : ""}" data-live="${esc(sessionKey(s))}" title="${esc(t(`live.hint.${kind}`))} · PID ${l.pid}">
-    <span class="${kind === "busy" ? "spinner" : "pulse"}"></span>${label}<span class="live-t">${esc(liveText(l))}</span></span>`;
+  return `<span class="live ${kind} ${isStale(l) ? "stale" : ""}" data-live="${esc(sessionKey(l))}" title="${esc(getLiveHint(l))} · PID ${l.pid}">
+    <span class="${kind === "busy" ? "spinner" : kind === "waiting" ? "pulse attn" : "pulse"}"></span>${label}<span class="live-t">${esc(liveText(l))}</span></span>`;
 }
 
 function prepare() {
@@ -20,9 +22,36 @@ function prepare() {
   if (ui.selected && !data.projects.some(p => p.n === ui.selected)) ui.selected = "";
 }
 
+// Whole conversations too, from main's full-text index (as in the edge menu): a session whose text matches joins the
+// hits even when its title does not. Words under three letters are not searched there.
+const TEXT_SEARCH_DELAY_MS = 220;
+const textSearch = { q: "", keys: new Set() };
+let textSearchTimer = 0, textSearchTicket = 0;
+function searchConversations(value) {
+  clearTimeout(textSearchTimer);
+  const v = value.trim();
+  if (!v.split(/\s+/).some(w => [...w].length >= 3)) {
+    textSearch.q = "";
+    textSearch.keys = new Set();
+    return;
+  }
+  const ticket = ++textSearchTicket;
+  textSearchTimer = setTimeout(async () => {
+    let hits = [];
+    try { hits = await window.manager.searchText(v); } catch {}
+    if (ticket !== textSearchTicket || ui.query.trim() !== v) return;
+    textSearch.q = v;
+    textSearch.keys = new Set(hits.map(h => h.key));
+    render();
+  }, TEXT_SEARCH_DELAY_MS);
+}
+function isTextHit(s) {
+  return textSearch.q !== "" && textSearch.q === ui.query.trim() && textSearch.keys.has(sessionKey(s));
+}
+
 function compute() {
   const toks = tokenize(ui.query);
-  const hits = toks.length ? data.sessions.filter(s => matches(s.hay, toks)) : data.sessions;
+  const hits = toks.length ? data.sessions.filter(s => matches(s.hay, toks) || isTextHit(s)) : data.sessions;
   const hitSet = new Set(hits);
   const projects = data.projects
     .map(p => ({ p, count: toks.length ? p.sessions.filter(s => hitSet.has(s)).length : p.sessions.length }))
@@ -31,10 +60,9 @@ function compute() {
   const scoped = sel ? hits.filter(s => inProject(s, sel)) : hits;
   const agentCounts = Object.fromEntries(AGENTS.map(a => [a, scoped.filter(s => s.agent === a).length]));
   const byAgent = ui.agent ? scoped.filter(s => s.agent === ui.agent) : scoped;
-  const liveCounts = { busy: 0, idle: 0 };
-  for (const s of byAgent) { const l = liveOf(s); if (l) liveCounts[l.status === "busy" ? "busy" : "idle"]++; }
-  // Running sessions go first (working, then stalled, then waiting for input); the rest keep their date order.
-  const running = byAgent.filter(liveOf).sort((a, b) => liveRank(liveOf(a)) - liveRank(liveOf(b)) || lastSign(liveOf(b)) - lastSign(liveOf(a)));
+  const liveCounts = countLiveGroups(byAgent.map(liveOf).filter(Boolean));
+  // Running sessions go first (blocked on the user, working, stalled, waiting for input); the rest keep their date order.
+  const running = byAgent.filter(liveOf).sort((a, b) => getLiveRank(liveOf(a)) - getLiveRank(liveOf(b)) || lastSign(liveOf(b)) - lastSign(liveOf(a)));
   const sessions = ui.liveOnly ? running : [...running, ...byAgent.filter(s => !liveOf(s))];
   return { toks, hits, projects, sel, scoped, agentCounts, liveCounts, sessions };
 }
@@ -42,6 +70,7 @@ function compute() {
 // ---------- rendering ----------
 function render({ resetScroll = false } = {}) {
   pendingRender = false;
+  removeEndedLaunches(key => live.get(key));
   const v = compute();
   visible = v.sessions;
   if (ui.active >= visible.length) ui.active = -1;
@@ -86,17 +115,22 @@ function renderProjects(v) {
 function projectLive(p) {
   const states = p.sessions.map(liveOf).filter(Boolean);
   if (!states.length) return "";
-  const busy = states.filter(l => l.status === "busy").length, idle = states.length - busy;
-  const title = [busy && tn("live.count.busy", busy), idle && tn("live.count.idle", idle)].filter(Boolean).join(", ");
-  return `<span class="proj-live" title="${esc(title)}">${busy ? `<span class="spinner"></span>${busy}` : ""}${idle ? `<span class="pulse"></span>${idle}` : ""}</span>`;
+  const { busy, waiting, idle } = countLiveGroups(states);
+  const title = [waiting && tn("live.count.waiting", waiting), busy && tn("live.count.busy", busy), idle && tn("live.count.idle", idle)].filter(Boolean).join(", ");
+  return `<span class="proj-live" title="${esc(title)}">${waiting ? `<span class="pulse attn"></span>${waiting}` : ""}${busy ? `<span class="spinner"></span>${busy}` : ""}${idle ? `<span class="pulse"></span>${idle}` : ""}</span>`;
 }
 
 function renderLiveFilter(v) {
-  const { busy, idle } = v.liveCounts;
-  document.title = busy ? `(${busy}) ${t("app.name")}` : t("app.name");
-  $("liveFilter").innerHTML = busy || idle || ui.liveOnly
+  const { busy, waiting, idle } = v.liveCounts;
+  document.title = waiting ? `(${waiting}!) ${t("app.name")}` : busy ? `(${busy}) ${t("app.name")}` : t("app.name");
+  const parts = [
+    waiting && `<span class="pulse attn"></span>${esc(tn("live.count.waiting", waiting))}`,
+    busy && `<span class="spinner"></span>${esc(tn("live.count.busy", busy))}`,
+    idle && `<span class="pulse"></span>${esc(tn("live.count.idle", idle))}`
+  ].filter(Boolean);
+  $("liveFilter").innerHTML = parts.length || ui.liveOnly
     ? `<button class="live-filter ${ui.liveOnly ? "on" : ""}" data-action="live-only" title="${esc(t(ui.liveOnly ? "manager.live.showAll" : "manager.live.showOpen"))}">
-        ${busy ? `<span class="spinner"></span>${esc(tn("live.count.busy", busy))}` : ""}${busy && idle ? '<span class="sep"></span>' : ""}${idle ? `<span class="pulse"></span>${esc(tn("live.count.idle", idle))}` : ""}${!busy && !idle ? esc(t("manager.live.noneActive")) : ""}
+        ${parts.length ? parts.join('<span class="sep"></span>') : esc(t("manager.live.noneActive"))}
       </button>`
     : `<span class="live-none">${esc(t("manager.live.none"))}</span>`;
 }
@@ -134,25 +168,25 @@ function sessionHtml(s, i, toks) {
     ? `<div class="dir">${icon("folder")}${pathHtml(s.cwd, toks)}${gitChip(s.cwd)}<button class="icon-btn" data-action="copy" data-path="${esc(s.cwd)}" title="${esc(t("action.copyPath"))}">${icon("copy")}</button></div>`
     : `<div class="dir unknown">${icon("alert")}${esc(t("manager.session.noDir"))}</div>`;
   const l = liveOf(s);
-  const liveCls = l ? `live-${l.status === "busy" ? (isStale(l) ? "stale" : "busy") : "idle"}` : "";
-  // A running session: its terminal is brought up; a second instance stays possible, but quieter. The secondary
-  // actions' labels (.bl) give way to their icon and tooltip in a narrow panel (styles.css).
-  const resumeBtn = l
+  const loading = isLoading(sessionKey(s), l);
+  const liveCls = loading ? "live-loading" : l ? `live-${getLiveGroup(l) === "busy" && isStale(l) ? "stale" : getLiveGroup(l)}` : "";
+  // A running session: its terminal is brought up, or moved into a tab; a past one is resumed or continued fresh
+  // (preview-ui.js). The secondary actions' labels (.bl) give way to their icon and tooltip in a narrow panel.
+  const runningBtns = l
     ? `<button class="btn sm primary" data-action="show-terminal" title="${esc(t("term.showTitle", { pid: l.pid }))}">${icon("raise")}${esc(t("term.show"))}</button>
-      <button class="btn sm ghost" data-action="resume" title="${esc(t("manager.session.openAgainTitle", { pid: l.pid }))}" aria-label="${esc(t("action.openAgain"))}">${icon("play")}<span class="bl">${esc(t("action.openAgain"))}</span></button>`
-    : `<button class="btn sm primary" data-action="resume" ${s.cwd ? "" : "disabled"}>${icon("play")}${esc(t("action.resume"))}</button>`;
+      ${isMoveHereOffered(s) ? `<button class="btn sm" data-action="move-here" title="${esc(t("term.moveHereTitle"))}">${icon("download")}<span class="bl">${esc(t("term.moveHere"))}</span></button>` : ""}`
+    : "";
   return `<article class="card sess ${liveCls} ${i === ui.active ? "active" : ""}" data-i="${i}">
     <div class="sess-head"><span class="agent ${s.agent.toLowerCase()}">${esc(s.agent)}</span>
       <h3 class="sess-title">${hl(s.title, toks)}</h3>
-      ${livePill(s)}
+      ${livePill(l, loading)}
       <span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span></div>
-    ${s.prompt ? `<p class="sess-prompt" title="${esc(s.prompt)}">${hl(s.prompt, toks)}</p>` : ""}
+    <div class="sid" title="${esc(t("manager.session.id"))}">${hl(s.id, toks)}</div>
+    ${s.recap ? `<p class="sess-recap" title="${esc(s.recap)}"><span class="recap-label">${esc(t("manager.session.recap"))}</span>${hl(s.recap, toks)}</p>` : ""}
     ${dir}
-    <div class="sess-foot"><span class="sid" title="${esc(t("manager.session.id"))}">${hl(s.id, toks)}</span>
-      ${usageChip(s)}
-      ${resumeBtn}
-      ${s.cwd ? `<button class="btn sm" data-action="terminal" data-path="${esc(s.cwd)}" title="${esc(t("action.terminalHere"))}" aria-label="${esc(t("action.terminal"))}">${icon("terminal")}<span class="bl">${esc(t("action.terminal"))}</span></button>
-      <button class="btn sm" data-action="explorer" data-path="${esc(s.cwd)}" title="${esc(t("action.explorerTitle"))}" aria-label="${esc(t("action.explorer"))}">${icon("open")}<span class="bl">${esc(t("action.explorer"))}</span></button>` : ""}
+    <div class="sess-foot">${getContextChip(s)}${usageChip(s)}<div class="grow"></div>
+      ${runningBtns}
+      ${l ? "" : getSessionActions(s)}
     </div></article>`;
 }
 
@@ -178,10 +212,19 @@ function toast(msg, isError = false) {
 }
 const setStatus = s => { $("status").textContent = s; };
 
+function showSummary() {
+  const byAgent = AGENTS.map(a => [a, data.sessions.filter(s => s.agent === a).length]).filter(([, n]) => n).map(([a, n]) => `${I18N.formatNumber(n)} ${a}`);
+  setStatus(t("manager.status.summary", {
+    sessions: tn("manager.status.sessions", data.sessions.length), agents: byAgent.join(" · ") || t("common.none"),
+    projects: tn("manager.status.projects", data.projects.length), time: I18N.formatTime(Date.now())
+  }));
+}
+
 async function load() {
   if (ui.loading) return;
   ui.loading = true;
-  $("refresh").classList.add("spin"); $("refresh").disabled = true;
+  // Refresh is hidden: main.js scans by itself (FULL_SCAN_MS); F5 still scans. To bring the button back, uncomment it in index.html, styles.css and renderer.js.
+  // $("refresh").classList.add("spin"); $("refresh").disabled = true;
   setStatus(t("manager.status.scanning"));
   if (!ui.loaded) render();
   try {
@@ -191,17 +234,13 @@ async function load() {
     ui.loaded = true;
     prepare();
     render();
-    const byAgent = AGENTS.map(a => [a, data.sessions.filter(s => s.agent === a).length]).filter(([, n]) => n).map(([a, n]) => `${I18N.formatNumber(n)} ${a}`);
-    setStatus(t("manager.status.summary", {
-      sessions: tn("manager.status.sessions", data.sessions.length), agents: byAgent.join(" · ") || t("common.none"),
-      projects: tn("manager.status.projects", data.projects.length), time: I18N.formatTime(Date.now())
-    }));
+    showSummary();
   } catch (e) {
     setStatus(t("manager.status.scanFailed", { error: e.message }));
     toast(e.message, true);
   } finally {
     ui.loading = false;
-    $("refresh").classList.remove("spin"); $("refresh").disabled = false;
+    // $("refresh").classList.remove("spin"); $("refresh").disabled = false;
   }
 }
 
@@ -222,12 +261,7 @@ async function pollLive() {
   let list;
   try { list = await window.manager.getLive(); } catch { return; }
   if (!setLive(list)) return updateLiveTexts();
-  // A session started after the last scan: rescan for its title, but not more often than every 30 s.
-  const known = new Set((raw.sessions || []).map(sessionKey));
-  if (list.some(l => !known.has(sessionKey(l))) && !ui.loading && Date.now() - lastAutoScan > 30000) {
-    lastAutoScan = Date.now();
-    load();
-  }
+  // A session started after the last scan shows as "new" until its transcript appears: main rescans then by itself.
   prepare();
   // Re-rendering would throw away a half-typed project name.
   if (ui.renaming) pendingRender = true; else render();
@@ -261,6 +295,7 @@ function setActive(i) {
 }
 
 async function resume(s) {
+  if (showSessionTab(s)) return;
   if (!s?.cwd) return toast(t("errors.sessionNoDir"), true);
   const l = liveOf(s);
   if (l && !confirm(t("manager.confirm.openAgain", { pid: l.pid }))) return;
@@ -268,7 +303,7 @@ async function resume(s) {
   toast(t("manager.toast.resuming", { agent: s.agent, cwd: s.cwd }));
 }
 async function showTerminal(s) {
-  if (!s) return;
+  if (!s || showSessionTab(s)) return;
   const r = await window.manager.focusTerminal(s.agent, s.id);
   const note = focusNote(r);
   if (note) toast(note, !r.ok);
@@ -291,7 +326,9 @@ async function runAction(action, btn) {
   const path = btn.dataset.path || btn.closest("[data-path]")?.dataset.path;
   switch (action) {
     case "resume": return resume(visible[Number(btn.closest(".sess").dataset.i)]);
+    case "fresh": await continueFresh(visible[Number(btn.closest(".sess").dataset.i)]); return toast(t("preview.fresh.started"));
     case "show-terminal": return showTerminal(visible[Number(btn.closest(".sess").dataset.i)]);
+    case "move-here": return moveSessionHere(visible[Number(btn.closest(".sess").dataset.i)]);
     case "terminal": await window.manager.launchFolder(path); return toast(t("manager.toast.terminal", { path }));
     case "explorer": { const err = await window.manager.openPath(path); if (err) throw new Error(err); return; }
     case "copy": await window.manager.copyText(path); return toast(t("toast.copied", { path }));
@@ -316,13 +353,14 @@ async function onAction(e) {
 function setQuery(q) {
   ui.query = q; ui.active = -1;
   if ($("search").value !== q) $("search").value = q;
+  searchConversations(q);
   render({ resetScroll: true });
 }
 
 // ---------- events ----------
 $("search").addEventListener("input", e => setQuery(e.target.value));
 $("clearSearch").addEventListener("click", () => { setQuery(""); $("search").focus(); });
-$("refresh").addEventListener("click", load);
+// $("refresh").addEventListener("click", load);
 for (const [id, open] of [["voiceHistory", window.manager.openVoiceHistory], ["settings", window.manager.openSettings]]) {
   $(id).addEventListener("click", async () => { if (!(await open())) toast(t("manager.unavailable"), true); });
 }
@@ -364,6 +402,8 @@ $("sessions").addEventListener("dblclick", e => {
 });
 
 document.addEventListener("keydown", e => {
+  // Keys typed into a terminal tab belong to what runs there (Ctrl+K included).
+  if (e.target.closest?.(".term-panes")) return;
   const inSearch = e.target === $("search");
   const typing = !inSearch && e.target.matches?.("input, textarea");
   if ((e.ctrlKey && (e.key === "k" || e.key === "f")) || (e.key === "/" && !typing && !inSearch)) {
@@ -390,15 +430,72 @@ document.addEventListener("keydown", e => {
 });
 
 // A scan started elsewhere (e.g. by the edge menu) updates this window as well.
+// Main rescans by itself when transcripts change: the list, the status line and an open search follow.
+// A session just opened shows "Loading" at once (common.js keeps the launches).
+// Re-rendering would throw away a half-typed project name.
+const renderSoon = () => (ui.renaming ? (pendingRender = true) : render());
+window.manager.onLaunch(() => {
+  renderSoon();
+  setTimeout(renderSoon, LOADING_MAX_MS + 1000);
+});
 window.manager.onDataChanged(d => {
   if (!ui.loaded || ui.loading) return;
   raw = d;
   prepare();
+  showSummary();
+  if (ui.query) searchConversations(ui.query);
   if (ui.renaming) pendingRender = true; else render();
 });
 // Git branches beside projects and session folders, and a session's last messages on hover (git-ui.js, preview-ui.js).
 watchGit(() => { if (!ui.loaded) return; if (ui.renaming) pendingRender = true; else render(); });
 previewHoverCard($("sessions"), card => visible[Number(card.dataset.i)]);
+
+// ---------- projects | sessions divider: dragged, moved with the arrow keys, reset by a double-click ----------
+const PROJECTS_WIDTH_KEY = "agentdeck.projectsWidth";
+const MIN_PROJECTS_PX = 220, MIN_SESSIONS_PX = 420, SPLITTER_STEP_PX = 16;
+function getProjectsWidth(left) {
+  const main = document.querySelector("main").getBoundingClientRect();
+  const projects = left - document.querySelector("main > .panel").getBoundingClientRect().left;
+  return Math.round(Math.max(MIN_PROJECTS_PX, Math.min(projects, main.width - MIN_SESSIONS_PX)));
+}
+function setProjectsWidth(px) {
+  document.querySelector("main").style.setProperty("--projects-w", `${px}px`);
+  try {
+    localStorage.setItem(PROJECTS_WIDTH_KEY, String(px));
+  } catch {}
+}
+function resetProjectsWidth() {
+  document.querySelector("main").style.removeProperty("--projects-w");
+  try {
+    localStorage.removeItem(PROJECTS_WIDTH_KEY);
+  } catch {}
+}
+function restoreProjectsWidth() {
+  let px = 0;
+  try {
+    px = Number(localStorage.getItem(PROJECTS_WIDTH_KEY));
+  } catch {}
+  if (px > 0) {
+    document.querySelector("main").style.setProperty("--projects-w", `${px}px`);
+  }
+}
+$("splitter").addEventListener("pointerdown", e => {
+  const el = e.currentTarget;
+  const move = ev => setProjectsWidth(getProjectsWidth(ev.clientX));
+  e.preventDefault();
+  el.setPointerCapture(e.pointerId);
+  el.addEventListener("pointermove", move);
+  el.addEventListener("lostpointercapture", () => el.removeEventListener("pointermove", move), { once: true });
+});
+$("splitter").addEventListener("dblclick", resetProjectsWidth);
+$("splitter").addEventListener("keydown", e => {
+  const step = { ArrowLeft: -SPLITTER_STEP_PX, ArrowRight: SPLITTER_STEP_PX }[e.key];
+  if (step) {
+    e.preventDefault();
+    setProjectsWidth(getProjectsWidth(document.querySelector("main > .panel").getBoundingClientRect().right + step));
+  }
+});
+restoreProjectsWidth();
 
 load();
 setInterval(pollLive, 2000);

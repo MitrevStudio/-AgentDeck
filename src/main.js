@@ -3,6 +3,7 @@ const { spawn, execFile } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
+const crypto = require("node:crypto");
 const { promisify } = require("node:util");
 // Both have to be in place before anything below reads userData.
 // Tests run a second, isolated instance against a throwaway profile (the single-instance lock is per profile too).
@@ -30,6 +31,27 @@ const voiceContext = require("./voice-context").createVoiceContext({ liveSession
 const { createLimits } = require("./limits");
 const limits = createLimits({ fetch: (url, init) => network.fetch(url, init), onChange: l => broadcast("limits:changed", l) });
 const { createNotifier } = require("./notify");
+const { createTerminals } = require("./terminals");
+// AgentDeck's own terminal tabs (prefs "sessionsIn": "tabs"); their output goes to the manager window only.
+function sendToManager(channel, payload) {
+  if (managerWin && !managerWin.isDestroyed()) {
+    managerWin.webContents.send(channel, payload);
+  }
+}
+const terminals = createTerminals({
+  userDataDir: app.getPath("userData"),
+  onData: (id, data, end) => sendToManager("terminal:data", { id, data, end }),
+  onExit: (id, code) => sendToManager("terminal:exit", { id, code }),
+  onChange: tabs => sendToManager("terminals:changed", tabs)
+});
+let pendingTab = ""; // the tab to bring up once the manager window has loaded
+function getSessionContext(key) {
+  return usage.get()?.sessions.find(s => s.key === key)?.context || null;
+}
+const autopilot = require("./autopilot").createAutopilot({
+  terminals, liveSessions: (...a) => liveSessions(...a), getContext: getSessionContext, getPrefs: () => prefs.get(), t: (...a) => t(...a)
+});
+const tabLinks = require("./tab-links").createTabLinks({ terminals, liveSessions: (...a) => liveSessions(...a) });
 let notifier = null;
 const sessionPreview = require("./session-preview");
 const gitStatus = require("./git-status");
@@ -58,6 +80,22 @@ function norm(p) { return path.resolve(p).replace(/\\/g, "/").toLowerCase(); }
 function titleFromText(s) {
   return String(s || "").replace(/\s+/g, " ").trim().slice(0, 110);
 }
+const RECAP_CHARS = 220;
+// The gist of where a session ended: its last answer without markdown, cut at a sentence end where one is near.
+function getRecap(text) {
+  const plain = String(text || "")
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/[-=*_:]{3,}/g, " ")
+    .replace(/[#*_`>|]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (plain.length <= RECAP_CHARS) {
+    return plain;
+  }
+  const cut = plain.slice(0, RECAP_CHARS);
+  const end = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("! "), cut.lastIndexOf("? "));
+  return end > RECAP_CHARS / 2 ? cut.slice(0, end + 1) : `${cut.trimEnd()}…`;
+}
 function walkFiles(dir, ext, out = [], depth = 0, skipDirs = []) {
   if (depth > 8 || out.length > 12000) return out;
   let entries;
@@ -73,31 +111,126 @@ function mtime(file) { try { return fs.statSync(file).mtimeMs; } catch { return 
 // Slash-command echoes, caveats and hook output are not something the user typed as a prompt (the previews skip
 // them too).
 const { NOISE_PROMPT, contentText } = sessionPreview;
+// Claude Code transcripts only ever grow, so each is read once and then only from where the last scan stopped (a file
+// that shrank is read again from the start). What was gathered so far stays here, per file.
+const claudeReads = new Map(); // file -> { offset, cwd, prompt, aiTitle, customTitle, answerLine, recap }
+function readClaudeLine(st, line) {
+  // Only the last answer and the last recap are parsed (once per read): most lines are tool output never decoded.
+  if (line.includes('"type":"assistant"') && line.includes('"type":"text"')) st.answerLine = line;
+  if (line.includes('"subtype":"away_summary"')) st.summaryLine = line;
+  // Titles can be appended at any point (/rename, AI title refresh); everything else is only needed once.
+  const titleLine = line.includes('"custom-title"') || line.includes('"ai-title"');
+  if (!titleLine && st.cwd && st.prompt) return;
+  let x; try { x = JSON.parse(line); } catch { return; }
+  if (x.type === "custom-title" && x.customTitle) st.customTitle = x.customTitle;
+  if (x.type === "ai-title" && x.aiTitle) st.aiTitle = x.aiTitle;
+  if (!st.cwd && typeof x.cwd === "string") st.cwd = x.cwd;
+  if (!st.prompt && x.type === "user" && !x.isMeta && !x.isSidechain) {
+    const text = contentText(x.message?.content);
+    if (text.trim() && !NOISE_PROMPT.test(text)) st.prompt = titleFromText(text.replace(/<\/?[a-z][\w-]*(\s[^>]*)?>/gi, " "));
+  }
+}
+// Reads the complete lines added since the last read; a line still being written waits for the next scan.
+function readClaudeAppended(file, st, size) {
+  const fd = fs.openSync(file, "r");
+  try {
+    const buf = Buffer.alloc(size - st.offset);
+    const read = fs.readSync(fd, buf, 0, buf.length, st.offset);
+    const end = buf.lastIndexOf(10, read - 1) + 1;
+    for (const line of buf.toString("utf8", 0, end).split(/\r?\n/)) {
+      if (line) readClaudeLine(st, line);
+    }
+    st.offset += end;
+    if (st.answerLine) {
+      st.recap = getAnswerRecap(st.answerLine);
+      st.answerLine = "";
+    }
+    if (st.summaryLine) {
+      st.summary = getAwaySummary(st.summaryLine);
+      st.summaryLine = "";
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+function getStat(file) {
+  try {
+    return fs.statSync(file);
+  } catch {
+    return null;
+  }
+}
 function parseClaude(file) {
-  let raw;
-  try { raw = fs.readFileSync(file, "utf8"); } catch { return null; }
-  const id = path.basename(file, ".jsonl");
-  let cwd = "", prompt = "", aiTitle = "", customTitle = "";
-  for (const line of raw.split(/\r?\n/)) {
-    if (!line) continue;
-    // Titles can be appended at any point (/rename, AI title refresh); everything else is only needed once.
-    const titleLine = line.includes('"custom-title"') || line.includes('"ai-title"');
-    if (!titleLine && cwd && prompt) continue;
-    let x; try { x = JSON.parse(line); } catch { continue; }
-    if (x.type === "custom-title" && x.customTitle) customTitle = x.customTitle;
-    if (x.type === "ai-title" && x.aiTitle) aiTitle = x.aiTitle;
-    if (!cwd && typeof x.cwd === "string") cwd = x.cwd;
-    if (!prompt && x.type === "user" && !x.isMeta && !x.isSidechain) {
-      const text = contentText(x.message?.content);
-      if (text.trim() && !NOISE_PROMPT.test(text)) prompt = titleFromText(text.replace(/<\/?[a-z][\w-]*(\s[^>]*)?>/gi, " "));
+  const stat = getStat(file);
+  if (!stat) {
+    claudeReads.delete(file);
+    return null;
+  }
+  let st = claudeReads.get(file);
+  if (!st || stat.size < st.offset) {
+    st = { offset: 0, cwd: "", prompt: "", aiTitle: "", customTitle: "", answerLine: "", recap: "" };
+    claudeReads.set(file, st);
+  }
+  if (stat.size > st.offset) {
+    try {
+      readClaudeAppended(file, st, stat.size);
+    } catch {
+      return null;
     }
   }
-  const title = titleFromText(customTitle || aiTitle) || prompt || t("session.untitled", { agent: "Claude", id: id.slice(0, 8) });
-  return { id, agent: "Claude", cwd, title, prompt: prompt !== title ? prompt : "", updatedAt: mtime(file), file };
+  const id = path.basename(file, ".jsonl");
+  const title = titleFromText(st.customTitle || st.aiTitle) || st.prompt || t("session.untitled", { agent: "Claude", id: id.slice(0, 8) });
+  return { id, agent: "Claude", cwd: st.cwd, title, prompt: st.prompt !== title ? st.prompt : "", recap: st.summary || st.recap, updatedAt: stat.mtimeMs, file };
+}
+// Claude Code's own recap of a session ("away_summary"), without its "(disable recaps in /config)" hint.
+function getAwaySummary(line) {
+  let x;
+  try {
+    x = JSON.parse(line);
+  } catch {
+    return "";
+  }
+  return x?.isSidechain || typeof x?.content !== "string" ? "" : x.content.replace(/\s*\(disable recaps[^)]*\)\s*$/i, "").replace(/\s+/g, " ").trim();
+}
+function getAnswerRecap(line) {
+  let x;
+  try {
+    x = JSON.parse(line);
+  } catch {
+    return "";
+  }
+  return x?.isSidechain ? "" : getRecap(contentText(x?.message?.content));
+}
+// Only the head of a Codex transcript is read: the first lines hold everything the list needs.
+const CODEX_HEAD_BYTES = 256 * 1024;
+function readHead(file, bytes) {
+  const fd = fs.openSync(file, "r");
+  try {
+    const buf = Buffer.alloc(bytes);
+    const read = fs.readSync(fd, buf, 0, bytes, 0);
+    return buf.toString("utf8", 0, read);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+// Kept while the file's size and time stay the same: a rescan reads only Codex transcripts that changed.
+const codexReads = new Map(); // file -> { mtime, size, session }
+function parseCodexCached(file) {
+  const stat = getStat(file);
+  if (!stat) {
+    codexReads.delete(file);
+    return null;
+  }
+  let known = codexReads.get(file);
+  if (!known || known.mtime !== stat.mtimeMs || known.size !== stat.size) {
+    known = { mtime: stat.mtimeMs, size: stat.size, session: parseCodex(file) };
+    codexReads.set(file, known);
+  }
+  return known.session ? { ...known.session } : null;
 }
 function parseCodex(file) {
   let lines;
-  try { lines = fs.readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean); } catch { return null; }
+  try { lines = readHead(file, CODEX_HEAD_BYTES).split(/\r?\n/).filter(Boolean); } catch { return null; }
   let id = path.basename(file, ".jsonl"), cwd = "", title = "", updatedAt = 0;
   for (const line of lines.slice(0, 35)) {
     let x; try { x = JSON.parse(line); } catch { continue; }
@@ -145,10 +278,19 @@ function openCodeSession(s, cwd, projectName) {
     updatedAt: Number(s.updated || s.time?.updated || s.updatedAt || 0)
   };
 }
-async function scanSessions() {
+// OpenCode's sessions come from its CLI, which takes seconds: a rescan started by a changed transcript keeps the last
+// answer (openCode: false), the Refresh button and the first scan ask it again.
+let lastOpenCode = [];
+async function scanSessions({ openCode = true } = {}) {
+  const registry = readRegistry();
+  if (openCode) lastOpenCode = await scanOpenCode(registry);
+  const found = lastOpenCode.map(s => ({ ...s }));
+  scanTranscripts(registry, found);
+  return indexProjects(found);
+}
+async function scanOpenCode(registry) {
   const found = [];
   // OpenCode: query globally first, then use registered projects as a fallback.
-  let registry = readRegistry();
   let openCodeFound = false, openCodeInstalled = false;
   try {
     const { stdout } = await runOpenCode(["session", "list", "--format", "json", "--max-count", "300"], USER, 12000);
@@ -173,8 +315,20 @@ async function scanSessions() {
       } catch { /* project not available */ }
     }
   }
+  return found;
+}
+// Files gone since the last scan leave the read caches.
+function forgetMissing(reads, files) {
+  const present = new Set(files);
+  for (const f of reads.keys()) {
+    if (!present.has(f)) reads.delete(f);
+  }
+}
+function scanTranscripts(registry, found) {
   // Claude Code transcripts. Subagent transcripts live in `subagents/` and cannot be resumed on their own.
-  for (const f of walkFiles(CLAUDE_DIR, ".jsonl", [], 0, ["subagents"])) {
+  const claudeFiles = walkFiles(CLAUDE_DIR, ".jsonl", [], 0, ["subagents"]);
+  forgetMissing(claudeReads, claudeFiles);
+  for (const f of claudeFiles) {
     const s = parseClaude(f);
     if (s) {
       const projectFolder = path.basename(path.dirname(f));
@@ -186,16 +340,20 @@ async function scanSessions() {
     }
   }
   // Codex transcripts.
-  for (const f of walkFiles(CODEX_DIR, ".jsonl")) {
-    const s = parseCodex(f);
+  const codexFiles = walkFiles(CODEX_DIR, ".jsonl");
+  forgetMissing(codexReads, codexFiles);
+  for (const f of codexFiles) {
+    const s = parseCodexCached(f);
     if (s) {
       const p = registry.projects.find(p => s.cwd && norm(p.path) === norm(s.cwd));
       if (p) s.projectName = p.name;
       found.push(s);
     }
   }
+}
+function indexProjects(found) {
   // Auto-index projects that can be reliably resolved from local session metadata.
-  registry = readRegistry();
+  const registry = readRegistry();
   let changed = false;
   for (const s of found) {
     if (!s.cwd || !path.isAbsolute(s.cwd) || !fs.existsSync(s.cwd)) continue;
@@ -223,12 +381,44 @@ function spawnDetached(file, args, opts) {
   child.unref();
   return new Promise((resolve, reject) => { child.once("spawn", resolve); child.once("error", reject); });
 }
-async function launchTerminal(cwd, command = null) {
+// A tab of AgentDeck's own: the command reaches PowerShell encoded, so no quoting of it can break the command line.
+async function openTab(cwd, command, meta, env) {
+  const encoded = command ? Buffer.from(command, "utf16le").toString("base64") : "";
+  const commandLine = command ? `powershell.exe -NoLogo -NoExit -EncodedCommand ${encoded}` : "powershell.exe -NoLogo";
+  const id = await terminals.open({ cwd, commandLine, title: meta.title || path.basename(cwd), agent: meta.agent, sessionId: meta.sessionId, env });
+  launchLog("agentdeck tab", `cwd="${cwd}" cmd=${command ? `"${command.slice(0, 120)}"` : "-"}`);
+  showTab(id);
+}
+function showTab(id) {
+  // An open window switches to the tab now; one that is still to load asks for it when it lists the tabs.
+  if (managerWin && !managerWin.isDestroyed()) sendToManager("terminal:activate", id);
+  else pendingTab = id;
+  showManager();
+}
+// "Show terminal", a notification's click, a voice command: a session in one of AgentDeck's tabs comes up there, any
+// other in its own terminal (terminal-focus.js; same answer).
+function focusSessionAnywhere(opts) {
+  const tab = terminals.getTabs().find(x => x.agent === opts.agent && x.sessionId === opts.id && !x.exited);
+  if (!tab) return focusSession(opts);
+  showTab(tab.id);
+  return Promise.resolve({ ok: true, how: "tab", reason: "", ms: 0 });
+}
+// meta: {title, agent, sessionId} of what runs, for the tab; inTab: an AgentDeck tab whatever the setting ("Move here").
+async function launchTerminal(cwd, command = null, meta = {}, inTab = false) {
   if (!cwd || !fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) throw new Error(t("errors.folderMissing"));
+  if (inTab || prefs.get().sessionsIn === "tabs") {
+    const proxy = await network.terminalProxy().catch(() => null);
+    return openTab(cwd, command, meta, terminalEnv(process.env, proxy));
+  }
   // Pass fixed argument arrays to wt.exe. No user-supplied shell command is evaluated. "-w new" gives the session a
   // window of its own (Settings -> General); "-w 0" adds a tab to the last used window.
   const newWindow = prefs.get().newWindow;
   const args = ["-w", newWindow ? "new" : "0", "new-tab", "-d", cwd];
+  // A resumed session's tab keeps its title: PowerShell would name it after the command ("claude"). wt.exe splits
+  // its command line at ";".
+  if (meta.sessionId) {
+    args.push("--title", meta.title.replace(/;/g, ","), "--suppressApplicationTitle");
+  }
   if (command) {
     args.push("powershell.exe", "-NoExit", "-Command", command);
   }
@@ -270,17 +460,75 @@ const NEW_SESSION = { Claude: "claude", OpenCode: "opencode", Codex: "codex" };
 const isAgent = agent => typeof agent === "string" && Object.hasOwn(NEW_SESSION, agent);
 function checkAgent(agent) { if (!isAgent(agent)) throw new Error(t("errors.unknownAgent")); }
 function checkSessionId(id) { if (typeof id !== "string" || !SESSION_ID.test(id)) throw new Error(t("errors.invalidSession")); }
-function launchAgent(agent, id, cwd) {
+function getSessionTitle(agent, id) {
+  return cache?.sessions.find(s => s.agent === agent && s.id === id)?.title || `${agent} ${id.slice(0, 8)}`;
+}
+function checkResumable(agent, id, cwd) {
   checkAgent(agent);
   checkSessionId(id);
   if (!cwd || !fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory())
     throw new Error(t("errors.sessionFolderUnknown"));
+  // Claude Code may have dropped the transcript since the scan; resuming it would only print "No conversation found".
+  if (agent === "Claude" && !findTranscript(id)) {
+    scan().catch(err => console.error("Scan failed:", err.message));
+    throw new Error(t("errors.conversationMissing"));
+  }
+}
+async function launchAgent(agent, id, cwd, inTab = false) {
+  checkResumable(agent, id, cwd);
   const cmd = agentCommand(agent, id).map(psQuote).join(" ");
-  return launchTerminal(cwd, "& " + cmd);
+  await launchTerminal(cwd, "& " + cmd, { title: getSessionTitle(agent, id), agent, sessionId: id }, inTab);
+  // Only Claude reports when it is ready (live.js), which ends the windows' "Loading".
+  if (agent === "Claude") {
+    broadcast("launch:started", `${agent}:${id}`);
+  }
+}
+// Continue fresh: a new Claude session that starts with the earlier one's handoff in its system prompt (Claude Code
+// keeps it for later resumes too), so nothing is pasted or sent.
+const HANDOFFS_DIR = path.join(app.getPath("userData"), "handoffs");
+const HANDOFF_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
+async function launchFresh(cwd, handoff) {
+  promptLaunch.sweep(HANDOFFS_DIR, { maxAge: HANDOFF_KEEP_MS });
+  fs.mkdirSync(HANDOFFS_DIR, { recursive: true });
+  const file = path.join(HANDOFFS_DIR, `prompt-${crypto.randomBytes(8).toString("hex")}.txt`);
+  fs.writeFileSync(file, handoff);
+  const cmd = [NEW_SESSION.Claude, "--append-system-prompt-file", file].map(psQuote).join(" ");
+  try {
+    await launchTerminal(cwd, "& " + cmd, { title: `Claude · ${path.basename(cwd)}`, agent: "Claude" });
+  } catch (e) {
+    promptLaunch.remove(file);
+    throw e;
+  }
 }
 function launchNew(agent, cwd) {
   checkAgent(agent);
-  return launchTerminal(cwd, "& " + psQuote(NEW_SESSION[agent]));
+  return launchTerminal(cwd, "& " + psQuote(NEW_SESSION[agent]), { title: `${agent} · ${path.basename(cwd)}`, agent });
+}
+// "Move here": a session running in another terminal is stopped there (its terminal modes reset) and resumed in an
+// AgentDeck tab. Not while it works - that would cut the turn off.
+const STOP_SCRIPT = path.join(__dirname, "stop-session.ps1");
+// entry: the session's live registry entry; its procStart tells a recycled pid from the session's own process.
+function stopExternalSession(entry) {
+  const start = /^\d+$/.test(entry.procStart) ? entry.procStart : "";
+  const script = `$ClaudePid = ${Number(entry.pid)}\n$ClaudeStart = '${start}'\n$AgentDeckPid = ${process.pid}\n${fs.readFileSync(STOP_SCRIPT, "utf8")}`;
+  const encoded = Buffer.from(script, "utf16le").toString("base64");
+  return new Promise(resolve => {
+    execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded], { windowsHide: true, timeout: 20000 }, err => resolve(err ? err.code ?? 1 : 0));
+  });
+}
+async function moveToTab(agent, id) {
+  checkAgent(agent);
+  checkSessionId(id);
+  const entry = (await liveSessions()).find(l => l.agent === agent && l.id === id);
+  if (!entry) throw new Error(t("errors.moveNotRunning"));
+  if (entry.status === "busy") throw new Error(t("errors.moveBusy"));
+  // Checked before the session is stopped: one that cannot be resumed (no prompt sent yet) keeps running where it is.
+  if (agent === "Claude" && !findTranscript(id)) throw new Error(t("errors.moveNoConversation"));
+  checkResumable(agent, id, entry.cwd);
+  const code = await stopExternalSession(entry);
+  if (code === 4) throw new Error(t("errors.moveHostsAgentDeck"));
+  if (code !== 0 && code !== 3) throw new Error(t("errors.moveStopFailed"));
+  await launchAgent(agent, id, entry.cwd, true);
 }
 // A new session that starts on a prompt (voice commands): the prompt travels in a file, never on a command line. The
 // terminal deletes the file once read; one whose terminal never started goes at once.
@@ -304,22 +552,85 @@ const agentsReady = Promise.all(Object.entries(NEW_SESSION).map(([agent, exe]) =
 // ---------- shared data ----------
 // The edge menu must open instantly, so the last scan is kept and pushed to the two windows that list sessions
 // when it changes (the voice windows have no use for it).
-let cache = null, scanning = null;
+let cache = null, scanning = null, scanningFull = false;
 function broadcast(channel, payload) {
   for (const w of [managerWin, bar?.win]) if (w && !w.isDestroyed()) w.webContents.send(channel, payload);
 }
-function scan() {
-  scanning ??= scanSessions().then(async sessions => {
-    // Scan first: it auto-indexes projects into the registry, which must be read afterwards.
-    cache = { registry: readRegistry(), sessions, agents: await agentsReady, at: Date.now() };
+// full: OpenCode's CLI and the git status are asked too (first scan, Refresh); a rescan after changed transcripts
+// skips both. A full scan asked for while a lighter one runs follows it.
+// A light rescan refreshes the full-text index at most this often: the search worker re-reads grown transcripts.
+const LIGHT_INDEX_MS = 60000;
+let lastSessionsSig = "", lastKeysSig = "", lastIndexAt = 0;
+function updateCache(sessions, registry, agents, full) {
+  const sig = JSON.stringify(sessions);
+  const changed = sig !== lastSessionsSig;
+  lastSessionsSig = sig;
+  if (!changed && !full && cache) return;
+  cache = { registry, sessions, agents, at: Date.now() };
+  // New or removed sessions are indexed at once; text added to known ones waits for the next index.
+  const keysSig = sessions.map(s => `${s.agent}:${s.id}`).join(",");
+  const newKeys = keysSig !== lastKeysSig;
+  lastKeysSig = keysSig;
+  if (full || newKeys || Date.now() - lastIndexAt >= LIGHT_INDEX_MS) {
+    lastIndexAt = Date.now();
     fullText.index(sessions);
-    broadcast("data:changed", cache);
+  }
+  broadcast("data:changed", cache);
+}
+function scan({ full = true } = {}) {
+  if (scanning && full && !scanningFull) return scanning.catch(() => {}).then(() => scan({ full }));
+  if (scanning) return scanning;
+  if (full) watchTranscripts();
+  scanningFull = full;
+  scanning = scanSessions({ openCode: full }).then(async sessions => {
+    // Scan first: it auto-indexes projects into the registry, which must be read afterwards.
+    updateCache(sessions, readRegistry(), await agentsReady, full);
     // Transcripts may have grown too, and there may be new folders: their results are broadcast on their own.
     usage.refresh().catch(err => console.error("Usage scan failed:", err.message));
-    gitStatus.refresh().catch(err => console.error("Git status failed:", err.message));
+    if (full) gitStatus.refresh().catch(err => console.error("Git status failed:", err.message));
     return cache;
-  }).finally(() => { scanning = null; });
+  }).finally(() => {
+    scanning = null;
+  });
   return scanning;
+}
+// Sessions that go on, start or end change their transcripts: the list, the search index and the figures follow by
+// themselves - at most every RESCAN_MS while transcripts keep changing, so a working session costs one light rescan
+// (only the lines it added are read) every few seconds.
+const RESCAN_MS = 5000;
+let rescanTimer = null;
+function scheduleRescan() {
+  if (rescanTimer) return;
+  rescanTimer = setTimeout(() => {
+    rescanTimer = null;
+    scan({ full: false }).catch(err => console.error("Rescan failed:", err.message));
+  }, RESCAN_MS);
+}
+// Every full scan watches what is not watched yet: a folder an agent creates later (installed or first run after
+// AgentDeck started), or one whose watch failed.
+const watchers = new Map(); // folder -> fs.FSWatcher
+function watchTranscripts() {
+  for (const dir of [CLAUDE_DIR, CODEX_DIR]) {
+    if (watchers.has(dir)) continue;
+    try {
+      const watcher = fs.watch(dir, { recursive: true }, (_event, name) => {
+        if (name && String(name).endsWith(".jsonl")) scheduleRescan();
+      });
+      watcher.on("error", err => {
+        console.error(`Watching ${dir} failed:`, err.message);
+        watcher.close();
+        watchers.delete(dir);
+      });
+      watchers.set(dir, watcher);
+    } catch (err) {
+      if (err.code !== "ENOENT") console.error(`Could not watch ${dir}:`, err.message);
+    }
+  }
+}
+// OpenCode sessions and git branches are not watched.
+const FULL_SCAN_MS = 5 * 60 * 1000;
+function scanPeriodically() {
+  setInterval(() => scan().catch(err => console.error("Full scan failed:", err.message)), FULL_SCAN_MS);
 }
 function registryChanged(registry) {
   if (cache) { cache = { ...cache, registry }; broadcast("data:changed", cache); }
@@ -397,9 +708,17 @@ function buildTrayMenu() {
     { type: "separator" },
     ...sep(v.items),
     { label: t("tray.edgeHandle"), type: "checkbox", checked: p.edgeHandle, click: item => prefs.set({ edgeHandle: item.checked }) },
-    { label: t("notify.toggle"), type: "checkbox", checked: notifier ? notifier.enabled() : true, enabled: Boolean(notifier), click: item => notifier?.setEnabled(item.checked) },
+    { label: t("notify.toggle"), type: "checkbox", checked: prefs.get().notify !== false, click: item => prefs.set({ notify: item.checked }) },
     { label: t("tray.language"), submenu: radio("language", Object.keys(LANGUAGES), l => LANGUAGES[l]) },
     { label: t("tray.theme"), submenu: radio("theme", prefs.THEMES, th => t(`theme.${th}`)) },
+    { label: t("tray.sessionsIn"), submenu: radio("sessionsIn", prefs.SESSIONS_IN, m => t(`tray.sessionsIn.${m}`)) },
+    {
+      label: t("tray.autoCompact"), submenu: [
+        { label: t("tray.autoCompact.on"), type: "checkbox", checked: p.autoCompact, click: item => prefs.set({ autoCompact: item.checked }) },
+        { type: "separator" },
+        ...radio("autoCompactTokens", prefs.AUTO_COMPACT_TOKENS, n => t("tray.autoCompact.from", { n: `${n / 1000}k` }))
+      ]
+    },
     { label: t("tray.settings"), enabled: Boolean(voice), click: () => voice?.openSettings() },
     updateMenuItem(),
     { type: "separator" },
@@ -490,10 +809,32 @@ function registerIpc() {
   handle("launch:folder", async p => { await launchTerminal(text(p)); return true; });
   handle("launch:agent", async (agent, id, cwd) => { await launchAgent(text(agent), text(id), text(cwd)); return true; });
   handle("launch:new", async (agent, cwd) => { await launchNew(text(agent), text(cwd)); return true; });
+  handle("launch:fresh", async (cwd, handoff) => {
+    await launchFresh(text(cwd), text(handoff, 20000));
+    return true;
+  });
   // Folders only: shell.openPath() on a file runs it.
   handle("open:path", p => (isDir(p) ? shell.openPath(p) : t("errors.folderMissing")));
   handle("clipboard:write", async value => { await clipboard.writeText(text(value, 1_000_000)); return true; });
   handle("live:get", () => liveSessions());
+  // AgentDeck's own terminal tabs. Keystrokes and sizes come as plain messages (many, no answer needed).
+  handle("terminals:list", () => {
+    const activate = pendingTab;
+    pendingTab = "";
+    return { tabs: terminals.getTabs(), activate };
+  });
+  handle("terminal:attach", id => terminals.attach(text(id, 64)));
+  handle("terminal:close", id => terminals.close(text(id, 64)));
+  handle("terminal:move", async (agent, id) => {
+    await moveToTab(text(agent), text(id));
+    return true;
+  });
+  ipcMain.on("terminal:input", (e, id, data) => {
+    if (trusted(e) && typeof data === "string" && data.length <= 1_000_000) terminals.input(id, data);
+  });
+  ipcMain.on("terminal:resize", (e, id, cols, rows) => {
+    if (trusted(e)) terminals.resize(id, Number(cols), Number(rows));
+  });
   // Tokens and API-equivalent cost (usage.js): the last result at once, or a fresh pass over the transcripts.
   handle("usage:get", () => usage.get());
   // The shortcuts as set now: the menu's hotkey and the voice ones (labels such as "Ctrl + Shift + Space").
@@ -559,7 +900,7 @@ function registerIpc() {
   handle("terminal:focus", (agent, id) => {
     if (!SESSION_ID.test(text(id))) throw new Error(t("errors.invalidSession"));
     notifier?.seen(agent, id);
-    return focusSession({ agent: text(agent), id });
+    return focusSessionAnywhere({ agent: text(agent), id });
   });
   // A path typed into the menu's search: offer a new session there if it is an existing directory.
   handle("fs:is-dir", p => (isDir(p) ? path.resolve(p) : ""));
@@ -574,6 +915,17 @@ function registerIpc() {
 
 // ---------- preferences ----------
 // A new language reloads every page (main's own strings follow at once); a new theme only swaps the page's tokens.
+// Before Settings had it, the notification switch was kept in notify.json.
+function carryOverNotify() {
+  if (prefs.get().notify !== null) {
+    return;
+  }
+  let on = true;
+  try {
+    on = JSON.parse(fs.readFileSync(path.join(app.getPath("userData"), "notify.json"), "utf8")).enabled !== false;
+  } catch {}
+  prefs.set({ notify: on });
+}
 function onPrefsChanged(p, keys) {
   for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send("prefs:changed", p);
   if (keys.includes("theme") && managerWin && !managerWin.isDestroyed()) managerWin.setBackgroundColor(prefs.background());
@@ -592,14 +944,19 @@ if (!app.requestSingleInstanceLock()) {
   app.on("second-instance", showManager);
   app.whenReady().then(() => {
     prefs.load();
+    carryOverNotify();
     prefs.on("changed", onPrefsChanged);
     // The proxy settings, before anything goes online (requests made meanwhile wait for them).
     network.start();
     registerIpc();
+    autopilot.start();
+    tabLinks.start();
+    watchTranscripts();
+    scanPeriodically();
 
     bar = createEdgeBar({
       preload: PRELOAD, onOpenManager: showManager, hotkeyLabel,
-      handle: { shown: () => prefs.get().edgeHandle, position: prefs.handlePosition, savePosition: prefs.setHandlePosition }
+      handle: { shown: () => prefs.get().edgeHandle, position: prefs.handlePosition, displayId: prefs.handleDisplayId, savePosition: prefs.setHandlePosition }
     });
     tray = new Tray(makeIcon(32, 2));
     // A press opens or closes the menu at once (here, where Windows lets it take the focus); held down after opening
@@ -614,9 +971,9 @@ if (!app.requestSingleInstanceLock()) {
     updater.start({ auto: prefs.get().autoUpdate });
     limits.start();
     notifier = createNotifier({
-      liveSessions, focus: focusSession, balloon, t, tn, onChange: buildTrayMenu,
+      liveSessions, focus: focusSessionAnywhere, balloon, t, tn, onChange: buildTrayMenu,
       quiet: () => Boolean(bar?.isVisible()),
-      file: path.join(app.getPath("userData"), "notify.json"),
+      isEnabled: () => prefs.get().notify !== false,
       describe: (agent, id, cwd) => {
         const s = cache?.sessions.find(x => x.agent === agent && x.id === id);
         const dir = s?.cwd || cwd || "";
@@ -654,7 +1011,7 @@ if (!app.requestSingleInstanceLock()) {
           autostart },
         // Voice commands open sessions with the menu's own launchers; a project is shown in the menu itself.
         commands: {
-          data: async () => cache ?? await scan(), live: liveSessions, focus: focusSession, launchAgent,
+          data: async () => cache ?? await scan(), live: liveSessions, focus: focusSessionAnywhere, launchAgent,
           launchNew: (agent, cwd, prompt) => (prompt ? launchNewWithPrompt(agent, cwd, prompt) : launchNew(agent, cwd)),
           showProject: dir => { bar.show("hotkey"); bar.win.webContents.send("voice:command-state", { select: dir }); },
           // While a command is being spoken the menu stays, wherever the pointer or the focus goes (edge-bar.js).
@@ -678,7 +1035,10 @@ if (!app.requestSingleInstanceLock()) {
       .catch(err => console.error("Voice shutdown failed:", err))
       .finally(() => app.quit());
   });
-  app.on("will-quit", () => globalShortcut.unregisterAll());
+  app.on("will-quit", () => {
+    globalShortcut.unregisterAll();
+    terminals.closeAll();
+  });
   // The hidden edge menu keeps the app alive after the manager window is closed; quitting is done from the tray.
   app.on("window-all-closed", () => {});
 }

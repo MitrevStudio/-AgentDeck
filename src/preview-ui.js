@@ -35,6 +35,67 @@ function previewFacts(s, d) {
   return `<div class="pv-facts">${facts.join('<span class="pv-sep">·</span>')}</div>
     ${times.length ? `<div class="pv-times" title="${esc([d.startedAt && fullDate(d.startedAt), d.lastAt && fullDate(d.lastAt)].filter(Boolean).join(" – "))}">${esc(times.join(" · "))}</div>` : ""}`;
 }
+// ---------- resume or continue fresh ----------
+// Resume re-reads the whole conversation on the first prompt; a fresh session starts with a short handoff (the task
+// and where it ended) already loaded by Claude, without a pointer to the old transcript, so the old context stays out.
+const HANDOFF_PART_CHARS = 600;
+function getHandoffPart(text) {
+  const plain = String(text || "").replace(/```[\s\S]*?```/g, " ").replace(/\s+/g, " ").trim();
+  return plain.length > HANDOFF_PART_CHARS ? `${plain.slice(0, HANDOFF_PART_CHARS).trimEnd()}…` : plain;
+}
+// The first prompt comes apart only when it is not among the last messages (session-preview.js); otherwise it opens them.
+function getFirstPrompt(d) {
+  const first = d?.messages?.[0];
+  return d?.firstPrompt || (!d?.more && first?.role === "user" ? first.text : "");
+}
+function getHandoff(s, d) {
+  const answers = (d?.messages || []).filter(m => m.role !== "user");
+  return t("preview.handoff", {
+    title: s.title,
+    task: getHandoffPart(getFirstPrompt(d)) || t("preview.handoff.unknown"),
+    outcome: getHandoffPart(answers[answers.length - 1]?.text) || t("preview.handoff.unknown")
+  });
+}
+function getSessionContext(s) {
+  return typeof contextBySession !== "undefined" ? contextBySession.get(sessionKey(s)) || null : null;
+}
+// Continue fresh pays off only when resuming would re-read a large context at full price (the red context chip). It
+// starts Claude Code (--append-system-prompt-file), so only Claude sessions get it.
+function isFreshOffered(s, c) {
+  return s.agent === "Claude" && Boolean(c) && getContextState(c) === "large";
+}
+// Why Continue fresh is left out for a session; nothing while the usage scan has not reached it yet.
+function getFreshMissingReason(s, c) {
+  if (s.agent !== "Claude") {
+    return t("preview.fresh.none.agent");
+  }
+  if (!c) {
+    return isUsageCurrent(s) ? t("preview.fresh.none.empty") : "";
+  }
+  if (getContextState(c) === "warm") {
+    return t("preview.fresh.none.warm", { until: I18N.formatTime(c.warmUntil) });
+  }
+  return t("preview.fresh.none.small", { n: I18N.formatNumber(c.tokens), limit: I18N.formatNumber(LARGE_CONTEXT) });
+}
+// Resume and Continue fresh on a past session's card (renderer.js): the cheaper one is blue, and Resume's tooltip says
+// why Continue fresh is missing.
+function getSessionActions(s) {
+  const c = getSessionContext(s);
+  const fresh = Boolean(s.cwd) && isFreshOffered(s, c);
+  const resumeTip = [t("preview.resume.cost"), fresh ? "" : getFreshMissingReason(s, c)].filter(Boolean).join("\n\n");
+  return `${fresh ? getActionButton("fresh", "plus", true, t("preview.fresh.cost"), "") : ""}
+      ${getActionButton("resume", "play", !fresh, resumeTip, s.cwd ? "" : "disabled")}`;
+}
+function getActionButton(action, iconName, recommended, tip, attrs) {
+  const name = `${t(`preview.${action}`)}${recommended ? ` ${t("preview.recommended")}` : ""}:`;
+  return `<button class="btn sm ${recommended ? "primary" : ""}" data-action="${action}" data-tip-name="${esc(name)}" data-tip="${esc(tip)}"
+      aria-description="${esc(`${name} ${tip}`)}" ${attrs}>${icon(iconName)}${esc(t(`preview.${action}`))}</button>`;
+}
+async function continueFresh(s) {
+  const d = await window.manager.getPreview(s.agent, s.id).catch(() => null);
+  await window.manager.launchFresh(s.cwd, getHandoff(s, d));
+}
+
 // d: main's answer; undefined while it is on its way (a skeleton), null when the session cannot be read.
 function previewHtml(s, d) {
   const title = `<div class="pv-title"><span class="adot ${s.agent.toLowerCase()}"></span><span class="t" title="${esc(s.title)}">${esc(s.title)}</span></div>`;
@@ -86,7 +147,11 @@ function showPreview(box, s) {
     if (box.isConnected && box.dataset.key === key && JSON.stringify(d) !== JSON.stringify(box.pvData)) setPreview(box, s, d);
   });
 }
-function setPreview(box, s, d) { box.pvData = d; fillPreview(box, s, d); }
+function setPreview(box, s, d) {
+  box.pvData = d;
+  box.pvSession = s;
+  fillPreview(box, s, d);
+}
 // A click on a clipped message opens it in full.
 document.addEventListener("click", e => {
   const el = e.target.closest?.(".pv-text.clipped");
@@ -124,8 +189,9 @@ function previewHoverCard(list, sessionOf) {
     card.style.top = `${Math.max(12, Math.min(r.top, innerHeight - height - 12))}px`;
     showPreview(card, s);
   }
+  // A session's buttons show their own tooltip, not the preview.
   list.addEventListener("mouseover", e => {
-    const el = e.target.closest(".sess");
+    const el = e.target.closest("button") ? null : e.target.closest(".sess");
     if (el === over) return;
     over = el;
     clearTimeout(showTimer);
