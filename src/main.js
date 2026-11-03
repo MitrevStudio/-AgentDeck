@@ -28,8 +28,9 @@ let answerPopup = null;
 const day = require("./day");
 const fullText = require("./search").createSearch({ dbFile: path.join(app.getPath("userData"), "search.db") });
 const voiceContext = require("./voice-context").createVoiceContext({ liveSessions: (...a) => liveSessions(...a), findTranscript: id => findTranscript(id) });
-const { createLimits } = require("./limits");
-const limits = createLimits({ fetch: (url, init) => network.fetch(url, init), onChange: l => broadcast("limits:changed", l) });
+const { createAllLimits } = require("./limits");
+const limits = createAllLimits({ fetch: (url, init) => network.fetch(url, init),
+  findExecutable: name => findOnPath(name), onChange: l => broadcast("limits:changed", l) });
 const { createNotifier } = require("./notify");
 const { createTerminals } = require("./terminals");
 // AgentDeck's own terminal tabs (prefs "sessionsIn": "tabs"); their output goes to the manager window only.
@@ -860,6 +861,7 @@ function registerIpc() {
   });
   handle("search:text", q => fullText.query(text(q, 500)));
   handle("limits:get", () => limits.refresh());
+  handle("limits:refresh", () => limits.refresh(true));
   // The figures themselves come as "usage:changed" when they changed; the answer only says when they were checked.
   handle("usage:refresh", async () => { const u = await usage.refresh(); return u && { at: u.at, stats: u.stats, version: u.version }; });
   // A session's last messages and a few facts about it (session-preview.js). The transcript is the one the scan
@@ -1036,6 +1038,7 @@ if (!app.requestSingleInstanceLock()) {
       .finally(() => app.quit());
   });
   app.on("will-quit", () => {
+    limits.stop();
     globalShortcut.unregisterAll();
     terminals.closeAll();
   });

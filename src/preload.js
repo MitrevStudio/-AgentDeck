@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld("manager", {
   summarizeDay: (date, skip) => ipcRenderer.invoke("day:summary", date, skip),
   searchText: q => ipcRenderer.invoke("search:text", q),
   getLimits: () => ipcRenderer.invoke("limits:get"),
+  refreshLimits: () => ipcRenderer.invoke("limits:refresh"),
   onLimitsChanged: cb => ipcRenderer.on("limits:changed", (_e, l) => cb(l)),
   refreshUsage: () => ipcRenderer.invoke("usage:refresh"),
   onUsageChanged: cb => ipcRenderer.on("usage:changed", (_e, u) => cb(u)),

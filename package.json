@@ -11,6 +11,7 @@
   "scripts": {
     "start": "electron .",
     "check": "node scripts/check.js",
+    "test:limits": "node scripts/test-limits.js",
     "dist": "electron-builder --win --publish never",
     "dist:dir": "electron-builder --win --dir --publish never"
   },

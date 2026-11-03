@@ -417,7 +417,7 @@ $("openManager").addEventListener("click", () => window.manager.barCommand("open
 // F5 scans now (main scans by itself every few minutes); the result comes back as "data:changed".
 async function refresh() {
   try {
-    await window.manager.getData();
+    await Promise.all([window.manager.getData(), window.manager.refreshLimits()]);
   } catch (e) {
     toast(e.message, true);
   }

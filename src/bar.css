@@ -42,7 +42,7 @@ kbd { font-size: 10.5px; border-bottom-width: 1px; border-radius: 4px; padding: 
 
 .top { display: flex; align-items: center; gap: 12px; padding: 14px 16px 8px; }
 .logo { width: 32px; height: 32px; flex: none; border-radius: 9px; font-size: 17px; }
-.search { flex: 1; }
+.search { flex: 1; min-width: 150px; }
 .search > .i { left: 13px; width: 18px; height: 18px; }
 .search input { height: 42px; padding: 0 14px 0 42px; border-radius: 11px; font-size: 15px; user-select: text; }
 
@@ -139,18 +139,25 @@ kbd { font-size: 10.5px; border-bottom-width: 1px; border-radius: 4px; padding: 
 .confirm.del .msg { flex: 1; min-width: 0; margin-right: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .confirm.del .btn, .confirm.del .icon-btn { flex: none; height: 32px; }
 
-/* Plan limits: percentage, a bar of the use with the time gone in the window marked on it. */
-#limits { display: flex; gap: 6px; }
-#limits .lim { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: var(--r-pill); border: 1px solid var(--line-2); font-size: 12.5px; font-weight: 600; white-space: nowrap; cursor: default; }
+/* One quiet surface per agent. Colour identifies the agent; warnings colour only the value and bar. */
+#limits { display: flex; gap: 8px; min-width: 0; max-width: 58%; overflow-x: auto; scrollbar-width: none; }
+#limits .lim-group { display: flex; align-items: center; gap: 9px; flex: none; height: 32px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--panel-2); }
+#limits .lim-group.claude { --limit-color: var(--claude); }
+#limits .lim-group.codex { --limit-color: var(--codex); }
+#limits .lim-provider { color: var(--limit-color); font-size: 11.5px; font-weight: 700; }
+#limits .lim { display: inline-flex; align-items: center; gap: 4px; height: 24px; font-size: 12px; font-weight: 650; white-space: nowrap; cursor: default; }
+#limits .lim + .lim { border-left: 1px solid var(--line-2); padding-left: 9px; }
 #limits .lim-k { color: var(--muted); font-weight: 500; }
-#limits .lim-bar { position: relative; width: 38px; height: 5px; border-radius: 3px; background: var(--line-2); }
-#limits .lim-bar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: var(--accent); }
-#limits .lim-bar b { position: absolute; top: -2px; width: 2px; height: 9px; margin-left: -1px; border-radius: 1px; background: var(--text); opacity: .55; }
-#limits .lim.warn { border-color: color-mix(in srgb, var(--wait) 55%, transparent); color: var(--wait); }
+#limits .lim-value { color: var(--limit-color); font-variant-numeric: tabular-nums; }
+#limits .lim.warn .lim-value { color: var(--wait); }
+#limits .lim.danger .lim-value { color: var(--danger); }
+#limits .lim-bar { position: relative; width: 25px; height: 4px; border-radius: 3px; background: var(--line-2); }
+#limits .lim-bar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: var(--limit-color); }
+#limits .lim-bar b { position: absolute; top: -2px; width: 2px; height: 8px; margin-left: -1px; border-radius: 1px; background: var(--text); opacity: .55; }
 #limits .lim.warn .lim-bar i { background: var(--wait); }
-#limits .lim.danger { border-color: var(--danger-line); color: var(--danger); }
 #limits .lim.danger .lim-bar i { background: var(--danger); }
-#limits .lim.err { color: var(--muted); }
+#limits .lim.err { color: var(--muted); font-weight: 500; }
+#limits .lim.stale { opacity: .55; }
 
 /* A full-text hit: the matching passage under the session's title. */
 .snip { margin-top: 2px; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
