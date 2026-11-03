@@ -13,21 +13,32 @@ const STEP_NOTES = ["autopilot.remembering", "autopilot.compacting"];
 // terminals: terminals.js; liveSessions(): live.js; getContext(key) -> {tokens} from usage-scan.js;
 // getPrefs() -> {autoCompact, autoCompactTokens}; t: i18n.
 function createAutopilot({ terminals, liveSessions, getContext, getPrefs, t }) {
-  const runs = new Map();     // tab id -> { step, sentAt, started }
+  const runs = new Map();     // tab id -> { step, sentAt, started, enterTimer }
   const disarmed = new Set(); // tab ids compacted, until their context is small again
   let timer = null, polling = false;
 
+  // The command goes in first and Enter a moment later. Anything typed in between makes the line the user's: it is not
+  // sent, and the run ends on the next poll.
   function sendStep(tabId, run) {
     run.sentAt = Date.now();
     run.started = false;
     terminals.setNote(tabId, t(STEP_NOTES[run.step]));
     terminals.type(tabId, STEPS[run.step]);
-    setTimeout(() => terminals.type(tabId, "\r"), ENTER_DELAY_MS);
+    run.enterTimer = setTimeout(() => {
+      run.enterTimer = null;
+      if (runs.get(tabId) === run && getPrefs().autoCompact && terminals.getLastInputAt(tabId) <= run.sentAt) {
+        terminals.type(tabId, "\r");
+      }
+    }, ENTER_DELAY_MS);
+  }
+  function stopRun(tabId) {
+    clearTimeout(runs.get(tabId)?.enterTimer);
+    runs.delete(tabId);
+    terminals.setNote(tabId, "");
   }
   function finishRun(tabId) {
-    runs.delete(tabId);
+    stopRun(tabId);
     disarmed.add(tabId);
-    terminals.setNote(tabId, "");
   }
   function nextStep(tabId, run) {
     run.step++;
@@ -75,7 +86,7 @@ function createAutopilot({ terminals, liveSessions, getContext, getPrefs, t }) {
   function forgetClosedTabs(tabIds) {
     for (const id of [...runs.keys(), ...disarmed]) {
       if (!tabIds.has(id)) {
-        runs.delete(id);
+        stopRun(id);
         disarmed.delete(id);
       }
     }
@@ -84,7 +95,12 @@ function createAutopilot({ terminals, liveSessions, getContext, getPrefs, t }) {
     const tabs = terminals.getTabs().filter(tab => tab.agent === "Claude" && tab.sessionId && !tab.exited);
     forgetClosedTabs(new Set(tabs.map(tab => tab.id)));
     const p = getPrefs();
-    if (!p.autoCompact || !tabs.length) {
+    // Switched off: a run under way stops too (a command already sent finishes by itself), and nothing more is typed.
+    if (!p.autoCompact) {
+      [...runs.keys()].forEach(stopRun);
+      return;
+    }
+    if (!tabs.length) {
       return;
     }
     const live = new Map((await liveSessions()).map(l => [`${l.agent}:${l.id}`, l]));

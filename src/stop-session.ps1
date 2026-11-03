@@ -1,5 +1,7 @@
 # "Move here": stops a Claude Code process in another terminal and switches off the terminal modes it left on (or
-# that tab prints escape codes). Run with -EncodedCommand, $ClaudePid set in front. Exit: 0 stopped, 3 not Claude, 1 error
+# that tab prints escape codes). Run with -EncodedCommand, $ClaudePid, $ClaudeStart (its procStart from the live
+# registry, '' when unknown) and $AgentDeckPid set in front.
+# Exit: 0 stopped, 3 not Claude (the session's process is gone), 4 AgentDeck runs inside the session, 1 error
 
 $ErrorActionPreference = 'Stop'
 $resetModes = (@('?1000l', '?1002l', '?1003l', '?1006l', '?1015l', '?1004l', '?2004l', '<u', '<u', '<u', '>4m', '?1049l', '?25h', '0m') |
@@ -53,9 +55,8 @@ function Get-ProcessTree($rootId)
     return $ids
 }
 
-function Stop-Tree
+function Stop-Tree($ids)
 {
-    $ids = Get-ProcessTree $ClaudePid
     [array]::Reverse($ids)
     $ids | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
     for ($i = 0; $i -lt 40 -and (Get-Process -Id $ClaudePid -ErrorAction SilentlyContinue); $i++)
@@ -78,15 +79,23 @@ function Write-ConsoleText($text)
 
 try
 {
+    # A recycled pid: started at another time than the registry says, it is not the session's process any more.
     $process = Get-Process -Id $ClaudePid -ErrorAction SilentlyContinue
-    if (-not $process -or $process.ProcessName -notmatch '^(claude|node|bun)$')
+    if (-not $process -or $process.ProcessName -notmatch '^(claude|node|bun)$' -or
+        ($ClaudeStart -and [string]$process.StartTime.ToFileTimeUtc() -ne $ClaudeStart))
     {
         exit 3
+    }
+    # AgentDeck started from inside the session (npm start in its shell) would go down with it.
+    $ids = @(Get-ProcessTree $ClaudePid)
+    if ($ids -contains $AgentDeckPid)
+    {
+        exit 4
     }
     Import-Native
     [void][StopNative]::FreeConsole()
     $attached = [StopNative]::AttachConsole($ClaudePid)
-    Stop-Tree
+    Stop-Tree $ids
     if ($attached)
     {
         Write-ConsoleText "$resetModes`r`n[This session was moved to AgentDeck]`r`n"

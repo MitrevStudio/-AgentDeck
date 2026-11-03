@@ -27,7 +27,9 @@ function findTabPid(pid, parents, tabPids) {
 
 // terminals: terminals.js; liveSessions(): live.js.
 function createTabLinks({ terminals, liveSessions }) {
-  const checked = new Map(); // `${agent}:${id}` -> the tab set it was checked against
+  // A session resumed again runs in a new process, which is checked anew: the key holds the pid.
+  const checked = new Map(); // `${agent}:${id}:${pid}` -> the tab set it was checked against
+  const checkKey = l => `${l.agent}:${l.id}:${l.pid}`;
   let timer = null, polling = false;
 
   async function linkTabs() {
@@ -37,7 +39,15 @@ function createTabLinks({ terminals, liveSessions }) {
     }
     const tabSet = tabs.map(tab => tab.pid).sort().join(",");
     const linked = new Set(terminals.getTabs().filter(tab => tab.sessionId).map(tab => `${tab.agent}:${tab.sessionId}`));
-    const candidates = (await liveSessions()).filter(l => !linked.has(`${l.agent}:${l.id}`) && checked.get(`${l.agent}:${l.id}`) !== tabSet);
+    const live = await liveSessions();
+    // Processes that ended are forgotten.
+    const running = new Set(live.map(checkKey));
+    for (const key of checked.keys()) {
+      if (!running.has(key)) {
+        checked.delete(key);
+      }
+    }
+    const candidates = live.filter(l => !linked.has(`${l.agent}:${l.id}`) && checked.get(checkKey(l)) !== tabSet);
     if (!candidates.length) {
       return;
     }
@@ -47,7 +57,7 @@ function createTabLinks({ terminals, liveSessions }) {
     }
     const tabByPid = new Map(tabs.map(tab => [tab.pid, tab.id]));
     for (const l of candidates) {
-      checked.set(`${l.agent}:${l.id}`, tabSet);
+      checked.set(checkKey(l), tabSet);
       const tabPid = findTabPid(l.pid, parents, tabByPid);
       if (tabPid) {
         terminals.link(tabByPid.get(tabPid), l.agent, l.id);

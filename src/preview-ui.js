@@ -43,20 +43,26 @@ function getHandoffPart(text) {
   const plain = String(text || "").replace(/```[\s\S]*?```/g, " ").replace(/\s+/g, " ").trim();
   return plain.length > HANDOFF_PART_CHARS ? `${plain.slice(0, HANDOFF_PART_CHARS).trimEnd()}…` : plain;
 }
+// The first prompt comes apart only when it is not among the last messages (session-preview.js); otherwise it opens them.
+function getFirstPrompt(d) {
+  const first = d?.messages?.[0];
+  return d?.firstPrompt || (!d?.more && first?.role === "user" ? first.text : "");
+}
 function getHandoff(s, d) {
   const answers = (d?.messages || []).filter(m => m.role !== "user");
   return t("preview.handoff", {
     title: s.title,
-    task: getHandoffPart(d?.firstPrompt) || t("preview.handoff.unknown"),
+    task: getHandoffPart(getFirstPrompt(d)) || t("preview.handoff.unknown"),
     outcome: getHandoffPart(answers[answers.length - 1]?.text) || t("preview.handoff.unknown")
   });
 }
 function getSessionContext(s) {
   return typeof contextBySession !== "undefined" ? contextBySession.get(sessionKey(s)) || null : null;
 }
-// Continue fresh pays off only when resuming would re-read a large context at full price (the red context chip).
-function isFreshOffered(c) {
-  return Boolean(c) && getContextState(c) === "large";
+// Continue fresh pays off only when resuming would re-read a large context at full price (the red context chip). It
+// starts Claude Code (--append-system-prompt-file), so only Claude sessions get it.
+function isFreshOffered(s, c) {
+  return s.agent === "Claude" && Boolean(c) && getContextState(c) === "large";
 }
 // Why Continue fresh is left out for a session; nothing while the usage scan has not reached it yet.
 function getFreshMissingReason(s, c) {
@@ -75,7 +81,7 @@ function getFreshMissingReason(s, c) {
 // why Continue fresh is missing.
 function getSessionActions(s) {
   const c = getSessionContext(s);
-  const fresh = Boolean(s.cwd) && isFreshOffered(c);
+  const fresh = Boolean(s.cwd) && isFreshOffered(s, c);
   const resumeTip = [t("preview.resume.cost"), fresh ? "" : getFreshMissingReason(s, c)].filter(Boolean).join("\n\n");
   return `${fresh ? getActionButton("fresh", "plus", true, t("preview.fresh.cost"), "") : ""}
       ${getActionButton("resume", "play", !fresh, resumeTip, s.cwd ? "" : "disabled")}`;

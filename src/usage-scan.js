@@ -125,16 +125,20 @@ function localDay(ms) {
 }
 
 // What the session's next reply re-reads - its own last reply's prompt, cache and answer - and until when the cache
-// it left stays warm: an hour once the session wrote to the 1-hour cache, five minutes otherwise.
+// it left stays warm: an hour when its latest cache write went to the 1-hour cache, five minutes otherwise (a reply
+// that only read the cache keeps what the write before it chose).
 function updateContext(contexts, session, rec) {
   if (rec[FLAGS] & SIDE) {
     return;
   }
   let c = contexts.get(session);
   if (!c) {
-    contexts.set(session, c = { tokens: 0, at: 0, oneHour: false });
+    contexts.set(session, c = { tokens: 0, at: 0, oneHour: false, writtenAt: 0 });
   }
-  c.oneHour ||= rec[W1] > 0;
+  if (rec[W5] + rec[W1] > 0 && rec[TIME] >= c.writtenAt) {
+    c.writtenAt = rec[TIME];
+    c.oneHour = rec[W1] > 0;
+  }
   if (rec[TIME] >= c.at) {
     c.at = rec[TIME];
     c.tokens = rec[IN] + rec[OUT] + rec[W5] + rec[W1] + rec[READ];

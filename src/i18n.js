@@ -148,6 +148,8 @@
       "errors.moveNotRunning": "The session is no longer running.",
       "errors.moveBusy": "The agent is still working in this session. Move it once it has finished.",
       "errors.moveStopFailed": "The session could not be closed in its terminal.",
+      "errors.moveNoConversation": "This session has no conversation saved yet, so it cannot be moved. Send it a prompt first.",
+      "errors.moveHostsAgentDeck": "AgentDeck itself runs inside this session, so closing it would close AgentDeck too.",
       "errors.sessionNoFile": "The session's file was not found.",
 
       "theme.system": "System",
@@ -1088,6 +1090,8 @@
       "errors.moveNotRunning": "Сесията вече не работи.",
       "errors.moveBusy": "Агентът все още работи в тази сесия. Премести я след като приключи.",
       "errors.moveStopFailed": "Сесията не можа да се затвори в терминала си.",
+      "errors.moveNoConversation": "Тази сесия още няма запазен разговор и не може да се премести. Първо ѝ изпрати съобщение.",
+      "errors.moveHostsAgentDeck": "Самият AgentDeck работи в тази сесия, затова затварянето ѝ би затворило и AgentDeck.",
       "errors.sessionNoFile": "Файлът на сесията не е намерен.",
 
       "theme.system": "Системна",

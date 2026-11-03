@@ -387,10 +387,21 @@ async function openTab(cwd, command, meta, env) {
   const commandLine = command ? `powershell.exe -NoLogo -NoExit -EncodedCommand ${encoded}` : "powershell.exe -NoLogo";
   const id = await terminals.open({ cwd, commandLine, title: meta.title || path.basename(cwd), agent: meta.agent, sessionId: meta.sessionId, env });
   launchLog("agentdeck tab", `cwd="${cwd}" cmd=${command ? `"${command.slice(0, 120)}"` : "-"}`);
+  showTab(id);
+}
+function showTab(id) {
   // An open window switches to the tab now; one that is still to load asks for it when it lists the tabs.
   if (managerWin && !managerWin.isDestroyed()) sendToManager("terminal:activate", id);
   else pendingTab = id;
   showManager();
+}
+// "Show terminal", a notification's click, a voice command: a session in one of AgentDeck's tabs comes up there, any
+// other in its own terminal (terminal-focus.js; same answer).
+function focusSessionAnywhere(opts) {
+  const tab = terminals.getTabs().find(x => x.agent === opts.agent && x.sessionId === opts.id && !x.exited);
+  if (!tab) return focusSession(opts);
+  showTab(tab.id);
+  return Promise.resolve({ ok: true, how: "tab", reason: "", ms: 0 });
 }
 // meta: {title, agent, sessionId} of what runs, for the tab; inTab: an AgentDeck tab whatever the setting ("Move here").
 async function launchTerminal(cwd, command = null, meta = {}, inTab = false) {
@@ -452,7 +463,7 @@ function checkSessionId(id) { if (typeof id !== "string" || !SESSION_ID.test(id)
 function getSessionTitle(agent, id) {
   return cache?.sessions.find(s => s.agent === agent && s.id === id)?.title || `${agent} ${id.slice(0, 8)}`;
 }
-async function launchAgent(agent, id, cwd, inTab = false) {
+function checkResumable(agent, id, cwd) {
   checkAgent(agent);
   checkSessionId(id);
   if (!cwd || !fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory())
@@ -462,6 +473,9 @@ async function launchAgent(agent, id, cwd, inTab = false) {
     scan().catch(err => console.error("Scan failed:", err.message));
     throw new Error(t("errors.conversationMissing"));
   }
+}
+async function launchAgent(agent, id, cwd, inTab = false) {
+  checkResumable(agent, id, cwd);
   const cmd = agentCommand(agent, id).map(psQuote).join(" ");
   await launchTerminal(cwd, "& " + cmd, { title: getSessionTitle(agent, id), agent, sessionId: id }, inTab);
   // Only Claude reports when it is ready (live.js), which ends the windows' "Loading".
@@ -493,8 +507,10 @@ function launchNew(agent, cwd) {
 // "Move here": a session running in another terminal is stopped there (its terminal modes reset) and resumed in an
 // AgentDeck tab. Not while it works - that would cut the turn off.
 const STOP_SCRIPT = path.join(__dirname, "stop-session.ps1");
-function stopExternalSession(pid) {
-  const script = `$ClaudePid = ${Number(pid)}\n${fs.readFileSync(STOP_SCRIPT, "utf8")}`;
+// entry: the session's live registry entry; its procStart tells a recycled pid from the session's own process.
+function stopExternalSession(entry) {
+  const start = /^\d+$/.test(entry.procStart) ? entry.procStart : "";
+  const script = `$ClaudePid = ${Number(entry.pid)}\n$ClaudeStart = '${start}'\n$AgentDeckPid = ${process.pid}\n${fs.readFileSync(STOP_SCRIPT, "utf8")}`;
   const encoded = Buffer.from(script, "utf16le").toString("base64");
   return new Promise(resolve => {
     execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded], { windowsHide: true, timeout: 20000 }, err => resolve(err ? err.code ?? 1 : 0));
@@ -506,7 +522,11 @@ async function moveToTab(agent, id) {
   const entry = (await liveSessions()).find(l => l.agent === agent && l.id === id);
   if (!entry) throw new Error(t("errors.moveNotRunning"));
   if (entry.status === "busy") throw new Error(t("errors.moveBusy"));
-  const code = await stopExternalSession(entry.pid);
+  // Checked before the session is stopped: one that cannot be resumed (no prompt sent yet) keeps running where it is.
+  if (agent === "Claude" && !findTranscript(id)) throw new Error(t("errors.moveNoConversation"));
+  checkResumable(agent, id, entry.cwd);
+  const code = await stopExternalSession(entry);
+  if (code === 4) throw new Error(t("errors.moveHostsAgentDeck"));
   if (code !== 0 && code !== 3) throw new Error(t("errors.moveStopFailed"));
   await launchAgent(agent, id, entry.cwd, true);
 }
@@ -560,6 +580,7 @@ function updateCache(sessions, registry, agents, full) {
 function scan({ full = true } = {}) {
   if (scanning && full && !scanningFull) return scanning.catch(() => {}).then(() => scan({ full }));
   if (scanning) return scanning;
+  if (full) watchTranscripts();
   scanningFull = full;
   scanning = scanSessions({ openCode: full }).then(async sessions => {
     // Scan first: it auto-indexes projects into the registry, which must be read afterwards.
@@ -585,14 +606,23 @@ function scheduleRescan() {
     scan({ full: false }).catch(err => console.error("Rescan failed:", err.message));
   }, RESCAN_MS);
 }
+// Every full scan watches what is not watched yet: a folder an agent creates later (installed or first run after
+// AgentDeck started), or one whose watch failed.
+const watchers = new Map(); // folder -> fs.FSWatcher
 function watchTranscripts() {
   for (const dir of [CLAUDE_DIR, CODEX_DIR]) {
+    if (watchers.has(dir)) continue;
     try {
-      fs.watch(dir, { recursive: true }, (_event, name) => {
+      const watcher = fs.watch(dir, { recursive: true }, (_event, name) => {
         if (name && String(name).endsWith(".jsonl")) scheduleRescan();
-      }).on("error", err => console.error(`Watching ${dir} failed:`, err.message));
+      });
+      watcher.on("error", err => {
+        console.error(`Watching ${dir} failed:`, err.message);
+        watcher.close();
+        watchers.delete(dir);
+      });
+      watchers.set(dir, watcher);
     } catch (err) {
-      // Not there (the agent is not installed): its sessions still come with Refresh.
       if (err.code !== "ENOENT") console.error(`Could not watch ${dir}:`, err.message);
     }
   }
@@ -870,7 +900,7 @@ function registerIpc() {
   handle("terminal:focus", (agent, id) => {
     if (!SESSION_ID.test(text(id))) throw new Error(t("errors.invalidSession"));
     notifier?.seen(agent, id);
-    return focusSession({ agent: text(agent), id });
+    return focusSessionAnywhere({ agent: text(agent), id });
   });
   // A path typed into the menu's search: offer a new session there if it is an existing directory.
   handle("fs:is-dir", p => (isDir(p) ? path.resolve(p) : ""));
@@ -941,7 +971,7 @@ if (!app.requestSingleInstanceLock()) {
     updater.start({ auto: prefs.get().autoUpdate });
     limits.start();
     notifier = createNotifier({
-      liveSessions, focus: focusSession, balloon, t, tn, onChange: buildTrayMenu,
+      liveSessions, focus: focusSessionAnywhere, balloon, t, tn, onChange: buildTrayMenu,
       quiet: () => Boolean(bar?.isVisible()),
       isEnabled: () => prefs.get().notify !== false,
       describe: (agent, id, cwd) => {
@@ -981,7 +1011,7 @@ if (!app.requestSingleInstanceLock()) {
           autostart },
         // Voice commands open sessions with the menu's own launchers; a project is shown in the menu itself.
         commands: {
-          data: async () => cache ?? await scan(), live: liveSessions, focus: focusSession, launchAgent,
+          data: async () => cache ?? await scan(), live: liveSessions, focus: focusSessionAnywhere, launchAgent,
           launchNew: (agent, cwd, prompt) => (prompt ? launchNewWithPrompt(agent, cwd, prompt) : launchNew(agent, cwd)),
           showProject: dir => { bar.show("hotkey"); bar.win.webContents.send("voice:command-state", { select: dir }); },
           // While a command is being spoken the menu stays, wherever the pointer or the focus goes (edge-bar.js).

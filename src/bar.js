@@ -243,7 +243,7 @@ async function resume(s) {
   if (!s.cwd) return toast(t("errors.sessionNoDir"), true);
   if (liveOf(s)) { st.confirm = sessionKey(s); return render({ strip: false }); }
   // Whichever costs less: Continue fresh for a large session whose cache went cold, Resume otherwise.
-  if (isFreshOffered(getSessionContext(s))) {
+  if (isFreshOffered(s, getSessionContext(s))) {
     await launch(() => continueFresh(s));
     return;
   }

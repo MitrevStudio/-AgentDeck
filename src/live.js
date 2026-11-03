@@ -81,7 +81,7 @@ async function claudeLive() {
   return entries
     .filter(x => !x.procStart || startVerified.get(`${x.pid}:${x.procStart}`) !== false)
     .map(x => ({
-      agent: "Claude", id: x.sessionId, pid: x.pid, cwd: x.cwd || "", name: x.name || "",
+      agent: "Claude", id: x.sessionId, pid: x.pid, procStart: String(x.procStart || ""), cwd: x.cwd || "", name: x.name || "",
       status: x.status === "shell" ? "busy" : x.status || "running",
       waitingFor: x.waitingFor || "",
       statusAt: x.statusUpdatedAt || x.updatedAt || x.startedAt || 0,

@@ -14,6 +14,23 @@ const CSC = path.join(process.env.WINDIR || "C:\\Windows", "Microsoft.NET", "Fra
 const SCROLLBACK_CHARS = 512 * 1024;
 const DEFAULT_COLS = 120, DEFAULT_ROWS = 32, MAX_SIZE = 1000;
 const FRAME_INPUT = 0, FRAME_RESIZE = 1;
+const MODE_SWITCH = /\x1b\[\?([\d;]+)([hl])/g;
+
+// modes: DEC private mode -> "h" | "l", as the given output leaves them.
+function applyModes(modes, text) {
+  for (const [, list, set] of text.matchAll(MODE_SWITCH)) {
+    list.split(";").filter(Boolean).forEach(mode => modes.set(mode, set));
+  }
+}
+// Where output longer than the scrollback is cut: at the first escape sequence of the part that is kept.
+function getCut(text) {
+  if (text.length <= SCROLLBACK_CHARS) {
+    return 0;
+  }
+  const from = text.length - SCROLLBACK_CHARS;
+  const at = text.indexOf("\x1b", from);
+  return at < 0 ? from : at;
+}
 
 // onData(id, data, end), onExit(id, code), onChange(tabs): to the manager window.
 function createTerminals({ userDataDir, onData, onExit, onChange }) {
@@ -59,18 +76,27 @@ function createTerminals({ userDataDir, onData, onExit, onChange }) {
     return Buffer.concat([header, payload]);
   }
 
-  // The scrollback is kept as chunks and trimmed once it holds twice its size, not copied on every chunk.
+  // The scrollback is kept as chunks and trimmed once it holds twice its size, not copied on every chunk. What is cut
+  // off starts at an escape sequence, never inside one, and the modes switched in the part that went (bracketed paste,
+  // focus events, mouse, alternate screen...) are put back in front of what a page replays.
   function appendScrollback(terminal, data) {
     terminal.chunks.push(data);
     terminal.chunkChars += data.length;
     if (terminal.chunkChars > 2 * SCROLLBACK_CHARS) {
-      const text = terminal.chunks.join("").slice(-SCROLLBACK_CHARS);
+      const all = terminal.chunks.join("");
+      const cut = getCut(all);
+      applyModes(terminal.modes, all.slice(0, cut));
+      const text = all.slice(cut);
       terminal.chunks = [text];
       terminal.chunkChars = text.length;
     }
   }
   function getScrollback(terminal) {
-    return terminal.chunks.join("").slice(-SCROLLBACK_CHARS);
+    const all = terminal.chunks.join("");
+    const cut = getCut(all);
+    const modes = new Map(terminal.modes);
+    applyModes(modes, all.slice(0, cut));
+    return [...modes].map(([mode, set]) => `\x1b[?${mode}${set}`).join("") + all.slice(cut);
   }
   function handleOutput(terminal, decoder, chunk) {
     const data = decoder.write(chunk);
@@ -95,7 +121,7 @@ function createTerminals({ userDataDir, onData, onExit, onChange }) {
       cwd, env: { ...env, AGENTDECK_TERMINAL: id }, stdio: ["pipe", "pipe", "ignore"], windowsHide: true
     });
     const terminal = {
-      id, cwd, title, agent, sessionId, child, chunks: [], chunkChars: 0, end: 0, exitCode: null, createdAt: Date.now(), lastInputAt: 0, note: ""
+      id, cwd, title, agent, sessionId, child, chunks: [], chunkChars: 0, modes: new Map(), end: 0, exitCode: null, createdAt: Date.now(), lastInputAt: 0, note: ""
     };
     const decoder = new StringDecoder("utf8");
     child.stdout.on("data", chunk => handleOutput(terminal, decoder, chunk));

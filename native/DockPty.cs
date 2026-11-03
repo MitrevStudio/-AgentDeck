@@ -135,6 +135,12 @@ static class DockPty
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
 
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool TerminateProcess(IntPtr process, uint exitCode);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool CloseHandle(IntPtr handle);
+
     [DllImport("kernel32.dll")]
     static extern uint ResumeThread(IntPtr thread);
 
@@ -205,7 +211,13 @@ static class DockPty
         {
             return false;
         }
-        AssignProcessToJobObject(CreateKillOnCloseJob(), process.hProcess);
+        // Outside its kill-on-close job the child could outlive its tab and AgentDeck, so it never runs without one.
+        IntPtr job = CreateKillOnCloseJob();
+        if (job == IntPtr.Zero || !AssignProcessToJobObject(job, process.hProcess))
+        {
+            TerminateProcess(process.hProcess, 1);
+            return false;
+        }
         ResumeThread(process.hThread);
         return true;
     }
@@ -223,9 +235,17 @@ static class DockPty
     static IntPtr CreateKillOnCloseJob()
     {
         IntPtr job = CreateJobObject(IntPtr.Zero, null);
+        if (job == IntPtr.Zero)
+        {
+            return IntPtr.Zero;
+        }
         JobExtendedLimitInformation info = new JobExtendedLimitInformation();
         info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        SetInformationJobObject(job, JOB_OBJECT_EXTENDED_LIMIT_INFORMATION, ref info, Marshal.SizeOf(typeof(JobExtendedLimitInformation)));
+        if (!SetInformationJobObject(job, JOB_OBJECT_EXTENDED_LIMIT_INFORMATION, ref info, Marshal.SizeOf(typeof(JobExtendedLimitInformation))))
+        {
+            CloseHandle(job);
+            return IntPtr.Zero;
+        }
         return job;
     }
 
