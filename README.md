@@ -108,6 +108,12 @@ the view names; `src/usage-prices.js`). Subscription plans (Claude Pro/Max, Chat
 token, so it is not what you paid. Models without a known price show tokens only. Transcripts and OpenCode's
 database are only read; a cache in `userData` keeps later passes quick.
 
+The edge menu also shows the subscription limits for installed Claude Code and Codex CLIs. Each
+provider has its own 5-hour/weekly (or provider-reported) windows, reset times and usage forecast.
+If both are installed, both groups appear. The Codex values come from its local app-server account
+RPC; an account signed in with an API key may not provide ChatGPT plan limits. The displayed
+percentages are distinct from the token and API-equivalent cost report above.
+
 ## Език и тема
 
 - Интерфейсът е на **български** или **английски**; темата е **тъмна**, **светла** или **системна** (следва Windows).
