@@ -72,9 +72,10 @@ function readRegistry() {
     const data = JSON.parse(fs.readFileSync(DATA, "utf8"));
     return {
       projects: Array.isArray(data.projects) ? data.projects : [],
-      removed: Array.isArray(data.removed) ? data.removed.filter(p => typeof p === "string") : []
+      removed: Array.isArray(data.removed) ? data.removed.filter(p => typeof p === "string") : [],
+      order: data.order === "custom" ? "custom" : "activity"
     };
-  } catch { return { projects: [], removed: [] }; }
+  } catch { return { projects: [], removed: [], order: "activity" }; }
 }
 function writeRegistry(data) {
   fs.mkdirSync(path.dirname(DATA), { recursive: true });
@@ -815,6 +816,31 @@ function registerIpc() {
     text(p); text(name, 1000);
     const data = readRegistry(); const item = data.projects.find(x => norm(x.path) === norm(p));
     if (item && name.trim()) item.name = name.trim().slice(0, 80);
+    writeRegistry(data); return registryChanged(data);
+  });
+  // The list in the user's own order (all projects, as shown). The dragged project, when pinned, keeps the slot it was
+  // dropped in; the other pinned ones stay where they are.
+  handle("project:arrange", (paths, moved) => {
+    if (!Array.isArray(paths) || paths.length > 10000) throw new Error(t("errors.invalidData"));
+    const at = new Map(paths.map((p, i) => [norm(text(p)), i]));
+    const data = readRegistry();
+    const rank = x => at.get(norm(x.path)) ?? paths.length;
+    data.projects.sort((a, b) => rank(a) - rank(b));
+    const item = moved ? data.projects.find(x => norm(x.path) === norm(text(moved))) : null;
+    if (Number.isInteger(item?.pin)) item.pin = data.projects.indexOf(item);
+    data.order = "custom";
+    writeRegistry(data); return registryChanged(data);
+  });
+  handle("project:sort-by-activity", () => {
+    const data = readRegistry(); data.order = "activity"; writeRegistry(data); return registryChanged(data);
+  });
+  // slot: the position to keep the project at, or null to let it move again.
+  handle("project:pin", (p, slot) => {
+    text(p);
+    if (slot !== null && !(Number.isInteger(slot) && slot >= 0)) throw new Error(t("errors.invalidData"));
+    const data = readRegistry(); const item = data.projects.find(x => norm(x.path) === norm(p));
+    if (item && slot === null) delete item.pin;
+    else if (item) item.pin = slot;
     writeRegistry(data); return registryChanged(data);
   });
   handle("launch:folder", async p => { await launchTerminal(text(p)); return true; });

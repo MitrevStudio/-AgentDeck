@@ -1,6 +1,8 @@
 let raw = { registry: { projects: [] }, sessions: [] };
 let data = { projects: [], sessions: [] };
 let visible = [];
+// Every project's path in the order shown, hidden ones too: a drag or a pin is placed within it.
+let order = [];
 const ui = { query: "", agent: "", selected: "", active: -1, renaming: "", loading: false, loaded: false, liveOnly: false };
 
 // Running sessions, keyed like `Claude:<id>`; refreshed every couple of seconds from the agents' own registries.
@@ -18,7 +20,9 @@ function livePill(l, loading) {
 }
 
 function prepare() {
-  data = conceal(buildData(raw, live), readHidden());
+  const built = buildData(raw, live);
+  order = built.projects.map(p => p.path);
+  data = conceal(built, readHidden());
   if (ui.selected && !data.projects.some(p => p.n === ui.selected)) ui.selected = "";
 }
 
@@ -85,14 +89,16 @@ function render({ resetScroll = false } = {}) {
 function renderProjects(v) {
   const total = data.projects.length;
   $("projectCount").textContent = v.toks.length ? `${v.projects.length} / ${total}` : total;
+  renderOrderToggle();
   let html = `<div class="proj all ${ui.selected ? "" : "active"}" data-path="" tabindex="0">
     <div class="proj-row">${icon("layers")}<span class="proj-name">${esc(t("manager.allSessions"))}</span><span class="count">${v.hits.length}</span></div></div>`;
   html += v.projects.map(({ p, count }) => `
-    <div class="proj ${ui.selected === p.n ? "active" : ""}" data-path="${esc(p.path)}" tabindex="0">
+    <div class="proj ${ui.selected === p.n ? "active" : ""}" data-path="${esc(p.path)}" tabindex="0" ${v.toks.length || ui.renaming === p.n ? "" : 'draggable="true"'}>
       <div class="proj-row">${icon("folder")}
         ${ui.renaming === p.n
           ? `<input class="rename" value="${esc(p.name)}" maxlength="80" aria-label="${esc(t("manager.project.newName"))}">`
           : `<span class="proj-name" title="${esc(p.name)}">${hl(p.name, v.toks)}</span>`}
+        ${isPinned(p) ? `<span class="pin-mark" title="${esc(t("manager.project.pinned"))}">${icon("pin")}</span>` : ""}
         ${gitChip(p.path)}${projectLive(p)}
         <span class="count" title="${esc(t(v.toks.length ? "manager.project.countMatching" : "manager.project.countAll"))}">${count}</span>
       </div>
@@ -102,6 +108,7 @@ function renderProjects(v) {
           <button class="icon-btn" data-action="terminal" title="${esc(t("action.terminalHere"))}">${icon("terminal")}</button>
           <button class="icon-btn" data-action="explorer" title="${esc(t("action.explorerTitle"))}">${icon("open")}</button>
           <button class="icon-btn" data-action="copy" title="${esc(t("action.copyPath"))}">${icon("copy")}</button>
+          <button class="icon-btn ${isPinned(p) ? "on" : ""}" data-action="pin" title="${esc(t(isPinned(p) ? "action.unpin" : "action.pin"))}">${icon("pin")}</button>
           <button class="icon-btn" data-action="rename" title="${esc(t("action.rename"))}">${icon("pencil")}</button>
           <button class="icon-btn danger" data-action="remove" title="${esc(t("action.remove"))}">${icon("trash")}</button>
         </span>
@@ -110,6 +117,15 @@ function renderProjects(v) {
   if (!total && ui.loaded) html += `<div class="empty small">${esc(t("manager.projects.empty"))}</div>`;
   else if (!v.projects.length && v.toks.length) html += `<div class="empty small">${esc(t("manager.projects.noMatch", { q: ui.query }))}</div>`;
   $("projects").innerHTML = html;
+}
+
+const isPinned = p => Number.isInteger(p.pin);
+function renderOrderToggle() {
+  const custom = raw.registry.order === "custom";
+  const el = $("projectOrder");
+  el.textContent = t(custom ? "manager.order.custom" : "manager.order.activity");
+  el.title = t(custom ? "manager.order.customTitle" : "manager.order.activityTitle");
+  el.hidden = !data.projects.length;
 }
 
 function projectLive(p) {
@@ -322,6 +338,20 @@ async function commitRename(input) {
   toast(t("manager.toast.renamed", { name }));
 }
 
+async function pinProject(path) {
+  const p = data.projects.find(x => x.n === normPath(path));
+  if (p) applyRegistry(await window.manager.pinProject(path, isPinned(p) ? null : p.slot));
+}
+// Puts `path` right before or after `target` in the shown order, which from then on is the user's own.
+async function moveProject(path, target, after) {
+  const list = order.filter(x => normPath(x) !== normPath(path));
+  list.splice(list.findIndex(x => normPath(x) === normPath(target)) + (after ? 1 : 0), 0, path);
+  applyRegistry(await window.manager.arrangeProjects(list, path));
+}
+async function toggleOrder() {
+  applyRegistry(raw.registry.order === "custom" ? await window.manager.sortProjectsByActivity() : await window.manager.arrangeProjects(order));
+}
+
 async function runAction(action, btn) {
   const path = btn.dataset.path || btn.closest("[data-path]")?.dataset.path;
   switch (action) {
@@ -333,6 +363,7 @@ async function runAction(action, btn) {
     case "explorer": { const err = await window.manager.openPath(path); if (err) throw new Error(err); return; }
     case "copy": await window.manager.copyText(path); return toast(t("toast.copied", { path }));
     case "rename": ui.renaming = normPath(path); return render();
+    case "pin": return pinProject(path);
     case "remove":
       if (!confirm(t("manager.confirm.remove", { path }))) return;
       return applyRegistry(await window.manager.removeProject(path));
@@ -387,6 +418,63 @@ $("projects").addEventListener("keydown", e => {
     return;
   }
   if ((e.key === "Enter" || e.key === " ") && e.target.classList.contains("proj")) { e.preventDefault(); selectProject(e.target.dataset.path); }
+  if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown") && e.target.matches(".proj[draggable]")) {
+    e.preventDefault();
+    moveByKey(e.target, e.key === "ArrowDown").catch(err => toast(err.message, true));
+  }
+});
+async function moveByKey(card, down) {
+  const next = down ? card.nextElementSibling : card.previousElementSibling;
+  if (!next?.matches(".proj[draggable]")) return;
+  const path = card.dataset.path;
+  await moveProject(path, next.dataset.path, down);
+  document.querySelector(`.proj[data-path="${CSS.escape(path)}"]`)?.focus();
+}
+$("projectOrder").addEventListener("click", () => toggleOrder().catch(err => toast(err.message, true)));
+
+// ---------- projects: drag and drop ----------
+const drag = { path: "" };
+const dropTarget = e => {
+  const card = e.target.closest(".proj[draggable]");
+  return card && card.dataset.path !== drag.path ? card : null;
+};
+const isAfter = (card, e) => {
+  const r = card.getBoundingClientRect();
+  return e.clientY > r.top + r.height / 2;
+};
+function clearDropMarks(keepDragging = false) {
+  const sel = keepDragging ? ".proj.drop-before, .proj.drop-after" : ".proj.drop-before, .proj.drop-after, .proj.dragging";
+  document.querySelectorAll(sel).forEach(el => el.classList.remove("drop-before", "drop-after", "dragging"));
+}
+$("projects").addEventListener("dragstart", e => {
+  const card = e.target.closest?.(".proj[draggable]");
+  if (!card) return;
+  drag.path = card.dataset.path;
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData("text/plain", drag.path);
+  card.classList.add("dragging");
+});
+$("projects").addEventListener("dragover", e => {
+  const card = drag.path && dropTarget(e);
+  if (!card) return;
+  e.preventDefault();
+  const cls = isAfter(card, e) ? "drop-after" : "drop-before";
+  if (card.classList.contains(cls)) return;
+  clearDropMarks(true);
+  card.classList.add(cls);
+});
+$("projects").addEventListener("drop", e => {
+  const card = drag.path && dropTarget(e);
+  if (!card) return;
+  e.preventDefault();
+  const path = drag.path;
+  drag.path = "";
+  clearDropMarks();
+  moveProject(path, card.dataset.path, isAfter(card, e)).catch(err => toast(err.message, true));
+});
+$("projects").addEventListener("dragend", () => {
+  drag.path = "";
+  clearDropMarks();
 });
 $("projects").addEventListener("focusout", e => {
   if (e.target.classList.contains("rename") && ui.renaming) commitRename(e.target).catch(err => toast(err.message, true));

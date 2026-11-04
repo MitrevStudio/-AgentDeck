@@ -15,6 +15,7 @@ const ICONS = {
   open: '<path d="M14 4h6v6"/><path d="M10 14 20 4"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/>',
   copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/>',
   pencil: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13 7 4 4"/>',
+  pin: '<path d="M9 4h6l-1 6 3 3v2H7v-2l3-3z"/><path d="M12 15v6"/>',
   trash: '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="m6 7 1 13h10l1-13"/><path d="M9 7V4h6v3"/>',
   refresh: '<path d="M20 12a8 8 0 1 1-2.3-5.7"/><path d="M20 4v5h-5"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
@@ -294,6 +295,18 @@ function buildData(raw, live) {
     // A session can be found by the (possibly renamed) name of any project it belongs to.
     for (const s of proj.sessions) s.hay += " \u0001 " + p.name.toLowerCase();
     return proj;
-  }).sort((a, b) => b.last - a.last || a.name.localeCompare(b.name, I18N.locale()));
-  return { projects, sessions };
+  });
+  const order = arrange(projects, raw.registry?.order === "custom");
+  order.forEach((p, i) => {
+    p.slot = i;
+  });
+  return { projects: order, sessions };
+}
+// Unpinned items by last activity (or as listed, in the user's own order), then each pinned one at its slot.
+function arrange(items, custom) {
+  const isPinned = x => Number.isInteger(x.pin);
+  const out = items.filter(x => !isPinned(x));
+  if (!custom) out.sort((a, b) => b.last - a.last || a.name.localeCompare(b.name, I18N.locale()));
+  for (const x of items.filter(isPinned).sort((a, b) => a.pin - b.pin)) out.splice(Math.min(x.pin, out.length), 0, x);
+  return out;
 }

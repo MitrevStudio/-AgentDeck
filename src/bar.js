@@ -114,7 +114,7 @@ function tileHtml(tile, toks) {
     ? `<span class="mono" style="--h:${hue(tile.p.n)}">${esc(initials(tile.label))}${badge}</span>`
     : `<span class="mono special ${tile.kind}">${icon(tile.kind === "live" ? "pulse" : tile.kind === "day" ? "clock" : "search")}</span>`;
   return `<button class="tile ${tile.key === st.tile ? "sel" : ""} ${tile.p?.concealed ? "concealed" : ""}" data-key="${esc(tile.key)}" title="${esc(tile.kind === "project" ? `${tile.label}\n${tile.p.path}${gitTip(tile.p.path)}` : tile.label)}">
-    ${mono}<span class="tname">${tile.kind === "project" ? hl(tile.label, toks) : esc(tile.label)}</span><span class="tcount">${tile.count}</span>${tile.kind === "project" ? gitTile(tile.p.path) : ""}</button>`;
+    ${mono}<span class="tname">${tile.kind === "project" ? hl(tile.label, toks) : esc(tile.label)}</span><span class="tcount">${tile.count}</span>${tile.kind === "project" ? gitTile(tile.p.path) : ""}${Number.isInteger(tile.p?.pin) ? `<span class="tpin">${icon("pin")}</span>` : ""}</button>`;
 }
 function renderStrip(toks) {
   $("strip").innerHTML = tiles.length ? tiles.map(tile => tileHtml(tile, toks)).join("") : `<div class="none">${esc(t("bar.noProjects", { q: q.value }))}</div>`;
