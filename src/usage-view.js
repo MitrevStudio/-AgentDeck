@@ -254,7 +254,7 @@ $("usageView").addEventListener("click", e => {
   if (el.dataset.period) { uv.period = el.dataset.period; return renderUsage(); }
   if (el.dataset.metric) { uv.metric = el.dataset.metric; return renderUsage(); }
   // From a project or a session to the sessions list, filtered to it.
-  if (el.dataset.project != null) { openUsage(false); ui.selected = ""; selectProject(el.dataset.project); return; }
+  if (el.dataset.project != null) { openUsage(false); ui.selected = ""; selectProject(normPath(el.dataset.project)); return; }
   if (el.dataset.session) { openUsage(false); setQuery(el.dataset.session.slice(el.dataset.session.indexOf(":") + 1)); }
 });
 $("usageView").addEventListener("pointermove", e => {

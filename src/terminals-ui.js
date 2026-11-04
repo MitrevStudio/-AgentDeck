@@ -1,5 +1,5 @@
 // AgentDeck's own terminal tabs (terminals.js in main): a strip over the sessions panel and an xterm.js view per tab.
-// Loaded before renderer.js, which calls showSessionTab, isMoveHereOffered and moveSessionHere.
+// Loaded before renderer.js, which calls showSessionTab, showProjectTab, isMoveHereOffered and moveSessionHere.
 const ANSI_NAMES = [
   "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
   "brightBlack", "brightRed", "brightGreen", "brightYellow", "brightBlue", "brightMagenta", "brightCyan", "brightWhite"
@@ -130,7 +130,7 @@ function renderTermTabs() {
   const sessionsTab = `<button class="term-tab ${activeTab ? "" : "active"}" data-term-tab="" role="tab">${icon("layers")}${esc(t("manager.sessions"))}</button>`;
   const html = sessionsTab + termTabs.map(tab => {
     const status = getTabStatus(tab);
-    return `<div class="term-tab ${tab.id === activeTab ? "active" : ""} ${tab.exited ? "exited" : ""}" data-term-tab="${esc(tab.id)}" role="tab" title="${esc(tab.cwd)}">
+    return `<div class="term-tab ${tab.id === activeTab ? "active" : ""} ${tab.exited ? "exited" : ""}" data-term-tab="${esc(tab.id)}" role="tab" title="${esc(tab.cwd)}" draggable="true">
       <span class="term-dot ${isTabLoading(tab) ? "loading" : status}"></span><span class="term-title">${esc(getTabTitle(tab))}</span>${tab.note ? `<span class="term-note">${esc(tab.note)}</span>` : ""}
       <button class="term-close" data-term-close="${esc(tab.id)}" title="${esc(t("term.tab.close"))}">${icon("x")}</button></div>`;
   }).join("");
@@ -140,14 +140,14 @@ function renderTermTabs() {
     strip.innerHTML = html;
   }
 }
-function activateTab(id) {
+function activateTab(id, focus = true) {
   activeTab = termViews.has(id) ? id : "";
   termViews.forEach((view, viewId) => view.el.classList.toggle("active", viewId === activeTab));
   $("termPanes").hidden = !activeTab;
   renderTermTabs();
   if (activeTab) {
     fitActiveTab();
-    termViews.get(activeTab).term.focus();
+    if (focus) termViews.get(activeTab).term.focus();
   }
 }
 function syncTermTabs(list) {
@@ -171,6 +171,20 @@ async function closeTermTab(id) {
 // ---------- sessions <-> tabs (main links a new session's tab: tab-links.js) ----------
 function findSessionTab(s) {
   return termTabs.find(tab => tab.agent === s.agent && tab.sessionId === s.id && !tab.exited) || null;
+}
+// A selected project's (or group's) open tab comes up: the session that needs the user first, else the latest one.
+// Without one, the sessions list does. The keyboard stays in the project list.
+function showProjectTab(sel) {
+  const tab = getProjectTab(sel);
+  if (tab || activeTab) {
+    activateTab(tab?.id || "", false);
+  }
+}
+function getProjectTab(sel) {
+  const open = sel.sessions.map(s => ({ s, tab: findSessionTab(s), l: liveOf(s) })).filter(x => x.tab);
+  const rank = x => (x.l ? getLiveRank(x.l) : Infinity);
+  open.sort((a, b) => rank(a) - rank(b) || (b.s.updatedAt || 0) - (a.s.updatedAt || 0));
+  return open[0]?.tab || null;
 }
 // Brings up the session's tab when it has one; false otherwise.
 function showSessionTab(s) {
@@ -227,6 +241,54 @@ $("termTabs").addEventListener("click", e => {
   if (tab) {
     activateTab(tab.dataset.termTab);
   }
+});
+// ---------- tabs: drag to reorder ----------
+// The strip shows the new order at once; main keeps it (and sends it back unchanged).
+let draggedTab = "";
+const getTabDropSide = (el, e) => (e.clientX > el.getBoundingClientRect().left + el.offsetWidth / 2 ? "after" : "before");
+function getTabDropTarget(e) {
+  const el = e.target.closest?.(".term-tab[draggable]");
+  return el && draggedTab && el.dataset.termTab !== draggedTab ? el : null;
+}
+function clearTabDropMarks() {
+  document.querySelectorAll(".term-tab.drop-before, .term-tab.drop-after, .term-tab.dragging").forEach(el => el.classList.remove("drop-before", "drop-after", "dragging"));
+}
+function moveTab(id, targetId, side) {
+  const ids = termTabs.map(tab => tab.id).filter(x => x !== id);
+  ids.splice(ids.indexOf(targetId) + (side === "after" ? 1 : 0), 0, id);
+  termTabs = ids.map(x => termTabs.find(tab => tab.id === x));
+  renderTermTabs();
+  window.terminals.reorder(ids).catch(err => toast(err.message, true));
+}
+$("termTabs").addEventListener("dragstart", e => {
+  const el = e.target.closest?.(".term-tab[draggable]");
+  if (!el) return;
+  draggedTab = el.dataset.termTab;
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData("text/plain", draggedTab);
+  el.classList.add("dragging");
+});
+$("termTabs").addEventListener("dragover", e => {
+  const el = getTabDropTarget(e);
+  if (!el) return;
+  e.preventDefault();
+  const cls = "drop-" + getTabDropSide(el, e);
+  if (el.classList.contains(cls)) return;
+  document.querySelectorAll(".term-tab.drop-before, .term-tab.drop-after").forEach(x => x.classList.remove("drop-before", "drop-after"));
+  el.classList.add(cls);
+});
+$("termTabs").addEventListener("drop", e => {
+  const el = getTabDropTarget(e);
+  if (!el) return;
+  e.preventDefault();
+  const id = draggedTab;
+  draggedTab = "";
+  clearTabDropMarks();
+  moveTab(id, el.dataset.termTab, getTabDropSide(el, e));
+});
+$("termTabs").addEventListener("dragend", () => {
+  draggedTab = "";
+  clearTabDropMarks();
 });
 new ResizeObserver(fitActiveTab).observe($("termPanes"));
 // The status dots and titles follow the live registry.

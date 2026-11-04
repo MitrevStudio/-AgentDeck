@@ -1,6 +1,6 @@
 // Edge menu: project tiles in a horizontal strip, the selected project's sessions below, one search for both.
 let raw = { registry: { projects: [] }, sessions: [], agents: [] };
-let model = { projects: [], sessions: [] };
+let model = { projects: [], sessions: [], groups: [] };
 let live = new Map(), liveSig = "";
 let tiles = [], rows = [];
 let shownDetail = ""; // the list #detail shows: which opening of the menu, tile and query
@@ -58,12 +58,16 @@ function computeTiles() {
   const running = model.sessions.filter(liveOf);
   if (running.length && !toks.length) out.push({ key: "live", kind: "live", label: t("bar.tile.live"), count: running.length });
   if (!toks.length && window.dayUi?.enabled()) out.push({ key: "day", kind: "day", label: t("bar.tile.day"), count: "" });
-  for (const p of model.projects) {
-    const inside = toks.length ? p.sessions.filter(s => hitSet.has(s)) : p.sessions;
-    if (toks.length && !inside.length && !matches(p.hay, toks)) continue;
+  for (const u of getUnits(model.projects, model.groups)) {
+    const p = u.group ? { ...u.group, sessions: u.sessions, members: u.members } : u.project;
+    const named = toks.length > 0 && matches(p.hay, toks);
+    // A group found by its name shows all of its sessions, as in the manager.
+    const whole = !toks.length || (u.group && named);
+    const inside = whole ? p.sessions : p.sessions.filter(s => hitSet.has(s));
+    if (!whole && !inside.length && !named) continue;
     const states = p.sessions.map(liveOf).filter(Boolean);
     out.push({
-      key: "p:" + p.n, kind: "project", p, label: p.name, count: inside.length,
+      key: "p:" + p.n, kind: u.group ? "group" : "project", p, label: p.name, count: inside.length, whole,
       waiting: states.some(l => l.status === "waiting"),
       busy: states.some(l => l.status === "busy" && !isStale(l)), idle: states.some(l => l.status !== "busy")
     });
@@ -79,7 +83,7 @@ function rowsFor(tile, toks, hits) {
   }
   if (tile.kind === "day") return [];
   if (tile.kind === "live") return model.sessions.filter(liveOf).sort(byLive).map(s => ({ type: "session", s, showPath: true }));
-  const list = toks.length ? tile.p.sessions.filter(s => found(s, toks)) : tile.p.sessions;
+  const list = tile.whole ? tile.p.sessions : tile.p.sessions.filter(s => found(s, toks));
   return liveFirst(list).map(s => ({ type: "session", s, showPath: s.cwdN !== tile.p.n }));
 }
 
@@ -110,11 +114,16 @@ const hideBtn = (kind, key, on) => `<button class="icon-btn hide-tag ${on ? "on"
 function tileHtml(tile, toks) {
   const badge = tile.waiting ? '<span class="badge"><span class="pulse attn"></span></span>'
     : tile.busy ? '<span class="badge"><span class="spinner"></span></span>' : tile.idle ? '<span class="badge"><span class="pulse"></span></span>' : "";
-  const mono = tile.kind === "project"
-    ? `<span class="mono" style="--h:${hue(tile.p.n)}">${esc(initials(tile.label))}${badge}</span>`
+  const mono = tile.kind === "project" || tile.kind === "group"
+    ? `<span class="mono ${tile.kind}" style="--h:${hue(tile.p.n)}">${esc(initials(tile.label))}${badge}</span>`
     : `<span class="mono special ${tile.kind}">${icon(tile.kind === "live" ? "pulse" : tile.kind === "day" ? "clock" : "search")}</span>`;
-  return `<button class="tile ${tile.key === st.tile ? "sel" : ""} ${tile.p?.concealed ? "concealed" : ""}" data-key="${esc(tile.key)}" title="${esc(tile.kind === "project" ? `${tile.label}\n${tile.p.path}${gitTip(tile.p.path)}` : tile.label)}">
-    ${mono}<span class="tname">${tile.kind === "project" ? hl(tile.label, toks) : esc(tile.label)}</span><span class="tcount">${tile.count}</span>${tile.kind === "project" ? gitTile(tile.p.path) : ""}</button>`;
+  return `<button class="tile ${tile.key === st.tile ? "sel" : ""} ${tile.p?.concealed ? "concealed" : ""}" data-key="${esc(tile.key)}" title="${esc(getTileTitle(tile))}">
+    ${mono}<span class="tname">${tile.p ? hl(tile.label, toks) : esc(tile.label)}</span><span class="tcount">${tile.count}</span>${tile.kind === "project" ? gitTile(tile.p.path) : ""}${isPinned(tile.p) ? `<span class="tpin">${icon("pin")}</span>` : ""}</button>`;
+}
+function getTileTitle(tile) {
+  if (tile.kind === "project") return `${tile.label}\n${tile.p.path}${gitTip(tile.p.path)}`;
+  if (tile.kind === "group") return `${tile.label}\n${getMemberNames(tile.p.members)}`;
+  return tile.label;
 }
 function renderStrip(toks) {
   $("strip").innerHTML = tiles.length ? tiles.map(tile => tileHtml(tile, toks)).join("") : `<div class="none">${esc(t("bar.noProjects", { q: q.value }))}</div>`;
@@ -148,9 +157,13 @@ function renderDetail(tile, toks) {
         <div class="dactions">${newButtons(tile.p.path)}
           <button class="btn" data-act="terminal" data-path="${esc(tile.p.path)}">${icon("terminal")}${esc(t("action.terminal"))}</button>
           <button class="btn" data-act="explorer" data-path="${esc(tile.p.path)}">${icon("open")}${esc(t("action.explorer"))}</button></div></div>`
+    : tile.kind === "group"
+    ? `<div class="dhead"><span class="mono sm group" style="--h:${hue(tile.p.n)}">${esc(initials(tile.label))}</span>
+        <div class="dtitle"><div class="dname">${hl(tile.label, toks)}${usageTotal(tile.p.sessions)}</div>
+        <div class="dsub">${esc(t("bar.group.sub", { names: getMemberNames(tile.p.members) }))}</div></div></div>`
     : `<div class="dhead"><div class="dtitle"><div class="dname">${esc(tile.kind === "live" ? t("bar.live.title") : t("bar.results.title", { q: q.value }))}</div>
         <div class="dsub">${esc(tile.kind === "live" ? t("bar.live.sub") : tn("bar.results.count", tile.count))}</div></div></div>`;
-  const empty = t(tile.kind === "project" ? (toks.length ? "bar.empty.projectNoMatch" : "bar.empty.project") : "bar.empty.results");
+  const empty = t(tile.p ? (toks.length ? "bar.empty.projectNoMatch" : "bar.empty.project") : "bar.empty.results");
   const pane = rows.some(r => r.s) ? `<aside class="pv" id="pv" aria-label="${esc(t("preview.title"))}"></aside>` : "";
   // New figures or git state redraw the same list: it keeps its scroll, and the preview pane is moved over as it is
   // (messages opened in full stay open).
@@ -290,7 +303,7 @@ async function act(name, el) {
       // Projects this was the last session of leave the list with it (their folders stay).
       const emptied = model.projects.filter(p => p.total === 1 && p.sessions.includes(s));
       await window.manager.deleteSession(s.agent, s.id);
-      for (const p of emptied) await window.manager.removeProject(p.path);
+      for (const p of emptied) await window.manager.removeProject(p.path, false);
       return toast(t(s.agent === "OpenCode" ? "toast.deletedForever" : "toast.deleted"));
     }
     if (name === "remove-project") { await window.manager.removeProject(path); return toast(t("toast.projectRemoved")); }
