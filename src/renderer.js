@@ -1,5 +1,5 @@
 let raw = { registry: { projects: [] }, sessions: [] };
-let data = { projects: [], sessions: [] };
+let data = { projects: [], sessions: [], groups: [] };
 let visible = [];
 // Every project's path in the order shown, hidden ones too: a drag or a pin is placed within it.
 let order = [];

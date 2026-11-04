@@ -1,6 +1,6 @@
 // Edge menu: project tiles in a horizontal strip, the selected project's sessions below, one search for both.
 let raw = { registry: { projects: [] }, sessions: [], agents: [] };
-let model = { projects: [], sessions: [] };
+let model = { projects: [], sessions: [], groups: [] };
 let live = new Map(), liveSig = "";
 let tiles = [], rows = [];
 let shownDetail = ""; // the list #detail shows: which opening of the menu, tile and query
@@ -58,7 +58,7 @@ function computeTiles() {
   const running = model.sessions.filter(liveOf);
   if (running.length && !toks.length) out.push({ key: "live", kind: "live", label: t("bar.tile.live"), count: running.length });
   if (!toks.length && window.dayUi?.enabled()) out.push({ key: "day", kind: "day", label: t("bar.tile.day"), count: "" });
-  for (const u of getUnits(model.projects, model.groups || [])) {
+  for (const u of getUnits(model.projects, model.groups)) {
     const p = u.group ? { ...u.group, sessions: u.sessions, members: u.members, hay: searchable(u.group.name) } : u.project;
     const inside = toks.length ? p.sessions.filter(s => hitSet.has(s)) : p.sessions;
     if (toks.length && !inside.length && !matches(p.hay, toks)) continue;
