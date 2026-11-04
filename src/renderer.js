@@ -138,14 +138,18 @@ function buildProjectHtml(p, count, v) {
       </div>
       ${pathHtml(p.path, v.toks)}
       <div class="proj-meta"><span>${esc(p.last ? ago(p.last) : t("manager.project.noSessions"))}</span>
-        <span class="proj-tools">
-          <button class="icon-btn" data-action="terminal" title="${esc(t("action.terminalHere"))}">${icon("terminal")}</button>
-          <button class="icon-btn" data-action="explorer" title="${esc(t("action.explorerTitle"))}">${icon("open")}</button>
-          <button class="icon-btn" data-action="copy" title="${esc(t("action.copyPath"))}">${icon("copy")}</button>
-          ${member ? "" : buildPinButton(p)}
-          <button class="icon-btn ${member ? "on" : ""}" data-action="group-menu" title="${esc(t("manager.projectGroup.menu"))}" aria-haspopup="menu">${icon("stack")}</button>
-          <button class="icon-btn" data-action="rename" title="${esc(t("action.rename"))}">${icon("pencil")}</button>
-          <button class="icon-btn danger" data-action="remove" title="${esc(t("action.remove"))}">${icon("trash")}</button>
+        <span class="proj-tools two-rows">
+          <span class="tool-row">
+            <button class="icon-btn" data-action="terminal" title="${esc(t("action.terminalHere"))}">${icon("terminal")}</button>
+            <button class="icon-btn" data-action="explorer" title="${esc(t("action.explorerTitle"))}">${icon("open")}</button>
+            <button class="icon-btn" data-action="copy" title="${esc(t("action.copyPath"))}">${icon("copy")}</button>
+          </span>
+          <span class="tool-row">
+            ${member ? "" : buildPinButton(p)}
+            <button class="icon-btn ${member ? "on" : ""}" data-action="group-menu" title="${esc(t("manager.projectGroup.menu"))}" aria-haspopup="menu">${icon("stack")}</button>
+            <button class="icon-btn" data-action="rename" title="${esc(t("action.rename"))}">${icon("pencil")}</button>
+            <button class="icon-btn danger" data-action="remove" title="${esc(t("action.remove"))}">${icon("trash")}</button>
+          </span>
         </span>
       </div>
     </div>`;
