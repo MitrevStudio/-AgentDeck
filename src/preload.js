@@ -2,7 +2,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("manager", {
   getData: opts => ipcRenderer.invoke("app:get-data", opts),
   addProject: () => ipcRenderer.invoke("project:add"),
-  removeProject: p => ipcRenderer.invoke("project:remove", p),
+  removeProject: (p, remember = true) => ipcRenderer.invoke("project:remove", p, remember),
   renameProject: (p, name) => ipcRenderer.invoke("project:rename", p, name),
   launchFolder: p => ipcRenderer.invoke("launch:folder", p),
   launchAgent: (agent, id, cwd) => ipcRenderer.invoke("launch:agent", agent, id, cwd),

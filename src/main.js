@@ -70,8 +70,11 @@ const OPENCODE_DB = path.join(process.env.XDG_DATA_HOME || path.join(USER, ".loc
 function readRegistry() {
   try {
     const data = JSON.parse(fs.readFileSync(DATA, "utf8"));
-    return { projects: Array.isArray(data.projects) ? data.projects : [] };
-  } catch { return { projects: [] }; }
+    return {
+      projects: Array.isArray(data.projects) ? data.projects : [],
+      removed: Array.isArray(data.removed) ? data.removed.filter(p => typeof p === "string") : []
+    };
+  } catch { return { projects: [], removed: [] }; }
 }
 function writeRegistry(data) {
   fs.mkdirSync(path.dirname(DATA), { recursive: true });
@@ -355,9 +358,11 @@ function scanTranscripts(registry, found) {
 function indexProjects(found) {
   // Auto-index projects that can be reliably resolved from local session metadata.
   const registry = readRegistry();
+  // Folders the user removed from the list stay out until added again.
+  const removed = new Set(registry.removed);
   let changed = false;
   for (const s of found) {
-    if (!s.cwd || !path.isAbsolute(s.cwd) || !fs.existsSync(s.cwd)) continue;
+    if (!s.cwd || !path.isAbsolute(s.cwd) || removed.has(norm(s.cwd)) || !fs.existsSync(s.cwd)) continue;
     try { if (!fs.statSync(s.cwd).isDirectory()) continue; } catch { continue; }
     let project = registry.projects.find(p => norm(p.path) === norm(s.cwd));
     if (!project) {
@@ -794,12 +799,17 @@ function registerIpc() {
     const p = path.resolve(result.filePaths[0]);
     pickedFrom = path.dirname(p);
     const data = readRegistry();
+    data.removed = data.removed.filter(x => x !== norm(p));
     if (!data.projects.some(x => norm(x.path) === norm(p))) data.projects.push({ name: path.basename(p), path: p });
     writeRegistry(data); return registryChanged(data);
   });
-  handle("project:remove", p => {
+  // remember: false when it only leaves with its last deleted session - a new session there brings it back.
+  handle("project:remove", (p, remember) => {
     text(p);
-    const data = readRegistry(); data.projects = data.projects.filter(x => norm(x.path) !== norm(p)); writeRegistry(data); return registryChanged(data);
+    const data = readRegistry();
+    data.projects = data.projects.filter(x => norm(x.path) !== norm(p));
+    if (remember !== false && !data.removed.includes(norm(p))) data.removed.push(norm(p));
+    writeRegistry(data); return registryChanged(data);
   });
   handle("project:rename", (p, name) => {
     text(p); text(name, 1000);

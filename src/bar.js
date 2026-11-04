@@ -290,7 +290,7 @@ async function act(name, el) {
       // Projects this was the last session of leave the list with it (their folders stay).
       const emptied = model.projects.filter(p => p.total === 1 && p.sessions.includes(s));
       await window.manager.deleteSession(s.agent, s.id);
-      for (const p of emptied) await window.manager.removeProject(p.path);
+      for (const p of emptied) await window.manager.removeProject(p.path, false);
       return toast(t(s.agent === "OpenCode" ? "toast.deletedForever" : "toast.deleted"));
     }
     if (name === "remove-project") { await window.manager.removeProject(path); return toast(t("toast.projectRemoved")); }
