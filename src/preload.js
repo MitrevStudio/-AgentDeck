@@ -56,6 +56,7 @@ contextBridge.exposeInMainWorld("terminals", {
   getTabs: () => ipcRenderer.invoke("terminals:list"),
   attach: id => ipcRenderer.invoke("terminal:attach", id),
   close: id => ipcRenderer.invoke("terminal:close", id),
+  reorder: ids => ipcRenderer.invoke("terminals:reorder", ids),
   move: (agent, id) => ipcRenderer.invoke("terminal:move", agent, id),
   input: (id, data) => ipcRenderer.send("terminal:input", id, data),
   resize: (id, cols, rows) => ipcRenderer.send("terminal:resize", id, cols, rows),

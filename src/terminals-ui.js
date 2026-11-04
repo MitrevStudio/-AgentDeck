@@ -130,7 +130,7 @@ function renderTermTabs() {
   const sessionsTab = `<button class="term-tab ${activeTab ? "" : "active"}" data-term-tab="" role="tab">${icon("layers")}${esc(t("manager.sessions"))}</button>`;
   const html = sessionsTab + termTabs.map(tab => {
     const status = getTabStatus(tab);
-    return `<div class="term-tab ${tab.id === activeTab ? "active" : ""} ${tab.exited ? "exited" : ""}" data-term-tab="${esc(tab.id)}" role="tab" title="${esc(tab.cwd)}">
+    return `<div class="term-tab ${tab.id === activeTab ? "active" : ""} ${tab.exited ? "exited" : ""}" data-term-tab="${esc(tab.id)}" role="tab" title="${esc(tab.cwd)}" draggable="true">
       <span class="term-dot ${isTabLoading(tab) ? "loading" : status}"></span><span class="term-title">${esc(getTabTitle(tab))}</span>${tab.note ? `<span class="term-note">${esc(tab.note)}</span>` : ""}
       <button class="term-close" data-term-close="${esc(tab.id)}" title="${esc(t("term.tab.close"))}">${icon("x")}</button></div>`;
   }).join("");
@@ -241,6 +241,54 @@ $("termTabs").addEventListener("click", e => {
   if (tab) {
     activateTab(tab.dataset.termTab);
   }
+});
+// ---------- tabs: drag to reorder ----------
+// The strip shows the new order at once; main keeps it (and sends it back unchanged).
+let draggedTab = "";
+const getTabDropSide = (el, e) => (e.clientX > el.getBoundingClientRect().left + el.offsetWidth / 2 ? "after" : "before");
+function getTabDropTarget(e) {
+  const el = e.target.closest?.(".term-tab[draggable]");
+  return el && draggedTab && el.dataset.termTab !== draggedTab ? el : null;
+}
+function clearTabDropMarks() {
+  document.querySelectorAll(".term-tab.drop-before, .term-tab.drop-after, .term-tab.dragging").forEach(el => el.classList.remove("drop-before", "drop-after", "dragging"));
+}
+function moveTab(id, targetId, side) {
+  const ids = termTabs.map(tab => tab.id).filter(x => x !== id);
+  ids.splice(ids.indexOf(targetId) + (side === "after" ? 1 : 0), 0, id);
+  termTabs = ids.map(x => termTabs.find(tab => tab.id === x));
+  renderTermTabs();
+  window.terminals.reorder(ids).catch(err => toast(err.message, true));
+}
+$("termTabs").addEventListener("dragstart", e => {
+  const el = e.target.closest?.(".term-tab[draggable]");
+  if (!el) return;
+  draggedTab = el.dataset.termTab;
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData("text/plain", draggedTab);
+  el.classList.add("dragging");
+});
+$("termTabs").addEventListener("dragover", e => {
+  const el = getTabDropTarget(e);
+  if (!el) return;
+  e.preventDefault();
+  const cls = "drop-" + getTabDropSide(el, e);
+  if (el.classList.contains(cls)) return;
+  document.querySelectorAll(".term-tab.drop-before, .term-tab.drop-after").forEach(x => x.classList.remove("drop-before", "drop-after"));
+  el.classList.add(cls);
+});
+$("termTabs").addEventListener("drop", e => {
+  const el = getTabDropTarget(e);
+  if (!el) return;
+  e.preventDefault();
+  const id = draggedTab;
+  draggedTab = "";
+  clearTabDropMarks();
+  moveTab(id, el.dataset.termTab, getTabDropSide(el, e));
+});
+$("termTabs").addEventListener("dragend", () => {
+  draggedTab = "";
+  clearTabDropMarks();
 });
 new ResizeObserver(fitActiveTab).observe($("termPanes"));
 // The status dots and titles follow the live registry.

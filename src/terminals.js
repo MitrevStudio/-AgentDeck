@@ -172,6 +172,14 @@ function createTerminals({ userDataDir, onData, onExit, onChange }) {
     const terminal = terminals.get(id);
     return terminal ? { scrollback: getScrollback(terminal), end: terminal.end, exitCode: terminal.exitCode } : null;
   }
+  // The tabs in the order of `ids`; any tab missing from it keeps its place after them.
+  function reorder(ids) {
+    const sorted = [...ids.filter(id => terminals.has(id)), ...terminals.keys()];
+    const entries = [...new Set(sorted)].map(id => [id, terminals.get(id)]);
+    terminals.clear();
+    entries.forEach(([id, x]) => terminals.set(id, x));
+    onChange(getTabs());
+  }
   function close(id) {
     const terminal = terminals.get(id);
     if (!terminal) {
@@ -206,7 +214,7 @@ function createTerminals({ userDataDir, onData, onExit, onChange }) {
     return [...terminals.values()].filter(x => !x.sessionId && x.exitCode === null).map(x => ({ id: x.id, pid: x.child.pid }));
   }
 
-  return { open, input, type, getLastInputAt, setNote, resize, attach, close, closeAll, link, getTabs, getUnlinkedTabs };
+  return { open, input, type, getLastInputAt, setNote, resize, attach, close, closeAll, link, reorder, getTabs, getUnlinkedTabs };
 }
 
 module.exports = { createTerminals };

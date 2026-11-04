@@ -970,6 +970,11 @@ function registerIpc() {
   });
   handle("terminal:attach", id => terminals.attach(text(id, 64)));
   handle("terminal:close", id => terminals.close(text(id, 64)));
+  handle("terminals:reorder", ids => {
+    if (!Array.isArray(ids) || ids.length > 1000) throw new Error(t("errors.invalidData"));
+    terminals.reorder(ids.map(id => text(id, 64)));
+    return true;
+  });
   handle("terminal:move", async (agent, id) => {
     await moveToTab(text(agent), text(id));
     return true;
