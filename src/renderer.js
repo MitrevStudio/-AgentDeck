@@ -34,7 +34,7 @@ function findSelected() {
   if (!ui.selected.startsWith("g:")) return data.projects.find(p => p.n === ui.selected);
   return getUnits(data.projects, data.groups).find(u => u.group?.n === ui.selected);
 }
-const inSelected = (s, sel) => (sel.group ? sel.members.some(p => inProject(s, p)) : inProject(s, sel));
+const isInSelected = (s, sel) => (sel.group ? sel.members.some(p => inProject(s, p)) : inProject(s, sel));
 
 // Whole conversations too, from main's full-text index (as in the edge menu): a session whose text matches joins the
 // hits even when its title does not. Words under three letters are not searched there.
@@ -73,14 +73,14 @@ function compute() {
     .map(p => ({ p, count: toks.length ? p.sessions.filter(s => hitSet.has(s)).length : p.sessions.length }))
     .filter(x => !toks.length || x.count > 0 || matches(x.p.hay, toks) || x.p.n === ui.selected || groupHits.has(x.p.group));
   const sel = findSelected();
-  const scoped = sel ? hits.filter(s => inSelected(s, sel)) : hits;
+  const scoped = sel ? hits.filter(s => isInSelected(s, sel)) : hits;
   const agentCounts = Object.fromEntries(AGENTS.map(a => [a, scoped.filter(s => s.agent === a).length]));
   const byAgent = ui.agent ? scoped.filter(s => s.agent === ui.agent) : scoped;
   const liveCounts = countLiveGroups(byAgent.map(liveOf).filter(Boolean));
   // Running sessions go first (blocked on the user, working, stalled, waiting for input); the rest keep their date order.
   const running = byAgent.filter(liveOf).sort((a, b) => getLiveRank(liveOf(a)) - getLiveRank(liveOf(b)) || lastSign(liveOf(b)) - lastSign(liveOf(a)));
   const sessions = ui.liveOnly ? running : [...running, ...byAgent.filter(s => !liveOf(s))];
-  return { toks, hits, projects, sel, scoped, agentCounts, liveCounts, sessions };
+  return { toks, hits, hitSet, projects, sel, scoped, agentCounts, liveCounts, sessions };
 }
 
 // ---------- rendering ----------
@@ -106,28 +106,28 @@ function renderProjects(v) {
     <div class="proj-row">${icon("layers")}<span class="proj-name">${esc(t("manager.allSessions"))}</span><span class="count">${v.hits.length}</span></div></div>`;
   const counts = new Map(v.projects.map(x => [x.p, x.count]));
   html += getUnits(v.projects.map(x => x.p), data.groups).map(u => {
-    if (!u.group) return projectHtml(u.project, counts.get(u.project), v);
+    if (!u.group) return buildProjectHtml(u.project, counts.get(u.project), v);
     const shut = isCollapsed(u.group.id) && !v.toks.length;
-    return groupHtml(u, v, shut) + (shut ? "" : u.members.map(p => projectHtml(p, counts.get(p), v)).join(""));
+    return buildGroupHtml(u, v, shut) + (shut ? "" : u.members.map(p => buildProjectHtml(p, counts.get(p), v)).join(""));
   }).join("");
   if (!total && ui.loaded) html += `<div class="empty small">${esc(t("manager.projects.empty"))}</div>`;
   else if (!v.projects.length && v.toks.length) html += `<div class="empty small">${esc(t("manager.projects.noMatch", { q: ui.query }))}</div>`;
   $("projects").innerHTML = html;
 }
-const draggable = (v, n) => (v.toks.length || ui.renaming === n ? "" : 'draggable="true"');
-const pinMark = () => `<span class="pin-mark" title="${esc(t("manager.project.pinned"))}">${icon("pin")}</span>`;
-const pinButton = x => `<button class="icon-btn ${isPinned(x) ? "on" : ""}" data-action="pin" title="${esc(t(isPinned(x) ? "action.unpin" : "action.pin"))}">${icon("pin")}</button>`;
-const nameHtml = (x, v, label) => (ui.renaming === x.n
+const getDraggableAttr = (v, n) => (v.toks.length || ui.renaming === n ? "" : 'draggable="true"');
+const buildPinMark = () => `<span class="pin-mark" title="${esc(t("manager.project.pinned"))}">${icon("pin")}</span>`;
+const buildPinButton = x => `<button class="icon-btn ${isPinned(x) ? "on" : ""}" data-action="pin" title="${esc(t(isPinned(x) ? "action.unpin" : "action.pin"))}">${icon("pin")}</button>`;
+const buildNameHtml = (x, v, label) => (ui.renaming === x.n
   ? `<input class="rename" value="${esc(x.name)}" maxlength="80" aria-label="${esc(t(label))}">`
   : `<span class="proj-name" title="${esc(x.name)}">${hl(x.name, v.toks)}</span>`);
 
-function projectHtml(p, count, v) {
+function buildProjectHtml(p, count, v) {
   const member = Boolean(p.group);
   return `
-    <div class="proj ${member ? "member" : ""} ${ui.selected === p.n ? "active" : ""}" data-path="${esc(p.path)}" tabindex="0" ${draggable(v, p.n)}>
+    <div class="proj ${member ? "member" : ""} ${ui.selected === p.n ? "active" : ""}" data-path="${esc(p.path)}" tabindex="0" ${getDraggableAttr(v, p.n)}>
       <div class="proj-row">${icon("folder")}
-        ${nameHtml(p, v, "manager.project.newName")}
-        ${isPinned(p) ? pinMark() : ""}
+        ${buildNameHtml(p, v, "manager.project.newName")}
+        ${isPinned(p) ? buildPinMark() : ""}
         ${gitChip(p.path)}${projectLive(p.sessions)}
         <span class="count" title="${esc(t(v.toks.length ? "manager.project.countMatching" : "manager.project.countAll"))}">${count}</span>
       </div>
@@ -137,7 +137,7 @@ function projectHtml(p, count, v) {
           <button class="icon-btn" data-action="terminal" title="${esc(t("action.terminalHere"))}">${icon("terminal")}</button>
           <button class="icon-btn" data-action="explorer" title="${esc(t("action.explorerTitle"))}">${icon("open")}</button>
           <button class="icon-btn" data-action="copy" title="${esc(t("action.copyPath"))}">${icon("copy")}</button>
-          ${member ? "" : pinButton(p)}
+          ${member ? "" : buildPinButton(p)}
           <button class="icon-btn ${member ? "on" : ""}" data-action="${member ? "leave-group" : "group"}" title="${esc(t(member ? "manager.projectGroup.leave" : "manager.projectGroup.create"))}">${icon("stack")}</button>
           <button class="icon-btn" data-action="rename" title="${esc(t("action.rename"))}">${icon("pencil")}</button>
           <button class="icon-btn danger" data-action="remove" title="${esc(t("action.remove"))}">${icon("trash")}</button>
@@ -146,22 +146,21 @@ function projectHtml(p, count, v) {
     </div>`;
 }
 
-function groupHtml(u, v, shut) {
-  const g = u.group, hits = new Set(v.hits);
-  const count = v.toks.length ? u.sessions.filter(s => hits.has(s)).length : u.sessions.length;
-  const last = Math.max(0, ...u.members.map(p => p.last));
+function buildGroupHtml(u, v, shut) {
+  const g = u.group;
+  const count = v.toks.length ? u.sessions.filter(s => v.hitSet.has(s)).length : u.sessions.length;
   return `
-    <div class="proj grp ${ui.selected === g.n ? "active" : ""}" data-group="${esc(g.id)}" tabindex="0" ${draggable(v, g.n)}>
+    <div class="proj grp ${ui.selected === g.n ? "active" : ""}" data-group="${esc(g.id)}" tabindex="0" ${getDraggableAttr(v, g.n)}>
       <div class="proj-row">
         <button class="icon-btn fold" data-action="fold" title="${esc(t(shut ? "manager.projectGroup.expand" : "manager.projectGroup.collapse"))}">${icon(shut ? "right" : "down")}</button>
-        ${icon("stack")}${nameHtml(g, v, "manager.projectGroup.newName")}
-        ${isPinned(g) ? pinMark() : ""}
+        ${icon("stack")}${buildNameHtml(g, v, "manager.projectGroup.newName")}
+        ${isPinned(g) ? buildPinMark() : ""}
         ${projectLive(u.sessions)}
         <span class="count" title="${esc(t(v.toks.length ? "manager.project.countMatching" : "manager.project.countAll"))}">${count}</span>
       </div>
-      <div class="proj-meta"><span>${esc(tn("manager.projectGroup.projects", u.members.length))} · ${esc(last ? ago(last) : t("manager.project.noSessions"))}</span>
+      <div class="proj-meta"><span>${esc(tn("manager.projectGroup.projects", u.members.length))} · ${esc(g.last ? ago(g.last) : t("manager.project.noSessions"))}</span>
         <span class="proj-tools">
-          ${pinButton(g)}
+          ${buildPinButton(g)}
           <button class="icon-btn" data-action="rename" title="${esc(t("action.rename"))}">${icon("pencil")}</button>
           <button class="icon-btn danger" data-action="ungroup" title="${esc(t("manager.projectGroup.delete"))}">${icon("x")}</button>
         </span>
@@ -188,7 +187,6 @@ function toggleCollapsed(id) {
   render();
 }
 
-const isPinned = p => Number.isInteger(p.pin);
 function renderOrderToggle() {
   const custom = raw.registry.order === "custom";
   const el = $("projectOrder");
@@ -430,34 +428,40 @@ async function createGroup(path) {
   render();
 }
 // The shown order with `src` ({path} or {group}) moved before, after or into the item of `card`, and the group the
-// moved project ends up in: into a group, beside one of its projects, or (beside anything else) none.
+// moved project ends up in.
 function getDropPlan(src, card, where) {
   const moving = src.group ? order.filter(x => getGroupOf(x) === src.group) : [src.path];
-  const isMoving = new Set(moving.map(normPath));
-  const rest = order.filter(x => !isMoving.has(normPath(x)));
-  const block = id => rest.filter(x => getGroupOf(x) === id);
-  const target = card.dataset.group || "";
-  const joins = where === "into" ? target : target ? "" : getGroupOf(card.dataset.path);
-  let anchor = card.dataset.path;
-  if (target || (src.group && joins)) {
-    const b = block(target || joins);
-    anchor = where === "before" ? b[0] : b.at(-1);
-  }
+  const isMoving = new Set(moving);
+  const rest = order.filter(x => !isMoving.has(x));
+  const joins = getJoinedGroup(card, where);
+  const anchor = getAnchor(rest, card, where, card.dataset.group || (src.group ? joins : ""));
   if (!anchor) return null;
-  rest.splice(rest.findIndex(x => normPath(x) === normPath(anchor)) + (where === "before" ? 0 : 1), 0, ...moving);
+  rest.splice(rest.indexOf(anchor) + (where === "before" ? 0 : 1), 0, ...moving);
   return { list: rest, groupOf: src.group ? null : { [src.path]: joins } };
+}
+// Into a group, beside one of its projects, or (beside anything else) none.
+function getJoinedGroup(card, where) {
+  if (where === "into") return card.dataset.group;
+  return card.dataset.group ? "" : getGroupOf(card.dataset.path);
+}
+// The path the moved item goes beside: the card's project, or the first or last project of the group it stands for.
+function getAnchor(rest, card, where, groupId) {
+  if (!groupId) return card.dataset.path;
+  const block = rest.filter(x => getGroupOf(x) === groupId);
+  return where === "before" ? block[0] : block.at(-1);
 }
 async function applyDrop(plan) {
   if (plan) applyRegistry(await window.manager.arrangeProjects(plan.list, plan.groupOf));
 }
+// Out of its group, right after the group's other projects; the last one out takes the group with it.
 async function leaveGroup(path) {
-  const card = document.querySelector(`.proj.grp[data-group="${CSS.escape(getGroupOf(path))}"]`);
-  const last = [...order].reverse().find(x => getGroupOf(x) === getGroupOf(path) && normPath(x) !== normPath(path));
-  if (!last) return applyRegistry(await window.manager.deleteGroup(getGroupOf(path)));
-  const list = order.filter(x => normPath(x) !== normPath(path));
-  list.splice(list.findIndex(x => normPath(x) === normPath(last)) + 1, 0, path);
+  const id = getGroupOf(path);
+  const last = order.findLast(x => getGroupOf(x) === id && x !== path);
+  if (!last) return applyRegistry(await window.manager.deleteGroup(id));
+  const list = order.filter(x => x !== path);
+  list.splice(list.indexOf(last) + 1, 0, path);
   applyRegistry(await window.manager.arrangeProjects(list, { [path]: "" }));
-  card?.focus();
+  document.querySelector(`.proj.grp[data-group="${CSS.escape(id)}"]`)?.focus();
 }
 async function toggleOrder() {
   applyRegistry(raw.registry.order === "custom" ? await window.manager.sortProjectsByActivity() : await window.manager.arrangeProjects(order));
@@ -539,8 +543,14 @@ $("projects").addEventListener("keydown", e => {
     moveByKey(e.target, e.key === "ArrowDown").catch(err => toast(err.message, true));
   }
 });
+// The card to move past: below an open group come its own projects, which it moves with.
+function getNextCard(card, down) {
+  let next = down ? card.nextElementSibling : card.previousElementSibling;
+  while (down && card.dataset.group && next?.dataset.path && getGroupOf(next.dataset.path) === card.dataset.group) next = next.nextElementSibling;
+  return next;
+}
 async function moveByKey(card, down) {
-  const next = down ? card.nextElementSibling : card.previousElementSibling;
+  const next = getNextCard(card, down);
   if (!next?.matches(".proj[draggable]")) return;
   const key = getCardKey(card);
   await applyDrop(getDropPlan(getSource(card), next, down ? "after" : "before"));

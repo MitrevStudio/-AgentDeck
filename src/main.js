@@ -74,20 +74,34 @@ function readRegistry() {
       projects: Array.isArray(data.projects) ? data.projects : [],
       removed: Array.isArray(data.removed) ? data.removed.filter(p => typeof p === "string") : [],
       order: data.order === "custom" ? "custom" : "activity",
-      groups: Array.isArray(data.groups) ? data.groups.filter(g => typeof g?.id === "string" && typeof g.name === "string") : []
+      groups: Array.isArray(data.groups) ? data.groups.filter(g => typeof g?.id === "string" && typeof g.name === "string") : [],
+      lastAdded: typeof data.lastAdded === "string" ? data.lastAdded : ""
     };
-  } catch { return { projects: [], removed: [], order: "activity", groups: [] }; }
+  } catch { return { projects: [], removed: [], order: "activity", groups: [], lastAdded: "" }; }
 }
 function writeRegistry(data) {
   fs.mkdirSync(path.dirname(DATA), { recursive: true });
   fs.writeFileSync(DATA, JSON.stringify(data, null, 2), "utf8");
 }
-// groupOf: {path: groupId or ""}. A project joining a group drops its own pin; a group left empty goes.
+function saveRegistry(data) {
+  writeRegistry(data);
+  return registryChanged(data);
+}
+const getProject = (data, p) => data.projects.find(x => norm(x.path) === norm(p));
+const isPinned = x => Number.isInteger(x?.pin);
+// slot: where to keep the item, or null to let it move again.
+function setPin(item, slot) {
+  if (slot !== null && !(Number.isInteger(slot) && slot >= 0)) throw new Error(t("errors.invalidData"));
+  if (item && slot === null) delete item.pin;
+  else if (item) item.pin = slot;
+}
+// groupOf: {path: groupId or ""}. A project joining a group drops its own pin.
 function setGroups(data, groupOf) {
   if (!groupOf || typeof groupOf !== "object") return;
   const ids = new Set(data.groups.map(g => g.id));
+  const byPath = new Map(data.projects.map(x => [norm(x.path), x]));
   for (const [p, id] of Object.entries(groupOf)) {
-    const item = data.projects.find(x => norm(x.path) === norm(text(p)));
+    const item = byPath.get(norm(text(p)));
     if (!item || (id && !ids.has(id))) continue;
     if (!id) delete item.group;
     else {
@@ -95,18 +109,16 @@ function setGroups(data, groupOf) {
       delete item.pin;
     }
   }
+}
+function dropEmptyGroups(data) {
   const used = new Set(data.projects.map(x => x.group));
   data.groups = data.groups.filter(g => used.has(g.id));
 }
 // Each pinned project or group is pinned where it now is among the top-level items.
 function repin(data) {
   const units = [...new Set(data.projects.map(x => (x.group ? "g:" + x.group : norm(x.path))))];
-  for (const g of data.groups) {
-    if (Number.isInteger(g.pin)) g.pin = units.indexOf("g:" + g.id);
-  }
-  for (const x of data.projects) {
-    if (Number.isInteger(x.pin)) x.pin = units.indexOf(norm(x.path));
-  }
+  for (const g of data.groups.filter(isPinned)) g.pin = units.indexOf("g:" + g.id);
+  for (const x of data.projects.filter(isPinned)) x.pin = units.indexOf(norm(x.path));
 }
 function norm(p) { return path.resolve(p).replace(/\\/g, "/").toLowerCase(); }
 function titleFromText(s) {
@@ -821,15 +833,17 @@ function registerIpc() {
   // starts where the last project was picked, or else beside the most recently registered one.
   let pickedFrom = null;
   handle("project:add", async () => {
-    const last = readRegistry().projects.at(-1)?.path;
+    const registry = readRegistry();
+    const last = registry.lastAdded || registry.projects.at(-1)?.path;
     const result = await dialog.showOpenDialog({ properties: ["openDirectory"], defaultPath: pickedFrom ?? (last && path.dirname(last)) });
     if (result.canceled || !result.filePaths[0]) return readRegistry();
     const p = path.resolve(result.filePaths[0]);
     pickedFrom = path.dirname(p);
     const data = readRegistry();
     data.removed = data.removed.filter(x => x !== norm(p));
-    if (!data.projects.some(x => norm(x.path) === norm(p))) data.projects.push({ name: path.basename(p), path: p });
-    writeRegistry(data); return registryChanged(data);
+    if (!getProject(data, p)) data.projects.push({ name: path.basename(p), path: p });
+    data.lastAdded = p;
+    return saveRegistry(data);
   });
   // remember: false when it only leaves with its last deleted session - a new session there brings it back.
   handle("project:remove", (p, remember) => {
@@ -837,13 +851,16 @@ function registerIpc() {
     const data = readRegistry();
     data.projects = data.projects.filter(x => norm(x.path) !== norm(p));
     if (remember !== false && !data.removed.includes(norm(p))) data.removed.push(norm(p));
-    writeRegistry(data); return registryChanged(data);
+    dropEmptyGroups(data);
+    return saveRegistry(data);
   });
   handle("project:rename", (p, name) => {
-    text(p); text(name, 1000);
-    const data = readRegistry(); const item = data.projects.find(x => norm(x.path) === norm(p));
+    text(p);
+    text(name, 1000);
+    const data = readRegistry();
+    const item = getProject(data, p);
     if (item && name.trim()) item.name = name.trim().slice(0, 80);
-    writeRegistry(data); return registryChanged(data);
+    return saveRegistry(data);
   });
   // The list in the user's own order (all projects, as shown); each pinned item is pinned where it now is. groupOf:
   // the group ids ("" for none) of the projects that changed groups.
@@ -852,37 +869,48 @@ function registerIpc() {
     const at = new Map(paths.map((p, i) => [norm(text(p)), i]));
     const data = readRegistry();
     setGroups(data, groupOf);
+    dropEmptyGroups(data);
     const rank = x => at.get(norm(x.path)) ?? paths.length;
     data.projects.sort((a, b) => rank(a) - rank(b));
     repin(data);
     data.order = "custom";
-    writeRegistry(data); return registryChanged(data);
+    return saveRegistry(data);
+  });
+  handle("project:sort-by-activity", () => {
+    const data = readRegistry();
+    data.order = "activity";
+    return saveRegistry(data);
+  });
+  handle("project:pin", (p, slot) => {
+    const data = readRegistry();
+    setPin(getProject(data, text(p)), slot);
+    return saveRegistry(data);
   });
   // A new group holding the project, in its place (and with its pin).
   handle("group:create", p => {
-    text(p);
-    const data = readRegistry(); const item = data.projects.find(x => norm(x.path) === norm(p));
+    const data = readRegistry();
+    const item = getProject(data, text(p));
     if (!item) return data;
     const group = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: t("manager.projectGroup.newName") };
-    if (Number.isInteger(item.pin)) group.pin = item.pin;
+    if (isPinned(item)) group.pin = item.pin;
     delete item.pin;
     item.group = group.id;
     data.groups.push(group);
-    writeRegistry(data); return registryChanged(data);
+    return saveRegistry(data);
   });
   handle("group:rename", (id, name) => {
-    text(id, 64); text(name, 1000);
-    const data = readRegistry(); const group = data.groups.find(g => g.id === id);
+    text(id, 64);
+    text(name, 1000);
+    const data = readRegistry();
+    const group = data.groups.find(g => g.id === id);
     if (group && name.trim()) group.name = name.trim().slice(0, 80);
-    writeRegistry(data); return registryChanged(data);
+    return saveRegistry(data);
   });
   handle("group:pin", (id, slot) => {
     text(id, 64);
-    if (slot !== null && !(Number.isInteger(slot) && slot >= 0)) throw new Error(t("errors.invalidData"));
-    const data = readRegistry(); const group = data.groups.find(g => g.id === id);
-    if (group && slot === null) delete group.pin;
-    else if (group) group.pin = slot;
-    writeRegistry(data); return registryChanged(data);
+    const data = readRegistry();
+    setPin(data.groups.find(g => g.id === id), slot);
+    return saveRegistry(data);
   });
   // Its projects stay where they are, outside any group.
   handle("group:delete", id => {
@@ -892,19 +920,7 @@ function registerIpc() {
     for (const x of data.projects) {
       if (x.group === id) delete x.group;
     }
-    writeRegistry(data); return registryChanged(data);
-  });
-  handle("project:sort-by-activity", () => {
-    const data = readRegistry(); data.order = "activity"; writeRegistry(data); return registryChanged(data);
-  });
-  // slot: the position to keep the project at, or null to let it move again.
-  handle("project:pin", (p, slot) => {
-    text(p);
-    if (slot !== null && !(Number.isInteger(slot) && slot >= 0)) throw new Error(t("errors.invalidData"));
-    const data = readRegistry(); const item = data.projects.find(x => norm(x.path) === norm(p));
-    if (item && slot === null) delete item.pin;
-    else if (item) item.pin = slot;
-    writeRegistry(data); return registryChanged(data);
+    return saveRegistry(data);
   });
   handle("launch:folder", async p => { await launchTerminal(text(p)); return true; });
   handle("launch:agent", async (agent, id, cwd) => { await launchAgent(text(agent), text(id), text(cwd)); return true; });

@@ -347,8 +347,8 @@ function getUnits(projects, groups) {
   return out;
 }
 // Unpinned items by last activity (or as listed, in the user's own order), then each pinned one at its slot.
+const isPinned = x => Number.isInteger(x?.pin);
 function arrange(items, custom) {
-  const isPinned = x => Number.isInteger(x.pin);
   const out = items.filter(x => !isPinned(x));
   if (!custom) out.sort((a, b) => b.last - a.last || a.name.localeCompare(b.name, I18N.locale()));
   for (const x of items.filter(isPinned).sort((a, b) => a.pin - b.pin)) out.splice(Math.min(x.pin, out.length), 0, x);

@@ -60,11 +60,13 @@ function computeTiles() {
   if (!toks.length && window.dayUi?.enabled()) out.push({ key: "day", kind: "day", label: t("bar.tile.day"), count: "" });
   for (const u of getUnits(model.projects, model.groups)) {
     const p = u.group ? { ...u.group, sessions: u.sessions, members: u.members, hay: searchable(u.group.name) } : u.project;
-    const inside = toks.length ? p.sessions.filter(s => hitSet.has(s)) : p.sessions;
-    if (toks.length && !inside.length && !matches(p.hay, toks)) continue;
+    // A group found by its name shows all of its sessions, as in the manager.
+    const whole = !toks.length || (u.group && matches(p.hay, toks));
+    const inside = whole ? p.sessions : p.sessions.filter(s => hitSet.has(s));
+    if (!whole && !inside.length && !matches(p.hay, toks)) continue;
     const states = p.sessions.map(liveOf).filter(Boolean);
     out.push({
-      key: "p:" + p.n, kind: u.group ? "group" : "project", p, label: p.name, count: inside.length,
+      key: "p:" + p.n, kind: u.group ? "group" : "project", p, label: p.name, count: inside.length, whole,
       waiting: states.some(l => l.status === "waiting"),
       busy: states.some(l => l.status === "busy" && !isStale(l)), idle: states.some(l => l.status !== "busy")
     });
@@ -80,7 +82,7 @@ function rowsFor(tile, toks, hits) {
   }
   if (tile.kind === "day") return [];
   if (tile.kind === "live") return model.sessions.filter(liveOf).sort(byLive).map(s => ({ type: "session", s, showPath: true }));
-  const list = toks.length ? tile.p.sessions.filter(s => found(s, toks)) : tile.p.sessions;
+  const list = tile.whole ? tile.p.sessions : tile.p.sessions.filter(s => found(s, toks));
   return liveFirst(list).map(s => ({ type: "session", s, showPath: s.cwdN !== tile.p.n }));
 }
 
@@ -115,7 +117,7 @@ function tileHtml(tile, toks) {
     ? `<span class="mono ${tile.kind}" style="--h:${hue(tile.p.n)}">${esc(initials(tile.label))}${badge}</span>`
     : `<span class="mono special ${tile.kind}">${icon(tile.kind === "live" ? "pulse" : tile.kind === "day" ? "clock" : "search")}</span>`;
   return `<button class="tile ${tile.key === st.tile ? "sel" : ""} ${tile.p?.concealed ? "concealed" : ""}" data-key="${esc(tile.key)}" title="${esc(getTileTitle(tile))}">
-    ${mono}<span class="tname">${tile.p ? hl(tile.label, toks) : esc(tile.label)}</span><span class="tcount">${tile.count}</span>${tile.kind === "project" ? gitTile(tile.p.path) : ""}${Number.isInteger(tile.p?.pin) ? `<span class="tpin">${icon("pin")}</span>` : ""}</button>`;
+    ${mono}<span class="tname">${tile.p ? hl(tile.label, toks) : esc(tile.label)}</span><span class="tcount">${tile.count}</span>${tile.kind === "project" ? gitTile(tile.p.path) : ""}${isPinned(tile.p) ? `<span class="tpin">${icon("pin")}</span>` : ""}</button>`;
 }
 function getTileTitle(tile) {
   if (tile.kind === "project") return `${tile.label}\n${tile.p.path}${gitTip(tile.p.path)}`;
