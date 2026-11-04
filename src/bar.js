@@ -59,11 +59,12 @@ function computeTiles() {
   if (running.length && !toks.length) out.push({ key: "live", kind: "live", label: t("bar.tile.live"), count: running.length });
   if (!toks.length && window.dayUi?.enabled()) out.push({ key: "day", kind: "day", label: t("bar.tile.day"), count: "" });
   for (const u of getUnits(model.projects, model.groups)) {
-    const p = u.group ? { ...u.group, sessions: u.sessions, members: u.members, hay: searchable(u.group.name) } : u.project;
+    const p = u.group ? { ...u.group, sessions: u.sessions, members: u.members } : u.project;
+    const named = toks.length > 0 && matches(p.hay, toks);
     // A group found by its name shows all of its sessions, as in the manager.
-    const whole = !toks.length || (u.group && matches(p.hay, toks));
+    const whole = !toks.length || (u.group && named);
     const inside = whole ? p.sessions : p.sessions.filter(s => hitSet.has(s));
-    if (!whole && !inside.length && !matches(p.hay, toks)) continue;
+    if (!whole && !inside.length && !named) continue;
     const states = p.sessions.map(liveOf).filter(Boolean);
     out.push({
       key: "p:" + p.n, kind: u.group ? "group" : "project", p, label: p.name, count: inside.length, whole,
@@ -121,7 +122,7 @@ function tileHtml(tile, toks) {
 }
 function getTileTitle(tile) {
   if (tile.kind === "project") return `${tile.label}\n${tile.p.path}${gitTip(tile.p.path)}`;
-  if (tile.kind === "group") return `${tile.label}\n${tile.p.members.map(p => p.name).join(", ")}`;
+  if (tile.kind === "group") return `${tile.label}\n${getMemberNames(tile.p.members)}`;
   return tile.label;
 }
 function renderStrip(toks) {
@@ -159,7 +160,7 @@ function renderDetail(tile, toks) {
     : tile.kind === "group"
     ? `<div class="dhead"><span class="mono sm group" style="--h:${hue(tile.p.n)}">${esc(initials(tile.label))}</span>
         <div class="dtitle"><div class="dname">${hl(tile.label, toks)}${usageTotal(tile.p.sessions)}</div>
-        <div class="dsub">${esc(t("bar.group.sub", { names: tile.p.members.map(p => p.name).join(", ") }))}</div></div></div>`
+        <div class="dsub">${esc(t("bar.group.sub", { names: getMemberNames(tile.p.members) }))}</div></div></div>`
     : `<div class="dhead"><div class="dtitle"><div class="dname">${esc(tile.kind === "live" ? t("bar.live.title") : t("bar.results.title", { q: q.value }))}</div>
         <div class="dsub">${esc(tile.kind === "live" ? t("bar.live.sub") : tn("bar.results.count", tile.count))}</div></div></div>`;
   const empty = t(tile.p ? (toks.length ? "bar.empty.projectNoMatch" : "bar.empty.project") : "bar.empty.results");

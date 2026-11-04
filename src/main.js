@@ -110,6 +110,13 @@ function setGroups(data, groupOf) {
     }
   }
 }
+// A group without projects has no place of its own to keep.
+function unpinEmptyGroups(data) {
+  const used = new Set(data.projects.map(x => x.group));
+  for (const g of data.groups) {
+    if (!used.has(g.id)) delete g.pin;
+  }
+}
 // Each pinned project or group is pinned where it now is among the top-level items.
 function repin(data) {
   const units = [...new Set(data.projects.map(x => (x.group ? "g:" + x.group : norm(x.path))))];
@@ -863,8 +870,10 @@ function registerIpc() {
   handle("project:remove", (p, remember) => {
     text(p);
     const data = readRegistry();
-    data.projects = data.projects.filter(x => norm(x.path) !== norm(p));
-    if (remember !== false && !data.removed.includes(norm(p))) data.removed.push(norm(p));
+    const n = norm(p);
+    data.projects = data.projects.filter(x => norm(x.path) !== n);
+    if (remember !== false && !data.removed.includes(n)) data.removed.push(n);
+    unpinEmptyGroups(data);
     return saveRegistry(data);
   });
   handle("project:rename", (p, name) => {
@@ -888,6 +897,13 @@ function registerIpc() {
     data.order = "custom";
     return saveRegistry(data);
   });
+  // Into a group (id) or out of it (""), keeping the order and the order mode as they are.
+  handle("project:set-group", (p, id) => {
+    const data = readRegistry();
+    setGroups(data, { [text(p)]: id === "" ? "" : text(id, 64) });
+    unpinEmptyGroups(data);
+    return saveRegistry(data);
+  });
   handle("project:sort-by-activity", () => {
     const data = readRegistry();
     data.order = "activity";
@@ -898,7 +914,6 @@ function registerIpc() {
     setPin(getProject(data, text(p)), slot);
     return saveRegistry(data);
   });
-  // A new group holding the project, in its place (and with its pin).
   // Empty, or holding the project `p` in its place.
   handle("group:create", p => {
     const data = readRegistry();
@@ -909,6 +924,7 @@ function registerIpc() {
     if (isPinned(item)) group.pin = item.pin;
     delete item.pin;
     item.group = group.id;
+    unpinEmptyGroups(data);
     return saveRegistry(data);
   });
   handle("group:rename", (id, name) => {

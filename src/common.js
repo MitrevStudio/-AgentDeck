@@ -311,7 +311,7 @@ function buildData(raw, live) {
 // The list's top level: projects outside any group, and each group (where its first project is, its activity the
 // latest of theirs) holding its projects.
 function getTopLevel(projects, registryGroups) {
-  const groups = registryGroups.map(g => ({ ...g, n: "g:" + g.id, members: [], last: 0 }));
+  const groups = registryGroups.map(g => ({ ...g, n: "g:" + g.id, hay: searchable(g.name), members: [], last: 0 }));
   const byId = new Map(groups.map(g => [g.id, g]));
   const units = [];
   for (const p of projects) {
@@ -327,6 +327,7 @@ function getTopLevel(projects, registryGroups) {
   }
   return { units, groups };
 }
+const getMemberNames = members => members.map(p => p.name).join(", ");
 // Projects as listed, with a {group, members, sessions} entry in place of each group's projects.
 function getUnits(projects, groups) {
   const byId = new Map(groups.map(g => [g.id, g]));

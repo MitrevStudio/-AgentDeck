@@ -140,14 +140,14 @@ function renderTermTabs() {
     strip.innerHTML = html;
   }
 }
-function activateTab(id) {
+function activateTab(id, focus = true) {
   activeTab = termViews.has(id) ? id : "";
   termViews.forEach((view, viewId) => view.el.classList.toggle("active", viewId === activeTab));
   $("termPanes").hidden = !activeTab;
   renderTermTabs();
   if (activeTab) {
     fitActiveTab();
-    termViews.get(activeTab).term.focus();
+    if (focus) termViews.get(activeTab).term.focus();
   }
 }
 function syncTermTabs(list) {
@@ -173,18 +173,18 @@ function findSessionTab(s) {
   return termTabs.find(tab => tab.agent === s.agent && tab.sessionId === s.id && !tab.exited) || null;
 }
 // A selected project's (or group's) open tab comes up: the session that needs the user first, else the latest one.
-// Without one, the sessions list does.
+// Without one, the sessions list does. The keyboard stays in the project list.
 function showProjectTab(sel) {
   const tab = getProjectTab(sel);
   if (tab || activeTab) {
-    activateTab(tab?.id || "");
+    activateTab(tab?.id || "", false);
   }
 }
 function getProjectTab(sel) {
-  const open = sel.sessions.filter(findSessionTab);
-  const rank = s => (liveOf(s) ? getLiveRank(liveOf(s)) : Infinity);
-  open.sort((a, b) => rank(a) - rank(b) || (b.updatedAt || 0) - (a.updatedAt || 0));
-  return open.length ? findSessionTab(open[0]) : null;
+  const open = sel.sessions.map(s => ({ s, tab: findSessionTab(s), l: liveOf(s) })).filter(x => x.tab);
+  const rank = x => (x.l ? getLiveRank(x.l) : Infinity);
+  open.sort((a, b) => rank(a) - rank(b) || (b.s.updatedAt || 0) - (a.s.updatedAt || 0));
+  return open[0]?.tab || null;
 }
 // Brings up the session's tab when it has one; false otherwise.
 function showSessionTab(s) {

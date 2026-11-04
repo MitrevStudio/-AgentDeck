@@ -75,12 +75,13 @@ main {
 .pin-mark { display: inline-flex; color: var(--accent); }
 .pin-mark .i { width: 14px; height: 14px; }
 .proj-tools .icon-btn.on { color: var(--accent); }
-.order-toggle {
-  margin-left: auto; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line);
+.head-btn {
+  padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line);
   background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer;
 }
-.order-toggle:hover { background: var(--panel-2); color: var(--text); }
-.order-toggle + .order-toggle { margin-left: 6px; }
+.head-btn:hover { background: var(--panel-2); color: var(--text); }
+#newGroup { margin-left: auto; }
+.head-btn + .head-btn { margin-left: 6px; }
 .menu {
   position: fixed; z-index: 50; min-width: 180px; max-width: 280px; padding: 4px; display: flex; flex-direction: column;
   border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--panel); box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);

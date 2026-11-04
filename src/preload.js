@@ -2,7 +2,8 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("manager", {
   getData: opts => ipcRenderer.invoke("app:get-data", opts),
   addProject: () => ipcRenderer.invoke("project:add"),
-  removeProject: (p, remember = true) => ipcRenderer.invoke("project:remove", p, remember),
+  removeProject: (p, remember) => ipcRenderer.invoke("project:remove", p, remember),
+  setProjectGroup: (p, id) => ipcRenderer.invoke("project:set-group", p, id),
   renameProject: (p, name) => ipcRenderer.invoke("project:rename", p, name),
   arrangeProjects: (paths, groupOf) => ipcRenderer.invoke("project:arrange", paths, groupOf),
   createGroup: p => ipcRenderer.invoke("group:create", p),

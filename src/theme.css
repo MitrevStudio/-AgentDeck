@@ -77,8 +77,8 @@
   --attn: #ff7eb0;          /* blocked on the user: a permission, a question */
   --attn-bg: rgba(255, 126, 176, .14);
   /* a running session: ready for the next prompt, working, waiting for the user's answer */
-  --ready: #5ee0a0;
-  --ready-bg: rgba(94, 224, 160, .13);
+  --ready: var(--busy);
+  --ready-bg: var(--busy-bg);
   --working: #ff9f43;
   --working-bg: rgba(255, 159, 67, .14);
   --needs: #ff5c5c;
@@ -211,8 +211,8 @@
   --wait-bg: rgba(214, 137, 16, .15);
   --attn: #c0266a;
   --attn-bg: rgba(192, 38, 106, .11);
-  --ready: #12854f;
-  --ready-bg: rgba(18, 133, 79, .11);
+  --ready: var(--busy);
+  --ready-bg: var(--busy-bg);
   --working: #c25e00;
   --working-bg: rgba(194, 94, 0, .12);
   --needs: #c62828;
