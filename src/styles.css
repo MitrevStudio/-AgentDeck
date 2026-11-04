@@ -64,9 +64,9 @@ main {
 .proj.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
 .proj.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
 .proj.drop-into { border-color: var(--accent); background: var(--accent-weak); }
-.proj.member { margin-left: 44px; position: relative; }
+.proj.member { margin-left: 30px; position: relative; }
 .proj.member::before {
-  content: ""; position: absolute; left: -26px; top: -4px; bottom: -5px;
+  content: ""; position: absolute; left: -6px; top: -4px; bottom: -5px;
   border-left: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
 }
 .proj.grp .proj-row { gap: 6px; }
