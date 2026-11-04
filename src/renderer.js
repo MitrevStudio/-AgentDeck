@@ -381,6 +381,7 @@ function selectProject(key) {
   ui.selected = ui.selected === key ? "" : key;
   ui.active = -1;
   render({ resetScroll: true });
+  if (ui.selected) showProjectTab(findSelected());
 }
 
 function setActive(i) {

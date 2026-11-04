@@ -1,5 +1,5 @@
 // AgentDeck's own terminal tabs (terminals.js in main): a strip over the sessions panel and an xterm.js view per tab.
-// Loaded before renderer.js, which calls showSessionTab, isMoveHereOffered and moveSessionHere.
+// Loaded before renderer.js, which calls showSessionTab, showProjectTab, isMoveHereOffered and moveSessionHere.
 const ANSI_NAMES = [
   "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
   "brightBlack", "brightRed", "brightGreen", "brightYellow", "brightBlue", "brightMagenta", "brightCyan", "brightWhite"
@@ -171,6 +171,20 @@ async function closeTermTab(id) {
 // ---------- sessions <-> tabs (main links a new session's tab: tab-links.js) ----------
 function findSessionTab(s) {
   return termTabs.find(tab => tab.agent === s.agent && tab.sessionId === s.id && !tab.exited) || null;
+}
+// A selected project's (or group's) open tab comes up: the session that needs the user first, else the latest one.
+// Without one, the sessions list does.
+function showProjectTab(sel) {
+  const tab = getProjectTab(sel);
+  if (tab || activeTab) {
+    activateTab(tab?.id || "");
+  }
+}
+function getProjectTab(sel) {
+  const open = sel.sessions.filter(findSessionTab);
+  const rank = s => (liveOf(s) ? getLiveRank(liveOf(s)) : Infinity);
+  open.sort((a, b) => rank(a) - rank(b) || (b.updatedAt || 0) - (a.updatedAt || 0));
+  return open.length ? findSessionTab(open[0]) : null;
 }
 // Brings up the session's tab when it has one; false otherwise.
 function showSessionTab(s) {
