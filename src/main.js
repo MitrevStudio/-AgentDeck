@@ -818,16 +818,16 @@ function registerIpc() {
     if (item && name.trim()) item.name = name.trim().slice(0, 80);
     writeRegistry(data); return registryChanged(data);
   });
-  // The list in the user's own order (all projects, as shown). The dragged project, when pinned, keeps the slot it was
-  // dropped in; the other pinned ones stay where they are.
-  handle("project:arrange", (paths, moved) => {
+  // The list in the user's own order (all projects, as shown); each pinned project is pinned where it now is.
+  handle("project:arrange", paths => {
     if (!Array.isArray(paths) || paths.length > 10000) throw new Error(t("errors.invalidData"));
     const at = new Map(paths.map((p, i) => [norm(text(p)), i]));
     const data = readRegistry();
     const rank = x => at.get(norm(x.path)) ?? paths.length;
     data.projects.sort((a, b) => rank(a) - rank(b));
-    const item = moved ? data.projects.find(x => norm(x.path) === norm(text(moved))) : null;
-    if (Number.isInteger(item?.pin)) item.pin = data.projects.indexOf(item);
+    data.projects.forEach((x, i) => {
+      if (Number.isInteger(x.pin)) x.pin = i;
+    });
     data.order = "custom";
     writeRegistry(data); return registryChanged(data);
   });

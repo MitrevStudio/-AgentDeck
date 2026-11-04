@@ -346,7 +346,7 @@ async function pinProject(path) {
 async function moveProject(path, target, after) {
   const list = order.filter(x => normPath(x) !== normPath(path));
   list.splice(list.findIndex(x => normPath(x) === normPath(target)) + (after ? 1 : 0), 0, path);
-  applyRegistry(await window.manager.arrangeProjects(list, path));
+  applyRegistry(await window.manager.arrangeProjects(list));
 }
 async function toggleOrder() {
   applyRegistry(raw.registry.order === "custom" ? await window.manager.sortProjectsByActivity() : await window.manager.arrangeProjects(order));

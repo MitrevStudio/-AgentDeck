@@ -4,7 +4,7 @@ contextBridge.exposeInMainWorld("manager", {
   addProject: () => ipcRenderer.invoke("project:add"),
   removeProject: (p, remember = true) => ipcRenderer.invoke("project:remove", p, remember),
   renameProject: (p, name) => ipcRenderer.invoke("project:rename", p, name),
-  arrangeProjects: (paths, moved) => ipcRenderer.invoke("project:arrange", paths, moved),
+  arrangeProjects: paths => ipcRenderer.invoke("project:arrange", paths),
   sortProjectsByActivity: () => ipcRenderer.invoke("project:sort-by-activity"),
   pinProject: (p, slot) => ipcRenderer.invoke("project:pin", p, slot),
   launchFolder: p => ipcRenderer.invoke("launch:folder", p),
