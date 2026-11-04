@@ -107,13 +107,14 @@ function renderProjects(v) {
   renderOrderToggle();
   let html = `<div class="proj all ${ui.selected ? "" : "active"}" data-path="" tabindex="0">
     <div class="proj-row">${icon("layers")}<span class="proj-name">${esc(t("manager.allSessions"))}</span><span class="count">${v.hits.length}</span></div></div>`;
+  // Empty groups (just made) at the top, the newest first.
+  if (!v.toks.length) html += data.groups.filter(g => !g.size).reverse().map(g => buildGroupHtml(getEmptyUnit(g), v, false)).join("");
   const counts = new Map(v.projects.map(x => [x.p, x.count]));
   html += getUnits(v.projects.map(x => x.p), data.groups).map(u => {
     if (!u.group) return buildProjectHtml(u.project, counts.get(u.project), v);
     const shut = isCollapsed(u.group.id) && !v.toks.length;
     return buildGroupHtml(u, v, shut) + (shut ? "" : u.members.map(p => buildProjectHtml(p, counts.get(p), v)).join(""));
   }).join("");
-  if (!v.toks.length) html += data.groups.filter(g => !g.size).map(g => buildGroupHtml(getEmptyUnit(g), v, false)).join("");
   if (!total && ui.loaded) html += `<div class="empty small">${esc(t("manager.projects.empty"))}</div>`;
   else if (!v.projects.length && v.toks.length) html += `<div class="empty small">${esc(t("manager.projects.noMatch", { q: ui.query }))}</div>`;
   $("projects").innerHTML = html;
