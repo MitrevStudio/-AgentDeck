@@ -262,7 +262,7 @@ function renderSessions(v) {
 
 function sessionHtml(s, i, toks) {
   const dir = s.cwd
-    ? `<div class="dir">${icon("folder")}${pathHtml(s.cwd, toks)}${gitChip(s.cwd)}<button class="icon-btn" data-action="copy" data-path="${esc(s.cwd)}" title="${esc(t("action.copyPath"))}">${icon("copy")}</button></div>`
+    ? `<div class="dir">${icon("folder")}${pathHtml(s.cwd, toks)}${gitChip(s.workDir || s.cwd)}<button class="icon-btn" data-action="copy" data-path="${esc(s.cwd)}" title="${esc(t("action.copyPath"))}">${icon("copy")}</button></div>`
     : `<div class="dir unknown">${icon("alert")}${esc(t("manager.session.noDir"))}</div>`;
   const l = liveOf(s);
   const loading = isLoading(sessionKey(s), l);

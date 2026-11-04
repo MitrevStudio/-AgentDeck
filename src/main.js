@@ -180,9 +180,12 @@ function readClaudeAppended(file, st, size) {
     const buf = Buffer.alloc(size - st.offset);
     const read = fs.readSync(fd, buf, 0, buf.length, st.offset);
     const end = buf.lastIndexOf(10, read - 1) + 1;
-    for (const line of buf.toString("utf8", 0, end).split(/\r?\n/)) {
+    const lines = buf.toString("utf8", 0, end).split(/\r?\n/);
+    for (const line of lines) {
       if (line) readClaudeLine(st, line);
     }
+    const last = getLastCwd(lines);
+    if (last) st.workDir = last === st.cwd ? "" : last;
     st.offset += end;
     if (st.answerLine) {
       st.recap = getAnswerRecap(st.answerLine);
@@ -195,6 +198,18 @@ function readClaudeAppended(file, st, size) {
   } finally {
     fs.closeSync(fd);
   }
+}
+// The folder the session works in now (it moves into a worktree, for one): the last message's own cwd. Tool data
+// inside a message can carry other cwd fields, so the line is parsed rather than searched.
+function getLastCwd(lines) {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i].includes('"cwd":"')) continue;
+    try {
+      const x = JSON.parse(lines[i]);
+      if (typeof x.cwd === "string") return x.cwd;
+    } catch {}
+  }
+  return "";
 }
 function getStat(file) {
   try {
@@ -223,7 +238,7 @@ function parseClaude(file) {
   }
   const id = path.basename(file, ".jsonl");
   const title = titleFromText(st.customTitle || st.aiTitle) || st.prompt || t("session.untitled", { agent: "Claude", id: id.slice(0, 8) });
-  return { id, agent: "Claude", cwd: st.cwd, title, prompt: st.prompt !== title ? st.prompt : "", recap: st.summary || st.recap, updatedAt: stat.mtimeMs, file };
+  return { id, agent: "Claude", cwd: st.cwd, workDir: st.workDir || undefined, title, prompt: st.prompt !== title ? st.prompt : "", recap: st.summary || st.recap, updatedAt: stat.mtimeMs, file };
 }
 // Claude Code's own recap of a session ("away_summary"), without its "(disable recaps in /config)" hint.
 function getAwaySummary(line) {
@@ -1108,7 +1123,7 @@ if (!app.requestSingleInstanceLock()) {
     // Git: refreshed after each scan, when the edge menu opens or the manager window gets the focus (the pages ask),
     // and every two minutes while either is in view.
     gitStatus.start({
-      dirs: () => (cache ? [...cache.registry.projects.map(p => p.path), ...cache.sessions.map(s => s.cwd)] : []),
+      dirs: () => (cache ? [...cache.registry.projects.map(p => p.path), ...cache.sessions.flatMap(s => [s.cwd, s.workDir])] : []),
       onChange: g => broadcast("git:changed", g),
       active: () => Boolean(bar?.isVisible() || (managerWin && !managerWin.isDestroyed() && managerWin.isVisible() && !managerWin.isMinimized()))
     });
