@@ -73,13 +73,40 @@ function readRegistry() {
     return {
       projects: Array.isArray(data.projects) ? data.projects : [],
       removed: Array.isArray(data.removed) ? data.removed.filter(p => typeof p === "string") : [],
-      order: data.order === "custom" ? "custom" : "activity"
+      order: data.order === "custom" ? "custom" : "activity",
+      groups: Array.isArray(data.groups) ? data.groups.filter(g => typeof g?.id === "string" && typeof g.name === "string") : []
     };
-  } catch { return { projects: [], removed: [], order: "activity" }; }
+  } catch { return { projects: [], removed: [], order: "activity", groups: [] }; }
 }
 function writeRegistry(data) {
   fs.mkdirSync(path.dirname(DATA), { recursive: true });
   fs.writeFileSync(DATA, JSON.stringify(data, null, 2), "utf8");
+}
+// groupOf: {path: groupId or ""}. A project joining a group drops its own pin; a group left empty goes.
+function setGroups(data, groupOf) {
+  if (!groupOf || typeof groupOf !== "object") return;
+  const ids = new Set(data.groups.map(g => g.id));
+  for (const [p, id] of Object.entries(groupOf)) {
+    const item = data.projects.find(x => norm(x.path) === norm(text(p)));
+    if (!item || (id && !ids.has(id))) continue;
+    if (!id) delete item.group;
+    else {
+      item.group = id;
+      delete item.pin;
+    }
+  }
+  const used = new Set(data.projects.map(x => x.group));
+  data.groups = data.groups.filter(g => used.has(g.id));
+}
+// Each pinned project or group is pinned where it now is among the top-level items.
+function repin(data) {
+  const units = [...new Set(data.projects.map(x => (x.group ? "g:" + x.group : norm(x.path))))];
+  for (const g of data.groups) {
+    if (Number.isInteger(g.pin)) g.pin = units.indexOf("g:" + g.id);
+  }
+  for (const x of data.projects) {
+    if (Number.isInteger(x.pin)) x.pin = units.indexOf(norm(x.path));
+  }
 }
 function norm(p) { return path.resolve(p).replace(/\\/g, "/").toLowerCase(); }
 function titleFromText(s) {
@@ -818,17 +845,53 @@ function registerIpc() {
     if (item && name.trim()) item.name = name.trim().slice(0, 80);
     writeRegistry(data); return registryChanged(data);
   });
-  // The list in the user's own order (all projects, as shown); each pinned project is pinned where it now is.
-  handle("project:arrange", paths => {
+  // The list in the user's own order (all projects, as shown); each pinned item is pinned where it now is. groupOf:
+  // the group ids ("" for none) of the projects that changed groups.
+  handle("project:arrange", (paths, groupOf) => {
     if (!Array.isArray(paths) || paths.length > 10000) throw new Error(t("errors.invalidData"));
     const at = new Map(paths.map((p, i) => [norm(text(p)), i]));
     const data = readRegistry();
+    setGroups(data, groupOf);
     const rank = x => at.get(norm(x.path)) ?? paths.length;
     data.projects.sort((a, b) => rank(a) - rank(b));
-    data.projects.forEach((x, i) => {
-      if (Number.isInteger(x.pin)) x.pin = i;
-    });
+    repin(data);
     data.order = "custom";
+    writeRegistry(data); return registryChanged(data);
+  });
+  // A new group holding the project, in its place (and with its pin).
+  handle("group:create", p => {
+    text(p);
+    const data = readRegistry(); const item = data.projects.find(x => norm(x.path) === norm(p));
+    if (!item) return data;
+    const group = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: t("manager.projectGroup.newName") };
+    if (Number.isInteger(item.pin)) group.pin = item.pin;
+    delete item.pin;
+    item.group = group.id;
+    data.groups.push(group);
+    writeRegistry(data); return registryChanged(data);
+  });
+  handle("group:rename", (id, name) => {
+    text(id, 64); text(name, 1000);
+    const data = readRegistry(); const group = data.groups.find(g => g.id === id);
+    if (group && name.trim()) group.name = name.trim().slice(0, 80);
+    writeRegistry(data); return registryChanged(data);
+  });
+  handle("group:pin", (id, slot) => {
+    text(id, 64);
+    if (slot !== null && !(Number.isInteger(slot) && slot >= 0)) throw new Error(t("errors.invalidData"));
+    const data = readRegistry(); const group = data.groups.find(g => g.id === id);
+    if (group && slot === null) delete group.pin;
+    else if (group) group.pin = slot;
+    writeRegistry(data); return registryChanged(data);
+  });
+  // Its projects stay where they are, outside any group.
+  handle("group:delete", id => {
+    text(id, 64);
+    const data = readRegistry();
+    data.groups = data.groups.filter(g => g.id !== id);
+    for (const x of data.projects) {
+      if (x.group === id) delete x.group;
+    }
     writeRegistry(data); return registryChanged(data);
   });
   handle("project:sort-by-activity", () => {

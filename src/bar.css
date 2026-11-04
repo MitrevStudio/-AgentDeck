@@ -59,6 +59,7 @@ kbd { font-size: 10.5px; border-bottom-width: 1px; border-radius: 4px; padding: 
 }
 .tile > .mono { width: 44px; height: 44px; }
 .tile:hover { background: var(--panel-2); }
+.mono.group { box-shadow: 3px -3px 0 -1px color-mix(in srgb, hsl(var(--h) 60% 55%) 45%, transparent); }
 .tile .tpin { position: absolute; top: 4px; right: 4px; display: inline-flex; color: var(--accent); }
 .tile .tpin .i { width: 12px; height: 12px; }
 .tile.sel { background: var(--accent-weak); border-color: color-mix(in srgb, var(--accent) 55%, transparent); }

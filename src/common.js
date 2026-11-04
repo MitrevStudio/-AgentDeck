@@ -10,6 +10,7 @@ const VOICE_MODES = Object.freeze(["verbatim", "clean", "prompt"]); // the dicta
 const ICONS = {
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  stack: '<rect x="3" y="8" width="13" height="12" rx="2"/><path d="M8 4h11a2 2 0 0 1 2 2v9"/>',
   layers: '<path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/>',
   terminal: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3"/><path d="M13 15h4"/>',
   open: '<path d="M14 4h6v6"/><path d="M10 14 20 4"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/>',
@@ -26,6 +27,7 @@ const ICONS = {
   raise: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/><path d="m9 16 3-3 3 3"/>',
   left: '<path d="m15 6-6 6 6 6"/>',
   right: '<path d="m9 6 6 6-6 6"/>',
+  down: '<path d="m6 9 6 6 6-6"/>',
   pulse: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
   mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
@@ -274,7 +276,8 @@ function conceal(data, h) {
   if (h.reveal) return data;
   return {
     projects: data.projects.filter(p => !p.concealed).map(p => ({ ...p, sessions: p.sessions.filter(s => !s.concealed) })),
-    sessions: data.sessions.filter(s => !s.concealed)
+    sessions: data.sessions.filter(s => !s.concealed),
+    groups: data.groups
   };
 }
 
@@ -296,11 +299,52 @@ function buildData(raw, live) {
     for (const s of proj.sessions) s.hay += " \u0001 " + p.name.toLowerCase();
     return proj;
   });
-  const order = arrange(projects, raw.registry?.order === "custom");
-  order.forEach((p, i) => {
-    p.slot = i;
+  const custom = raw.registry?.order === "custom";
+  const { units, groups } = getTopLevel(projects, raw.registry?.groups || []);
+  const order = arrange(units, custom);
+  order.forEach((u, i) => {
+    u.slot = i;
   });
-  return { projects: order, sessions };
+  const flat = order.flatMap(u => (u.members ? arrange(u.members, custom) : [u]));
+  return { projects: flat, sessions, groups: groups.map(({ members, ...g }) => g) };
+}
+// The list's top level: projects outside any group, and each group (where its first project is, its activity the
+// latest of theirs) holding its projects.
+function getTopLevel(projects, registryGroups) {
+  const groups = registryGroups.map(g => ({ ...g, n: "g:" + g.id, members: [], last: 0 }));
+  const byId = new Map(groups.map(g => [g.id, g]));
+  const units = [];
+  for (const p of projects) {
+    const g = byId.get(p.group);
+    if (!g) {
+      delete p.group;
+      units.push(p);
+      continue;
+    }
+    if (!g.members.length) units.push(g);
+    g.members.push(p);
+    g.last = Math.max(g.last, p.last);
+  }
+  return { units, groups: groups.filter(g => g.members.length) };
+}
+// Projects as listed, with a {group, members, sessions} entry in place of each group's projects.
+function getUnits(projects, groups) {
+  const byId = new Map(groups.map(g => [g.id, g]));
+  const seen = new Map(), out = [];
+  for (const p of projects) {
+    const g = byId.get(p.group);
+    if (!g) {
+      out.push({ project: p });
+      continue;
+    }
+    if (!seen.has(g.id)) {
+      seen.set(g.id, { group: g, members: [] });
+      out.push(seen.get(g.id));
+    }
+    seen.get(g.id).members.push(p);
+  }
+  for (const u of seen.values()) u.sessions = [...new Set(u.members.flatMap(p => p.sessions))];
+  return out;
 }
 // Unpinned items by last activity (or as listed, in the user's own order), then each pinned one at its slot.
 function arrange(items, custom) {
