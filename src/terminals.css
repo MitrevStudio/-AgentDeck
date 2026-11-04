@@ -18,9 +18,9 @@ button.term-tab { padding-right: 10px; }
 .term-tab.exited .term-title { text-decoration: line-through; opacity: .7; }
 .term-note { flex: none; padding: 0 6px; border-radius: var(--r-pill); background: var(--accent-weak); color: var(--accent); font-size: 11px; }
 .term-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--line-2); }
-.term-dot.busy { background: var(--busy); }
-.term-dot.idle { background: var(--wait); }
-.term-dot.waiting { background: var(--attn); }
+.term-dot.busy { background: var(--working); }
+.term-dot.idle { background: var(--ready); }
+.term-dot.waiting { background: var(--needs); }
 .term-dot.loading {
   width: 10px; height: 10px; background: none; border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);
   border-top-color: var(--accent); animation: spin .8s linear infinite;

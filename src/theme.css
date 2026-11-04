@@ -76,6 +76,13 @@
   --wait-bg: rgba(242, 181, 95, .14);
   --attn: #ff7eb0;          /* blocked on the user: a permission, a question */
   --attn-bg: rgba(255, 126, 176, .14);
+  /* a running session: ready for the next prompt, working, waiting for the user's answer */
+  --ready: #5ee0a0;
+  --ready-bg: rgba(94, 224, 160, .13);
+  --working: #ff9f43;
+  --working-bg: rgba(255, 159, 67, .14);
+  --needs: #ff5c5c;
+  --needs-bg: rgba(255, 92, 92, .14);
   --warn: #f0b86a;
   --danger: #ff8a8a;
   --danger-bg: rgba(255, 138, 138, .12);
@@ -204,6 +211,12 @@
   --wait-bg: rgba(214, 137, 16, .15);
   --attn: #c0266a;
   --attn-bg: rgba(192, 38, 106, .11);
+  --ready: #12854f;
+  --ready-bg: rgba(18, 133, 79, .11);
+  --working: #c25e00;
+  --working-bg: rgba(194, 94, 0, .12);
+  --needs: #c62828;
+  --needs-bg: rgba(198, 40, 40, .1);
   --warn: #a35a00;
   --danger: #c93434;
   --danger-bg: rgba(201, 52, 52, .08);
@@ -265,7 +278,7 @@ kbd {
 
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse {
-  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--wait) 55%, transparent); }
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ready) 55%, transparent); }
   70%, 100% { box-shadow: 0 0 0 7px transparent; }
 }
 @keyframes shimmer { to { background-position: -200% 0; } }
@@ -419,21 +432,21 @@ kbd {
 /* ---------- live status ---------- */
 .spinner {
   width: 12px; height: 12px; flex: none; border-radius: 50%;
-  border: 2px solid color-mix(in srgb, var(--busy) 25%, transparent); border-top-color: var(--busy); animation: spin .8s linear infinite;
+  border: 2px solid color-mix(in srgb, var(--working) 25%, transparent); border-top-color: var(--working); animation: spin .8s linear infinite;
 }
-.pulse { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--wait); animation: pulse 2s ease-out infinite; }
+.pulse { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--ready); animation: pulse 2s ease-out infinite; }
 .live {
   flex: none; display: inline-flex; align-items: center; gap: 7px; height: 24px; padding: 0 10px;
   border-radius: var(--r-pill); font-size: 12px; font-weight: 650; white-space: nowrap;
 }
 .live .live-t { font-weight: 450; opacity: .85; }
 .live .live-t:empty { display: none; }
-.live.busy { color: var(--busy); background: var(--busy-bg); }
-.live.idle { color: var(--wait); background: var(--wait-bg); }
-.live.waiting { color: var(--attn); background: var(--attn-bg); }
-.pulse.attn { background: var(--attn); animation-name: pulse-attn; }
+.live.busy { color: var(--working); background: var(--working-bg); }
+.live.idle { color: var(--ready); background: var(--ready-bg); }
+.live.waiting { color: var(--needs); background: var(--needs-bg); }
+.pulse.attn { background: var(--needs); animation-name: pulse-attn; }
 @keyframes pulse-attn {
-  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--attn) 55%, transparent); }
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--needs) 55%, transparent); }
   70%, 100% { box-shadow: 0 0 0 7px transparent; }
 }
 .live.other { color: var(--accent); background: var(--accent-weak); }
