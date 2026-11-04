@@ -110,14 +110,13 @@ function setGroups(data, groupOf) {
     }
   }
 }
-function dropEmptyGroups(data) {
-  const used = new Set(data.projects.map(x => x.group));
-  data.groups = data.groups.filter(g => used.has(g.id));
-}
 // Each pinned project or group is pinned where it now is among the top-level items.
 function repin(data) {
   const units = [...new Set(data.projects.map(x => (x.group ? "g:" + x.group : norm(x.path))))];
-  for (const g of data.groups.filter(isPinned)) g.pin = units.indexOf("g:" + g.id);
+  for (const g of data.groups.filter(isPinned)) {
+    g.pin = units.indexOf("g:" + g.id);
+    if (g.pin < 0) delete g.pin;
+  }
   for (const x of data.projects.filter(isPinned)) x.pin = units.indexOf(norm(x.path));
 }
 function norm(p) { return path.resolve(p).replace(/\\/g, "/").toLowerCase(); }
@@ -851,7 +850,6 @@ function registerIpc() {
     const data = readRegistry();
     data.projects = data.projects.filter(x => norm(x.path) !== norm(p));
     if (remember !== false && !data.removed.includes(norm(p))) data.removed.push(norm(p));
-    dropEmptyGroups(data);
     return saveRegistry(data);
   });
   handle("project:rename", (p, name) => {
@@ -869,7 +867,6 @@ function registerIpc() {
     const at = new Map(paths.map((p, i) => [norm(text(p)), i]));
     const data = readRegistry();
     setGroups(data, groupOf);
-    dropEmptyGroups(data);
     const rank = x => at.get(norm(x.path)) ?? paths.length;
     data.projects.sort((a, b) => rank(a) - rank(b));
     repin(data);
@@ -887,15 +884,16 @@ function registerIpc() {
     return saveRegistry(data);
   });
   // A new group holding the project, in its place (and with its pin).
+  // Empty, or holding the project `p` in its place.
   handle("group:create", p => {
     const data = readRegistry();
-    const item = getProject(data, text(p));
-    if (!item) return data;
     const group = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: t("manager.projectGroup.newName") };
+    data.groups.push(group);
+    const item = p ? getProject(data, text(p)) : null;
+    if (!item) return saveRegistry(data);
     if (isPinned(item)) group.pin = item.pin;
     delete item.pin;
     item.group = group.id;
-    data.groups.push(group);
     return saveRegistry(data);
   });
   handle("group:rename", (id, name) => {

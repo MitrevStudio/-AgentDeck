@@ -74,6 +74,20 @@ main {
   background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer;
 }
 .order-toggle:hover { background: var(--panel-2); color: var(--text); }
+.order-toggle + .order-toggle { margin-left: 6px; }
+.menu {
+  position: fixed; z-index: 50; min-width: 180px; max-width: 280px; padding: 4px; display: flex; flex-direction: column;
+  border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--panel); box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+}
+.menu button {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 0; border-radius: 6px; text-align: left;
+  background: transparent; color: var(--text); font: inherit; font-size: 13px; cursor: pointer;
+}
+.menu button.sep { margin-top: 5px; position: relative; }
+.menu button.sep::before { content: ""; position: absolute; left: 4px; right: 4px; top: -3px; border-top: 1px solid var(--line); }
+.menu button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu button .i { width: 14px; height: 14px; flex: none; color: var(--muted); }
+.menu button:hover, .menu button:focus { background: var(--panel-2); outline: none; }
 .proj.all .proj-name { font-weight: 600; }
 .rename {
   flex: 1; min-width: 0; height: 30px; padding: 0 8px; border-radius: var(--r-sm); outline: none;

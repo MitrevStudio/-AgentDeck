@@ -32,8 +32,11 @@ function prepare() {
 // The selected project, or the selected group as {group, members, sessions}.
 function findSelected() {
   if (!ui.selected.startsWith("g:")) return data.projects.find(p => p.n === ui.selected);
+  const g = data.groups.find(x => x.n === ui.selected);
+  if (g && !g.size) return getEmptyUnit(g);
   return getUnits(data.projects, data.groups).find(u => u.group?.n === ui.selected);
 }
+const getEmptyUnit = g => ({ group: g, members: [], sessions: [] });
 const isInSelected = (s, sel) => (sel.group ? sel.members.some(p => inProject(s, p)) : inProject(s, sel));
 
 // Whole conversations too, from main's full-text index (as in the edge menu): a session whose text matches joins the
@@ -102,6 +105,7 @@ function renderProjects(v) {
   const total = data.projects.length;
   $("projectCount").textContent = v.toks.length ? `${v.projects.length} / ${total}` : total;
   renderOrderToggle();
+  closeGroupMenu();
   let html = `<div class="proj all ${ui.selected ? "" : "active"}" data-path="" tabindex="0">
     <div class="proj-row">${icon("layers")}<span class="proj-name">${esc(t("manager.allSessions"))}</span><span class="count">${v.hits.length}</span></div></div>`;
   const counts = new Map(v.projects.map(x => [x.p, x.count]));
@@ -110,6 +114,7 @@ function renderProjects(v) {
     const shut = isCollapsed(u.group.id) && !v.toks.length;
     return buildGroupHtml(u, v, shut) + (shut ? "" : u.members.map(p => buildProjectHtml(p, counts.get(p), v)).join(""));
   }).join("");
+  if (!v.toks.length) html += data.groups.filter(g => !g.size).map(g => buildGroupHtml(getEmptyUnit(g), v, false)).join("");
   if (!total && ui.loaded) html += `<div class="empty small">${esc(t("manager.projects.empty"))}</div>`;
   else if (!v.projects.length && v.toks.length) html += `<div class="empty small">${esc(t("manager.projects.noMatch", { q: ui.query }))}</div>`;
   $("projects").innerHTML = html;
@@ -138,7 +143,7 @@ function buildProjectHtml(p, count, v) {
           <button class="icon-btn" data-action="explorer" title="${esc(t("action.explorerTitle"))}">${icon("open")}</button>
           <button class="icon-btn" data-action="copy" title="${esc(t("action.copyPath"))}">${icon("copy")}</button>
           ${member ? "" : buildPinButton(p)}
-          <button class="icon-btn ${member ? "on" : ""}" data-action="${member ? "leave-group" : "group"}" title="${esc(t(member ? "manager.projectGroup.leave" : "manager.projectGroup.create"))}">${icon("stack")}</button>
+          <button class="icon-btn ${member ? "on" : ""}" data-action="group-menu" title="${esc(t("manager.projectGroup.menu"))}" aria-haspopup="menu">${icon("stack")}</button>
           <button class="icon-btn" data-action="rename" title="${esc(t("action.rename"))}">${icon("pencil")}</button>
           <button class="icon-btn danger" data-action="remove" title="${esc(t("action.remove"))}">${icon("trash")}</button>
         </span>
@@ -150,7 +155,7 @@ function buildGroupHtml(u, v, shut) {
   const g = u.group;
   const count = v.toks.length ? u.sessions.filter(s => v.hitSet.has(s)).length : u.sessions.length;
   return `
-    <div class="proj grp ${ui.selected === g.n ? "active" : ""}" data-group="${esc(g.id)}" tabindex="0" ${getDraggableAttr(v, g.n)}>
+    <div class="proj grp ${ui.selected === g.n ? "active" : ""}" data-group="${esc(g.id)}" tabindex="0" ${g.size ? getDraggableAttr(v, g.n) : ""}>
       <div class="proj-row">
         <button class="icon-btn fold" data-action="fold" title="${esc(t(shut ? "manager.projectGroup.expand" : "manager.projectGroup.collapse"))}">${icon(shut ? "right" : "down")}</button>
         ${icon("stack")}${buildNameHtml(g, v, "manager.projectGroup.newName")}
@@ -158,9 +163,9 @@ function buildGroupHtml(u, v, shut) {
         ${projectLive(u.sessions)}
         <span class="count" title="${esc(t(v.toks.length ? "manager.project.countMatching" : "manager.project.countAll"))}">${count}</span>
       </div>
-      <div class="proj-meta"><span>${esc(tn("manager.projectGroup.projects", u.members.length))} · ${esc(g.last ? ago(g.last) : t("manager.project.noSessions"))}</span>
+      <div class="proj-meta"><span>${esc(g.size ? `${tn("manager.projectGroup.projects", g.size)} · ${g.last ? ago(g.last) : t("manager.project.noSessions")}` : t("manager.projectGroup.empty"))}</span>
         <span class="proj-tools">
-          ${buildPinButton(g)}
+          ${g.size ? buildPinButton(g) : ""}
           <button class="icon-btn" data-action="rename" title="${esc(t("action.rename"))}">${icon("pencil")}</button>
           <button class="icon-btn danger" data-action="ungroup" title="${esc(t("manager.projectGroup.delete"))}">${icon("x")}</button>
         </span>
@@ -193,6 +198,7 @@ function renderOrderToggle() {
   el.textContent = t(custom ? "manager.order.custom" : "manager.order.activity");
   el.title = t(custom ? "manager.order.customTitle" : "manager.order.activityTitle");
   el.hidden = !data.projects.length;
+  $("newGroup").hidden = !data.projects.length;
 }
 
 function projectLive(sessions) {
@@ -419,13 +425,18 @@ async function pinProject(path, groupId) {
   const p = data.projects.find(x => x.n === normPath(path));
   if (p) applyRegistry(await window.manager.pinProject(path, isPinned(p) ? null : p.slot));
 }
+// Empty, or with the project at `path` in it; either way named right away.
 async function createGroup(path) {
+  const known = new Set(data.groups.map(g => g.id));
   applyRegistry(await window.manager.createGroup(path));
-  const id = getGroupOf(path);
-  if (!id) return;
-  collapsed.delete(id);
-  ui.renaming = "g:" + id;
+  const g = data.groups.find(x => !known.has(x.id));
+  if (!g) return;
+  collapsed.delete(g.id);
+  ui.renaming = g.n;
   render();
+}
+async function moveToGroup(path, id) {
+  await applyDrop(getDropPlan({ path }, { dataset: { group: id } }, "into"));
 }
 // The shown order with `src` ({path} or {group}) moved before, after or into the item of `card`, and the group the
 // moved project ends up in.
@@ -435,6 +446,7 @@ function getDropPlan(src, card, where) {
   const rest = order.filter(x => !isMoving.has(x));
   const joins = getJoinedGroup(card, where);
   const anchor = getAnchor(rest, card, where, card.dataset.group || (src.group ? joins : ""));
+  if (!anchor && where === "into") return { list: order, groupOf: { [src.path]: joins } };
   if (!anchor) return null;
   rest.splice(rest.indexOf(anchor) + (where === "before" ? 0 : 1), 0, ...moving);
   return { list: rest, groupOf: src.group ? null : { [src.path]: joins } };
@@ -453,13 +465,12 @@ function getAnchor(rest, card, where, groupId) {
 async function applyDrop(plan) {
   if (plan) applyRegistry(await window.manager.arrangeProjects(plan.list, plan.groupOf));
 }
-// Out of its group, right after the group's other projects; the last one out takes the group with it.
+// Out of its group, right after the group's other projects; the group stays even when this was its last one.
 async function leaveGroup(path) {
   const id = getGroupOf(path);
-  const last = order.findLast(x => getGroupOf(x) === id && x !== path);
-  if (!last) return applyRegistry(await window.manager.deleteGroup(id));
   const list = order.filter(x => x !== path);
-  list.splice(list.indexOf(last) + 1, 0, path);
+  const last = list.findLast(x => getGroupOf(x) === id);
+  list.splice(last ? list.indexOf(last) + 1 : order.indexOf(path), 0, path);
   applyRegistry(await window.manager.arrangeProjects(list, { [path]: "" }));
   document.querySelector(`.proj.grp[data-group="${CSS.escape(id)}"]`)?.focus();
 }
@@ -480,8 +491,7 @@ async function runAction(action, btn) {
     case "copy": await window.manager.copyText(path); return toast(t("toast.copied", { path }));
     case "rename": ui.renaming = groupId ? "g:" + groupId : normPath(path); return render();
     case "pin": return pinProject(path, groupId);
-    case "group": return createGroup(path);
-    case "leave-group": return leaveGroup(path);
+    case "group-menu": return openGroupMenu(btn, path);
     case "ungroup": return applyRegistry(await window.manager.deleteGroup(groupId));
     case "fold": return toggleCollapsed(groupId);
     case "remove":
@@ -557,21 +567,75 @@ async function moveByKey(card, down) {
   [...document.querySelectorAll(".proj[draggable]")].find(el => getCardKey(el) === key)?.focus();
 }
 $("projectOrder").addEventListener("click", () => toggleOrder().catch(err => toast(err.message, true)));
+$("newGroup").addEventListener("click", () => createGroup().catch(err => toast(err.message, true)));
+
+// ---------- projects: the group menu ----------
+// Moves a project into another group, a new one, or out of its own.
+let groupMenu = null;
+function openGroupMenu(btn, path) {
+  closeGroupMenu();
+  const own = getGroupOf(path);
+  const items = [
+    ...data.groups.filter(g => g.id !== own).map(g => ({ label: g.name, icon: "stack", run: () => moveToGroup(path, g.id) })),
+    { label: t("manager.projectGroup.create"), icon: "plus", run: () => createGroup(path), sep: true },
+    ...(own ? [{ label: t("manager.projectGroup.leave"), icon: "x", run: () => leaveGroup(path) }] : [])
+  ];
+  groupMenu = document.createElement("div");
+  groupMenu.className = "menu";
+  groupMenu.setAttribute("role", "menu");
+  groupMenu.innerHTML = items.map((x, i) => `<button role="menuitem" data-i="${i}" class="${x.sep && i ? "sep" : ""}">${icon(x.icon)}<span>${esc(x.label)}</span></button>`).join("");
+  groupMenu.addEventListener("click", e => {
+    const item = items[e.target.closest("[data-i]")?.dataset.i];
+    if (!item) return;
+    closeGroupMenu();
+    item.run().catch(err => toast(err.message, true));
+  });
+  document.body.append(groupMenu);
+  placeGroupMenu(btn);
+  groupMenu.querySelector("button").focus();
+}
+function placeGroupMenu(btn) {
+  const r = btn.getBoundingClientRect();
+  const below = r.bottom + groupMenu.offsetHeight + 4 <= window.innerHeight;
+  groupMenu.style.top = (below ? r.bottom + 4 : r.top - groupMenu.offsetHeight - 4) + "px";
+  groupMenu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - groupMenu.offsetWidth - 8)) + "px";
+}
+function closeGroupMenu() {
+  groupMenu?.remove();
+  groupMenu = null;
+}
+document.addEventListener("mousedown", e => {
+  if (groupMenu && !groupMenu.contains(e.target)) closeGroupMenu();
+}, true);
+document.addEventListener("keydown", e => {
+  if (!groupMenu) return;
+  if (e.key === "Escape") {
+    e.stopPropagation();
+    closeGroupMenu();
+  }
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    e.stopPropagation();
+    const all = [...groupMenu.querySelectorAll("button")];
+    const i = all.indexOf(document.activeElement) + (e.key === "ArrowDown" ? 1 : -1);
+    all[(i + all.length) % all.length].focus();
+  }
+}, true);
 
 // ---------- projects: drag and drop ----------
 // A project goes before or after another, into a group (the lower half of its row) or out of it; a group moves whole.
 let drag = null;
 const getSource = card => (card.dataset.group ? { group: card.dataset.group } : { path: card.dataset.path });
 function getDropCard(e) {
-  const card = e.target.closest(".proj[draggable]");
+  const card = e.target.closest(".proj[draggable], .proj.grp");
   if (!card || !drag) return null;
-  if (drag.group) return card.dataset.group === drag.group || getGroupOf(card.dataset.path) === drag.group ? null : card;
+  if (drag.group) return card.dataset.group === drag.group || getGroupOf(card.dataset.path) === drag.group || !card.draggable ? null : card;
   return card.dataset.path === drag.path ? null : card;
 }
 function getDropWhere(card, e) {
   const r = card.getBoundingClientRect();
   const lower = e.clientY > r.top + r.height / 2;
-  if (card.dataset.group && drag.path) return lower ? "into" : "before";
+  if (card.dataset.group && drag.path) return lower || !card.draggable ? "into" : "before";
   return lower ? "after" : "before";
 }
 const DROP_MARKS = ["drop-before", "drop-after", "drop-into"];

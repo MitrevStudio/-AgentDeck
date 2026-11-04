@@ -306,7 +306,7 @@ function buildData(raw, live) {
     u.slot = i;
   });
   const flat = order.flatMap(u => (u.members ? arrange(u.members, custom) : [u]));
-  return { projects: flat, sessions, groups: groups.map(({ members, ...g }) => g) };
+  return { projects: flat, sessions, groups: groups.map(({ members, ...g }) => ({ ...g, size: members.length })) };
 }
 // The list's top level: projects outside any group, and each group (where its first project is, its activity the
 // latest of theirs) holding its projects.
@@ -325,7 +325,7 @@ function getTopLevel(projects, registryGroups) {
     g.members.push(p);
     g.last = Math.max(g.last, p.last);
   }
-  return { units, groups: groups.filter(g => g.members.length) };
+  return { units, groups };
 }
 // Projects as listed, with a {group, members, sessions} entry in place of each group's projects.
 function getUnits(projects, groups) {
