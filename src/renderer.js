@@ -105,7 +105,6 @@ function renderProjects(v) {
   const total = data.projects.length;
   $("projectCount").textContent = v.toks.length ? `${v.projects.length} / ${total}` : total;
   renderOrderToggle();
-  closeGroupMenu();
   let html = `<div class="proj all ${ui.selected ? "" : "active"}" data-path="" tabindex="0">
     <div class="proj-row">${icon("layers")}<span class="proj-name">${esc(t("manager.allSessions"))}</span><span class="count">${v.hits.length}</span></div></div>`;
   const counts = new Map(v.projects.map(x => [x.p, x.count]));
@@ -570,27 +569,36 @@ $("projectOrder").addEventListener("click", () => toggleOrder().catch(err => toa
 $("newGroup").addEventListener("click", () => createGroup().catch(err => toast(err.message, true)));
 
 // ---------- projects: the group menu ----------
-// Moves a project into another group, a new one, or out of its own.
+// Moves a project into another group (Move to a group, then the group), a new one, or out of its own.
 let groupMenu = null;
 function openGroupMenu(btn, path) {
   closeGroupMenu();
-  const own = getGroupOf(path);
-  const items = [
-    ...data.groups.filter(g => g.id !== own).map(g => ({ label: g.name, icon: "stack", run: () => moveToGroup(path, g.id) })),
-    { label: t("manager.projectGroup.create"), icon: "plus", run: () => createGroup(path), sep: true },
-    ...(own ? [{ label: t("manager.projectGroup.leave"), icon: "x", run: () => leaveGroup(path) }] : [])
-  ];
   groupMenu = document.createElement("div");
   groupMenu.className = "menu";
   groupMenu.setAttribute("role", "menu");
-  groupMenu.innerHTML = items.map((x, i) => `<button role="menuitem" data-i="${i}" class="${x.sep && i ? "sep" : ""}">${icon(x.icon)}<span>${esc(x.label)}</span></button>`).join("");
-  groupMenu.addEventListener("click", e => {
+  document.body.append(groupMenu);
+  showMenuItems(getGroupMenuItems(path), btn);
+}
+function getGroupMenuItems(path) {
+  const own = getGroupOf(path);
+  const targets = data.groups.filter(g => g.id !== own).map(g => ({ label: g.name, icon: "stack", run: () => moveToGroup(path, g.id) }));
+  return [
+    ...(targets.length ? [{ label: t("manager.projectGroup.move"), icon: "stack", items: targets }] : []),
+    { label: t("manager.projectGroup.create"), icon: "plus", run: () => createGroup(path) },
+    ...(own ? [{ label: t("manager.projectGroup.leave"), icon: "x", run: () => leaveGroup(path) }] : [])
+  ];
+}
+// A submenu opens in place of the menu, with Back to return.
+function showMenuItems(items, btn) {
+  groupMenu.innerHTML = items.map((x, i) => `<button role="menuitem" data-i="${i}" ${x.items ? 'aria-haspopup="menu"' : ""}>
+    ${icon(x.icon)}<span>${esc(x.label)}</span>${x.items && !x.back ? icon("right") : ""}</button>`).join("");
+  groupMenu.onclick = e => {
     const item = items[e.target.closest("[data-i]")?.dataset.i];
+    if (item?.items) return showMenuItems(item.back ? item.items : [{ label: t("manager.projectGroup.back"), icon: "left", items, back: true }, ...item.items], btn);
     if (!item) return;
     closeGroupMenu();
     item.run().catch(err => toast(err.message, true));
-  });
-  document.body.append(groupMenu);
+  };
   placeGroupMenu(btn);
   groupMenu.querySelector("button").focus();
 }
