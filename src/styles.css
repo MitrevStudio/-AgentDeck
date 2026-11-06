@@ -13,7 +13,11 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 .brand h1 { margin: 0; font-size: 16px; font-weight: 650; }
 .brand p { margin: 0; color: var(--muted); font-size: 12px; }
 .search { flex: 1; max-width: 780px; margin: 0 auto; }
-.top-actions { display: flex; gap: 8px; flex: none; }
+.top-actions { display: flex; gap: 6px; flex: none; }
+/* Usage, History and Settings as plain icons (their names in the tooltips); Add project keeps its label. */
+.top-actions .btn:not(.primary) { width: 38px; padding: 0; justify-content: center; background: transparent; border-color: transparent; color: var(--muted); }
+.top-actions .btn:not(.primary):hover { color: var(--text); }
+.top-actions .btn:not(.primary) .label { display: none; }
 /* Refresh is hidden: main.js scans by itself (FULL_SCAN_MS); F5 still scans. To bring the button back, uncomment it in index.html, styles.css and renderer.js.
 #refresh { width: 38px; padding: 0; justify-content: center; opacity: .45; }
 #refresh:hover, #refresh:focus-visible { opacity: 1; }
@@ -30,6 +34,10 @@ main {
   content: ""; position: absolute; inset: 8px 3px; border-radius: 2px; background: transparent; transition: background .15s;
 }
 .splitter:hover::after, .splitter:focus-visible::after, .splitter:active::after { background: var(--accent); }
+/* The two lists stand apart by their background alone: no frames, no lines under their headers, no rings on counts. */
+main .panel { border-color: transparent; }
+main .panel-head { min-height: 50px; border-bottom-color: transparent; }
+main .count { border-color: transparent; }
 
 /* ---------- projects ---------- */
 /* A project is one line (renderer.js); --row-bg is solid so its tools, shown over the right end, hide what is under. */
@@ -74,7 +82,7 @@ main {
 .pin-mark .i { width: 13px; height: 13px; }
 .proj-tools .icon-btn.on { color: var(--accent); }
 .head-btn {
-  padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line);
+  padding: 3px 9px; border-radius: 999px; border: 1px solid transparent;
   background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer;
 }
 .head-btn:hover { background: var(--panel-2); color: var(--text); }
@@ -98,14 +106,13 @@ main {
 }
 
 /* ---------- sessions ---------- */
-.scope {
-  display: flex; align-items: center; gap: 12px; padding: 14px 14px 14px 18px;
-  border-bottom: 1px solid var(--line);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 9%, transparent), color-mix(in srgb, var(--accent) 2%, transparent));
-}
-.scope > .i { width: 24px; height: 24px; color: var(--accent); }
-.scope .label { font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; }
-.scope .path { font-size: 18px; }
+/* The chosen project or group, over its sessions. */
+.scope { display: flex; align-items: center; gap: 10px; padding: 4px 14px 10px 18px; }
+.scope > .i { width: 18px; height: 18px; color: var(--muted); }
+.scope .label { font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 1px; }
+.scope .path { font-size: 13.5px; }
+.scope .btn.sm { background: transparent; border-color: transparent; color: var(--muted); }
+.scope .btn.sm:hover { color: var(--text); }
 
 .group {
   position: sticky; top: -10px; z-index: 1; display: flex; gap: 8px; align-items: baseline;
@@ -199,7 +206,6 @@ main {
 @media (max-width: 1400px) { .brand p { display: none; } }
 @media (max-width: 1180px) {
   .keys { display: none; }
-  .top-actions .btn:not(.primary) .label { display: none; }
   /* The narrower project list: a project's branch is in its tooltip, its name keeps the room. */
   .proj-row .git-chip .gb { display: none; }
 }
