@@ -17,15 +17,10 @@ main {
 .side { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--panel); }
 .side-head { display: flex; align-items: center; gap: 10px; padding: 12px 12px 8px; }
 .side-head .logo { width: 30px; height: 30px; flex: none; border-radius: 8px; font-size: 16px; }
-/* Opens the search (palette-ui.js). */
-.side-search {
-  flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px 0 10px;
-  border-radius: var(--r-sm); border: 1px solid var(--line-2); background: var(--bg); color: var(--faint); font-size: 13px; text-align: left;
-}
-.side-search:hover { border-color: var(--line-3); color: var(--muted); }
-.side-search .i { width: 15px; height: 15px; }
-.side-search .grow { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.side-search kbd { font-size: 10.5px; padding: 0 4px; }
+/* Search, Usage, History and Settings: as quiet as the section heads' icons, so the logo stays the one thing that stands out. */
+.side-head .icon-btn { width: 28px; height: 28px; }
+.side-head .icon-btn .i { width: 16px; height: 16px; }
+.side-head .icon-btn.on { color: var(--accent); background: var(--accent-weak); }
 .side-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .side-sec { min-height: 0; display: flex; flex-direction: column; }
 .projects-sec { flex: 1 1 55%; }
@@ -38,9 +33,6 @@ main {
 .side-sec-head .icon-btn .i { width: 15px; height: 15px; }
 .side-sec-head .icon-btn.on { color: var(--accent); }
 .side-list { flex: 1; min-height: 0; overflow: auto; padding: 0 6px 8px; }
-.side-foot { flex: none; display: flex; gap: 2px; padding: 6px 8px; border-top: 1px solid var(--line); }
-.side-foot .icon-btn.on, #usage.on { color: var(--accent); background: var(--accent-weak); }
-#usage.on { border-color: transparent; }
 
 /* ---------- projects ---------- */
 /* A project is one line (renderer.js); --row-bg is solid so its tools, shown over the right end, hide what is under. */

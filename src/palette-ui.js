@@ -132,7 +132,7 @@
     } catch (err) { toast(err.message, true); }
   });
   box.addEventListener("mousedown", e => { if (e.target === box) close(); });
-  // Ctrl+K anywhere, the terminals included; the sidebar's field opens it too, keeping what was typed.
+  // Ctrl+K anywhere, the terminals included; the sidebar's search icon opens it too, keeping what was typed.
   document.addEventListener("keydown", e => {
     if (e.ctrlKey && !e.altKey && !e.shiftKey && e.code === "KeyK") { e.preventDefault(); e.stopPropagation(); st.open ? close() : open(); }
   }, true);
