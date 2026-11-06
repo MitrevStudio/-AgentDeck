@@ -51,6 +51,9 @@ const ICONS = {
   splitRight: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/>',
   splitDown: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 12h18"/>',
   maximize: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
+  groupAdd: '<rect x="3" y="8" width="13" height="12" rx="2"/><path d="M8 4h11a2 2 0 0 1 2 2v9"/><path d="M9.5 11v6M6.5 14h6"/>',
+  sortActivity: '<path d="M4 6h10M4 12h7M4 18h4"/><path d="M18 5v14"/><path d="m15 16 3 3 3-3"/>',
+  sortCustom: '<circle cx="9" cy="6" r="1.2" fill="currentColor"/><circle cx="15" cy="6" r="1.2" fill="currentColor"/><circle cx="9" cy="12" r="1.2" fill="currentColor"/><circle cx="15" cy="12" r="1.2" fill="currentColor"/><circle cx="9" cy="18" r="1.2" fill="currentColor"/><circle cx="15" cy="18" r="1.2" fill="currentColor"/>',
   more: '<circle cx="5" cy="12" r="1.3" fill="currentColor"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="19" cy="12" r="1.3" fill="currentColor"/>',
   // the agents, as plain glyphs (not their logos): a spark, code brackets, a prompt
   agentClaude: '<path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4"/>',
@@ -299,6 +302,16 @@ function hue(str) {
 // Every word must match somewhere; "\" and "/" are interchangeable so pasted Windows paths work.
 const tokenize = q => q.toLowerCase().replace(/\\/g, "/").split(/\s+/).filter(Boolean);
 const matches = (hay, toks) => toks.every(t => hay.includes(t));
+// How close a name is to what was typed: 0 the same, 1 starts with it, 2 a word in it starts with it, 3 holds it
+// somewhere, -1 not at all (the name alone, not its folder). Ties keep their order.
+function nameCloseness(name, query) {
+  const n = String(name || "").toLowerCase(), q = String(query || "").trim().toLowerCase();
+  if (!q) return -1;
+  if (n === q) return 0;
+  if (n.startsWith(q)) return 1;
+  if (n.split(/[\s\-_.\/\\]+/).some(w => w.startsWith(q))) return 2;
+  return n.includes(q) ? 3 : -1;
+}
 const searchable = (...parts) => parts.filter(Boolean).join(" \u0001 ").toLowerCase().replace(/\\/g, "/");
 
 // Escapes `text`, wraps search hits in <mark>, and (for paths) wraps the last segment from `leafAt` in .leaf.

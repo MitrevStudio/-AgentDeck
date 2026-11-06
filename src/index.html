@@ -25,9 +25,11 @@
     <div class="side-body">
       <section class="side-sec projects-sec">
         <div class="side-sec-head"><h2 data-i18n="manager.projects"></h2><span class="count" id="projectCount">0</span>
-          <button class="head-btn" id="newGroup" hidden data-i18n="manager.projectGroup.add" data-i18n-title="manager.projectGroup.addTitle"></button>
-          <button class="head-btn" id="projectOrder" hidden></button>
-          <button class="icon-btn" id="add" data-i18n-title="manager.addProject"><span data-icon="plus"></span></button></div>
+          <span class="side-tools">
+            <button class="icon-btn" id="projectOrder" hidden></button>
+            <button class="icon-btn" id="newGroup" hidden data-i18n-title="manager.projectGroup.addTitle"><span data-icon="groupAdd"></span></button>
+            <button class="icon-btn" id="add" data-i18n-title="manager.addProject"><span data-icon="plus"></span></button>
+          </span></div>
         <div class="side-list" id="projects"></div>
       </section>
       <section class="side-sec agents-sec">

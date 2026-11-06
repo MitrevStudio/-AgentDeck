@@ -17,7 +17,10 @@
     const found = toks.length ? data.sessions.filter(s => matches(s.hay, toks) || isTextHit(s)) : data.sessions;
     const running = found.filter(liveOf).sort(byLive);
     const rest = found.filter(s => !liveOf(s)).sort(byDate).slice(0, toks.length ? MAX_SESSIONS : IDLE_SESSIONS);
-    const projects = toks.length ? data.projects.filter(p => matches(p.hay, toks)).slice(0, MAX_PROJECTS) : [];
+    // Projects first, the closest name first (one found by its folder only after those found by name).
+    const rank = p => { const d = nameCloseness(p.name, st.q); return d < 0 ? 9 : d; };
+    const projects = toks.length ? data.projects.filter(p => matches(p.hay, toks))
+      .map((p, i) => ({ p, i, d: rank(p) })).sort((a, b) => a.d - b.d || a.i - b.i).map(x => x.p).slice(0, MAX_PROJECTS) : [];
     return [...projects.map(p => ({ p })), ...[...running, ...rest].map(s => ({ s }))];
   }
   function searchText() {
