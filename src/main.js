@@ -47,9 +47,10 @@ const workspace = createWorkspace({ onChange: () => { sendWorkspace(); scheduleW
 const terminals = createTerminals({
   userDataDir: app.getPath("userData"),
   onData: (id, data, end) => sendToManager("terminal:data", { id, data, end }),
-  // A program that ends takes its pane with it, as in Herdr.
-  onExit: id => { terminals.close(id); },
-  onChange: () => { prunePanes(); sendWorkspace(); scheduleWorkspaceSave(); }
+  // A program that ends takes its pane with it, as in Herdr. A terminal lost with its DockPty (killed, or Windows
+  // shutting down first) keeps its pane, which opens anew on the next start.
+  onExit: (id, code, lost) => { if (lost) terminals.setNote(id, t("term.lost")); else terminals.close(id); },
+  onChange: () => { prunePanes(); sendWorkspace(); scheduleWorkspaceSave(); updateTrayCount(); }
 });
 // Panes whose terminal is gone (closed, or ended) leave the layout.
 function prunePanes() {
@@ -61,22 +62,26 @@ function prunePanes() {
 function getWorkspaceView() {
   return { ...workspace.snapshot(), terminals: terminals.getTabs() };
 }
-// The edge menu hears it too: it marks the sessions open in AgentDeck and counts a project's tabs.
-// Quitting ends AgentDeck's own terminals: asked first while any runs (only from the tray's Quit; an update or
-// Windows shutting down does not ask).
-function confirmQuit() {
-  const running = terminals.getTabs().filter(x => !x.exited).length;
-  if (!running) return true;
-  const options = {
-    type: "warning", buttons: [t("quit.confirm.quit"), t("common.cancel")], defaultId: 1, cancelId: 1, noLink: true,
-    title: t("app.name"), message: tn("quit.confirm.message", running), detail: t("quit.confirm.detail")
-  };
-  const owner = managerWin && !managerWin.isDestroyed() && managerWin.isVisible() ? managerWin : null;
-  return (owner ? dialog.showMessageBoxSync(owner, options) : dialog.showMessageBoxSync(options)) === 0;
+// Quitting leaves AgentDeck's own terminals running (the next start attaches to them again); the tray's "Stop all
+// terminals and quit" ends them, asked first while any runs.
+async function stopAllAndQuit() {
+  const running = terminals.countRunning();
+  if (running) {
+    const options = {
+      type: "warning", buttons: [t("quit.stopAll.confirm"), t("common.cancel")], defaultId: 1, cancelId: 1, noLink: true,
+      title: t("app.name"), message: tn("quit.stopAll.message", running), detail: t("quit.stopAll.detail")
+    };
+    const owner = managerWin && !managerWin.isDestroyed() && managerWin.isVisible() ? managerWin : null;
+    if ((owner ? dialog.showMessageBoxSync(owner, options) : dialog.showMessageBoxSync(options)) !== 0) return;
+  }
+  // The layout stays as it is: the next start opens its panes anew (agents resume their sessions).
+  await saveWorkspaceFinal();
+  terminals.stopAll();
+  app.quit();
 }
 // The layout is saved in userData/workspace.json (a second after a change, and on quit) with what runs in each pane,
 // so the next start puts it back (restoreWorkspace). Not while it is being restored, nor once quitting began: the
-// terminals ending then would save an emptied layout over the real one.
+// terminals stopped then would save an emptied layout over the real one.
 const WORKSPACE_FILE = path.join(app.getPath("userData"), "workspace.json");
 const WORKSPACE_SAVE_MS = 1000;
 let workspaceSaveTimer = null, workspaceSaving = false;
@@ -125,21 +130,28 @@ async function reopenTerminal(meta, env) {
     return "";
   });
 }
-// The saved layout, with each pane's terminal opened anew (the terminals ended with the app). Shown space, tabs and
-// focus as they were. All spaces at once: a space shown later finds its panes ready, and the edge menu counts them.
+// The saved layout, each pane with its terminal: the one still running when there is one (attached again), else one
+// opened anew (after a reboot, or a stop). Shown space, tabs and focus as they were. All spaces at once: a space shown
+// later finds its panes ready, and the edge menu counts them. A running terminal the layout does not know (saved
+// before it opened) gets a tab of its own.
 async function restoreWorkspace() {
   const saved = readSavedWorkspace();
   try {
-    if (!saved) return;
-    const panes = new Set(Object.values(saved.layout.tabs || {}).flatMap(tab => getPanes(tab?.root)));
-    if (!panes.size) return;
-    const proxy = await network.terminalProxy().catch(() => null);
-    const env = terminalEnv(process.env, proxy);
-    const ids = new Map();
-    for (const old of panes) {
-      ids.set(old, await reopenTerminal(saved.terms[old], env));
+    const running = new Set(await terminals.restore());
+    const panes = saved ? new Set(Object.values(saved.layout.tabs || {}).flatMap(tab => getPanes(tab?.root))) : new Set();
+    const ids = new Map([...panes].filter(old => running.has(old)).map(old => [old, old]));
+    const gone = [...panes].filter(old => !running.has(old));
+    if (gone.length) {
+      const proxy = await network.terminalProxy().catch(() => null);
+      const env = terminalEnv(process.env, proxy);
+      for (const old of gone) {
+        ids.set(old, await reopenTerminal(saved.terms[old], env));
+      }
     }
-    workspace.importState(saved.layout, old => ids.get(old) || "");
+    if (saved) workspace.importState(saved.layout, old => ids.get(old) || "");
+    const unplaced = terminals.getTabs().filter(x => !workspace.findTab(x.id));
+    unplaced.forEach(x => workspace.addTab(getSpaceFor(x.cwd), x.id));
+    if (unplaced.length && saved?.layout.activeSpace) workspace.activateSpace(saved.layout.activeSpace);
     prunePanes();
   } catch (e) {
     console.error("Restoring the layout failed:", e);
@@ -149,6 +161,7 @@ async function restoreWorkspace() {
   }
 }
 let restoring = Promise.resolve();
+// The edge menu hears it too: it marks the sessions open in AgentDeck and counts a project's tabs.
 function sendWorkspace() {
   const view = getWorkspaceView();
   sendToManager("workspace:changed", view);
@@ -929,7 +942,9 @@ function buildTrayMenu() {
     ...waits.slice(0, 8).map(w => ({ label: cut(`${w.title} · ${w.project}`), click: () => notifier.bringUp(w.key) })),
     { label: t("notify.clear"), click: () => notifier.clear() }
   ] : [];
-  tray.setToolTip(`${t("app.name")}${hotkey ? ` — ${hotkeyLabel()}` : ""}${failed ? ` · ${tn("tray.failed", failed)}` : ""}${waits.length ? ` · ${tn("notify.waiting", waits.length)}` : ""}`);
+  trayCount = terminals.countRunning();
+  const running = trayCount ? ` · ${tn("tray.terminals", trayCount)}` : "";
+  tray.setToolTip(`${t("app.name")}${hotkey ? ` — ${hotkeyLabel()}` : ""}${running}${failed ? ` · ${tn("tray.failed", failed)}` : ""}${waits.length ? ` · ${tn("notify.waiting", waits.length)}` : ""}`);
   const sep = list => (list.length ? [...list, { type: "separator" }] : []);
   const p = prefs.get();
   const radio = (key, values, label) => values.map(value => ({
@@ -957,8 +972,14 @@ function buildTrayMenu() {
     { label: t("tray.settings"), enabled: Boolean(voice), click: () => voice?.openSettings() },
     updateMenuItem(),
     { type: "separator" },
-    { label: t("tray.quit"), click: () => { if (confirmQuit()) app.quit(); } }
+    { label: t("tray.quit"), click: () => app.quit() },
+    { label: t("tray.stopAllQuit"), enabled: trayCount > 0, click: () => stopAllAndQuit().catch(e => console.error("Stopping the terminals failed:", e)) }
   ]));
+}
+// The tooltip counts the terminals that run (they outlive AgentDeck), and "Stop all terminals and quit" follows.
+let trayCount = 0;
+function updateTrayCount() {
+  if (terminals.countRunning() !== trayCount) buildTrayMenu();
 }
 
 // ---------- updates ----------
@@ -1365,7 +1386,8 @@ if (!app.requestSingleInstanceLock()) {
         console.error("Saving the layout failed:", e.message);
       }
     }
-    terminals.closeAll();
+    // The terminals keep running; the next start attaches to them again.
+    terminals.detachAll();
   });
   // The hidden edge menu keeps the app alive after the manager window is closed; quitting is done from the tray.
   app.on("window-all-closed", () => {});
