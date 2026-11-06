@@ -1,6 +1,7 @@
+// The manager window's sidebar - the projects (each a space with its own terminals, workspace-ui.js) and the agents
+// running now - and what the centre shows for a project with no terminals open.
 let raw = { registry: { projects: [] }, sessions: [] };
 let data = { projects: [], sessions: [], groups: [] };
-let visible = [];
 // Every project's path in the order shown, hidden ones too: a drag or a pin is placed within it.
 let order = [];
 // Each project's group id ("" for none), by its path as listed, hidden ones too.
@@ -8,7 +9,8 @@ let groupOfPath = new Map();
 // The open Groups menu of a project card.
 let groupMenu = null;
 const getGroupOf = path => groupOfPath.get(path) || "";
-const ui = { query: "", agent: "", selected: "", active: -1, renaming: "", loading: false, loaded: false };
+// selected: the shown space (workspace-ui.js decides it; a project's normalized path).
+const ui = { query: "", selected: "", renaming: "", loading: false, loaded: false };
 
 // Running sessions, keyed like `Claude:<id>`; refreshed every couple of seconds from the agents' own registries.
 let live = new Map(), liveSig = "", pendingRender = false;
@@ -19,18 +21,9 @@ function prepare() {
   order = built.projects.map(p => p.path);
   groupOfPath = new Map(built.projects.map(p => [p.path, p.group || ""]));
   data = conceal(built, readHidden());
-  if (ui.selected && !(ui.selected.startsWith("g:") ? data.groups : data.projects).some(x => x.n === ui.selected)) ui.selected = "";
   if (groupMenu?.dataset.path && !groupOfPath.has(groupMenu.dataset.path)) closeGroupMenu();
 }
-// The selected project, or the selected group as {group, members, sessions}.
-function findSelected() {
-  if (!ui.selected.startsWith("g:")) return data.projects.find(p => p.n === ui.selected);
-  const g = data.groups.find(x => x.n === ui.selected);
-  if (g && !g.size) return getEmptyUnit(g);
-  return getUnits(data.projects, data.groups).find(u => u.group?.n === ui.selected);
-}
 const getEmptyUnit = g => ({ group: g, members: [], sessions: [] });
-const isInSelected = (s, sel) => (sel.group ? sel.members.some(p => inProject(s, p)) : inProject(s, sel));
 
 // Whole conversations too, from main's full-text index (as in the edge menu): a session whose text matches joins the
 // hits even when its title does not. Words under three letters are not searched there.
@@ -68,28 +61,22 @@ function compute() {
   const projects = data.projects
     .map(p => ({ p, count: toks.length ? p.sessions.filter(s => hitSet.has(s)).length : p.sessions.length }))
     .filter(x => !toks.length || x.count > 0 || matches(x.p.hay, toks) || x.p.n === ui.selected || groupHits.has(x.p.group));
-  const sel = findSelected();
-  const scoped = sel ? hits.filter(s => isInSelected(s, sel)) : hits;
-  const agentCounts = Object.fromEntries(AGENTS.map(a => [a, scoped.filter(s => s.agent === a).length]));
-  const byAgent = ui.agent ? scoped.filter(s => s.agent === ui.agent) : scoped;
-  const liveCounts = countLiveGroups(byAgent.map(liveOf).filter(Boolean));
-  // Running sessions go first (blocked on the user, working, stalled, waiting for input); the rest keep their date order.
-  const running = byAgent.filter(liveOf).sort((a, b) => getLiveRank(liveOf(a)) - getLiveRank(liveOf(b)) || lastSign(liveOf(b)) - lastSign(liveOf(a)));
-  const sessions = [...running, ...byAgent.filter(s => !liveOf(s))];
-  return { toks, hits, hitSet, projects, sel, scoped, agentCounts, liveCounts, sessions };
+  // The agents: running sessions, those that need the user first.
+  const running = hits.filter(liveOf).sort((a, b) => getLiveRank(liveOf(a)) - getLiveRank(liveOf(b)) || lastSign(liveOf(b)) - lastSign(liveOf(a)));
+  const liveCounts = countLiveGroups(data.sessions.map(liveOf).filter(Boolean));
+  return { toks, hits, hitSet, projects, running, liveCounts };
 }
 
 // ---------- rendering ----------
-function render({ resetScroll = false } = {}) {
+function render() {
   pendingRender = false;
   removeEndedLaunches(key => live.get(key));
   const v = compute();
-  visible = v.sessions;
-  if (ui.active >= visible.length) ui.active = -1;
   renderProjects(v);
-  renderSessions(v);
+  renderAgents(v);
+  renderTitle(v);
+  if (!getShownTab()) renderSpaceEmpty($("spaceEmpty"), ws.activeSpace);
   $("clearSearch").hidden = !ui.query;
-  if (resetScroll) $("sessions").scrollTop = 0;
   const input = document.querySelector(".rename");
   if (input && document.activeElement !== input) { input.focus(); input.select(); }
 }
@@ -98,8 +85,7 @@ function renderProjects(v) {
   const total = data.projects.length;
   $("projectCount").textContent = v.toks.length ? `${v.projects.length} / ${total}` : total;
   renderOrderToggle();
-  let html = `<div class="proj all ${ui.selected ? "" : "active"}" data-path="" tabindex="0">
-    <div class="proj-row">${icon("layers")}<span class="proj-name">${esc(t("manager.allSessions"))}</span><span class="count">${v.hits.length}</span></div></div>`;
+  let html = "";
   // Empty groups (just made) at the top, the newest first.
   if (!v.toks.length) html += data.groups.filter(g => !g.size).reverse().map(g => buildGroupHtml(getEmptyUnit(g), v, false)).join("");
   const counts = new Map(v.projects.map(x => [x.p, x.count]));
@@ -132,7 +118,7 @@ function buildProjectHtml(p, count, v) {
         ${buildNameHtml(p, v, "manager.project.newName")}
         ${isPinned(p) ? buildPinMark() : ""}
         ${gitChip(p.path)}${projectLive(p.sessions)}
-        ${buildCountHtml(count, v)}
+        ${getSpaceTabsHtml(p.n)}
       </div>
       <span class="proj-tools">
         <button class="icon-btn" data-action="terminal" title="${esc(t("action.terminalHere"))}">${icon("terminal")}</button>
@@ -204,90 +190,92 @@ function projectLive(sessions) {
   return `<span class="proj-live" title="${esc(title)}">${waiting ? `<span class="pulse attn"></span>${waiting}` : ""}${busy ? `<span class="spinner"></span>${busy}` : ""}${idle ? `<span class="pulse"></span>${idle}` : ""}</span>`;
 }
 
-// The window title counts the sessions that need the user, else the working ones; the list's groups show the rest.
+// How many tabs a project has open (workspace-ui.js), beside its name.
+function getSpaceTabsHtml(n) {
+  const count = ws.spaces[n]?.tabs.length || 0;
+  return count ? `<span class="proj-tabs" title="${esc(tn("ws.tabCount", count))}">${icon("terminal")}${count}</span>` : "";
+}
+// The window title counts the sessions that need the user, else the working ones.
 function renderTitle(v) {
   const { busy, waiting } = v.liveCounts;
   document.title = waiting ? `(${waiting}!) ${t("app.name")}` : busy ? `(${busy}) ${t("app.name")}` : t("app.name");
 }
-function renderAgentFilter(v) {
-  const options = [["", t("manager.agents.all"), v.scoped.length], ...AGENTS.map(a => [a, a, v.agentCounts[a]])];
-  $("agentFilter").innerHTML = options.map(([key, label, n]) =>
-    `<option value="${key}" ${ui.agent === key ? "selected" : ""} ${n || ui.agent === key || !key ? "" : "disabled"}>${esc(label)} (${n})</option>`).join("");
+
+// ---------- agents ----------
+// The sessions running now under Need you / Working / Waiting for you, each with its project and subagents. One open
+// in AgentDeck is brought up by a click, one in another terminal too (or moved here from its menu).
+function renderAgents(v) {
+  $("agentCount").textContent = v.running.length;
+  if (!v.running.length) {
+    $("agents").innerHTML = `<div class="side-empty">${esc(t(ui.loaded ? "manager.agents.none" : "manager.status.scanning"))}</div>`;
+    return;
+  }
+  let last = "", html = "";
+  for (const s of v.running) {
+    const l = liveOf(s), group = getSessionGroup(s, l);
+    if (group !== last) html += `<div class="agroup">${esc(group)}</div>`;
+    last = group;
+    html += agentHtml(s, l, v.toks);
+  }
+  $("agents").innerHTML = html;
 }
-
-function renderSessions(v) {
-  $("sessionCount").textContent = v.sessions.length;
-  renderTitle(v);
-  renderAgentFilter(v);
-
-  $("scope").innerHTML = v.sel?.group ? `<div class="scope">${icon("stack")}
-      <div class="grow"><div class="label">${esc(t("manager.scope.group", { name: v.sel.group.name }))}</div>
-        <div class="path">${esc(getMemberNames(v.sel.members))}</div></div>
-      <button class="btn sm" data-action="all" title="${esc(t("manager.scope.allTitle"))}">${icon("x")}${esc(t("common.all"))}</button>
-    </div>` : v.sel ? `<div class="scope">${icon("folder")}
-      <div class="grow"><div class="label">${esc(t("manager.scope.label", { name: v.sel.name }))}</div>${pathHtml(v.sel.path, v.toks)}</div>
-      <button class="icon-btn" data-action="copy" data-path="${esc(v.sel.path)}" title="${esc(t("action.copyPath"))}">${icon("copy")}</button>
-      <button class="btn sm" data-action="terminal" data-path="${esc(v.sel.path)}">${icon("terminal")}${esc(t("action.terminal"))}</button>
-      <button class="btn sm" data-action="explorer" data-path="${esc(v.sel.path)}">${icon("open")}${esc(t("action.explorer"))}</button>
-      <button class="btn sm" data-action="all" title="${esc(t("manager.scope.allTitle"))}">${icon("x")}${esc(t("common.all"))}</button>
-    </div>` : "";
-
-  if (!ui.loaded) { $("sessions").innerHTML = '<div class="skel"></div>'.repeat(5); return; }
-  if (!visible.length) { $("sessions").innerHTML = emptySessions(v); return; }
-
-  const groups = new Map();
-  visible.forEach((s, i) => {
-    const g = getSessionGroup(s, liveOf(s));
-    if (!groups.has(g)) groups.set(g, []);
-    groups.get(g).push(sessionHtml(s, i, v.toks));
-  });
-  $("sessions").innerHTML = [...groups].map(([g, items]) =>
-    `<div class="group">${esc(g)}<span class="n">${items.length}</span></div>${items.join("")}`).join("");
+function agentHtml(s, l, toks) {
+  const key = sessionKey(s), here = findSessionTab(s);
+  const project = data.projects.find(p => inProject(s, p))?.name || s.cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop();
+  return `<div class="agent ${here ? "here" : ""}" data-key="${esc(key)}" title="${esc(`${s.title}\n${s.cwd}`)}">${agentMark(s.agent)}
+      <div class="agent-main"><div class="agent-title">${hl(s.title, toks)}</div><div class="agent-sub">${esc(project)}${here ? "" : ` · ${esc(t("manager.agents.outside"))}`}</div></div>
+      ${statusMark(l, isLoading(key, l))}</div>
+    ${l.subagents?.length ? subagentsHtml(key, l.subagents, "data-action", SIDEBAR_SUBAGENTS) : ""}`;
 }
+// The sidebar lists only the newest few of a session's subagents.
+const SIDEBAR_SUBAGENTS = 3;
+const sessionByKey = key => data.sessions.find(s => sessionKey(s) === key) || null;
 
-// One or two lines: the agent, the title, where it ran, its context and cost, when, and its state; the recap below.
-// The actions show over the right end while the row is pointed at, chosen or holds the focus.
-function sessionHtml(s, i, toks) {
-  const l = liveOf(s);
-  const key = sessionKey(s);
-  const loading = isLoading(key, l);
-  // A running session: its terminal is brought up, or moved into a tab; a past one is resumed or continued fresh
-  // (preview-ui.js).
-  const actions = l
-    ? `<button class="btn sm" data-action="show-terminal" title="${esc(t("term.showTitle", { pid: l.pid }))}">${icon("raise")}${esc(t("term.show"))}</button>
-      ${isMoveHereOffered(s) ? `<button class="icon-btn" data-action="move-here" title="${esc(t("term.moveHereTitle"))}">${icon("download")}</button>` : ""}`
-    : getSessionActions(s);
-  return `<article class="sess ${i === ui.active ? "active" : ""}" data-i="${i}">
-    <div class="sess-main">
-      <div class="sess-line">${agentMark(s.agent)}
-        <h3 class="sess-title" title="${esc(s.title)}">${hl(s.title, toks)}</h3>
-        ${whereHtml(s, toks)}
-        ${getContextChip(s)}${usageChip(s)}
-        <span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span>
-        ${statusMark(l, loading)}
-      </div>
-      ${s.recap ? `<p class="sess-recap" title="${esc(s.recap)}">${hl(s.recap, toks)}</p>` : ""}
-      <div class="sess-acts">${actions}
-        <button class="icon-btn" data-action="row-menu" title="${esc(t("manager.session.more"))}" aria-haspopup="menu">${icon("more")}</button></div>
+// ---------- a project with no terminals open ----------
+// Its name, a new terminal or agent session, and its latest sessions to resume.
+const SPACE_RECENT = 6;
+function getSpaceFolder(key) {
+  return data.projects.find(p => p.n === key)?.path || "";
+}
+function renderSpaceEmpty(el, key) {
+  const p = data.projects.find(x => x.n === key);
+  if (!p) {
+    el.innerHTML = `<div class="se-box empty"><h3>${esc(t("ws.pick.title"))}</h3><p>${esc(t("ws.pick.body"))}</p></div>`;
+    return;
+  }
+  const agents = raw.agents?.length ? raw.agents : AGENTS;
+  const recent = [...p.sessions].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, SPACE_RECENT);
+  el.innerHTML = `<div class="se-box">
+    <div class="se-head"><span class="pmono" style="--h:${hue(p.n)}">${esc(initials(p.name))}</span>
+      <div><h2>${esc(p.name)}</h2>${pathHtml(p.path, [])}</div></div>
+    <div class="se-new">
+      <button class="btn" data-new="terminal">${icon("terminal")}${esc(t("ws.newTerminal"))}</button>
+      ${agents.map(a => `<button class="btn" data-new="${esc(a)}">${icon(`agent${a}`)}${esc(a)}</button>`).join("")}
     </div>
-    ${l?.subagents?.length ? subagentsHtml(key, l.subagents, "data-action") : ""}
-  </article>`;
+    ${recent.length ? `<p class="se-label">${esc(t("ws.recent"))}</p>${recent.map(s => `<div class="se-row" data-key="${esc(sessionKey(s))}">
+      ${agentMark(s.agent)}<span class="se-title" title="${esc(s.title)}">${esc(s.title)}</span>${getContextChip(s)}
+      <span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span>
+      <span class="se-acts">${liveOf(s) ? `<button class="btn sm" data-action="show-terminal">${icon("raise")}${esc(t("term.show"))}</button>` : getSessionActions(s)}</span></div>`).join("")}` : ""}
+  </div>`;
 }
-// The folder's name (the whole path in the tooltip) and its branch.
-function whereHtml(s, toks) {
-  if (!s.cwd) return `<span class="where unknown" title="${esc(t("manager.session.noDir"))}">${icon("alert")}</span>`;
-  const leaf = s.cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || s.cwd;
-  return `<span class="where"><span class="where-dir" title="${esc(s.cwd)}">${hl(leaf, toks)}</span>${gitChip(s.workDir || s.cwd)}</span>`;
+// The + of the tab bar: a terminal or an agent, in a new tab of the shown space.
+function openNewMenu(btn) {
+  if (!getSpaceFolder(ws.activeSpace)) return;
+  closeGroupMenu();
+  groupMenu = document.createElement("div");
+  groupMenu.className = "menu";
+  groupMenu.setAttribute("role", "menu");
+  document.body.append(groupMenu);
+  const agents = raw.agents?.length ? raw.agents : AGENTS;
+  showMenuItems([
+    { label: t("ws.newTerminal"), icon: "terminal", run: () => openInSpace("terminal") },
+    ...agents.map(a => ({ label: a, icon: `agent${a}`, run: () => openInSpace(a) }))
+  ], btn);
 }
-
-function emptySessions(v) {
-  const box = (title, body, actions = []) => `<div class="empty"><h3>${esc(title)}</h3>${body ? `<p>${esc(body)}</p>` : ""}
-    ${actions.length ? `<div class="actions">${actions.map(([action, label]) => `<button class="btn" data-action="${action}">${esc(t(label))}</button>`).join("")}</div>` : ""}</div>`;
-  if (v.toks.length) return box(t(v.sel ? "manager.empty.searchInProject" : "manager.empty.search", { q: ui.query }), t("manager.empty.searchBody"),
-    [["clear-search", "manager.empty.clearSearch"], ...(v.sel ? [["all", "manager.empty.searchAll"]] : [])]);
-  if (ui.agent) return box(t("manager.empty.agent", { agent: ui.agent }), "", [["all-agents", "manager.empty.allAgents"]]);
-  if (v.sel) return box(t("manager.empty.project"), t("manager.empty.projectBody"));
-  return box(t("manager.empty.none"), t("manager.empty.noneBody"));
+// workspace-ui.js: the layout changed - the shown space is the selected project.
+function onWorkspaceChanged() {
+  ui.selected = ws.activeSpace;
+  renderSoon();
 }
 
 // ---------- actions ----------
@@ -366,21 +354,12 @@ function updateLiveTexts() {
   });
 }
 
-// key: a project's normalized path, or "g:<id>" for a group.
+// key: a project's normalized path (its space comes up), or "g:<id>" for a group (it folds or opens).
 function selectProject(key) {
-  ui.selected = ui.selected === key ? "" : key;
-  ui.active = -1;
-  render({ resetScroll: true });
-  const sel = ui.selected && findSelected();
-  if (sel) showProjectTab(sel);
-}
-
-function setActive(i) {
-  if (!visible.length) return;
-  ui.active = Math.max(0, Math.min(visible.length - 1, i));
-  document.querySelectorAll(".sess.active").forEach(el => el.classList.remove("active"));
-  const el = document.querySelector(`.sess[data-i="${ui.active}"]`);
-  if (el) { el.classList.add("active"); el.scrollIntoView({ block: "nearest" }); }
+  if (key.startsWith("g:")) return toggleCollapsed(key.slice(2));
+  ui.selected = key;
+  render();
+  runWorkspace("space", { space: key });
 }
 
 async function resume(s) {
@@ -481,11 +460,12 @@ async function toggleOrder() {
 async function runAction(action, btn) {
   const path = btn.dataset.path || btn.closest("[data-path]")?.dataset.path;
   const groupId = btn.closest("[data-group]")?.dataset.group;
+  const session = () => sessionByKey(btn.closest("[data-key]")?.dataset.key);
   switch (action) {
-    case "resume": return resume(visible[Number(btn.closest(".sess").dataset.i)]);
-    case "fresh": await continueFresh(visible[Number(btn.closest(".sess").dataset.i)]); return toast(t("preview.fresh.started"));
-    case "show-terminal": return showTerminal(visible[Number(btn.closest(".sess").dataset.i)]);
-    case "move-here": return moveSessionHere(visible[Number(btn.closest(".sess").dataset.i)]);
+    case "resume": return resume(session());
+    case "fresh": await continueFresh(session()); return toast(t("preview.fresh.started"));
+    case "show-terminal": return showTerminal(session());
+    case "move-here": return moveSessionHere(session());
     case "terminal": await window.manager.launchFolder(path); return toast(t("manager.toast.terminal", { path }));
     case "explorer": { const err = await window.manager.openPath(path); if (err) throw new Error(err); return; }
     case "copy": await window.manager.copyText(path); return toast(t("toast.copied", { path }));
@@ -498,9 +478,6 @@ async function runAction(action, btn) {
     case "remove":
       if (!confirm(t("manager.confirm.remove", { path }))) return;
       return applyRegistry(await window.manager.removeProject(path));
-    case "all": ui.selected = ""; return render({ resetScroll: true });
-    case "all-agents": ui.agent = ""; return render({ resetScroll: true });
-    case "row-menu": return openRowMenu(btn, visible[Number(btn.closest(".sess").dataset.i)]);
     case "subagents": {
       const key = btn.dataset.key;
       subagentsOpen.set(key, !isSubagentsOpen(key, live.get(key)?.subagents || []));
@@ -518,10 +495,10 @@ async function onAction(e) {
 }
 
 function setQuery(q) {
-  ui.query = q; ui.active = -1;
+  ui.query = q;
   if ($("search").value !== q) $("search").value = q;
   searchConversations(q);
-  render({ resetScroll: true });
+  render();
 }
 
 // ---------- events ----------
@@ -534,11 +511,6 @@ for (const [id, open] of [["voiceHistory", window.manager.openVoiceHistory], ["s
 $("add").addEventListener("click", async () => {
   try { applyRegistry(await window.manager.addProject()); } catch (e) { toast(e.message, true); }
 });
-$("agentFilter").addEventListener("change", e => {
-  ui.agent = e.target.value; ui.active = -1;
-  render({ resetScroll: true });
-});
-$("scope").addEventListener("click", onAction);
 $("projects").addEventListener("click", async e => {
   if (e.target.classList.contains("rename") || await onAction(e)) return;
   const card = e.target.closest(".proj");
@@ -607,7 +579,7 @@ function openProjectMenu(btn, path) {
     { label: t("action.remove"), icon: "trash", run: () => runAction("remove", btn) }
   ]);
 }
-// A session's own menu: its id and folder, a terminal or Explorer there. Also on a right-click of the row.
+// A running session's menu (the agents list, on a right-click): bring it up or move it here, its id and folder.
 function openRowMenu(btn, s) {
   if (!s) return;
   closeGroupMenu();
@@ -617,6 +589,8 @@ function openRowMenu(btn, s) {
   document.body.append(groupMenu);
   const copy = (text, msg) => async () => { await window.manager.copyText(text); toast(msg); };
   showMenuItems([
+    { label: t("term.show"), icon: "raise", run: () => showTerminal(s) },
+    ...(liveOf(s) && isMoveHereOffered(s) ? [{ label: t("term.moveHere"), icon: "download", run: () => moveSessionHere(s) }] : []),
     { label: t("manager.session.copyId"), icon: "copy", run: copy(s.id, t("manager.toast.copiedId", { id: s.id })) },
     ...(s.cwd ? [
       { label: t("action.copyPath"), icon: "copy", run: copy(s.cwd, t("toast.copied", { path: s.cwd })) },
@@ -734,26 +708,28 @@ $("projects").addEventListener("dragend", () => {
 $("projects").addEventListener("focusout", e => {
   if (e.target.classList.contains("rename") && ui.renaming) commitRename(e.target).catch(err => toast(err.message, true));
 });
-$("sessions").addEventListener("click", async e => {
+$("agents").addEventListener("click", async e => {
   if (await onAction(e)) return;
-  const card = e.target.closest(".sess");
-  if (card) setActive(Number(card.dataset.i));
+  const row = e.target.closest(".agent");
+  if (row) showTerminal(sessionByKey(row.dataset.key)).catch(err => toast(err.message, true));
 });
-$("sessions").addEventListener("contextmenu", e => {
-  const card = e.target.closest(".sess");
-  if (!card) return;
+$("agents").addEventListener("contextmenu", e => {
+  const row = e.target.closest(".agent");
+  if (!row) return;
   e.preventDefault();
-  setActive(Number(card.dataset.i));
-  openRowMenu(card.querySelector("[data-action=row-menu]"), visible[Number(card.dataset.i)]);
+  openRowMenu(row, sessionByKey(row.dataset.key));
 });
-$("sessions").addEventListener("dblclick", e => {
-  const card = e.target.closest(".sess");
-  if (card && !e.target.closest("button")) openSession(visible[Number(card.dataset.i)]).catch(err => toast(err.message, true));
+$("spaceEmpty").addEventListener("click", async e => {
+  const make = e.target.closest("[data-new]");
+  if (make) return openInSpace(make.dataset.new === "terminal" ? "terminal" : make.dataset.new);
+  if (await onAction(e)) return;
+  const row = e.target.closest(".se-row");
+  if (row && e.detail === 2) openSession(sessionByKey(row.dataset.key)).catch(err => toast(err.message, true));
 });
 
 document.addEventListener("keydown", e => {
-  // Keys typed into a terminal tab belong to what runs there (Ctrl+K included).
-  if (e.target.closest?.(".term-panes")) return;
+  // Keys typed into a terminal belong to what runs there (Ctrl+K included).
+  if (e.target.closest?.(".term-host")) return;
   const inSearch = e.target === $("search");
   const typing = !inSearch && e.target.matches?.("input, textarea");
   if ((e.ctrlKey && (e.key === "k" || e.key === "f")) || (e.key === "/" && !typing && !inSearch)) {
@@ -761,22 +737,7 @@ document.addEventListener("keydown", e => {
   }
   if (e.key === "F5") { e.preventDefault(); load(); return; }
   if (typing) return;
-  if (e.key === "Escape") {
-    if (ui.query) setQuery("");
-    else if (ui.selected) { ui.selected = ""; ui.active = -1; render({ resetScroll: true }); }
-    else if (ui.active >= 0) { ui.active = -1; render(); }
-    return;
-  }
-  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-    if (!inSearch && e.target.closest?.("button, .proj")) return;
-    e.preventDefault();
-    setActive(ui.active < 0 ? 0 : ui.active + (e.key === "ArrowDown" ? 1 : -1));
-    return;
-  }
-  if (e.key === "Enter" && ui.active >= 0 && (inSearch || e.target === document.body)) {
-    e.preventDefault();
-    openSession(visible[ui.active]).catch(err => toast(err.message, true));
-  }
+  if (e.key === "Escape" && ui.query) setQuery("");
 });
 
 // A scan started elsewhere (e.g. by the edge menu) updates this window as well.
@@ -798,14 +759,13 @@ window.manager.onDataChanged(d => {
 });
 // Git branches beside projects and session folders, and a session's last messages on hover (git-ui.js, preview-ui.js).
 watchGit(() => { if (!ui.loaded) return; if (ui.renaming) pendingRender = true; else render(); });
-previewHoverCard($("sessions"), card => visible[Number(card.dataset.i)]);
 
 // ---------- projects | sessions divider: dragged, moved with the arrow keys, reset by a double-click ----------
 const PROJECTS_WIDTH_KEY = "agentdeck.projectsWidth";
-const MIN_PROJECTS_PX = 220, MIN_SESSIONS_PX = 420, SPLITTER_STEP_PX = 16;
+const MIN_PROJECTS_PX = 200, MIN_SESSIONS_PX = 420, SPLITTER_STEP_PX = 16;
 function getProjectsWidth(left) {
   const main = document.querySelector("main").getBoundingClientRect();
-  const projects = left - document.querySelector("main > .panel").getBoundingClientRect().left;
+  const projects = left - document.querySelector("main > .side").getBoundingClientRect().left;
   return Math.round(Math.max(MIN_PROJECTS_PX, Math.min(projects, main.width - MIN_SESSIONS_PX)));
 }
 function setProjectsWidth(px) {
@@ -842,7 +802,7 @@ $("splitter").addEventListener("keydown", e => {
   const step = { ArrowLeft: -SPLITTER_STEP_PX, ArrowRight: SPLITTER_STEP_PX }[e.key];
   if (step) {
     e.preventDefault();
-    setProjectsWidth(getProjectsWidth(document.querySelector("main > .panel").getBoundingClientRect().right + step));
+    setProjectsWidth(getProjectsWidth(document.querySelector("main > .side").getBoundingClientRect().right + step));
   }
 });
 restoreProjectsWidth();

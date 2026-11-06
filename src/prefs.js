@@ -1,6 +1,6 @@
 // App-wide preferences: UI language, theme and automatic updates (`ui` in settings.json), the edge handle
 // (`edgeHandle`: shown or not, and where), and where sessions open (`terminal`): in Windows Terminal - a window of
-// their own or a tab of the last one - or in AgentDeck's own tabs (`sessionsIn`).
+// their own or a tab of the last one - or in AgentDeck's own terminals (`sessionsIn`, the default).
 // Main process only. Every page gets a snapshot from its preload ("prefs:get") and "prefs:changed" afterwards;
 // i18n.js applies language and theme. The handle's position is not in the snapshot: it changes with a drag, which no
 // page needs to hear about.
@@ -22,7 +22,8 @@ const AUTO_COMPACT_TOKENS = [100000, 150000, 200000, 300000];
 const BACKGROUND = { dark: "#0d1015", light: "#f2f4f8" };
 
 const prefs = new EventEmitter();
-const state = { language: "bg", theme: "dark", edgeHandle: true, autoUpdate: true, newWindow: true, sessionsIn: "windows", autoCompact: true, autoCompactTokens: 150000, dayView: false, notify: null };
+const state = { language: "bg", theme: "dark", edgeHandle: true, autoUpdate: true, newWindow: true, sessionsIn: "tabs", autoCompact: true, autoCompactTokens: 150000, dayView: false, notify: null };
+let sessionsInChosen = false; // the user picked where sessions open (settings or the tray menu)
 let handleX = 0.5; // the edge handle's centre, as a fraction of the display width
 let handleDisplay = null; // the id of the display it is on (null: the primary one)
 const fraction = v => (typeof v === "number" && v >= 0 && v <= 1 ? v : null);
@@ -45,7 +46,13 @@ function load() {
   handleDisplay = Number.isInteger(handle.display) ? handle.display : null;
   state.autoUpdate = ui.autoUpdate !== false;
   state.newWindow = !(isObj(root.terminal) && root.terminal.newWindow === false);
-  if (isObj(root.terminal) && SESSIONS_IN.includes(root.terminal.sessionsIn)) state.sessionsIn = root.terminal.sessionsIn;
+  // Sessions open in AgentDeck's own terminals unless the user chose Windows Terminal. Every save used to write the
+  // setting, so a stored "windows" counts only once marked as chosen (sessionsInChosen, written since).
+  const term = isObj(root.terminal) ? root.terminal : {};
+  if (term.sessionsInChosen === true && SESSIONS_IN.includes(term.sessionsIn)) {
+    state.sessionsIn = term.sessionsIn;
+    sessionsInChosen = true;
+  }
   const auto = isObj(root.terminal) && isObj(root.terminal.autoCompact) ? root.terminal.autoCompact : {};
   state.autoCompact = auto.on !== false;
   if (AUTO_COMPACT_TOKENS.includes(auto.tokens)) state.autoCompactTokens = auto.tokens;
@@ -86,6 +93,7 @@ async function set(patch) {
   }
   if (SESSIONS_IN.includes(patch.sessionsIn) && patch.sessionsIn !== state.sessionsIn) {
     state.sessionsIn = patch.sessionsIn;
+    sessionsInChosen = true;
     keys.push("sessionsIn");
   }
   if (typeof patch.autoCompact === "boolean" && patch.autoCompact !== state.autoCompact) {
@@ -130,6 +138,7 @@ function save() {
     terminal: {
       newWindow: state.newWindow,
       sessionsIn: state.sessionsIn,
+      sessionsInChosen: sessionsInChosen || undefined,
       autoCompact: { on: state.autoCompact, tokens: state.autoCompactTokens }
     },
     dayView: { show: state.dayView },

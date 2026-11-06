@@ -1,46 +1,85 @@
-/* AgentDeck's own terminal tabs (terminals-ui.js): the strip over the sessions panel and a pane per terminal. Colours
-   come from theme.css tokens (--term-* for the terminal itself), so both themes are covered. */
+/* The centre of the manager window (workspace-ui.js): the shown project's tabs and its panes. Colours come from
+   theme.css tokens (--term-* for the terminals themselves), so both themes are covered. */
 
-.term-tabs {
-  display: flex; gap: 2px; padding: 6px 8px 0; overflow-x: auto; flex: none;
-  border-bottom: 1px solid var(--line); background: var(--panel-2);
+.work { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
+
+/* ---------- tabs ---------- */
+.tabbar { flex: none; display: flex; align-items: center; gap: 4px; min-height: 40px; padding: 6px 10px 4px; overflow-x: auto; scrollbar-width: none; }
+.wtab {
+  flex: none; display: flex; align-items: center; gap: 7px; max-width: 240px; height: 28px; padding: 0 4px 0 12px;
+  border-radius: var(--r-pill); color: var(--muted); font-size: 12.5px; cursor: pointer; user-select: none;
 }
-.term-tab {
-  flex: none; display: flex; align-items: center; gap: 7px; max-width: 240px; height: 32px; padding: 0 6px 0 10px;
-  border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0; background: none;
-  color: var(--muted); font: inherit; font-size: 12.5px; cursor: pointer;
-}
-.term-tab .i { width: 15px; height: 15px; }
-.term-tab:hover { background: var(--btn-hover); color: var(--text); }
-.term-tab[draggable] { cursor: grab; }
-.term-tab.dragging { opacity: .5; }
-.term-tab.drop-before { box-shadow: inset 2px 0 0 var(--accent); }
-.term-tab.drop-after { box-shadow: inset -2px 0 0 var(--accent); }
-.term-tab.active { margin-bottom: -1px; border-color: var(--line); background: var(--term-bg); color: var(--text); }
-button.term-tab { padding-right: 10px; }
-.term-title { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.term-tab.exited .term-title { text-decoration: line-through; opacity: .7; }
-.term-note { flex: none; padding: 0 6px; border-radius: var(--r-pill); background: var(--accent-weak); color: var(--accent); font-size: 11px; }
-.term-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--line-2); }
-.term-dot.busy { background: var(--working); }
-.term-dot.idle { background: var(--ready); }
-.term-dot.waiting { background: var(--needs); }
-.term-dot.loading {
-  width: 10px; height: 10px; background: none; border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);
-  border-top-color: var(--accent); animation: spin .8s linear infinite;
-}
-.term-close {
+.wtab:hover { background: var(--panel-2); color: var(--text); }
+.wtab.active { background: var(--panel-3); color: var(--text); box-shadow: inset 0 0 0 1px var(--line-2); }
+.wtab-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.wtab-close {
   flex: none; width: 20px; height: 20px; display: grid; place-items: center; padding: 0;
-  border: 0; border-radius: 5px; background: none; color: var(--muted); cursor: pointer;
+  border: 0; border-radius: 50%; background: none; color: var(--faint); opacity: 0;
 }
-.term-close .i { width: 13px; height: 13px; }
-.term-close:hover { background: var(--line); color: var(--text); }
+.wtab:hover .wtab-close, .wtab.active .wtab-close { opacity: 1; }
+.wtab-close:hover { background: var(--line-2); color: var(--text); }
+.wtab-close .i { width: 12px; height: 12px; }
+.wtab.dragging { opacity: .5; }
+.wtab.drop-before { box-shadow: inset 2px 0 0 var(--accent); }
+.wtab.drop-after { box-shadow: inset -2px 0 0 var(--accent); }
+.wtab-new { width: 28px; height: 28px; border-radius: 50%; }
 
-/* While a tab is up, the sessions list makes room for its terminal. */
-#sessionsPanel.showing-term > .panel-head,
-#sessionsPanel.showing-term > #scope,
-#sessionsPanel.showing-term > #sessions { display: none; }
-.term-panes { position: relative; flex: 1; min-height: 0; background: var(--term-bg); }
-.term-panes[hidden] { display: none; }
-.term-pane { position: absolute; inset: 0; padding: 8px 4px 4px 12px; visibility: hidden; }
-.term-pane.active { visibility: visible; }
+/* ---------- panes ---------- */
+/* A tab's panes as cards on the canvas, a gap between them; the focused one has the accent's edge. */
+.panes { flex: 1; min-height: 0; display: flex; padding: 2px 10px 10px; }
+.panes[hidden] { display: none; }
+.panes > * { flex: 1; min-width: 0; min-height: 0; }
+.split { display: flex; min-width: 0; min-height: 0; }
+.split.right { flex-direction: row; }
+.split.down { flex-direction: column; }
+.split > .pane, .split > .split { min-width: 0; min-height: 0; }
+.divider { flex: none; position: relative; z-index: 1; touch-action: none; }
+.split.right > .divider { width: 8px; cursor: col-resize; }
+.split.down > .divider { height: 8px; cursor: row-resize; }
+.divider::after { content: ""; position: absolute; border-radius: 2px; background: transparent; }
+.split.right > .divider::after { inset: 4px 3px; }
+.split.down > .divider::after { inset: 3px 4px; }
+.divider:hover::after, .split.dragging > .divider::after { background: var(--accent); }
+.split.dragging { cursor: inherit; user-select: none; }
+
+.pane {
+  display: flex; flex-direction: column; overflow: hidden;
+  border-radius: var(--r-md); border: 1px solid var(--line); background: var(--term-bg);
+}
+.pane.focused { border-color: var(--accent-line); }
+.pane-head {
+  flex: none; display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 4px 0 10px;
+  border-bottom: 1px solid var(--line); background: var(--panel); font-size: 12.5px; color: var(--muted);
+}
+.pane.focused .pane-head { color: var(--text); }
+.pane-title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 550; }
+.pane-note { flex: none; padding: 0 6px; border-radius: var(--r-pill); background: var(--accent-weak); color: var(--accent); font-size: 11px; }
+.pane-tools { flex: none; display: flex; gap: 1px; opacity: 0; transition: opacity var(--dur-fast); }
+.pane:hover .pane-tools, .pane.focused .pane-tools, .pane-tools:focus-within { opacity: 1; }
+.pane-tools .icon-btn { width: 24px; height: 24px; border-radius: 6px; }
+.pane-tools .icon-btn .i { width: 14px; height: 14px; }
+.pane-tools .icon-btn.on { color: var(--accent); }
+.pane-head .ctx-chip { height: 20px; line-height: 18px; font-size: 11px; }
+.pane-body { position: relative; flex: 1; min-height: 0; }
+.term-host { position: absolute; inset: 0; padding: 6px 4px 4px 10px; }
+
+/* ---------- a project with no tabs ---------- */
+.space-empty { flex: 1; min-height: 0; overflow: auto; padding: 48px 24px; }
+.space-empty[hidden] { display: none; }
+.se-box { max-width: 640px; margin: 0 auto; }
+.se-head { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+.se-head .pmono { width: 40px; height: 40px; border-radius: 11px; font-size: 14px; }
+.se-head h2 { margin: 0; font-size: 17px; font-weight: 650; }
+.se-head .path { font-size: 12.5px; }
+.se-new { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 28px; }
+.se-new .btn { height: 34px; }
+.se-label { margin: 0 0 6px; font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.se-row { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 4px 6px 4px 10px; border-radius: var(--r-sm); }
+.se-row:hover { background: var(--panel-2); }
+.se-title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 13.5px; }
+.se-row .when { flex: none; font-size: 12px; color: var(--faint); white-space: nowrap; }
+.se-row .btn.sm { height: 28px; }
+.se-row .btn.primary { background: var(--panel-2); border-color: var(--line-2); color: var(--text); }
+.se-acts { display: flex; gap: 6px; opacity: 0; }
+.se-row:hover .se-acts, .se-acts:focus-within { opacity: 1; }
+.se-hint { color: var(--muted); }

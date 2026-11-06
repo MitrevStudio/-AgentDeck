@@ -48,6 +48,9 @@ const ICONS = {
   chart: '<path d="M4 20h16"/><path d="M7 16v-5M12 16V6M17 16v-8"/>',
   globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
   power: '<path d="M12 3v8"/><path d="M6.6 6.5a8 8 0 1 0 10.8 0"/>',
+  splitRight: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/>',
+  splitDown: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 12h18"/>',
+  maximize: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
   more: '<circle cx="5" cy="12" r="1.3" fill="currentColor"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="19" cy="12" r="1.3" fill="currentColor"/>',
   // the agents, as plain glyphs (not their logos): a spark, code brackets, a prompt
   agentClaude: '<path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4"/>',
@@ -237,17 +240,18 @@ function isSubagentsOpen(key, list) {
   return subagentsOpen.has(key) ? subagentsOpen.get(key) : list.some(a => a.working);
 }
 // attr: the attribute the page's buttons carry their action in (data-action in the manager, data-act in the edge menu).
-function subagentsHtml(key, list, attr) {
+// shown: how many are listed when open (the newest; the rest are counted).
+function subagentsHtml(key, list, attr, shown = SUBAGENTS_SHOWN) {
   const open = isSubagentsOpen(key, list);
   const working = list.filter(a => a.working).length;
   const summary = [tn("manager.subagents.count", list.length), working && tn("manager.subagents.working", working)].filter(Boolean).join(" · ");
-  const rows = open ? list.slice(0, SUBAGENTS_SHOWN).map(a => `<div class="sub-row">
+  const rows = open ? list.slice(0, shown).map(a => `<div class="sub-row">
       <span class="sub-type">${esc(a.type || t("manager.subagents.agent"))}</span>
       <span class="sub-desc" title="${esc(a.description)}">${esc(a.description)}</span>
       <span class="when" title="${esc(fullDate(a.at))}">${esc(ago(a.at))}</span>
       ${a.working ? `<span class="st spinner" title="${esc(t("manager.subagents.busy"))}"></span>` : '<span class="st none"></span>'}
     </div>`).join("") : "";
-  const more = open && list.length > SUBAGENTS_SHOWN ? `<div class="sub-more">${esc(tn("manager.subagents.more", list.length - SUBAGENTS_SHOWN))}</div>` : "";
+  const more = open && list.length > shown ? `<div class="sub-more">${esc(tn("manager.subagents.more", list.length - shown))}</div>` : "";
   return `<div class="subs">
     <button class="sub-toggle" ${attr}="subagents" data-key="${esc(key)}" aria-expanded="${open}">${icon(open ? "down" : "right")}${working ? '<span class="st spinner"></span>' : ""}<span>${esc(summary)}</span></button>
     ${rows}${more}</div>`;

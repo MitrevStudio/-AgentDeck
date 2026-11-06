@@ -39,13 +39,30 @@ function sendToManager(channel, payload) {
     managerWin.webContents.send(channel, payload);
   }
 }
+// Where each terminal is on screen (workspace.js): spaces (projects), their tabs, and the panes a tab is split into.
+// The window gets the layout and the terminals' list together, as one picture.
+const { createWorkspace, getPanes } = require("./workspace");
+const workspace = createWorkspace({ onChange: () => sendWorkspace() });
 const terminals = createTerminals({
   userDataDir: app.getPath("userData"),
   onData: (id, data, end) => sendToManager("terminal:data", { id, data, end }),
-  onExit: (id, code) => sendToManager("terminal:exit", { id, code }),
-  onChange: tabs => sendToManager("terminals:changed", tabs)
+  // A program that ends takes its pane with it, as in Herdr.
+  onExit: id => { terminals.close(id); },
+  onChange: () => { prunePanes(); sendWorkspace(); }
 });
-let pendingTab = ""; // the tab to bring up once the manager window has loaded
+// Panes whose terminal is gone (closed, or ended) leave the layout.
+function prunePanes() {
+  const alive = new Set(terminals.getTabs().map(x => x.id));
+  for (const tab of Object.values(workspace.snapshot().tabs)) {
+    getPanes(tab.root).filter(term => !alive.has(term)).forEach(term => workspace.removeTerm(term));
+  }
+}
+function getWorkspaceView() {
+  return { ...workspace.snapshot(), terminals: terminals.getTabs() };
+}
+function sendWorkspace() {
+  sendToManager("workspace:changed", getWorkspaceView());
+}
 function getSessionContext(key) {
   return usage.get()?.sessions.find(s => s.key === key)?.context || null;
 }
@@ -58,7 +75,7 @@ const sessionPreview = require("./session-preview");
 const gitStatus = require("./git-status");
 const autostart = require("./autostart");
 const { t, tn, LANGUAGES } = require("./i18n");
-const { keyLabel } = require("./voice/util");
+const { keyLabel, isObj } = require("./voice/util");
 const execFileAsync = promisify(execFile);
 
 const USER = os.homedir();
@@ -448,18 +465,37 @@ function spawnDetached(file, args, opts) {
   child.unref();
   return new Promise((resolve, reject) => { child.once("spawn", resolve); child.once("error", reject); });
 }
-// A tab of AgentDeck's own: the command reaches PowerShell encoded, so no quoting of it can break the command line.
-async function openTab(cwd, command, meta, env) {
+// The space a folder belongs to: the listed project that holds it (the deepest one), else the folder itself, which
+// joins the list as a project of its own (as the scan adds the folders sessions ran in) unless the user removed it.
+function getSpaceFor(cwd) {
+  const n = norm(cwd);
+  const registry = readRegistry();
+  const owner = registry.projects
+    .filter(p => n === norm(p.path) || n.startsWith(norm(p.path).replace(/\/$/, "") + "/"))
+    .sort((a, b) => b.path.length - a.path.length)[0];
+  if (owner) return norm(owner.path);
+  if (!registry.removed.includes(n)) {
+    registry.projects.push({ name: path.basename(cwd) || cwd, path: path.resolve(cwd) });
+    saveRegistry(registry);
+  }
+  return n;
+}
+// The places a terminal can open: a tab of its own in its space, or beside the shown tab's focused pane.
+const PLACES = ["tab", "right", "down"];
+// A terminal of AgentDeck's own: the command reaches PowerShell encoded, so no quoting of it can break the command
+// line. It opens in a new tab of its project's space, or split off the focused pane (place "right" / "down").
+async function openTab(cwd, command, meta, env, place = "tab") {
   const encoded = command ? Buffer.from(command, "utf16le").toString("base64") : "";
   const commandLine = command ? `powershell.exe -NoLogo -NoExit -EncodedCommand ${encoded}` : "powershell.exe -NoLogo";
   const id = await terminals.open({ cwd, commandLine, title: meta.title || path.basename(cwd), agent: meta.agent, sessionId: meta.sessionId, env });
-  launchLog("agentdeck tab", `cwd="${cwd}" cmd=${command ? `"${command.slice(0, 120)}"` : "-"}`);
-  showTab(id);
+  launchLog(`agentdeck ${place}`, `cwd="${cwd}" cmd=${command ? `"${command.slice(0, 120)}"` : "-"}`);
+  const shown = workspace.getActiveTab();
+  if (place !== "tab" && shown) workspace.split(shown.id, id, place);
+  else workspace.addTab(getSpaceFor(cwd), id);
+  showManager();
 }
 function showTab(id) {
-  // An open window switches to the tab now; one that is still to load asks for it when it lists the tabs.
-  if (managerWin && !managerWin.isDestroyed()) sendToManager("terminal:activate", id);
-  else pendingTab = id;
+  workspace.focus(id);
   showManager();
 }
 // "Show terminal", a notification's click, a voice command: a session in one of AgentDeck's tabs comes up there, any
@@ -470,12 +506,14 @@ function focusSessionAnywhere(opts) {
   showTab(tab.id);
   return Promise.resolve({ ok: true, how: "tab", reason: "", ms: 0 });
 }
-// meta: {title, agent, sessionId} of what runs, for the tab; inTab: an AgentDeck tab whatever the setting ("Move here").
-async function launchTerminal(cwd, command = null, meta = {}, inTab = false) {
+// meta: {title, agent, sessionId} of what runs, for the tab; inTab: an AgentDeck terminal whatever the setting ("Move
+// here", a split); place: where in the window (PLACES).
+async function launchTerminal(cwd, command = null, meta = {}, inTab = false, place = "tab") {
   if (!cwd || !fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) throw new Error(t("errors.folderMissing"));
-  if (inTab || prefs.get().sessionsIn === "tabs") {
+  if (!PLACES.includes(place)) place = "tab";
+  if (inTab || place !== "tab" || prefs.get().sessionsIn === "tabs") {
     const proxy = await network.terminalProxy().catch(() => null);
-    return openTab(cwd, command, meta, terminalEnv(process.env, proxy));
+    return openTab(cwd, command, meta, terminalEnv(process.env, proxy), place);
   }
   // Pass fixed argument arrays to wt.exe. No user-supplied shell command is evaluated. "-w new" gives the session a
   // window of its own (Settings -> General); "-w 0" adds a tab to the last used window.
@@ -541,10 +579,10 @@ function checkResumable(agent, id, cwd) {
     throw new Error(t("errors.conversationMissing"));
   }
 }
-async function launchAgent(agent, id, cwd, inTab = false) {
+async function launchAgent(agent, id, cwd, inTab = false, place = "tab") {
   checkResumable(agent, id, cwd);
   const cmd = agentCommand(agent, id).map(psQuote).join(" ");
-  await launchTerminal(cwd, "& " + cmd, { title: getSessionTitle(agent, id), agent, sessionId: id }, inTab);
+  await launchTerminal(cwd, "& " + cmd, { title: getSessionTitle(agent, id), agent, sessionId: id }, inTab, place);
   // Only Claude reports when it is ready (live.js), which ends the windows' "Loading".
   if (agent === "Claude") {
     broadcast("launch:started", `${agent}:${id}`);
@@ -554,22 +592,22 @@ async function launchAgent(agent, id, cwd, inTab = false) {
 // keeps it for later resumes too), so nothing is pasted or sent.
 const HANDOFFS_DIR = path.join(app.getPath("userData"), "handoffs");
 const HANDOFF_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
-async function launchFresh(cwd, handoff) {
+async function launchFresh(cwd, handoff, place = "tab") {
   promptLaunch.sweep(HANDOFFS_DIR, { maxAge: HANDOFF_KEEP_MS });
   fs.mkdirSync(HANDOFFS_DIR, { recursive: true });
   const file = path.join(HANDOFFS_DIR, `prompt-${crypto.randomBytes(8).toString("hex")}.txt`);
   fs.writeFileSync(file, handoff);
   const cmd = [NEW_SESSION.Claude, "--append-system-prompt-file", file].map(psQuote).join(" ");
   try {
-    await launchTerminal(cwd, "& " + cmd, { title: `Claude · ${path.basename(cwd)}`, agent: "Claude" });
+    await launchTerminal(cwd, "& " + cmd, { title: `Claude · ${path.basename(cwd)}`, agent: "Claude" }, false, place);
   } catch (e) {
     promptLaunch.remove(file);
     throw e;
   }
 }
-function launchNew(agent, cwd) {
+function launchNew(agent, cwd, place = "tab") {
   checkAgent(agent);
-  return launchTerminal(cwd, "& " + psQuote(NEW_SESSION[agent]), { title: `${agent} · ${path.basename(cwd)}`, agent });
+  return launchTerminal(cwd, "& " + psQuote(NEW_SESSION[agent]), { title: `${agent} · ${path.basename(cwd)}`, agent }, false, place);
 }
 // "Move here": a session running in another terminal is stopped there (its terminal modes reset) and resumed in an
 // AgentDeck tab. Not while it works - that would cut the turn off.
@@ -698,6 +736,34 @@ function watchTranscripts() {
 const FULL_SCAN_MS = 5 * 60 * 1000;
 function scanPeriodically() {
   setInterval(() => scan().catch(err => console.error("Full scan failed:", err.message)), FULL_SCAN_MS);
+}
+// What the window asks of the layout (workspace-ui.js). A terminal closed here ends; its pane goes once it has.
+async function runWorkspaceCommand(cmd, a) {
+  const id = v => text(v ?? "", 64);
+  switch (cmd) {
+    case "focus": return workspace.focus(id(a.term));
+    case "focus-dir": return workspace.focusDirection(text(a.direction, 8));
+    case "ratio": return workspace.setRatio(id(a.tab), text(a.path ?? "", 32), Number(a.ratio));
+    case "zoom": return workspace.toggleZoom(id(a.tab));
+    case "space": workspace.activateSpace(text(a.space ?? "", 2000)); return true;
+    case "tab": return workspace.activateTab(id(a.tab));
+    case "rename-tab": return workspace.renameTab(id(a.tab), text(a.name ?? "", 200));
+    case "reorder-tabs":
+      if (!Array.isArray(a.ids) || a.ids.length > 1000) throw new Error(t("errors.invalidData"));
+      return workspace.reorderTabs(text(a.space ?? "", 2000), a.ids.map(id));
+    case "close-pane": return terminals.close(id(a.term));
+    case "close-tab": workspace.getTabTerms(id(a.tab)).forEach(term => terminals.close(term)); return true;
+    // A shell beside the focused pane, in its folder (or the shown space's).
+    case "split": {
+      const dir = a.dir === "down" ? "down" : "right";
+      const shown = workspace.getActiveTab();
+      const cwd = terminals.getTabs().find(x => x.id === shown?.focus)?.cwd;
+      if (!cwd) return false;
+      await launchTerminal(cwd, null, {}, true, dir);
+      return true;
+    }
+    default: throw new Error(t("errors.invalidData"));
+  }
 }
 function registryChanged(registry) {
   if (cache) { cache = { ...cache, registry }; broadcast("data:changed", cache); }
@@ -951,30 +1017,23 @@ function registerIpc() {
     }
     return saveRegistry(data);
   });
-  handle("launch:folder", async p => { await launchTerminal(text(p)); return true; });
-  handle("launch:agent", async (agent, id, cwd) => { await launchAgent(text(agent), text(id), text(cwd)); return true; });
-  handle("launch:new", async (agent, cwd) => { await launchNew(text(agent), text(cwd)); return true; });
-  handle("launch:fresh", async (cwd, handoff) => {
-    await launchFresh(text(cwd), text(handoff, 20000));
+  // place (optional): "tab", "right" or "down" - where in AgentDeck's window (PLACES).
+  const placeOf = p => (PLACES.includes(p) ? p : "tab");
+  handle("launch:folder", async (p, place) => { await launchTerminal(text(p), null, {}, false, placeOf(place)); return true; });
+  handle("launch:agent", async (agent, id, cwd, place) => { await launchAgent(text(agent), text(id), text(cwd), false, placeOf(place)); return true; });
+  handle("launch:new", async (agent, cwd, place) => { await launchNew(text(agent), text(cwd), placeOf(place)); return true; });
+  handle("launch:fresh", async (cwd, handoff, place) => {
+    await launchFresh(text(cwd), text(handoff, 20000), placeOf(place));
     return true;
   });
   // Folders only: shell.openPath() on a file runs it.
   handle("open:path", p => (isDir(p) ? shell.openPath(p) : t("errors.folderMissing")));
   handle("clipboard:write", async value => { await clipboard.writeText(text(value, 1_000_000)); return true; });
   handle("live:get", () => liveSessions());
-  // AgentDeck's own terminal tabs. Keystrokes and sizes come as plain messages (many, no answer needed).
-  handle("terminals:list", () => {
-    const activate = pendingTab;
-    pendingTab = "";
-    return { tabs: terminals.getTabs(), activate };
-  });
+  // AgentDeck's own terminals and their layout. Keystrokes and sizes come as plain messages (many, no answer needed).
+  handle("workspace:get", () => getWorkspaceView());
+  handle("workspace:command", (cmd, args) => runWorkspaceCommand(text(cmd, 32), isObj(args) ? args : {}));
   handle("terminal:attach", id => terminals.attach(text(id, 64)));
-  handle("terminal:close", id => terminals.close(text(id, 64)));
-  handle("terminals:reorder", ids => {
-    if (!Array.isArray(ids) || ids.length > 1000) throw new Error(t("errors.invalidData"));
-    terminals.reorder(ids.map(id => text(id, 64)));
-    return true;
-  });
   handle("terminal:move", async (agent, id) => {
     await moveToTab(text(agent), text(id));
     return true;
