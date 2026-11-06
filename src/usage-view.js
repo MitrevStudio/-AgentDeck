@@ -1,6 +1,6 @@
 // The manager's Usage view: tokens and API-equivalent cost for today, the last 7 and 30 days and all time, a daily
 // chart of the last 30 days, and the projects, sessions and models behind the chosen period. Classic script loaded
-// after renderer.js, whose data, ui, live, render(), selectProject() and setQuery() it uses; figures and formats
+// after renderer.js, whose data, ui, live, render(), selectProject() and the search (palette-ui.js) it uses; figures and formats
 // come from usage-ui.js. Kept in a function scope: the page's scripts share one global scope.
 (() => {
 const uv = { open: false, period: "d7", metric: "cost", focus: -1, refreshing: false };
@@ -255,7 +255,7 @@ $("usageView").addEventListener("click", e => {
   if (el.dataset.metric) { uv.metric = el.dataset.metric; return renderUsage(); }
   // From a project or a session to the sessions list, filtered to it.
   if (el.dataset.project != null) { openUsage(false); ui.selected = ""; selectProject(normPath(el.dataset.project)); return; }
-  if (el.dataset.session) { openUsage(false); setQuery(el.dataset.session.slice(el.dataset.session.indexOf(":") + 1)); }
+  if (el.dataset.session) { openUsage(false); window.searchPalette.open(el.dataset.session.slice(el.dataset.session.indexOf(":") + 1)); }
 });
 $("usageView").addEventListener("pointermove", e => {
   const g = e.target.closest?.("#uvPlot g[data-i]");
@@ -279,7 +279,6 @@ window.addEventListener("keydown", e => {
   if (["ArrowUp", "ArrowDown", "Enter"].includes(e.key)) e.stopImmediatePropagation();
 }, true);
 // Searching is about sessions.
-$("search").addEventListener("input", () => { if (uv.open) openUsage(false); });
 new ResizeObserver(() => { if (uv.open && usage) renderChart(); }).observe($("usageView"));
 
 // Figures follow the scans; a running session's numbers are refreshed every so often while the window is in view.

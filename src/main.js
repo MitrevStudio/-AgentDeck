@@ -60,8 +60,23 @@ function prunePanes() {
 function getWorkspaceView() {
   return { ...workspace.snapshot(), terminals: terminals.getTabs() };
 }
+// The edge menu hears it too: it marks the sessions open in AgentDeck and counts a project's tabs.
+// Quitting ends AgentDeck's own terminals: asked first while any runs (only from the tray's Quit; an update or
+// Windows shutting down does not ask).
+function confirmQuit() {
+  const running = terminals.getTabs().filter(x => !x.exited).length;
+  if (!running) return true;
+  const options = {
+    type: "warning", buttons: [t("quit.confirm.quit"), t("common.cancel")], defaultId: 1, cancelId: 1, noLink: true,
+    title: t("app.name"), message: tn("quit.confirm.message", running), detail: t("quit.confirm.detail")
+  };
+  const owner = managerWin && !managerWin.isDestroyed() && managerWin.isVisible() ? managerWin : null;
+  return (owner ? dialog.showMessageBoxSync(owner, options) : dialog.showMessageBoxSync(options)) === 0;
+}
 function sendWorkspace() {
-  sendToManager("workspace:changed", getWorkspaceView());
+  const view = getWorkspaceView();
+  sendToManager("workspace:changed", view);
+  if (bar?.win && !bar.win.isDestroyed()) bar.win.webContents.send("workspace:changed", view);
 }
 function getSessionContext(key) {
   return usage.get()?.sessions.find(s => s.key === key)?.context || null;
@@ -746,6 +761,8 @@ async function runWorkspaceCommand(cmd, a) {
     case "ratio": return workspace.setRatio(id(a.tab), text(a.path ?? "", 32), Number(a.ratio));
     case "zoom": return workspace.toggleZoom(id(a.tab));
     case "space": workspace.activateSpace(text(a.space ?? "", 2000)); return true;
+    // The edge menu: the window comes up showing that project.
+    case "show-space": workspace.activateSpace(text(a.space ?? "", 2000)); showManager(); return true;
     case "tab": return workspace.activateTab(id(a.tab));
     case "rename-tab": return workspace.renameTab(id(a.tab), text(a.name ?? "", 200));
     case "reorder-tabs":
@@ -855,7 +872,7 @@ function buildTrayMenu() {
     { label: t("tray.settings"), enabled: Boolean(voice), click: () => voice?.openSettings() },
     updateMenuItem(),
     { type: "separator" },
-    { label: t("tray.quit"), click: () => app.quit() }
+    { label: t("tray.quit"), click: () => { if (confirmQuit()) app.quit(); } }
   ]));
 }
 

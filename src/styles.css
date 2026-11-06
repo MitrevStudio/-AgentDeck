@@ -17,11 +17,15 @@ main {
 .side { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--panel); }
 .side-head { display: flex; align-items: center; gap: 10px; padding: 12px 12px 8px; }
 .side-head .logo { width: 30px; height: 30px; flex: none; border-radius: 8px; font-size: 16px; }
-.side .search { flex: 1; min-width: 0; }
-.side .search > .i { left: 10px; width: 15px; height: 15px; }
-.side .search input { height: 32px; padding: 0 60px 0 32px; border-radius: var(--r-sm); font-size: 13px; background: var(--bg); }
-.side .search .clear { right: 50px; width: 24px; height: 24px; }
-.side .search kbd { right: 8px; font-size: 10.5px; padding: 0 4px; }
+/* Opens the search (palette-ui.js). */
+.side-search {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px 0 10px;
+  border-radius: var(--r-sm); border: 1px solid var(--line-2); background: var(--bg); color: var(--faint); font-size: 13px; text-align: left;
+}
+.side-search:hover { border-color: var(--line-3); color: var(--muted); }
+.side-search .i { width: 15px; height: 15px; }
+.side-search .grow { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.side-search kbd { font-size: 10.5px; padding: 0 4px; }
 .side-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .side-sec { min-height: 0; display: flex; flex-direction: column; }
 .projects-sec { flex: 1 1 55%; }
@@ -122,7 +126,36 @@ main {
   display: flex; align-items: center; gap: 16px; padding: 5px 14px; font-size: 12px; color: var(--muted);
   border-top: 1px solid var(--line); background: var(--panel);
 }
-.keys { margin-left: auto; display: flex; align-items: center; gap: 3px; white-space: nowrap; }
-.keys kbd { font-size: 10.5px; padding: 0 5px; }
-.keys span { margin: 0 10px 0 4px; }
-@media (max-width: 1100px) { .keys { display: none; } }
+/* The focused pane's folder, branch and context on the left, the plan limits on the right. */
+.focus-info { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.focus-info:empty { display: none; }
+.fi-dir { display: inline-flex; align-items: center; gap: 5px; color: var(--text); white-space: nowrap; }
+.fi-dir .i { width: 14px; height: 14px; color: var(--muted); }
+.status #limits { margin-left: auto; }
+.status #limits .lim-group { height: 24px; padding: 0 8px; background: transparent; border-color: transparent; }
+
+/* ---------- search (palette-ui.js) ---------- */
+.pal-back { position: fixed; inset: 0; z-index: 60; display: flex; justify-content: center; align-items: flex-start; padding-top: 10vh; background: var(--backdrop); }
+.pal-back[hidden] { display: none; }
+.pal {
+  width: min(1040px, calc(100vw - 48px)); height: min(620px, 78vh); display: flex; flex-direction: column; overflow: hidden;
+  border-radius: var(--r-xl); border: 1px solid var(--line-2); background: var(--panel); box-shadow: var(--shadow-dialog);
+}
+.pal-head { position: relative; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 14px; height: 52px; border-bottom: 1px solid var(--line); }
+.pal-head > .i { width: 18px; height: 18px; color: var(--faint); }
+.pal-head input { flex: 1; min-width: 0; height: 100%; border: 0; outline: none; background: transparent; font-size: 15.5px; }
+.pal-head input::-webkit-search-cancel-button { display: none; }
+.pal-body { flex: 1; min-height: 0; display: flex; }
+.pal-list { flex: 1 1 55%; min-width: 0; overflow: auto; padding: 6px; }
+.pal-pv { flex: 1 1 45%; border-left: 1px solid var(--line); }
+.pal-row { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 5px 10px; border-radius: var(--r-sm); cursor: pointer; }
+.pal-row.sel { background: color-mix(in srgb, var(--accent) 13%, var(--panel)); }
+.pal-main { flex: 1; min-width: 0; }
+.pal-title { font-size: 13.5px; font-weight: 550; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.pal-sub, .pal-snip { font-size: 11.5px; color: var(--faint); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.pal-snip { color: var(--muted); }
+.pal-kind { flex: none; font-size: 11px; color: var(--faint); }
+.pal-row .when { flex: none; min-width: 72px; text-align: right; font-size: 12px; color: var(--faint); white-space: nowrap; }
+.pal-foot { flex: none; display: flex; align-items: center; gap: 3px; padding: 7px 14px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--faint); }
+.pal-foot kbd { font-size: 10.5px; padding: 0 5px; }
+.pal-foot span { margin: 0 10px 0 4px; }

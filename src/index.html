@@ -20,12 +20,7 @@
   <aside class="side">
     <div class="side-head">
       <div class="logo">⌘</div>
-      <div class="search">
-        <span data-icon="search"></span>
-        <input id="search" type="search" data-i18n-placeholder="manager.search.placeholder" data-i18n-aria-label="common.search" autocomplete="off" spellcheck="false">
-        <button id="clearSearch" class="icon-btn clear" data-i18n-title="manager.search.clear" hidden><span data-icon="x"></span></button>
-        <kbd>Ctrl K</kbd>
-      </div>
+      <button class="side-search" id="openPalette"><span data-icon="search"></span><span class="grow" data-i18n="palette.open"></span><kbd>Ctrl K</kbd></button>
     </div>
     <div class="side-body">
       <section class="side-sec projects-sec">
@@ -55,9 +50,18 @@
   </section>
 </main>
 <section id="usageView" class="usage-view" tabindex="-1" data-i18n-aria-label="usage.title" hidden></section>
+<!-- Search (palette-ui.js). -->
+<div class="pal-back" id="palette" hidden>
+  <div class="pal" role="dialog" data-i18n-aria-label="palette.title">
+    <div class="pal-head"><span data-icon="search"></span><input id="palQ" type="search" data-i18n-placeholder="manager.search.placeholder" autocomplete="off" spellcheck="false"><kbd>Esc</kbd></div>
+    <div class="pal-body"><div class="pal-list" id="palList"></div><aside class="pv pal-pv" id="palPv" hidden></aside></div>
+    <div class="pal-foot"><kbd>↑</kbd><kbd>↓</kbd><span data-i18n="manager.keys.select"></span><kbd>Enter</kbd><span data-i18n="palette.keys.open"></span><kbd>Alt</kbd><kbd>Enter</kbd><span data-i18n="palette.keys.beside"></span></div>
+  </div>
+</div>
 <footer class="status">
+  <span id="focusInfo" class="focus-info"></span>
   <span id="status" data-i18n="manager.status.ready"></span>
-  <span class="keys"><kbd>Alt</kbd><kbd>Shift</kbd><kbd>+</kbd><span data-i18n="ws.keys.split"></span><kbd>Alt</kbd><kbd>←↑→↓</kbd><span data-i18n="ws.keys.move"></span><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>T</kbd><span data-i18n="ws.keys.tab"></span><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>W</kbd><span data-i18n="ws.keys.close"></span></span>
+  <div id="limits"></div>
 </footer>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <script src="common.js"></script>
@@ -68,6 +72,8 @@
 <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
 <script src="workspace-ui.js"></script>
 <script src="renderer.js"></script>
+<script src="palette-ui.js"></script>
+<script src="limits-ui.js"></script>
 <script src="usage-view.js"></script>
 </body>
 </html>
