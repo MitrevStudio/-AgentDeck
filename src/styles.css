@@ -1,49 +1,46 @@
-/* Manager window layout. Tokens and shared components (buttons, search, chips, panels, cards, paths, live pills,
-   empty states, toast) come from theme.css, which is linked first. */
+/* Manager window layout: the sidebar (projects and agents) beside the terminals (terminals.css). Tokens and shared
+   components (buttons, search, chips, paths, live marks, empty states, toast) come from theme.css, linked first. */
 html, body { height: 100%; }
 body { display: flex; flex-direction: column; overflow: hidden; }
 
-/* ---------- header ---------- */
-.top {
-  display: flex; align-items: center; gap: 20px; padding: 14px 20px;
-  border-bottom: 1px solid var(--line); background: var(--panel);
-}
-.brand { display: flex; align-items: center; gap: 12px; flex: none; }
-.logo { width: 38px; height: 38px; border-radius: 10px; font-size: 20px; }
-.brand h1 { margin: 0; font-size: 16px; font-weight: 650; }
-.brand p { margin: 0; color: var(--muted); font-size: 12px; }
-.search { flex: 1; max-width: 780px; margin: 0 auto; }
-.top-actions { display: flex; gap: 6px; flex: none; }
-/* Usage, History and Settings as plain icons (their names in the tooltips); Add project keeps its label. */
-.top-actions .btn:not(.primary) { width: 38px; padding: 0; justify-content: center; background: transparent; border-color: transparent; color: var(--muted); }
-.top-actions .btn:not(.primary):hover { color: var(--text); }
-.top-actions .btn:not(.primary) .label { display: none; }
-/* Refresh is hidden: main.js scans by itself (FULL_SCAN_MS); F5 still scans. To bring the button back, uncomment it in index.html, styles.css and renderer.js.
-#refresh { width: 38px; padding: 0; justify-content: center; opacity: .45; }
-#refresh:hover, #refresh:focus-visible { opacity: 1; }
-*/
-
 /* ---------- layout ---------- */
 main {
-  flex: 1; min-height: 0; display: grid; gap: 4px; padding: 16px 20px;
-  grid-template-columns: min(var(--projects-w, clamp(310px, 25vw, 390px)), calc(100% - 432px)) 8px minmax(0, 1fr);
+  flex: 1; min-height: 0; display: grid;
+  grid-template-columns: min(var(--projects-w, 280px), calc(100% - 420px)) 5px minmax(0, 1fr);
 }
-/* Between the projects and the sessions (renderer.js): a line that shows while pointed at, dragged or focused. */
-.splitter { position: relative; cursor: col-resize; outline: none; touch-action: none; }
-.splitter::after {
-  content: ""; position: absolute; inset: 8px 3px; border-radius: 2px; background: transparent; transition: background .15s;
-}
+/* Between the sidebar and the terminals (renderer.js): a line that shows while pointed at, dragged or focused. */
+.splitter { position: relative; cursor: col-resize; outline: none; touch-action: none; background: var(--panel); border-right: 1px solid var(--line); }
+.splitter::after { content: ""; position: absolute; inset: 0 1px; background: transparent; transition: background .15s; }
 .splitter:hover::after, .splitter:focus-visible::after, .splitter:active::after { background: var(--accent); }
-/* The two lists stand apart by their background alone: no frames, no lines under their headers, no rings on counts. */
-main .panel { border-color: transparent; }
-main .panel-head { min-height: 50px; border-bottom-color: transparent; }
-main .count { border-color: transparent; }
+
+/* ---------- sidebar ---------- */
+.side { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--panel); }
+.side-head { display: flex; align-items: center; gap: 10px; padding: 12px 12px 8px; }
+.side-head .logo { width: 30px; height: 30px; flex: none; border-radius: 8px; font-size: 16px; }
+.side .search { flex: 1; min-width: 0; }
+.side .search > .i { left: 10px; width: 15px; height: 15px; }
+.side .search input { height: 32px; padding: 0 60px 0 32px; border-radius: var(--r-sm); font-size: 13px; background: var(--bg); }
+.side .search .clear { right: 50px; width: 24px; height: 24px; }
+.side .search kbd { right: 8px; font-size: 10.5px; padding: 0 4px; }
+.side-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.side-sec { min-height: 0; display: flex; flex-direction: column; }
+.projects-sec { flex: 1 1 55%; }
+.agents-sec { flex: 1 1 45%; border-top: 1px solid var(--line); }
+.side-sec-head { flex: none; display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 8px 0 14px; }
+.side-sec-head h2 { margin: 0; font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.side-sec-head .count { border-color: transparent; font-size: 11px; }
+.side-sec-head .icon-btn { width: 26px; height: 26px; margin-left: auto; }
+.side-sec-head .head-btn + .icon-btn, #projectOrder:not([hidden]) + .icon-btn { margin-left: 0; }
+.side-list { flex: 1; min-height: 0; overflow: auto; padding: 0 6px 8px; }
+.side-foot { flex: none; display: flex; gap: 2px; padding: 6px 8px; border-top: 1px solid var(--line); }
+.side-foot .icon-btn.on, #usage.on { color: var(--accent); background: var(--accent-weak); }
+#usage.on { border-color: transparent; }
 
 /* ---------- projects ---------- */
 /* A project is one line (renderer.js); --row-bg is solid so its tools, shown over the right end, hide what is under. */
 .proj {
   --row-bg: var(--panel);
-  position: relative; padding: 4px 8px; border-radius: var(--r-sm); margin-bottom: 1px; cursor: pointer;
+  position: relative; padding: 3px 8px; border-radius: var(--r-sm); margin-bottom: 1px; cursor: pointer;
   background: var(--row-bg);
 }
 .proj:hover { --row-bg: var(--panel-2); }
@@ -63,32 +60,32 @@ main .count { border-color: transparent; }
   opacity: 0; pointer-events: none; transition: opacity var(--dur-fast);
 }
 .proj-tools .icon-btn { width: 26px; height: 26px; }
-.proj:hover .proj-tools, .proj.active .proj-tools, .proj:focus-within .proj-tools { opacity: 1; pointer-events: auto; }
-.proj.all { margin-bottom: 6px; }
+.proj:hover .proj-tools, .proj:focus-within .proj-tools { opacity: 1; pointer-events: auto; }
 .proj[draggable="true"] { cursor: grab; }
 .proj.dragging { opacity: .45; }
 .proj.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
 .proj.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
 .proj.drop-into { --row-bg: color-mix(in srgb, var(--accent) 13%, var(--panel)); box-shadow: inset 0 0 0 1px var(--accent); }
 .proj.member { margin-left: 18px; }
-.proj.member::before {
-  content: ""; position: absolute; left: -7px; top: 0; bottom: 0;
-  border-left: 1px solid var(--line-2);
-}
+.proj.member::before { content: ""; position: absolute; left: -7px; top: 0; bottom: 0; border-left: 1px solid var(--line-2); }
 .proj.grp .proj-row { gap: 6px; }
 .proj.grp .fold { width: 22px; height: 22px; padding: 0; margin-left: -4px; }
 .proj.grp .fold .i { width: 14px; height: 14px; }
+.proj .count { border-color: transparent; background: transparent; padding: 0 2px; color: var(--faint); }
+.proj-tabs { flex: none; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .pin-mark { display: inline-flex; color: var(--muted); }
 .pin-mark .i { width: 13px; height: 13px; }
 .proj-tools .icon-btn.on { color: var(--accent); }
+.proj-live { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 650; color: var(--muted); }
+.proj-live .pulse { margin-left: 3px; }
+.proj-row .git-chip .gb { display: none; }
 .head-btn {
-  padding: 3px 9px; border-radius: 999px; border: 1px solid transparent;
+  padding: 2px 7px; border-radius: 999px; border: 1px solid transparent;
   flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
-  background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap;
+  background: transparent; color: var(--muted); font: inherit; font-size: 11.5px; cursor: pointer; white-space: nowrap;
 }
 .head-btn:hover { background: var(--panel-2); color: var(--text); }
 #newGroup { margin-left: auto; }
-.head-btn + .head-btn { margin-left: 6px; }
 .menu {
   position: fixed; z-index: 50; min-width: 180px; max-width: 280px; padding: 4px; display: flex; flex-direction: column;
   border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--panel); box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
@@ -100,96 +97,32 @@ main .count { border-color: transparent; }
 .menu button span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .menu button .i { width: 14px; height: 14px; flex: none; color: var(--muted); }
 .menu button:hover, .menu button:focus { background: var(--panel-2); outline: none; }
-.proj.all .proj-name { font-weight: 600; }
 .rename {
-  flex: 1; min-width: 0; height: 30px; padding: 0 8px; border-radius: var(--r-sm); outline: none;
+  flex: 1; min-width: 0; height: 26px; padding: 0 8px; border-radius: var(--r-sm); outline: none;
   border: 1px solid var(--accent); background: var(--bg); font-weight: 600;
 }
 
-/* ---------- sessions ---------- */
-/* The chosen project or group, over its sessions. */
-.scope { display: flex; align-items: center; gap: 10px; padding: 4px 14px 10px 18px; }
-.scope > .i { width: 18px; height: 18px; color: var(--muted); }
-.scope .label { font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 1px; }
-.scope .path { font-size: 13.5px; }
-.scope .btn.sm { background: transparent; border-color: transparent; color: var(--muted); }
-.scope .btn.sm:hover { color: var(--text); }
-
-.group {
-  position: sticky; top: -10px; z-index: 1; display: flex; gap: 8px; align-items: baseline;
-  margin: 0 -10px 4px; padding: 10px 16px 7px; background: var(--panel);
-  font-size: 11.5px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
-}
-.group:first-child { margin-top: -10px; }
-.group .n { color: var(--faint); font-weight: 500; letter-spacing: 0; }
-/* A session is a row of one or two lines (renderer.js). --row-bg is its background, solid, so the actions shown over
-   its right end hide what is under them. */
-.sess {
-  --row-bg: var(--panel);
-  position: relative; padding: 6px 10px; border-radius: var(--r-md); background: var(--row-bg);
-  scroll-margin: 44px 0 10px; transition: background var(--dur-fast);
-}
-.sess:hover { --row-bg: var(--panel-2); }
-.sess.active { --row-bg: color-mix(in srgb, var(--accent) 13%, var(--panel)); }
-.sess-main { position: relative; }
-.sess-line { display: flex; align-items: center; gap: 8px; min-height: 26px; }
-.sess-title {
-  flex: 1 1 auto; min-width: 60px; margin: 0; font-size: 14px; font-weight: 600; line-height: 1.35;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.where {
-  flex: 0 3 auto; min-width: 0; max-width: 32%; display: inline-flex; align-items: center; gap: 8px;
-  font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden;
-}
-.where-dir { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.where.unknown { color: var(--warn); }
-.where.unknown .i { width: 14px; height: 14px; }
-.when { flex: none; min-width: 64px; text-align: right; font-size: 12px; color: var(--faint); white-space: nowrap; }
-/* The session in brief, under its title: Claude Code's own recap, or its last answer. */
-.sess-recap {
-  margin: 1px 0 0 22px; font-size: 12.5px; line-height: 1.4; color: var(--muted);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-/* The actions: over the right end of the row while it is pointed at, chosen, or one of them has the focus. */
-.sess-acts {
-  position: absolute; top: 0; right: -4px; height: 26px; display: flex; align-items: center; gap: 6px;
-  padding-left: 36px; background: linear-gradient(90deg, transparent, var(--row-bg) 32px);
-  opacity: 0; pointer-events: none; transition: opacity var(--dur-fast);
-}
-.sess-main:hover .sess-acts, .sess.active .sess-acts, .sess-acts:focus-within { opacity: 1; pointer-events: auto; }
-.sess-acts .btn.sm { height: 28px; }
-/* In a row every button is plain; the recommended one says so in its tooltip. */
-.sess-acts .btn.primary { background: var(--panel-2); border-color: var(--line-2); color: var(--text); }
-.sess-acts .icon-btn { width: 28px; height: 28px; }
-
-/* ---------- live status ---------- */
-.proj-live { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 650; color: var(--muted); }
-.proj-live .pulse { margin-left: 3px; }
-.select.sm { width: auto; height: 30px; padding-left: 10px; font-size: 13px; }
-
-/* A narrower sessions panel (#sessions is a size container, usage.css): the branch goes first, then the folder. */
-@container (max-width: 700px) { .sess-line .usage-chip { display: none; } }
-@container (max-width: 640px) { .where .git-chip { display: none; } }
-@container (max-width: 480px) { .where { display: none; } }
+/* ---------- agents ---------- */
+/* The sessions running now, under Need you / Working / Waiting for you (renderer.js). */
+.agroup { padding: 8px 8px 3px; font-size: 11px; font-weight: 600; color: var(--muted); }
+.agroup:first-child { padding-top: 0; }
+.agent { position: relative; display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 3px 8px; border-radius: var(--r-sm); cursor: pointer; }
+.agent:hover { background: var(--panel-2); }
+.agent.here { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
+.agent-main { flex: 1; min-width: 0; }
+.agent-title { font-size: 13px; font-weight: 550; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.agent-sub { font-size: 11.5px; color: var(--faint); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.agents-sec .subs { margin: 0 6px 4px 30px; }
+.agents-sec .sub-row { min-height: 20px; font-size: 11.5px; }
+.agents-sec .sub-row .when { display: none; }
+.side-empty { padding: 6px 14px; font-size: 12px; color: var(--faint); }
 
 /* ---------- footer ---------- */
 .status {
-  display: flex; align-items: center; gap: 16px; padding: 8px 20px; font-size: 12px; color: var(--muted);
+  display: flex; align-items: center; gap: 16px; padding: 5px 14px; font-size: 12px; color: var(--muted);
   border-top: 1px solid var(--line); background: var(--panel);
 }
-.keys { margin-left: auto; display: flex; align-items: center; gap: 5px; white-space: nowrap; }
-.keys span { margin-right: 10px; }
-
-/* Narrower windows: the search keeps room for its whole placeholder - first the tagline goes, then the secondary
-   header buttons keep only their icon (and tooltip). */
-@media (max-width: 1400px) { .brand p { display: none; } }
-@media (max-width: 1180px) {
-  .keys { display: none; }
-  /* The narrower project list: a project's branch is in its tooltip, its name keeps the room. */
-  .proj-row .git-chip .gb { display: none; }
-}
-@media (max-width: 1020px) {
-  .brand h1 { display: none; }
-  .top-actions .label { display: none; }
-}
-#sessions .skel { height: 44px; margin-bottom: 4px; }
+.keys { margin-left: auto; display: flex; align-items: center; gap: 3px; white-space: nowrap; }
+.keys kbd { font-size: 10.5px; padding: 0 5px; }
+.keys span { margin: 0 10px 0 4px; }
+@media (max-width: 1100px) { .keys { display: none; } }

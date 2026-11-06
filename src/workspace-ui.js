@@ -1,0 +1,399 @@
+// The centre of the manager window: the shown project's tabs, and the shown tab split into panes, each a terminal
+// (xterm.js) of AgentDeck's own. The layout lives in main (workspace.js); this page draws it and sends commands back.
+// Loaded before renderer.js, which provides the session data (data, live) and calls showSessionTab, findSessionTab,
+// isMoveHereOffered, moveSessionHere, renderWorkspace and runWorkspace.
+const ANSI_NAMES = [
+  "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
+  "brightBlack", "brightRed", "brightGreen", "brightYellow", "brightBlue", "brightMagenta", "brightCyan", "brightWhite"
+];
+const HEADERS_REFRESH_MS = 3000;
+let ws = { activeSpace: "", spaces: {}, tabs: {}, terminals: [] };
+const termViews = new Map(); // terminal id -> { host, term, fit, attachedEnd, queue }
+let layoutSig = "";          // what the panes were last built from
+let focusAfterRender = false;
+
+const runWorkspace = (cmd, args = {}) => window.terminals.command(cmd, args).catch(e => toast(e.message, true));
+const getTerminal = id => ws.terminals.find(x => x.id === id) || null;
+const getShownSpace = () => ws.spaces[ws.activeSpace] || { tabs: [], active: "" };
+const getShownTab = () => ws.tabs[getShownSpace().active] || null;
+function getPanesOf(node, out = []) {
+  if (!node) return out;
+  if (node.term) out.push(node.term);
+  else { getPanesOf(node.a, out); getPanesOf(node.b, out); }
+  return out;
+}
+
+// ---------- looks ----------
+// theme.css --term-* tokens: --term-ansi-black ... --term-ansi-bright-white for the 16 colours.
+function getTermTheme() {
+  const styles = getComputedStyle(document.documentElement);
+  const v = name => styles.getPropertyValue(name).trim();
+  const theme = { background: v("--term-bg"), foreground: v("--term-fg"), cursor: v("--term-cursor"), selectionBackground: v("--term-selection") };
+  for (const name of ANSI_NAMES) theme[name] = v(`--term-ansi-${name.replace(/[A-Z]/g, c => `-${c.toLowerCase()}`)}`);
+  return theme;
+}
+function applyTermTheme() {
+  const theme = getTermTheme();
+  termViews.forEach(view => { view.term.options.theme = theme; });
+}
+
+// ---------- terminals ----------
+// Output that arrived before the scrollback did: only what the scrollback does not hold yet is written.
+function writeAfter(view, data, end) {
+  const start = end - data.length;
+  if (end > view.attachedEnd) view.term.write(data.slice(Math.max(0, view.attachedEnd - start)));
+}
+async function attachView(id, view) {
+  const a = await window.terminals.attach(id);
+  if (!a) return;
+  view.term.write(a.scrollback);
+  view.attachedEnd = a.end;
+  view.queue.forEach(chunk => writeAfter(view, chunk.data, chunk.end));
+  view.queue = [];
+}
+function createTermView(id) {
+  const host = document.createElement("div");
+  host.className = "term-host";
+  const term = new Terminal({ fontFamily: '"Cascadia Mono", Consolas, monospace', fontSize: 13, cursorBlink: true, scrollback: 10000, theme: getTermTheme() });
+  const fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(host);
+  term.attachCustomKeyEventHandler(e => handleTermKey(term, e));
+  term.onData(d => window.terminals.input(id, d));
+  // Clicking into a terminal makes its pane the focused one.
+  term.textarea?.addEventListener("focus", () => { if (getShownTab()?.focus !== id) runWorkspace("focus", { term: id }); });
+  const view = { host, term, fit, attachedEnd: null, queue: [] };
+  termViews.set(id, view);
+  attachView(id, view).catch(e => toast(e.message, true));
+  return view;
+}
+function disposeTermView(id) {
+  const view = termViews.get(id);
+  view.term.dispose();
+  view.host.remove();
+  termViews.delete(id);
+}
+function fitTerm(id) {
+  const view = termViews.get(id);
+  if (!view || !view.host.isConnected || !view.host.offsetWidth) return;
+  try {
+    view.fit.fit();
+    window.terminals.resize(id, view.term.cols, view.term.rows);
+  } catch {}
+}
+const fitShown = () => document.querySelectorAll("#panes .pane[data-term]").forEach(el => fitTerm(el.dataset.term));
+
+// ---------- keys ----------
+// The window's own keys, as in Windows Terminal; everything else goes to the program. Ctrl+C copies a selection.
+function getWorkspaceKey(e) {
+  const plus = e.code === "Equal" || e.code === "NumpadAdd", minus = e.code === "Minus" || e.code === "NumpadSubtract";
+  if (e.altKey && e.shiftKey && !e.ctrlKey && plus) return ["split", { dir: "right" }];
+  if (e.altKey && e.shiftKey && !e.ctrlKey && minus) return ["split", { dir: "down" }];
+  if (e.altKey && !e.shiftKey && !e.ctrlKey) {
+    const direction = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" }[e.key];
+    if (direction) return ["focus-dir", { direction }];
+  }
+  if (e.ctrlKey && e.shiftKey && !e.altKey) {
+    if (e.code === "KeyW") return ["close-pane", {}];
+    if (e.code === "KeyT") return ["new-tab", {}];
+    if (e.code === "KeyZ") return ["zoom", {}];
+  }
+  if (e.ctrlKey && !e.altKey && e.key === "Tab") return ["next-tab", { back: e.shiftKey }];
+  return null;
+}
+function runWorkspaceKey([cmd, args]) {
+  const tab = getShownTab();
+  focusAfterRender = true;
+  if (cmd === "split") return tab ? runWorkspace("split", args) : null;
+  if (cmd === "focus-dir") return runWorkspace("focus-dir", args);
+  if (cmd === "close-pane") return tab ? closePane(tab.focus) : null;
+  if (cmd === "zoom") return tab ? runWorkspace("zoom", { tab: tab.id }) : null;
+  if (cmd === "new-tab") return openInSpace("terminal");
+  if (cmd === "next-tab") {
+    const list = getShownSpace().tabs;
+    if (list.length < 2) return null;
+    const i = list.indexOf(getShownSpace().active);
+    return runWorkspace("tab", { tab: list[(i + (args.back ? -1 : 1) + list.length) % list.length] });
+  }
+}
+function handleTermKey(term, e) {
+  if (e.type !== "keydown") return true;
+  const key = getWorkspaceKey(e);
+  if (key) {
+    e.preventDefault();
+    runWorkspaceKey(key);
+    return false;
+  }
+  if (!e.ctrlKey) return true;
+  if (e.key === "c" && term.hasSelection()) {
+    window.manager.copyText(term.getSelection());
+    term.clearSelection();
+    return false;
+  }
+  // The browser pastes; xterm picks the text up from the paste event.
+  return e.key !== "v";
+}
+// The same keys when the keyboard is elsewhere in the window (not typing in a field).
+document.addEventListener("keydown", e => {
+  if (e.target.closest?.(".term-host") || e.target.matches?.("input, textarea, select")) return;
+  const key = getWorkspaceKey(e);
+  if (!key) return;
+  e.preventDefault();
+  runWorkspaceKey(key);
+});
+
+// ---------- actions ----------
+// A terminal running an agent asks first; a plain shell closes at once.
+function closePane(term) {
+  const x = getTerminal(term);
+  if (x?.agent && !confirm(t("ws.closeConfirm"))) return;
+  runWorkspace("close-pane", { term });
+}
+function closeTab(tabId) {
+  const terms = getPanesOf(ws.tabs[tabId]?.root);
+  if (terms.some(id => getTerminal(id)?.agent) && !confirm(t("ws.closeTabConfirm", { n: terms.length }))) return;
+  runWorkspace("close-tab", { tab: tabId });
+}
+// what: "terminal" or an agent's name; a new tab in the shown space's folder.
+async function openInSpace(what, place = "tab") {
+  const folder = getSpaceFolder(ws.activeSpace);
+  if (!folder) return;
+  try {
+    if (what === "terminal") await window.manager.launchFolder(folder, place);
+    else await window.manager.launchNew(what, folder, place);
+  } catch (e) { toast(e.message, true); }
+}
+
+// ---------- sessions <-> terminals (main links a new session's terminal: tab-links.js) ----------
+function findSessionTab(s) {
+  return ws.terminals.find(x => x.agent === s.agent && x.sessionId === s.id && !x.exited) || null;
+}
+// Brings up the session's pane when it has one; false otherwise.
+function showSessionTab(s) {
+  const x = s && findSessionTab(s);
+  if (!x) return false;
+  focusAfterRender = true;
+  runWorkspace("focus", { term: x.id });
+  return true;
+}
+function isMoveHereOffered(s) {
+  return s.agent === "Claude" && !findSessionTab(s);
+}
+async function moveSessionHere(s) {
+  toast(t("term.moving"));
+  try { await window.terminals.move(s.agent, s.id); }
+  catch (e) { toast(e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ""), true); }
+}
+// The session a terminal runs, from the scan (renderer.js data), if it is linked to one.
+function getTermSession(x) {
+  return x?.sessionId ? data.sessions.find(s => s.agent === x.agent && s.id === x.sessionId) || null : null;
+}
+const getTermTitle = x => getTermSession(x)?.title || x?.title || "";
+function getTermLive(x) {
+  return x?.sessionId ? live.get(`${x.agent}:${x.sessionId}`) || null : null;
+}
+// A tab's state: the most urgent of its panes' (needs you, working, waiting).
+function getTabLive(tab) {
+  const states = getPanesOf(tab.root).map(id => getTermLive(getTerminal(id))).filter(Boolean);
+  return states.sort((a, b) => getLiveRank(a) - getLiveRank(b))[0] || null;
+}
+
+// ---------- drawing ----------
+function renderTabbar() {
+  const space = getShownSpace();
+  const tabs = space.tabs.map(id => ws.tabs[id]).filter(Boolean);
+  $("tabbar").innerHTML = tabs.map((tab, i) => {
+    const l = getTabLive(tab);
+    const label = tab.name || getTermTitle(getTerminal(tab.focus)) || String(i + 1);
+    return `<div class="wtab ${tab.id === space.active ? "active" : ""}" data-tab="${esc(tab.id)}" role="tab" draggable="true" title="${esc(label)}">
+      ${l ? statusMark(l, false) : ""}<span class="wtab-name">${esc(label)}</span>
+      <button class="wtab-close" data-ws="close-tab" title="${esc(t("ws.closeTab"))}">${icon("x")}</button></div>`;
+  }).join("") + `<button class="icon-btn wtab-new" data-ws="new-menu" title="${esc(t("ws.new"))}" aria-haspopup="menu">${icon("plus")}</button>`;
+}
+// The panes of the shown tab (or its zoomed pane), built anew only when the layout changed; the terminals' own
+// elements move into them, so nothing they show is lost.
+function renderPanes() {
+  const tab = getShownTab();
+  const root = tab ? (tab.zoom ? { term: tab.zoom } : tab.root) : null;
+  const sig = JSON.stringify([ws.activeSpace, tab?.id, root]);
+  $("panes").hidden = !tab;
+  $("spaceEmpty").hidden = Boolean(tab);
+  if (!tab) {
+    layoutSig = sig;
+    renderSpaceEmpty($("spaceEmpty"), ws.activeSpace);
+    return;
+  }
+  if (sig !== layoutSig) {
+    layoutSig = sig;
+    const box = $("panes");
+    box.replaceChildren(buildNode(root, ""));
+    requestAnimationFrame(fitShown);
+  }
+  renderPaneHeads(tab);
+  document.querySelectorAll("#panes .pane").forEach(el => el.classList.toggle("focused", el.dataset.term === tab.focus));
+  if (focusAfterRender) {
+    focusAfterRender = false;
+    termViews.get(tab.focus)?.term.focus();
+  }
+}
+function buildNode(node, path) {
+  if (node.term) {
+    const el = document.createElement("div");
+    el.className = "pane";
+    el.dataset.term = node.term;
+    el.innerHTML = '<div class="pane-head"></div><div class="pane-body"></div>';
+    const view = termViews.get(node.term) || createTermView(node.term);
+    el.lastChild.appendChild(view.host);
+    return el;
+  }
+  const el = document.createElement("div");
+  el.className = `split ${node.dir}`;
+  const ratio = Math.min(0.9, Math.max(0.1, Number(node.ratio) || 0.5));
+  const a = buildNode(node.a, path + "a"), b = buildNode(node.b, path + "b");
+  a.style.flex = `${ratio} 1 0`;
+  b.style.flex = `${1 - ratio} 1 0`;
+  const divider = document.createElement("div");
+  divider.className = "divider";
+  divider.dataset.path = path;
+  el.append(a, divider, b);
+  return el;
+}
+// Each pane's header: the agent, what runs, its context, its state, and the pane's buttons.
+function renderPaneHeads(tab) {
+  const many = getPanesOf(tab.root).length > 1;
+  document.querySelectorAll("#panes .pane").forEach(el => {
+    const x = getTerminal(el.dataset.term);
+    const s = getTermSession(x), l = getTermLive(x);
+    const html = `${x?.agent ? agentMark(x.agent) : `<span class="agent-mark">${icon("terminal")}</span>`}
+      <span class="pane-title" title="${esc(x?.cwd || "")}">${esc(getTermTitle(x))}</span>
+      ${x?.note ? `<span class="pane-note">${esc(x.note)}</span>` : ""}
+      ${s ? getContextChip(s) : ""}${l ? statusMark(l, isLoading(sessionKey(l), l)) : ""}
+      <span class="pane-tools">
+        <button class="icon-btn" data-ws="split-right" title="${esc(t("ws.splitRight"))}">${icon("splitRight")}</button>
+        <button class="icon-btn" data-ws="split-down" title="${esc(t("ws.splitDown"))}">${icon("splitDown")}</button>
+        ${many ? `<button class="icon-btn ${tab.zoom ? "on" : ""}" data-ws="zoom" title="${esc(t(tab.zoom ? "ws.unzoom" : "ws.zoom"))}">${icon("maximize")}</button>` : ""}
+        <button class="icon-btn" data-ws="close-pane" title="${esc(t("ws.closePane"))}">${icon("x")}</button>
+      </span>`;
+    const head = el.querySelector(".pane-head");
+    if (head.dataset.html !== html) { head.dataset.html = html; head.innerHTML = html; }
+  });
+}
+function renderWorkspace() {
+  // Terminals that went: their views go too.
+  const ids = new Set(ws.terminals.map(x => x.id));
+  [...termViews.keys()].filter(id => !ids.has(id)).forEach(disposeTermView);
+  renderTabbar();
+  renderPanes();
+}
+
+// ---------- events ----------
+window.terminals.onData(({ id, data, end }) => {
+  const view = termViews.get(id) || createTermView(id);
+  if (view.attachedEnd === null) view.queue.push({ data, end });
+  else writeAfter(view, data, end);
+});
+window.terminals.onWorkspace(next => {
+  const before = getShownTab()?.focus;
+  ws = next;
+  // Something new came up (a launch, a split, "show terminal"): the keyboard goes to it.
+  if (getShownTab()?.focus !== before) focusAfterRender = true;
+  renderWorkspace();
+  if (typeof onWorkspaceChanged === "function") onWorkspaceChanged();
+});
+window.prefs.onChanged(() => requestAnimationFrame(applyTermTheme));
+new ResizeObserver(() => fitShown()).observe($("panes"));
+
+$("tabbar").addEventListener("click", e => {
+  const tabEl = e.target.closest("[data-tab]");
+  const btn = e.target.closest("[data-ws]");
+  if (btn?.dataset.ws === "close-tab") { e.stopPropagation(); return closeTab(tabEl.dataset.tab); }
+  if (btn?.dataset.ws === "new-menu") return openNewMenu(btn);
+  if (tabEl) { focusAfterRender = true; runWorkspace("tab", { tab: tabEl.dataset.tab }); }
+});
+$("tabbar").addEventListener("auxclick", e => {
+  const tabEl = e.target.closest("[data-tab]");
+  if (tabEl && e.button === 1) closeTab(tabEl.dataset.tab);
+});
+$("tabbar").addEventListener("dblclick", e => {
+  const tabEl = e.target.closest("[data-tab]");
+  if (!tabEl || e.target.closest("button")) return;
+  const name = prompt(t("ws.renamePrompt"), ws.tabs[tabEl.dataset.tab]?.name || "");
+  if (name !== null) runWorkspace("rename-tab", { tab: tabEl.dataset.tab, name });
+});
+$("panes").addEventListener("click", e => {
+  const btn = e.target.closest("[data-ws]");
+  const pane = e.target.closest(".pane");
+  if (!pane) return;
+  const term = pane.dataset.term, tab = getShownTab();
+  if (!btn) { if (tab?.focus !== term) runWorkspace("focus", { term }); return; }
+  focusAfterRender = true;
+  const run = () => {
+    if (btn.dataset.ws === "split-right") return runWorkspace("split", { dir: "right" });
+    if (btn.dataset.ws === "split-down") return runWorkspace("split", { dir: "down" });
+    if (btn.dataset.ws === "zoom") return runWorkspace("zoom", { tab: tab.id });
+    if (btn.dataset.ws === "close-pane") return closePane(term);
+  };
+  // A pane's buttons act on that pane: it is focused first.
+  if (tab?.focus !== term) runWorkspace("focus", { term }).then(run); else run();
+});
+// Dragging a divider: the panes follow the pointer, main hears the new share once it is let go.
+$("panes").addEventListener("pointerdown", e => {
+  const divider = e.target.closest(".divider");
+  if (!divider) return;
+  e.preventDefault();
+  const split = divider.parentElement, [a, , b] = split.children;
+  const across = split.classList.contains("right");
+  const rect = split.getBoundingClientRect();
+  let ratio = 0.5;
+  divider.setPointerCapture(e.pointerId);
+  split.classList.add("dragging");
+  const move = ev => {
+    ratio = Math.min(0.9, Math.max(0.1, across ? (ev.clientX - rect.left) / rect.width : (ev.clientY - rect.top) / rect.height));
+    a.style.flex = `${ratio} 1 0`;
+    b.style.flex = `${1 - ratio} 1 0`;
+  };
+  divider.addEventListener("pointermove", move);
+  divider.addEventListener("lostpointercapture", () => {
+    divider.removeEventListener("pointermove", move);
+    split.classList.remove("dragging");
+    fitShown();
+    runWorkspace("ratio", { tab: getShownTab()?.id, path: divider.dataset.path, ratio });
+  }, { once: true });
+});
+
+// ---------- tabs: drag to reorder ----------
+let draggedTab = "";
+const getTabDropSide = (el, e) => (e.clientX > el.getBoundingClientRect().left + el.offsetWidth / 2 ? "after" : "before");
+function clearTabDropMarks() {
+  document.querySelectorAll(".wtab.drop-before, .wtab.drop-after, .wtab.dragging").forEach(el => el.classList.remove("drop-before", "drop-after", "dragging"));
+}
+$("tabbar").addEventListener("dragstart", e => {
+  const el = e.target.closest?.(".wtab");
+  if (!el) return;
+  draggedTab = el.dataset.tab;
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData("text/plain", draggedTab);
+  el.classList.add("dragging");
+});
+$("tabbar").addEventListener("dragover", e => {
+  const el = e.target.closest?.(".wtab");
+  if (!el || !draggedTab || el.dataset.tab === draggedTab) return;
+  e.preventDefault();
+  document.querySelectorAll(".wtab.drop-before, .wtab.drop-after").forEach(x => x.classList.remove("drop-before", "drop-after"));
+  el.classList.add("drop-" + getTabDropSide(el, e));
+});
+$("tabbar").addEventListener("drop", e => {
+  const el = e.target.closest?.(".wtab");
+  if (!el || !draggedTab) return;
+  e.preventDefault();
+  const ids = getShownSpace().tabs.filter(id => id !== draggedTab);
+  ids.splice(ids.indexOf(el.dataset.tab) + (getTabDropSide(el, e) === "after" ? 1 : 0), 0, draggedTab);
+  draggedTab = "";
+  clearTabDropMarks();
+  runWorkspace("reorder-tabs", { space: ws.activeSpace, ids });
+});
+$("tabbar").addEventListener("dragend", () => { draggedTab = ""; clearTabDropMarks(); });
+
+// The headers and tab states follow the live registry and the scan.
+setInterval(() => { renderTabbar(); const tab = getShownTab(); if (tab) renderPaneHeads(tab); }, HEADERS_REFRESH_MS);
+window.terminals.getWorkspace().then(next => { ws = next; renderWorkspace(); if (typeof onWorkspaceChanged === "function") onWorkspaceChanged(); }).catch(() => {});

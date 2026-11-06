@@ -15,45 +15,49 @@
 <script src="i18n.js"></script>
 </head>
 <body>
-<header class="top">
-  <div class="brand">
-    <div class="logo">⌘</div>
-    <div><h1 data-i18n="app.name"></h1><p data-i18n="app.tagline"></p></div>
-  </div>
-  <div class="search">
-    <span data-icon="search"></span>
-    <input id="search" type="search" data-i18n-placeholder="manager.search.placeholder" data-i18n-aria-label="common.search" autocomplete="off" spellcheck="false">
-    <button id="clearSearch" class="icon-btn clear" data-i18n-title="manager.search.clear" hidden><span data-icon="x"></span></button>
-    <kbd>Ctrl K</kbd>
-  </div>
-  <div class="top-actions">
-    <button id="usage" class="btn" data-i18n-title="usage.button.title" aria-pressed="false"><span data-icon="chart"></span><span class="label" data-i18n="usage.button.label"></span></button>
-    <button id="voiceHistory" class="btn" data-i18n-title="manager.history.title"><span data-icon="clock"></span><span class="label" data-i18n="manager.history.label"></span></button>
-    <button id="settings" class="btn" data-i18n-title="manager.settings.title"><span data-icon="sliders"></span><span class="label" data-i18n="manager.settings.label"></span></button>
-    <!-- Refresh is hidden: main.js scans by itself (FULL_SCAN_MS); F5 still scans. To bring the button back, uncomment it in index.html, styles.css and renderer.js.
-    <button id="refresh" class="btn" data-i18n-title="manager.refresh.title" data-i18n-aria-label="manager.refresh.label"><span data-icon="refresh"></span></button>
-    -->
-    <button id="add" class="btn primary"><span data-icon="plus"></span><span class="label" data-i18n="manager.addProject"></span></button>
-  </div>
-</header>
 <main>
-  <aside class="panel">
-    <div class="panel-head"><h2 data-i18n="manager.projects"></h2><span class="count" id="projectCount">0</span><button class="head-btn" id="newGroup" hidden data-i18n="manager.projectGroup.add" data-i18n-title="manager.projectGroup.addTitle"></button><button class="head-btn" id="projectOrder" hidden></button></div>
-    <div class="panel-body" id="projects"></div>
+  <!-- The sidebar, as in Herdr: the projects (each a space with its own tabs) and the agents running now. -->
+  <aside class="side">
+    <div class="side-head">
+      <div class="logo">⌘</div>
+      <div class="search">
+        <span data-icon="search"></span>
+        <input id="search" type="search" data-i18n-placeholder="manager.search.placeholder" data-i18n-aria-label="common.search" autocomplete="off" spellcheck="false">
+        <button id="clearSearch" class="icon-btn clear" data-i18n-title="manager.search.clear" hidden><span data-icon="x"></span></button>
+        <kbd>Ctrl K</kbd>
+      </div>
+    </div>
+    <div class="side-body">
+      <section class="side-sec projects-sec">
+        <div class="side-sec-head"><h2 data-i18n="manager.projects"></h2><span class="count" id="projectCount">0</span>
+          <button class="head-btn" id="newGroup" hidden data-i18n="manager.projectGroup.add" data-i18n-title="manager.projectGroup.addTitle"></button>
+          <button class="head-btn" id="projectOrder" hidden></button>
+          <button class="icon-btn" id="add" data-i18n-title="manager.addProject"><span data-icon="plus"></span></button></div>
+        <div class="side-list" id="projects"></div>
+      </section>
+      <section class="side-sec agents-sec">
+        <div class="side-sec-head"><h2 data-i18n="manager.agents.title"></h2><span class="count" id="agentCount">0</span></div>
+        <div class="side-list" id="agents"></div>
+      </section>
+    </div>
+    <div class="side-foot">
+      <button id="usage" class="icon-btn" data-i18n-title="usage.button.title" aria-pressed="false"><span data-icon="chart"></span></button>
+      <button id="voiceHistory" class="icon-btn" data-i18n-title="manager.history.title"><span data-icon="clock"></span></button>
+      <button id="settings" class="icon-btn" data-i18n-title="manager.settings.title"><span data-icon="sliders"></span></button>
+    </div>
   </aside>
   <div class="splitter" id="splitter" role="separator" aria-orientation="vertical" tabindex="0" data-i18n-title="manager.splitter"></div>
-  <section class="panel" id="sessionsPanel">
-    <div class="term-tabs" id="termTabs" role="tablist" hidden></div>
-    <div class="panel-head"><h2 data-i18n="manager.sessions"></h2><span class="count" id="sessionCount">0</span><div class="grow"></div><select id="agentFilter" class="select sm" data-i18n-aria-label="manager.agents.filter"></select></div>
-    <div id="scope"></div>
-    <div class="panel-body" id="sessions"></div>
-    <div class="term-panes" id="termPanes" hidden></div>
+  <!-- The shown project's tabs, and the shown tab split into panes (workspace-ui.js). -->
+  <section class="work">
+    <div class="tabbar" id="tabbar" role="tablist"></div>
+    <div class="panes" id="panes" hidden></div>
+    <div class="space-empty" id="spaceEmpty"></div>
   </section>
 </main>
 <section id="usageView" class="usage-view" tabindex="-1" data-i18n-aria-label="usage.title" hidden></section>
 <footer class="status">
   <span id="status" data-i18n="manager.status.ready"></span>
-  <span class="keys"><kbd>Ctrl K</kbd><span data-i18n="manager.keys.search"></span><kbd>↑</kbd><kbd>↓</kbd><span data-i18n="manager.keys.select"></span><kbd>Enter</kbd><span data-i18n="manager.keys.resume"></span><kbd>Esc</kbd><span data-i18n="manager.keys.clear"></span></span>
+  <span class="keys"><kbd>Alt</kbd><kbd>Shift</kbd><kbd>+</kbd><span data-i18n="ws.keys.split"></span><kbd>Alt</kbd><kbd>←↑→↓</kbd><span data-i18n="ws.keys.move"></span><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>T</kbd><span data-i18n="ws.keys.tab"></span><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>W</kbd><span data-i18n="ws.keys.close"></span></span>
 </footer>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <script src="common.js"></script>
@@ -62,7 +66,7 @@
 <script src="preview-ui.js"></script>
 <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
 <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
-<script src="terminals-ui.js"></script>
+<script src="workspace-ui.js"></script>
 <script src="renderer.js"></script>
 <script src="usage-view.js"></script>
 </body>

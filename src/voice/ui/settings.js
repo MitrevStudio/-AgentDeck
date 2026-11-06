@@ -88,7 +88,7 @@ function renderGeneral() {
   $("uiTheme").innerHTML = segHtml(THEMES.map(th => [th, t(`theme.${th}`)]), general.theme);
   $("edgeHandle").checked = general.edgeHandle;
   $("autoUpdate").checked = general.autoUpdate;
-  $("sessionsIn").innerHTML = segHtml(SESSIONS_IN.map(m => [m, t(`tray.sessionsIn.${m}`)]), general.sessionsIn || "windows");
+  $("sessionsIn").innerHTML = segHtml(SESSIONS_IN.map(m => [m, t(`tray.sessionsIn.${m}`)]), general.sessionsIn || "tabs");
   $("newWindow").checked = general.newWindow !== false;
   $("newWindow").disabled = general.sessionsIn === "tabs";
   $("dayView").checked = general.dayView === true;
