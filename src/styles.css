@@ -92,7 +92,9 @@ main {
   background: transparent; color: var(--text); font: inherit; font-size: 13px; cursor: pointer;
 }
 .menu button span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.menu button .i { width: 14px; height: 14px; flex: none; color: var(--muted); }
+.menu button .i { width: 14px; height: 14px; flex: none; }
+/* An agent's glyph keeps its own colour (theme.css). */
+.menu button .i:not([class*="glyph-"]) { color: var(--muted); }
 .menu button:hover, .menu button:focus { background: var(--panel-2); outline: none; }
 .rename {
   flex: 1; min-width: 0; height: 26px; padding: 0 8px; border-radius: var(--r-sm); outline: none;
@@ -152,3 +154,11 @@ main {
 .pal-foot { flex: none; display: flex; align-items: center; gap: 3px; padding: 7px 14px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--faint); }
 .pal-foot kbd { font-size: 10.5px; padding: 0 5px; }
 .pal-foot span { margin: 0 10px 0 4px; }
+
+/* ---------- keyboard shortcuts (keys-ui.js): the search's popup, as a list ---------- */
+.keys-pal { width: min(560px, calc(100vw - 48px)); height: auto; max-height: 80vh; }
+.keys-pal .pal-head b { flex: 1; font-size: 14.5px; font-weight: 600; }
+.keys-list { overflow: auto; padding: 4px 18px 14px; }
+.keys-list h3 { margin: 12px 0 4px; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.keys-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 4px 0; font-size: 13px; }
+.keys-keys { display: inline-flex; align-items: center; gap: 3px; flex: none; white-space: nowrap; color: var(--faint); font-size: 12px; }

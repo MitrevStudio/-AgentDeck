@@ -26,6 +26,7 @@
         <button id="usage" class="icon-btn" data-i18n-title="usage.button.title" aria-pressed="false"><span data-icon="chart"></span></button>
         <button id="voiceHistory" class="icon-btn" data-i18n-title="manager.history.title"><span data-icon="clock"></span></button>
         <button id="settings" class="icon-btn" data-i18n-title="manager.settings.title"><span data-icon="sliders"></span></button>
+        <button id="keysBtn" class="icon-btn" data-i18n-title="keys.open"><span data-icon="keyboard"></span></button>
       </span>
     </div>
     <div class="side-body">
@@ -61,6 +62,13 @@
     <div class="pal-foot"><kbd>↑</kbd><kbd>↓</kbd><span data-i18n="manager.keys.select"></span><kbd>Enter</kbd><span data-i18n="palette.keys.open"></span><kbd>Alt</kbd><kbd>Enter</kbd><span data-i18n="palette.keys.beside"></span></div>
   </div>
 </div>
+<!-- The window's keyboard shortcuts (F1, keys-ui.js). -->
+<div class="pal-back" id="keysPanel" hidden>
+  <div class="pal keys-pal" role="dialog" data-i18n-aria-label="keys.title">
+    <div class="pal-head"><span data-icon="keyboard"></span><b data-i18n="keys.title"></b><kbd>Esc</kbd></div>
+    <div class="keys-list" id="keysList"></div>
+  </div>
+</div>
 <footer class="status">
   <span id="focusInfo" class="focus-info"></span>
   <span id="status" data-i18n="manager.status.ready"></span>
@@ -78,5 +86,6 @@
 <script src="palette-ui.js"></script>
 <script src="limits-ui.js"></script>
 <script src="usage-view.js"></script>
+<script src="keys-ui.js"></script>
 </body>
 </html>

@@ -101,9 +101,16 @@ function fitTerm(id) {
 const fitShown = () => document.querySelectorAll("#panes .pane[data-term]").forEach(el => fitTerm(el.dataset.term));
 
 // ---------- keys ----------
+// Ctrl+Shift+1/2/3: a new session of that agent in the shown project (Alt as well: beside the focused pane). By
+// e.code, so the keys stay where they are on any keyboard layout (a Bulgarian one too).
+const NEW_AGENT_KEYS = { Digit1: "Claude", Digit2: "Codex", Digit3: "OpenCode" };
 // The window's own keys, as in Windows Terminal; everything else goes to the program. Ctrl+C copies a selection.
+// Only chords no program in a terminal needs: Ctrl+Shift or Alt+Shift ones, Ctrl+, and F1 - never a plain Ctrl+letter.
 function getWorkspaceKey(e) {
   const plus = e.code === "Equal" || e.code === "NumpadAdd", minus = e.code === "Minus" || e.code === "NumpadSubtract";
+  if (e.ctrlKey && e.shiftKey && NEW_AGENT_KEYS[e.code]) return ["new-agent", { agent: NEW_AGENT_KEYS[e.code], place: e.altKey ? "right" : "tab" }];
+  if (e.key === "F1" && !e.ctrlKey && !e.altKey && !e.shiftKey) return ["keys", {}];
+  if (e.ctrlKey && !e.altKey && !e.shiftKey && e.code === "Comma") return ["window", { button: "settings" }];
   if (e.altKey && e.shiftKey && !e.ctrlKey && plus) return ["split", { dir: "right" }];
   if (e.altKey && e.shiftKey && !e.ctrlKey && minus) return ["split", { dir: "down" }];
   if (e.altKey && !e.shiftKey && !e.ctrlKey) {
@@ -114,6 +121,9 @@ function getWorkspaceKey(e) {
     if (e.code === "KeyW") return ["close-pane", {}];
     if (e.code === "KeyT") return ["new-tab", {}];
     if (e.code === "KeyZ") return ["zoom", {}];
+    if (e.code === "KeyR") return ["resume-latest", {}];
+    if (e.code === "KeyH") return ["window", { button: "voiceHistory" }];
+    if (e.code === "KeyU") return ["window", { button: "usage" }];
   }
   if (e.ctrlKey && !e.altKey && e.key === "Tab") return ["next-tab", { back: e.shiftKey }];
   if (e.ctrlKey && !e.altKey && !e.shiftKey) {
@@ -125,6 +135,9 @@ function getWorkspaceKey(e) {
 }
 function runWorkspaceKey([cmd, args]) {
   if (cmd === "font") return stepTermFont(args.step);
+  if (cmd === "keys") return window.shortcutsHelp.toggle();
+  // Settings, History and Usage: as their sidebar buttons do (Usage opens and closes).
+  if (cmd === "window") return $(args.button).click();
   const tab = getShownTab();
   focusAfterRender = true;
   if (cmd === "split") return tab ? runWorkspace("split", args) : null;
@@ -132,6 +145,8 @@ function runWorkspaceKey([cmd, args]) {
   if (cmd === "close-pane") return tab ? closePane(tab.focus) : null;
   if (cmd === "zoom") return tab ? runWorkspace("zoom", { tab: tab.id }) : null;
   if (cmd === "new-tab") return openInSpace("terminal");
+  if (cmd === "new-agent") return getInstalledAgents().includes(args.agent) ? openInSpace(args.agent, args.place) : null;
+  if (cmd === "resume-latest") return resumeLatest();
   if (cmd === "next-tab") {
     const list = getShownSpace().tabs;
     if (list.length < 2) return null;
