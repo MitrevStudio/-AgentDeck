@@ -86,6 +86,25 @@ function priceOf(model) {
   return PRICES[ALIASES[key] || key] || null;
 }
 
+// Context windows (input tokens) of the Claude models, as Anthropic's model overview lists them on AS_OF. Claude Code's
+// transcripts do not record the window a session ran with, so a session's fill is worked out from here; Codex writes
+// its own (model_context_window) and needs no table. Older Claude models have 200K, or 1M as an opt-in variant
+// ("[1m]"), which usage-scan.js infers once a session's context grows past 200K.
+const MILLION = 1_000_000, CLAUDE_DEFAULT_WINDOW = 200_000;
+const MILLION_WINDOW = new Set([
+  "claude-fable-5-1", "claude-mythos-5-1", "claude-fable-5", "claude-mythos-5",
+  "claude-opus-5-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6",
+  "claude-sonnet-5-5", "claude-sonnet-5", "claude-sonnet-4-6", "claude-haiku-5-5"
+]);
+// The window of a Claude model, or 0 when it is not a Claude model.
+function contextWindow(model) {
+  const raw = String(model || "").toLowerCase();
+  const key = modelKey(model);
+  if (!key.includes("claude")) return 0;
+  if (raw.includes("[1m]") || MILLION_WINDOW.has(ALIASES[key] || key)) return MILLION;
+  return CLAUDE_DEFAULT_WINDOW;
+}
+
 // t: { input, output, write5m, write1h, read } (input without cache reads/writes); null when the model is unknown.
 function cost(model, t, { fast = false, geo = "" } = {}) {
   const p = priceOf(model);
@@ -97,4 +116,4 @@ function cost(model, t, { fast = false, geo = "" } = {}) {
   return usd;
 }
 
-module.exports = { AS_OF, SOURCES, PRICES, modelKey, priceOf, cost };
+module.exports = { AS_OF, SOURCES, PRICES, modelKey, priceOf, cost, contextWindow, MILLION };
