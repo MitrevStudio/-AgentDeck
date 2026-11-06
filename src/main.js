@@ -811,6 +811,7 @@ function showManager() {
     icon: makeIcon(64),
     webPreferences: { preload: PRELOAD, contextIsolation: true, nodeIntegration: false }
   });
+  managerWin.webContents.on("did-finish-load", () => managerWin?.webContents.setZoomFactor(prefs.get().uiScale));
   managerWin.loadFile(path.join(__dirname, "index.html"));
   managerWin.on("closed", () => {
     managerWin = null;
@@ -1049,6 +1050,8 @@ function registerIpc() {
   handle("live:get", () => liveSessions());
   // AgentDeck's own terminals and their layout. Keystrokes and sizes come as plain messages (many, no answer needed).
   handle("workspace:get", () => getWorkspaceView());
+  // The terminals' text size and the window's scale, from the window's own keys (Ctrl+= / Ctrl+- / Ctrl+0).
+  handle("prefs:set-view", patch => prefs.set({ terminalFontSize: patch?.terminalFontSize, uiScale: patch?.uiScale }));
   handle("workspace:command", (cmd, args) => runWorkspaceCommand(text(cmd, 32), isObj(args) ? args : {}));
   handle("terminal:attach", id => terminals.attach(text(id, 64)));
   handle("terminal:move", async (agent, id) => {
@@ -1161,6 +1164,7 @@ function onPrefsChanged(p, keys) {
     for (const w of [managerWin, bar?.win, bar?.handleWin]) if (w && !w.isDestroyed()) w.webContents.reload();
   }
   if (keys.includes("edgeHandle")) bar?.syncHandle();
+  if (keys.includes("uiScale") && managerWin && !managerWin.isDestroyed()) managerWin.webContents.setZoomFactor(p.uiScale);
   if (keys.includes("autoUpdate")) updater.setAuto(p.autoUpdate);
   buildTrayMenu();
 }

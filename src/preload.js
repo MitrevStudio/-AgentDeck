@@ -55,6 +55,7 @@ contextBridge.exposeInMainWorld("manager", {
 // AgentDeck's own terminals and their layout (manager window; terminals.js and workspace.js in main).
 contextBridge.exposeInMainWorld("terminals", {
   getWorkspace: () => ipcRenderer.invoke("workspace:get"),
+  setView: patch => ipcRenderer.invoke("prefs:set-view", patch),
   command: (cmd, args) => ipcRenderer.invoke("workspace:command", cmd, args),
   attach: id => ipcRenderer.invoke("terminal:attach", id),
   move: (agent, id) => ipcRenderer.invoke("terminal:move", agent, id),

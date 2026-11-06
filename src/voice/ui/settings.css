@@ -147,3 +147,5 @@ body:not([data-tab="network"]) [data-for="network"] { display: none; }
 
 /* What goes to the provider (Dictionary, Commands): a quiet line under the section's fields. */
 .vs-privacy { margin: 0 0 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+/* A short choice (a size, a scale) needs no full-width field. */
+.select.vs-narrow { width: auto; min-width: 180px; }

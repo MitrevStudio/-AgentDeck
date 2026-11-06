@@ -6,7 +6,7 @@
 // page needs to hear about.
 //
 // events: "changed" (snapshot, keys) - keys lists what changed: "language", "theme", "edgeHandle", "autoUpdate",
-// "newWindow", "sessionsIn", "autoCompact", "autoCompactTokens".
+// "newWindow", "sessionsIn", "autoCompact", "autoCompactTokens", "terminalFontSize", "uiScale".
 const { app, nativeTheme } = require("electron");
 const { EventEmitter } = require("node:events");
 const settings = require("./voice/settings");
@@ -18,11 +18,15 @@ const THEMES = ["system", "dark", "light"];
 const SESSIONS_IN = ["windows", "tabs"];
 // Context sizes from which a session in an AgentDeck tab is remembered and compacted (autopilot.js).
 const AUTO_COMPACT_TOKENS = [100000, 150000, 200000, 300000];
+// The text of AgentDeck's own terminals, px before the window's scale; the manager window's scale (its zoom). The
+// defaults read like Herdr's (JetBrains Mono 14 at its scale).
+const TERMINAL_FONT_SIZES = [11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24];
+const UI_SCALES = [0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5];
 // --bg of theme.css, for windows until their page paints.
 const BACKGROUND = { dark: "#0d1015", light: "#f2f4f8" };
 
 const prefs = new EventEmitter();
-const state = { language: "bg", theme: "dark", edgeHandle: true, autoUpdate: true, newWindow: true, sessionsIn: "tabs", autoCompact: true, autoCompactTokens: 150000, dayView: false, notify: null };
+const state = { language: "bg", theme: "dark", edgeHandle: true, autoUpdate: true, newWindow: true, sessionsIn: "tabs", autoCompact: true, autoCompactTokens: 150000, dayView: false, notify: null, terminalFontSize: 14, uiScale: 1.1 };
 let sessionsInChosen = false; // the user picked where sessions open (settings or the tray menu)
 let handleX = 0.5; // the edge handle's centre, as a fraction of the display width
 let handleDisplay = null; // the id of the display it is on (null: the primary one)
@@ -56,6 +60,8 @@ function load() {
   const auto = isObj(root.terminal) && isObj(root.terminal.autoCompact) ? root.terminal.autoCompact : {};
   state.autoCompact = auto.on !== false;
   if (AUTO_COMPACT_TOKENS.includes(auto.tokens)) state.autoCompactTokens = auto.tokens;
+  if (TERMINAL_FONT_SIZES.includes(term.fontSize)) state.terminalFontSize = term.fontSize;
+  if (UI_SCALES.includes(ui.scale)) state.uiScale = ui.scale;
   state.dayView = isObj(root.dayView) && root.dayView.show === true;
   // null: not saved here yet (main carries the earlier choice over).
   state.notify = isObj(root.notify) && typeof root.notify.on === "boolean" ? root.notify.on : null;
@@ -104,6 +110,14 @@ async function set(patch) {
     state.autoCompactTokens = patch.autoCompactTokens;
     keys.push("autoCompactTokens");
   }
+  if (TERMINAL_FONT_SIZES.includes(patch.terminalFontSize) && patch.terminalFontSize !== state.terminalFontSize) {
+    state.terminalFontSize = patch.terminalFontSize;
+    keys.push("terminalFontSize");
+  }
+  if (UI_SCALES.includes(patch.uiScale) && patch.uiScale !== state.uiScale) {
+    state.uiScale = patch.uiScale;
+    keys.push("uiScale");
+  }
   if (typeof patch.notify === "boolean" && patch.notify !== state.notify) {
     state.notify = patch.notify;
     keys.push("notify");
@@ -133,12 +147,13 @@ function setHandlePosition(x, display) {
 // In effect at once; a file that cannot be written is only logged. `hoverEdge: undefined` drops the former key.
 function save() {
   return settings.writeRoot({
-    ui: { language: state.language, theme: state.theme, autoUpdate: state.autoUpdate },
+    ui: { language: state.language, theme: state.theme, autoUpdate: state.autoUpdate, scale: state.uiScale },
     edgeHandle: { show: state.edgeHandle, x: Math.round(handleX * 10000) / 10000, display: handleDisplay ?? undefined },
     terminal: {
       newWindow: state.newWindow,
       sessionsIn: state.sessionsIn,
       sessionsInChosen: sessionsInChosen || undefined,
+      fontSize: state.terminalFontSize,
       autoCompact: { on: state.autoCompact, tokens: state.autoCompactTokens }
     },
     dayView: { show: state.dayView },
@@ -147,4 +162,4 @@ function save() {
   }).catch(e => console.error("Could not save settings:", e.message));
 }
 
-module.exports = Object.assign(prefs, { load, get, set, handlePosition, handleDisplayId, setHandlePosition, background, LANGUAGES, THEMES, SESSIONS_IN, AUTO_COMPACT_TOKENS });
+module.exports = Object.assign(prefs, { load, get, set, handlePosition, handleDisplayId, setHandlePosition, background, LANGUAGES, THEMES, SESSIONS_IN, AUTO_COMPACT_TOKENS, TERMINAL_FONT_SIZES, UI_SCALES });
