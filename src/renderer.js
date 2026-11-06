@@ -8,20 +8,31 @@ let groupOfPath = new Map();
 // The open Groups menu of a project card.
 let groupMenu = null;
 const getGroupOf = path => groupOfPath.get(path) || "";
-const ui = { query: "", agent: "", selected: "", active: -1, renaming: "", loading: false, loaded: false, liveOnly: false };
+const ui = { query: "", agent: "", selected: "", active: -1, renaming: "", loading: false, loaded: false };
+// A running session's subagents: shown or folded by the user (sessionKey -> true/false); otherwise they show while
+// one of them works.
+const subagentsOpen = new Map();
 
 // Running sessions, keyed like `Claude:<id>`; refreshed every couple of seconds from the agents' own registries.
 let live = new Map(), liveSig = "", pendingRender = false;
 const liveOf = s => live.get(sessionKey(s));
-function livePill(l, loading) {
-  if (loading) {
-    return getLoadingPill();
-  }
-  if (!l) return "";
+// A running session's state as one small mark (the words are in its tooltip): a spinner while it works, a red dot
+// while it needs the user, a green one while it waits for the next prompt.
+function getStatusClass(l) {
   const kind = getLiveKind(l);
-  const label = kind === "other" ? esc(l.status) : esc(t(`live.label.${kind}`));
-  return `<span class="live ${kind} ${isStale(l) ? "stale" : ""}" data-live="${esc(sessionKey(l))}" title="${esc(getLiveHint(l))} · PID ${l.pid}">
-    <span class="${kind === "busy" ? "spinner" : kind === "waiting" ? "pulse attn" : "pulse"}"></span>${label}<span class="live-t">${esc(liveText(l))}</span></span>`;
+  if (kind === "busy") return `st spinner${isStale(l) ? " stale" : ""}`;
+  if (kind === "waiting") return "st pulse attn";
+  return kind === "idle" ? "st pulse" : "st pulse other";
+}
+function getStatusTitle(l) {
+  const kind = getLiveKind(l);
+  const label = kind === "other" ? l.status : t(`live.label.${kind}`);
+  return [`${label}${liveText(l) ? ` · ${liveText(l)}` : ""}`, getLiveHint(l), `PID ${l.pid}`].join("\n");
+}
+function statusMark(l, loading) {
+  if (loading) return `<span class="st spinner loading" title="${esc(t("live.hint.loading"))}"></span>`;
+  if (!l) return '<span class="st none"></span>';
+  return `<span class="${getStatusClass(l)}" data-live="${esc(sessionKey(l))}" title="${esc(getStatusTitle(l))}"></span>`;
 }
 
 function prepare() {
@@ -30,7 +41,7 @@ function prepare() {
   groupOfPath = new Map(built.projects.map(p => [p.path, p.group || ""]));
   data = conceal(built, readHidden());
   if (ui.selected && !(ui.selected.startsWith("g:") ? data.groups : data.projects).some(x => x.n === ui.selected)) ui.selected = "";
-  if (groupMenu && !groupOfPath.has(groupMenu.dataset.path)) closeGroupMenu();
+  if (groupMenu?.dataset.path && !groupOfPath.has(groupMenu.dataset.path)) closeGroupMenu();
 }
 // The selected project, or the selected group as {group, members, sessions}.
 function findSelected() {
@@ -85,7 +96,7 @@ function compute() {
   const liveCounts = countLiveGroups(byAgent.map(liveOf).filter(Boolean));
   // Running sessions go first (blocked on the user, working, stalled, waiting for input); the rest keep their date order.
   const running = byAgent.filter(liveOf).sort((a, b) => getLiveRank(liveOf(a)) - getLiveRank(liveOf(b)) || lastSign(liveOf(b)) - lastSign(liveOf(a)));
-  const sessions = ui.liveOnly ? running : [...running, ...byAgent.filter(s => !liveOf(s))];
+  const sessions = [...running, ...byAgent.filter(s => !liveOf(s))];
   return { toks, hits, hitSet, projects, sel, scoped, agentCounts, liveCounts, sessions };
 }
 
@@ -223,27 +234,29 @@ function projectLive(sessions) {
   return `<span class="proj-live" title="${esc(title)}">${waiting ? `<span class="pulse attn"></span>${waiting}` : ""}${busy ? `<span class="spinner"></span>${busy}` : ""}${idle ? `<span class="pulse"></span>${idle}` : ""}</span>`;
 }
 
-function renderLiveFilter(v) {
-  const { busy, waiting, idle } = v.liveCounts;
+// The window title counts the sessions that need the user, else the working ones; the list's groups show the rest.
+function renderTitle(v) {
+  const { busy, waiting } = v.liveCounts;
   document.title = waiting ? `(${waiting}!) ${t("app.name")}` : busy ? `(${busy}) ${t("app.name")}` : t("app.name");
-  const parts = [
-    waiting && `<span class="pulse attn"></span>${esc(tn("live.count.waiting", waiting))}`,
-    busy && `<span class="spinner"></span>${esc(tn("live.count.busy", busy))}`,
-    idle && `<span class="pulse"></span>${esc(tn("live.count.idle", idle))}`
-  ].filter(Boolean);
-  $("liveFilter").innerHTML = parts.length || ui.liveOnly
-    ? `<button class="live-filter ${ui.liveOnly ? "on" : ""}" data-action="live-only" title="${esc(t(ui.liveOnly ? "manager.live.showAll" : "manager.live.showOpen"))}">
-        ${parts.length ? parts.join('<span class="sep"></span>') : esc(t("manager.live.noneActive"))}
-      </button>`
-    : `<span class="live-none">${esc(t("manager.live.none"))}</span>`;
+}
+function renderAgentFilter(v) {
+  const options = [["", t("manager.agents.all"), v.scoped.length], ...AGENTS.map(a => [a, a, v.agentCounts[a]])];
+  $("agentFilter").innerHTML = options.map(([key, label, n]) =>
+    `<option value="${key}" ${ui.agent === key ? "selected" : ""} ${n || ui.agent === key || !key ? "" : "disabled"}>${esc(label)} (${n})</option>`).join("");
+}
+// The group a session is listed under: what a running one is doing, else the day it was last active.
+function getSessionGroup(s) {
+  const l = liveOf(s);
+  if (isLoading(sessionKey(s), l)) return t("manager.group.working");
+  if (!l) return dayGroup(s.updatedAt);
+  if (l.status === "waiting") return t("manager.group.needs");
+  return l.status === "busy" ? t("manager.group.working") : t("manager.group.ready");
 }
 
 function renderSessions(v) {
   $("sessionCount").textContent = v.sessions.length;
-  renderLiveFilter(v);
-  $("agentChips").innerHTML = [["", t("common.all"), v.scoped.length], ...AGENTS.map(a => [a, a, v.agentCounts[a]])]
-    .map(([key, label, n]) => `<button class="chip ${ui.agent === key ? "on" : ""}" data-agent="${key}" ${n || ui.agent === key || !key ? "" : "disabled"}>
-      ${key ? `<span class="dot ${key.toLowerCase()}"></span>` : ""}${esc(label)}<span class="n">${n}</span></button>`).join("");
+  renderTitle(v);
+  renderAgentFilter(v);
 
   $("scope").innerHTML = v.sel?.group ? `<div class="scope">${icon("stack")}
       <div class="grow"><div class="label">${esc(t("manager.scope.group", { name: v.sel.group.name }))}</div>
@@ -262,7 +275,7 @@ function renderSessions(v) {
 
   const groups = new Map();
   visible.forEach((s, i) => {
-    const g = liveOf(s) ? t("manager.group.open") : dayGroup(s.updatedAt);
+    const g = getSessionGroup(s);
     if (!groups.has(g)) groups.set(g, []);
     groups.get(g).push(sessionHtml(s, i, v.toks));
   });
@@ -270,31 +283,62 @@ function renderSessions(v) {
     `<div class="group">${esc(g)}<span class="n">${items.length}</span></div>${items.join("")}`).join("");
 }
 
+// One or two lines: the agent, the title, where it ran, its context and cost, when, and its state; the recap below.
+// The actions show over the right end while the row is pointed at, chosen or holds the focus.
 function sessionHtml(s, i, toks) {
-  const dir = s.cwd
-    ? `<div class="dir">${icon("folder")}${pathHtml(s.cwd, toks)}${gitChip(s.workDir || s.cwd)}<button class="icon-btn" data-action="copy" data-path="${esc(s.cwd)}" title="${esc(t("action.copyPath"))}">${icon("copy")}</button></div>`
-    : `<div class="dir unknown">${icon("alert")}${esc(t("manager.session.noDir"))}</div>`;
   const l = liveOf(s);
-  const loading = isLoading(sessionKey(s), l);
-  const liveCls = loading ? "live-loading" : l ? `live-${getLiveGroup(l) === "busy" && isStale(l) ? "stale" : getLiveGroup(l)}` : "";
+  const key = sessionKey(s);
+  const loading = isLoading(key, l);
   // A running session: its terminal is brought up, or moved into a tab; a past one is resumed or continued fresh
-  // (preview-ui.js). The secondary actions' labels (.bl) give way to their icon and tooltip in a narrow panel.
-  const runningBtns = l
-    ? `<button class="btn sm primary" data-action="show-terminal" title="${esc(t("term.showTitle", { pid: l.pid }))}">${icon("raise")}${esc(t("term.show"))}</button>
-      ${isMoveHereOffered(s) ? `<button class="btn sm" data-action="move-here" title="${esc(t("term.moveHereTitle"))}">${icon("download")}<span class="bl">${esc(t("term.moveHere"))}</span></button>` : ""}`
-    : "";
-  return `<article class="card sess ${liveCls} ${i === ui.active ? "active" : ""}" data-i="${i}">
-    <div class="sess-head"><span class="agent ${s.agent.toLowerCase()}">${esc(s.agent)}</span>
-      <h3 class="sess-title">${hl(s.title, toks)}</h3>
-      ${livePill(l, loading)}
-      <span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span></div>
-    <div class="sid" title="${esc(t("manager.session.id"))}">${hl(s.id, toks)}</div>
-    ${s.recap ? `<p class="sess-recap" title="${esc(s.recap)}"><span class="recap-label">${esc(t("manager.session.recap"))}</span>${hl(s.recap, toks)}</p>` : ""}
-    ${dir}
-    <div class="sess-foot">${getContextChip(s)}${usageChip(s)}<div class="grow"></div>
-      ${runningBtns}
-      ${l ? "" : getSessionActions(s)}
-    </div></article>`;
+  // (preview-ui.js).
+  const actions = l
+    ? `<button class="btn sm" data-action="show-terminal" title="${esc(t("term.showTitle", { pid: l.pid }))}">${icon("raise")}${esc(t("term.show"))}</button>
+      ${isMoveHereOffered(s) ? `<button class="icon-btn" data-action="move-here" title="${esc(t("term.moveHereTitle"))}">${icon("download")}</button>` : ""}`
+    : getSessionActions(s);
+  return `<article class="sess ${i === ui.active ? "active" : ""}" data-i="${i}">
+    <div class="sess-main">
+      <div class="sess-line">${agentMark(s.agent)}
+        <h3 class="sess-title" title="${esc(s.title)}">${hl(s.title, toks)}</h3>
+        ${whereHtml(s, toks)}
+        ${getContextChip(s)}${usageChip(s)}
+        <span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span>
+        ${statusMark(l, loading)}
+      </div>
+      ${s.recap ? `<p class="sess-recap" title="${esc(s.recap)}">${hl(s.recap, toks)}</p>` : ""}
+      <div class="sess-acts">${actions}
+        <button class="icon-btn" data-action="row-menu" title="${esc(t("manager.session.more"))}" aria-haspopup="menu">${icon("more")}</button></div>
+    </div>
+    ${l?.subagents?.length ? subagentsHtml(key, l.subagents) : ""}
+  </article>`;
+}
+// The agent as a small plain glyph; its name in the tooltip.
+const agentMark = agent => `<span class="agent-mark" title="${esc(agent)}">${icon(`agent${agent}`)}</span>`;
+// The folder's name (the whole path in the tooltip) and its branch.
+function whereHtml(s, toks) {
+  if (!s.cwd) return `<span class="where unknown" title="${esc(t("manager.session.noDir"))}">${icon("alert")}</span>`;
+  const leaf = s.cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || s.cwd;
+  return `<span class="where"><span class="where-dir" title="${esc(s.cwd)}">${hl(leaf, toks)}</span>${gitChip(s.workDir || s.cwd)}</span>`;
+}
+
+// ---------- subagents ----------
+const SUBAGENTS_SHOWN = 10;
+function isSubagentsOpen(key, list) {
+  return subagentsOpen.has(key) ? subagentsOpen.get(key) : list.some(a => a.working);
+}
+function subagentsHtml(key, list) {
+  const open = isSubagentsOpen(key, list);
+  const working = list.filter(a => a.working).length;
+  const summary = [tn("manager.subagents.count", list.length), working && tn("manager.subagents.working", working)].filter(Boolean).join(" · ");
+  const rows = open ? list.slice(0, SUBAGENTS_SHOWN).map(a => `<div class="sub-row">
+      <span class="sub-type">${esc(a.type || t("manager.subagents.agent"))}</span>
+      <span class="sub-desc" title="${esc(a.description)}">${esc(a.description)}</span>
+      <span class="when" title="${esc(fullDate(a.at))}">${esc(ago(a.at))}</span>
+      ${a.working ? `<span class="st spinner" title="${esc(t("manager.subagents.busy"))}"></span>` : '<span class="st none"></span>'}
+    </div>`).join("") : "";
+  const more = open && list.length > SUBAGENTS_SHOWN ? `<div class="sub-more">${esc(tn("manager.subagents.more", list.length - SUBAGENTS_SHOWN))}</div>` : "";
+  return `<div class="subs">
+    <button class="sub-toggle" data-action="subagents" data-key="${esc(key)}" aria-expanded="${open}">${icon(open ? "down" : "right")}${working ? '<span class="st spinner"></span>' : ""}<span>${esc(summary)}</span></button>
+    ${rows}${more}</div>`;
 }
 
 function emptySessions(v) {
@@ -302,7 +346,6 @@ function emptySessions(v) {
     ${actions.length ? `<div class="actions">${actions.map(([action, label]) => `<button class="btn" data-action="${action}">${esc(t(label))}</button>`).join("")}</div>` : ""}</div>`;
   if (v.toks.length) return box(t(v.sel ? "manager.empty.searchInProject" : "manager.empty.search", { q: ui.query }), t("manager.empty.searchBody"),
     [["clear-search", "manager.empty.clearSearch"], ...(v.sel ? [["all", "manager.empty.searchAll"]] : [])]);
-  if (ui.liveOnly) return box(t(v.sel ? "manager.empty.liveInProject" : "manager.empty.live"), t("manager.empty.liveBody"), [["live-only", "manager.live.showAll"]]);
   if (ui.agent) return box(t("manager.empty.agent", { agent: ui.agent }), "", [["all-agents", "manager.empty.allAgents"]]);
   if (v.sel) return box(t("manager.empty.project"), t("manager.empty.projectBody"));
   return box(t("manager.empty.none"), t("manager.empty.noneBody"));
@@ -354,10 +397,10 @@ async function load() {
 window.addEventListener("storage", e => { if (e.key === HIDDEN_KEY && ui.loaded) { prepare(); render(); } });
 function applyRegistry(registry) { raw.registry = registry; prepare(); render(); }
 
-// Returns true when the set of running sessions or any of their states changed.
+// Returns true when the set of running sessions, any of their states or their subagents changed.
 function setLive(list) {
   live = new Map(list.map(l => [sessionKey(l), l]));
-  const sig = list.map(l => `${sessionKey(l)}:${l.status}`).sort().join("|");
+  const sig = list.map(l => `${sessionKey(l)}:${l.status}:${(l.subagents || []).map(a => `${a.id}${a.working ? "+" : ""}`).join(",")}`).sort().join("|");
   if (sig === liveSig) return false;
   liveSig = sig;
   return true;
@@ -374,15 +417,13 @@ async function pollLive() {
   if (ui.renaming) pendingRender = true; else render();
 }
 
-// Between state changes only the "activity N sec ago" texts move; update them in place.
+// Between state changes only the "activity N sec ago" texts and a stalled spinner move; update them in place.
 function updateLiveTexts() {
   document.querySelectorAll("[data-live]").forEach(el => {
     const l = live.get(el.dataset.live);
     if (!l) return;
-    el.querySelector(".live-t").textContent = liveText(l);
-    el.classList.toggle("stale", isStale(l));
-    el.closest(".sess")?.classList.toggle("live-stale", isStale(l));
-    el.closest(".sess")?.classList.toggle("live-busy", l.status === "busy" && !isStale(l));
+    el.className = getStatusClass(l);
+    el.title = getStatusTitle(l);
   });
 }
 
@@ -519,7 +560,12 @@ async function runAction(action, btn) {
       return applyRegistry(await window.manager.removeProject(path));
     case "all": ui.selected = ""; return render({ resetScroll: true });
     case "all-agents": ui.agent = ""; return render({ resetScroll: true });
-    case "live-only": ui.liveOnly = !ui.liveOnly; ui.active = -1; return render({ resetScroll: true });
+    case "row-menu": return openRowMenu(btn, visible[Number(btn.closest(".sess").dataset.i)]);
+    case "subagents": {
+      const key = btn.dataset.key;
+      subagentsOpen.set(key, !isSubagentsOpen(key, live.get(key)?.subagents || []));
+      return render();
+    }
     case "clear-search": return setQuery("");
   }
 }
@@ -548,14 +594,11 @@ for (const [id, open] of [["voiceHistory", window.manager.openVoiceHistory], ["s
 $("add").addEventListener("click", async () => {
   try { applyRegistry(await window.manager.addProject()); } catch (e) { toast(e.message, true); }
 });
-$("agentChips").addEventListener("click", e => {
-  const chip = e.target.closest(".chip");
-  if (!chip || chip.disabled) return;
-  ui.agent = chip.dataset.agent; ui.active = -1;
+$("agentFilter").addEventListener("change", e => {
+  ui.agent = e.target.value; ui.active = -1;
   render({ resetScroll: true });
 });
 $("scope").addEventListener("click", onAction);
-$("liveFilter").addEventListener("click", onAction);
 $("projects").addEventListener("click", async e => {
   if (e.target.classList.contains("rename") || await onAction(e)) return;
   const card = e.target.closest(".proj");
@@ -605,6 +648,24 @@ function openGroupMenu(btn, path) {
   groupMenu.setAttribute("role", "menu");
   document.body.append(groupMenu);
   showMenuItems(getGroupMenuItems(path), btn);
+}
+// A session's own menu: its id and folder, a terminal or Explorer there. Also on a right-click of the row.
+function openRowMenu(btn, s) {
+  if (!s) return;
+  closeGroupMenu();
+  groupMenu = document.createElement("div");
+  groupMenu.className = "menu";
+  groupMenu.setAttribute("role", "menu");
+  document.body.append(groupMenu);
+  const copy = (text, msg) => async () => { await window.manager.copyText(text); toast(msg); };
+  showMenuItems([
+    { label: t("manager.session.copyId"), icon: "copy", run: copy(s.id, t("manager.toast.copiedId", { id: s.id })) },
+    ...(s.cwd ? [
+      { label: t("action.copyPath"), icon: "copy", run: copy(s.cwd, t("toast.copied", { path: s.cwd })) },
+      { label: t("action.terminalHere"), icon: "terminal", run: async () => { await window.manager.launchFolder(s.cwd); toast(t("manager.toast.terminal", { path: s.cwd })); } },
+      { label: t("action.explorerTitle"), icon: "open", run: async () => { const err = await window.manager.openPath(s.cwd); if (err) throw new Error(err); } }
+    ] : [])
+  ], btn);
 }
 function getGroupMenuItems(path) {
   const own = getGroupOf(path);
@@ -719,6 +780,13 @@ $("sessions").addEventListener("click", async e => {
   if (await onAction(e)) return;
   const card = e.target.closest(".sess");
   if (card) setActive(Number(card.dataset.i));
+});
+$("sessions").addEventListener("contextmenu", e => {
+  const card = e.target.closest(".sess");
+  if (!card) return;
+  e.preventDefault();
+  setActive(Number(card.dataset.i));
+  openRowMenu(card.querySelector("[data-action=row-menu]"), visible[Number(card.dataset.i)]);
 });
 $("sessions").addEventListener("dblclick", e => {
   const card = e.target.closest(".sess");

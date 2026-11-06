@@ -31,16 +31,6 @@ main {
 }
 .splitter:hover::after, .splitter:focus-visible::after, .splitter:active::after { background: var(--accent); }
 
-/* ---------- paths ---------- */
-.dir {
-  display: flex; align-items: center; gap: 10px; margin-top: 11px; padding: 8px 8px 8px 12px;
-  background: var(--path-bg); border: 1px solid var(--line); border-radius: var(--r-md);
-}
-.dir > .i { width: 18px; height: 18px; color: var(--accent); }
-.dir .path { flex: 1; min-width: 0; font-size: 15px; }
-.dir.unknown { color: var(--warn); font-size: 13px; padding: 10px 12px; }
-.dir.unknown > .i { color: var(--warn); }
-
 /* ---------- projects ---------- */
 .proj {
   padding: 11px 12px 8px; border-radius: 10px; border: 1px solid transparent;
@@ -116,55 +106,77 @@ main {
 }
 .group:first-child { margin-top: -10px; }
 .group .n { color: var(--faint); font-weight: 500; letter-spacing: 0; }
-/* A session is a .card (theme.css). */
-.sess { margin-bottom: 10px; scroll-margin: 44px 0 10px; }
-.sess-head { display: flex; align-items: flex-start; gap: 10px; }
-.agent { flex: none; margin-top: 1px; padding: 2px 8px; border-radius: 6px; font-size: 11.5px; font-weight: 700; }
-.agent.claude { color: var(--claude); background: var(--claude-bg); }
-.agent.opencode { color: var(--opencode); background: var(--opencode-bg); }
-.agent.codex { color: var(--codex); background: var(--codex-bg); }
-.sess-title { flex: 1; min-width: 0; margin: 0; font-size: 15.5px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
-.when { flex: none; margin-top: 2px; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
-/* The session in brief: Claude Code's own recap, or its last answer. */
+/* A session is a row of one or two lines (renderer.js). --row-bg is its background, solid, so the actions shown over
+   its right end hide what is under them. */
+.sess {
+  --row-bg: var(--panel);
+  position: relative; padding: 6px 10px; border-radius: var(--r-md); background: var(--row-bg);
+  scroll-margin: 44px 0 10px; transition: background var(--dur-fast);
+}
+.sess:hover { --row-bg: var(--panel-2); }
+.sess.active { --row-bg: color-mix(in srgb, var(--accent) 13%, var(--panel)); }
+.sess-main { position: relative; }
+.sess-line { display: flex; align-items: center; gap: 8px; min-height: 26px; }
+.agent-mark { flex: none; display: inline-grid; place-items: center; color: var(--muted); }
+.agent-mark .i { width: 14px; height: 14px; }
+.sess-title {
+  flex: 1 1 auto; min-width: 60px; margin: 0; font-size: 14px; font-weight: 600; line-height: 1.35;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.where {
+  flex: 0 3 auto; min-width: 0; max-width: 32%; display: inline-flex; align-items: center; gap: 8px;
+  font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden;
+}
+.where-dir { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.where.unknown { color: var(--warn); }
+.where.unknown .i { width: 14px; height: 14px; }
+.when { flex: none; min-width: 64px; text-align: right; font-size: 12px; color: var(--faint); white-space: nowrap; }
+/* The session in brief, under its title: Claude Code's own recap, or its last answer. */
 .sess-recap {
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
-  margin: 5px 0 0; padding-left: 8px; border-left: 2px solid var(--accent-line);
-  color: var(--text); font-size: 12.5px; line-height: 1.45;
+  margin: 1px 0 0 22px; font-size: 12.5px; line-height: 1.4; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.sess-recap .recap-label { margin-right: 6px; font-weight: 600; color: var(--accent); }
-.sid { margin-top: 4px; font: 12px var(--mono); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sess-foot { display: flex; align-items: center; gap: 8px; margin-top: 11px; }
-.sess-foot .btn { flex: none; }
-/* A narrower sessions panel (#sessions is a size container, usage.css): Move here becomes an icon button with its
-   tooltip, and a live pill leaves out its activity time, so the title keeps its words whole. */
-@container (max-width: 640px) {
-  .sess-foot .bl { display: none; }
-  .sess-foot .btn:has(.bl) { width: 32px; padding: 0; justify-content: center; }
-  .sess-head .live .live-t { display: none; }
+/* The actions: over the right end of the row while it is pointed at, chosen, or one of them has the focus. */
+.sess-acts {
+  position: absolute; top: 0; right: -4px; height: 26px; display: flex; align-items: center; gap: 6px;
+  padding-left: 36px; background: linear-gradient(90deg, transparent, var(--row-bg) 32px);
+  opacity: 0; pointer-events: none; transition: opacity var(--dur-fast);
 }
+.sess-main:hover .sess-acts, .sess.active .sess-acts, .sess-acts:focus-within { opacity: 1; pointer-events: auto; }
+.sess-acts .btn.sm { height: 28px; }
+/* In a row every button is plain; the recommended one says so in its tooltip. */
+.sess-acts .btn.primary { background: var(--panel-2); border-color: var(--line-2); color: var(--text); }
+.sess-acts .icon-btn { width: 28px; height: 28px; }
 
 /* ---------- live status ---------- */
-.sess.live-busy { border-color: color-mix(in srgb, var(--working) 40%, transparent); box-shadow: inset 3px 0 0 var(--working); }
-.sess.live-loading { border-color: color-mix(in srgb, var(--accent) 40%, transparent); box-shadow: inset 3px 0 0 var(--accent); }
-.sess.live-idle { border-color: color-mix(in srgb, var(--ready) 35%, transparent); box-shadow: inset 3px 0 0 var(--ready); }
-.sess.live-waiting { border-color: color-mix(in srgb, var(--needs) 45%, transparent); box-shadow: inset 3px 0 0 var(--needs); }
-.sess.live-stale { box-shadow: inset 3px 0 0 var(--muted); }
-.sess.active.live-busy { box-shadow: inset 3px 0 0 var(--working), var(--ring); }
-.sess.active.live-idle { box-shadow: inset 3px 0 0 var(--ready), var(--ring); }
-.sess.active.live-waiting { box-shadow: inset 3px 0 0 var(--needs), var(--ring); }
-.sess.active.live-stale { box-shadow: inset 3px 0 0 var(--muted), var(--ring); }
+/* One mark per running session, at the row's right end; .none keeps the column for the others. */
+.st { flex: none; }
+.st.none { width: 12px; height: 12px; }
+.st.pulse { margin: 0 2px; }
+.st.pulse.other { background: var(--accent); animation: none; }
+.st.spinner.stale { border-color: color-mix(in srgb, var(--muted) 25%, transparent); border-top-color: var(--muted); animation-duration: 2.4s; }
+.st.spinner.loading { border-color: color-mix(in srgb, var(--accent) 25%, transparent); border-top-color: var(--accent); }
 .proj-live { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 650; color: var(--muted); }
 .proj-live .pulse { margin-left: 3px; }
-/* The sessions header: in a narrow panel the agent chips go to a line of their own rather than out of the panel. */
-.panel-head:has(#agentChips) { flex-wrap: wrap; row-gap: 8px; }
-.live-filter {
-  display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; margin-left: 4px; white-space: nowrap;
-  border-radius: var(--r-pill); border: 1px solid var(--line-2); background: var(--bg); font-size: 12.5px; font-weight: 600;
+.select.sm { width: auto; height: 30px; padding-left: 10px; font-size: 13px; }
+
+/* ---------- subagents ---------- */
+/* A running session's subagents, under it on a line of their own: folded to a count, or listed newest first. */
+.subs { margin: 2px 0 2px 22px; padding-left: 10px; border-left: 1px solid var(--line-2); }
+.sub-toggle {
+  display: inline-flex; align-items: center; gap: 6px; padding: 2px 6px 2px 2px; margin-left: -2px;
+  border: 0; border-radius: var(--r-xs); background: transparent; color: var(--muted); font-size: 12px;
 }
-.live-filter:hover { border-color: var(--accent); }
-.live-filter.on { border-color: var(--busy); background: var(--busy-bg); }
-.live-filter .sep { width: 1px; height: 14px; margin: 0 3px; background: var(--line-2); }
-.live-none { margin-left: 6px; font-size: 12px; color: var(--faint); }
+.sub-toggle:hover { color: var(--text); background: var(--panel-3); }
+.sub-toggle .i { width: 12px; height: 12px; }
+.sub-row { display: flex; align-items: center; gap: 8px; min-height: 22px; font-size: 12px; color: var(--muted); }
+.sub-type { flex: none; color: var(--text); font-weight: 550; }
+.sub-desc { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sub-more { padding: 2px 0; font-size: 12px; color: var(--faint); }
+
+/* A narrower sessions panel (#sessions is a size container, usage.css): the branch goes first, then the folder. */
+@container (max-width: 640px) { .where .git-chip { display: none; } }
+@container (max-width: 480px) { .where { display: none; } }
 
 /* ---------- footer ---------- */
 .status {
@@ -189,3 +201,4 @@ main {
   .brand h1 { display: none; }
   .top-actions .label { display: none; }
 }
+#sessions .skel { height: 44px; margin-bottom: 4px; }
