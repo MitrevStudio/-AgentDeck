@@ -4,6 +4,8 @@
 let usage = null, usageBySession = new Map(), contextBySession = new Map();
 // From this size a cold session is marked as expensive to continue.
 const LARGE_CONTEXT = 150000;
+// From this share of its window a context is drawn as nearly full: the agent compacts it (or stops) soon.
+const FULL_CONTEXT = 0.8;
 const CONTEXT_REFRESH_MS = 30000;
 
 const usageDay = ms => { const d = new Date(ms); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
@@ -91,12 +93,30 @@ function getContextState(c) {
   }
   return c.tokens >= LARGE_CONTEXT ? "large" : "cold";
 }
+// The share of the model's context window in use (0..1), or null when the window is not known (OpenCode, a model
+// usage-prices.js does not list).
+function getContextFill(c) {
+  return c.window > 0 ? Math.min(1, c.tokens / c.window) : null;
+}
+// "52%", or "≈52%" when the window is the model's usual one rather than what the agent reported.
+function getFillText(c) {
+  const pct = I18N.formatNumber(getContextFill(c), { style: "percent", maximumFractionDigits: 0 });
+  return c.exact ? pct : `≈${pct}`;
+}
 function getContextTitle(c, state) {
   const n = I18N.formatNumber(c.tokens);
-  if (state === "warm") {
-    return t("context.tip.warm", { n, until: I18N.formatTime(c.warmUntil) });
+  const lines = [state === "warm" ? t("context.tip.warm", { n, until: I18N.formatTime(c.warmUntil) })
+    : t(state === "large" ? "context.tip.large" : "context.tip.cold", { n })];
+  const fill = getContextFill(c);
+  if (fill != null) {
+    lines.push(t(c.exact ? "context.tip.window" : "context.tip.windowApprox", { pct: getFillText(c), window: I18N.formatNumber(c.window) }));
+    if (fill >= FULL_CONTEXT) lines.push(t("context.tip.full"));
   }
-  return t(state === "large" ? "context.tip.large" : "context.tip.cold", { n });
+  return lines.join("\n");
+}
+function getContextClass(c) {
+  const fill = getContextFill(c);
+  return `ctx-chip ${getContextState(c)}${fill != null && fill >= FULL_CONTEXT ? " full" : ""}`;
 }
 // The usage scan has read the session's transcript as it is now.
 function isUsageCurrent(s) {
@@ -108,8 +128,12 @@ function getContextChip(s) {
   if (!c) {
     return s.agent === "Claude" && isUsageCurrent(s) ? `<span class="ctx-chip empty" title="${esc(t("context.tip.empty"))}">${esc(t("context.label", { n: 0 }))}</span>` : "";
   }
-  const state = getContextState(c);
-  return `<span class="ctx-chip ${state}" data-ctx="${esc(sessionKey(s))}" title="${esc(getContextTitle(c, state))}">${esc(t("context.label", { n: fmtTokens(c.tokens).replace(/\.$/, "") }))}</span>`;
+  const n = fmtTokens(c.tokens).replace(/\.$/, "");
+  const fill = getContextFill(c);
+  // The share in use also fills the chip from the left, as a thin line along its bottom.
+  const label = fill == null ? t("context.label", { n }) : t("context.labelFill", { n, pct: getFillText(c) });
+  const style = fill == null ? "" : ` style="--fill: ${Math.round(fill * 1000) / 10}%"`;
+  return `<span class="${getContextClass(c)}" data-ctx="${esc(sessionKey(s))}"${style} title="${esc(getContextTitle(c, getContextState(c)))}">${esc(label)}</span>`;
 }
 function refreshContextChips() {
   document.querySelectorAll("[data-ctx]").forEach(el => {
@@ -117,9 +141,8 @@ function refreshContextChips() {
     if (!c) {
       return;
     }
-    const state = getContextState(c);
-    el.className = `ctx-chip ${state}`;
-    el.title = getContextTitle(c, state);
+    el.className = getContextClass(c);
+    el.title = getContextTitle(c, getContextState(c));
   });
 }
 setInterval(refreshContextChips, CONTEXT_REFRESH_MS);

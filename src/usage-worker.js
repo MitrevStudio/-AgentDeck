@@ -9,7 +9,7 @@ const scan = require("./usage-scan");
 const atomic = require("./voice/atomic-file");
 const { readAt, lineChunks } = require("./file-chunks");
 
-const VERSION = 2;          // of the cache layout and of what the parsers extract
+const VERSION = 3;          // of the cache layout and of what the parsers extract (3: Codex's context window)
 const MARK = 64;            // bytes compared to tell a rewritten file from one that only grew
 const PARALLEL = 4;         // files read at once
 const SAVE_AFTER_MS = 90 * 1000;
@@ -144,7 +144,7 @@ function sources() {
     if (!bySession.has(key)) bySession.set(key, { first, list: [] });
     const s = bySession.get(key);
     s.first = Math.min(s.first, first);
-    s.list.push({ key, cwd: e.cwd, msgs: e.msgs.values(), sub: e.sub, file });
+    s.list.push({ key, cwd: e.cwd, msgs: e.msgs.values(), sub: e.sub, file, window: e.window || 0 });
   }
   const ordered = [...bySession.values()].sort((a, b) => a.first - b.first)
     .flatMap(s => s.list.sort((a, b) => a.sub - b.sub || (a.file < b.file ? -1 : 1)));

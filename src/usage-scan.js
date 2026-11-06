@@ -75,7 +75,8 @@ function readClaude(buf, state) {
 
 // ---------- Codex ----------
 // token_count events carry running totals for the session (input includes cached input, output includes reasoning);
-// a record is the difference to the previous total. state: { msgs, cwd, id, model, total }.
+// a record is the difference to the previous total. state: { msgs, cwd, id, model, total, window } - window: the
+// model's context window as Codex reports it (model_context_window).
 const CODEX_TOTAL = ["input_tokens", "cached_input_tokens", "output_tokens"];
 function readCodex(buf, state) {
   return eachLine(buf, ['"session_meta"', '"turn_context"', '"token_count"'], 160, line => {
@@ -84,6 +85,7 @@ function readCodex(buf, state) {
     if (x.type === "session_meta") { state.id ||= p.id || ""; state.cwd ||= p.cwd || ""; }
     if (x.type === "turn_context") { if (p.model) state.model = String(p.model); state.cwd ||= p.cwd || ""; }
     if (x.type !== "event_msg" || p.type !== "token_count" || !p.info) return;
+    if (n(p.info.model_context_window)) state.window = n(p.info.model_context_window);
     const total = p.info.total_token_usage, last = p.info.last_token_usage;
     let d = null;
     if (total) {
@@ -126,14 +128,14 @@ function localDay(ms) {
 
 // What the session's next reply re-reads - its own last reply's prompt, cache and answer - and until when the cache
 // it left stays warm: an hour when its latest cache write went to the 1-hour cache, five minutes otherwise (a reply
-// that only read the cache keeps what the write before it chose).
+// that only read the cache keeps what the write before it chose). The model of that last reply sets the window.
 function updateContext(contexts, session, rec) {
   if (rec[FLAGS] & SIDE) {
     return;
   }
   let c = contexts.get(session);
   if (!c) {
-    contexts.set(session, c = { tokens: 0, at: 0, oneHour: false, writtenAt: 0 });
+    contexts.set(session, c = { tokens: 0, at: 0, oneHour: false, writtenAt: 0, model: "" });
   }
   if (rec[W5] + rec[W1] > 0 && rec[TIME] >= c.writtenAt) {
     c.writtenAt = rec[TIME];
@@ -142,16 +144,26 @@ function updateContext(contexts, session, rec) {
   if (rec[TIME] >= c.at) {
     c.at = rec[TIME];
     c.tokens = rec[IN] + rec[OUT] + rec[W5] + rec[W1] + rec[READ];
+    c.model = rec[MODEL];
   }
 }
-function getContextSummary(c) {
+// How full the context is: `reported` is the window the agent wrote down itself (Codex), exact; otherwise the model's
+// (usage-prices.js), and a Claude context already past it ran on the model's 1M variant. window 0: unknown.
+function getContextWindow(c, reported) {
+  if (reported > 0) {
+    return { window: reported, exact: true };
+  }
+  const known = prices.contextWindow(c.model);
+  return { window: known && c.tokens > known ? prices.MILLION : known, exact: false };
+}
+function getContextSummary(c, reported = 0) {
   if (!c) {
     return null;
   }
-  return { tokens: c.tokens, at: c.at, warmUntil: c.at + (c.oneHour ? CACHE_1H : CACHE_5M) };
+  return { tokens: c.tokens, at: c.at, warmUntil: c.at + (c.oneHour ? CACHE_1H : CACHE_5M), ...getContextWindow(c, reported) };
 }
 
-// sources: [{ key: "Claude:<id>", cwd, title, msgs: iterable of records }], in priority order - a record seen again
+// sources: [{ key: "Claude:<id>", cwd, title, msgs: iterable of records, window? }], in priority order - a record seen again
 // later (a copied reply) only completes the first one. Returns the summary the windows receive.
 function aggregate(sources) {
   const seen = new Map(), owner = new Map();
@@ -165,7 +177,9 @@ function aggregate(sources) {
     }
   }
   const sessions = [], sIndex = new Map(), models = [], mIndex = new Map(), rows = new Map(), contexts = new Map();
+  const windows = new Map(); // session key -> the context window its agent reported
   for (const src of sources) {
+    if (src.window > 0) windows.set(src.key, src.window);
     if (sIndex.has(src.key)) { const s = sessions[sIndex.get(src.key)]; s.cwd ||= src.cwd || ""; s.title ||= src.title || ""; continue; }
     sIndex.set(src.key, sessions.length);
     sessions.push({ key: src.key, cwd: src.cwd || "", title: src.title || "" });
@@ -188,7 +202,7 @@ function aggregate(sources) {
   const remap = new Map(used.map((i, j) => [i, j]));
   return {
     models,
-    sessions: used.map(i => ({ ...sessions[i], context: getContextSummary(contexts.get(i)) })),
+    sessions: used.map(i => ({ ...sessions[i], context: getContextSummary(contexts.get(i), windows.get(sessions[i].key)) })),
     // [session, "YYYY-MM-DD" (local), model, input, output, cacheWrite, cacheRead, usd|null, replies]
     rows: [...rows.values()].map(r => [remap.get(r[0]), ...r.slice(1)]),
     prices: { asOf: prices.AS_OF, sources: prices.SOURCES }
