@@ -6,6 +6,8 @@
 // its process (crash, kill) and Windows reuses PIDs, so an entry only counts when the PID is alive *and* was started at `procStart`.
 // "busy" alone does not tell whether anything is still happening, so the newest write to the transcript or to
 // one of its subagent transcripts is reported as `activityAt`.
+// Its subagents (<transcript>/subagents/agent-*.jsonl, described by the .meta.json beside each) come along as
+// `subagents`, newest first; one written to within SUBAGENT_ACTIVE_MS counts as working.
 //
 // OpenCode and Codex keep no such registry, so they have no live status.
 const { execFile } = require("node:child_process");
@@ -17,8 +19,11 @@ const CLAUDE_HOME = path.join(os.homedir(), ".claude");
 const REGISTRY_DIR = path.join(CLAUDE_HOME, "sessions");
 const PROJECTS_DIR = path.join(CLAUDE_HOME, "projects");
 
+const SUBAGENT_ACTIVE_MS = 30000;
+
 const startVerified = new Map(); // `${pid}:${procStart}` -> boolean
 const transcripts = new Map();   // sessionId -> transcript path
+const subagentMeta = new Map();  // .meta.json path -> {type, description}
 
 const mtime = f => { try { return fs.statSync(f).mtimeMs; } catch { return 0; } };
 
@@ -59,13 +64,30 @@ function findTranscript(id) {
   return "";
 }
 
-function lastActivity(id) {
+// What Claude Code wrote about a subagent when it started it (agentType, description); read once, it does not change.
+function readSubagentMeta(file) {
+  if (!subagentMeta.has(file)) {
+    let m = {};
+    try { m = JSON.parse(fs.readFileSync(file, "utf8")); } catch {}
+    subagentMeta.set(file, { type: String(m.agentType || ""), description: String(m.description || "") });
+  }
+  return subagentMeta.get(file);
+}
+function listSubagents(dir, now) {
+  let names;
+  try { names = fs.readdirSync(dir).filter(f => f.endsWith(".jsonl")); } catch { return []; }
+  return names.map(f => {
+    const id = f.slice(0, -".jsonl".length);
+    const at = mtime(path.join(dir, f));
+    return { id, at, working: now - at < SUBAGENT_ACTIVE_MS, ...readSubagentMeta(path.join(dir, `${id}.meta.json`)) };
+  }).sort((a, b) => b.at - a.at);
+}
+// The newest write to the transcript or to a subagent's, and the subagents.
+function getActivity(id) {
   const file = findTranscript(id);
-  if (!file) return 0;
-  let t = mtime(file);
-  const subagents = path.join(file.slice(0, -".jsonl".length), "subagents");
-  try { for (const f of fs.readdirSync(subagents)) t = Math.max(t, mtime(path.join(subagents, f))); } catch {}
-  return t;
+  if (!file) return { at: 0, subagents: [] };
+  const subagents = listSubagents(path.join(file.slice(0, -".jsonl".length), "subagents"), Date.now());
+  return { at: Math.max(mtime(file), ...subagents.map(a => a.at)), subagents };
 }
 
 async function claudeLive() {
@@ -80,13 +102,15 @@ async function claudeLive() {
   await verifyStarts(entries);
   return entries
     .filter(x => !x.procStart || startVerified.get(`${x.pid}:${x.procStart}`) !== false)
-    .map(x => ({
+    .map(x => ({ x, activity: getActivity(x.sessionId) }))
+    .map(({ x, activity }) => ({
       agent: "Claude", id: x.sessionId, pid: x.pid, procStart: String(x.procStart || ""), cwd: x.cwd || "", name: x.name || "",
       status: x.status === "shell" ? "busy" : x.status || "running",
       waitingFor: x.waitingFor || "",
       statusAt: x.statusUpdatedAt || x.updatedAt || x.startedAt || 0,
       startedAt: x.startedAt || 0,
-      activityAt: lastActivity(x.sessionId)
+      activityAt: activity.at,
+      subagents: activity.subagents
     }));
 }
 
