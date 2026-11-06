@@ -1,7 +1,8 @@
 // How AgentDeck's own terminals are laid out in the manager window, as in Herdr: a project is a space, a space has
 // tabs, and a tab is a tree of panes split right or down, each pane showing one terminal (terminals.js). Kept in main,
 // so a terminal opened from anywhere (the edge menu, a voice command, a notification) lands in its place; the window
-// only draws it and sends commands back. In memory only: the terminals themselves end with the app.
+// only draws it and sends commands back. Main saves it (exportState) and puts it back on the next start (importState),
+// with the terminals that still run or ones opened anew in their place.
 //
 // A node is { term } (a pane) or { dir: "right" | "down", ratio, a, b } (a split: `a` left or above, `b` the rest).
 // A split is addressed by its path from the tab's root: "" the root, "a"/"b" its children, "ab" and so on.
@@ -213,6 +214,51 @@ function createWorkspace({ onChange = () => {} } = {}) {
     return (s && tabs.get(s.active)) || null;
   }
 
+  // What is saved: the snapshot itself is plain data.
+  const exportState = () => snapshot();
+  // Replaces the layout with a saved one. remap(old terminal id) -> the id now in that pane, or "" to drop the pane (its
+  // sibling takes the split's place, as when a terminal ends). Tabs left without panes go, and a focus or zoom on a
+  // dropped pane falls back. The file may be old or damaged, so anything malformed is skipped, not trusted.
+  function importState(state, remap) {
+    spaces.clear();
+    tabs.clear();
+    activeSpace = "";
+    const mapNode = node => {
+      if (!node || typeof node !== "object") return null;
+      if (typeof node.term === "string") {
+        const term = remap(node.term);
+        return term ? { term } : null;
+      }
+      if (!["right", "down"].includes(node.dir)) return null;
+      const a = mapNode(node.a), b = mapNode(node.b);
+      if (!a || !b) return a || b;
+      return { dir: node.dir, ratio: clampRatio(node.ratio), a, b };
+    };
+    const saved = state && typeof state === "object" ? state : {};
+    const savedTabs = saved.tabs && typeof saved.tabs === "object" ? saved.tabs : {};
+    for (const [key, s] of Object.entries(saved.spaces && typeof saved.spaces === "object" ? saved.spaces : {})) {
+      if (!s || !Array.isArray(s.tabs)) continue;
+      const space = getSpace(key);
+      for (const id of s.tabs) {
+        const tab = typeof id === "string" && !tabs.has(id) ? savedTabs[id] : null;
+        const root = tab ? mapNode(tab.root) : null;
+        if (!root) continue;
+        const panes = getPanes(root);
+        const focus = typeof tab.focus === "string" ? remap(tab.focus) : "";
+        const zoom = typeof tab.zoom === "string" && tab.zoom ? remap(tab.zoom) : "";
+        tabs.set(id, {
+          id, space: key, name: typeof tab.name === "string" ? tab.name.slice(0, 80) : "", root,
+          focus: panes.includes(focus) ? focus : panes[0],
+          zoom: panes.length > 1 && panes.includes(zoom) ? zoom : ""
+        });
+        space.tabs.push(id);
+      }
+      space.active = space.tabs.includes(s.active) ? s.active : space.tabs[0] || "";
+    }
+    if (typeof saved.activeSpace === "string" && spaces.has(saved.activeSpace)) activeSpace = saved.activeSpace;
+    changed();
+  }
+
   function snapshot() {
     return {
       activeSpace,
@@ -223,7 +269,7 @@ function createWorkspace({ onChange = () => {} } = {}) {
 
   return {
     addTab, split, removeTerm, getTabTerms, focus, focusDirection, setRatio, toggleZoom, activateSpace, activateTab,
-    renameTab, reorderTabs, getActiveTab, findTab, snapshot
+    renameTab, reorderTabs, getActiveTab, findTab, snapshot, exportState, importState
   };
 }
 
