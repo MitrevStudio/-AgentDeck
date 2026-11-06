@@ -142,32 +142,24 @@ const buildNameHtml = (x, v, label) => (ui.renaming === x.n
   ? `<input class="rename" value="${esc(x.name)}" maxlength="80" aria-label="${esc(t(label))}">`
   : `<span class="proj-name" title="${esc(x.name)}">${hl(x.name, v.toks)}</span>`);
 
+// One line: the project's mark, name, branch, running sessions and count; its folder and last activity in the tooltip.
+// A terminal and Explorer show while the row is pointed at or chosen, the rest is in its menu.
 function buildProjectHtml(p, count, v) {
   const member = Boolean(p.group);
+  const tip = `${p.name}\n${p.path}\n${p.last ? ago(p.last) : t("manager.project.noSessions")}`;
   return `
     <div class="proj ${member ? "member" : ""} ${ui.selected === p.n ? "active" : ""}" data-path="${esc(p.path)}" tabindex="0" ${getDraggableAttr(v, p.n)}>
-      <div class="proj-row">${icon("folder")}
+      <div class="proj-row" title="${esc(tip)}"><span class="pmono" style="--h:${hue(p.n)}">${esc(initials(p.name))}</span>
         ${buildNameHtml(p, v, "manager.project.newName")}
         ${isPinned(p) ? buildPinMark() : ""}
         ${gitChip(p.path)}${projectLive(p.sessions)}
         ${buildCountHtml(count, v)}
       </div>
-      ${pathHtml(p.path, v.toks)}
-      <div class="proj-meta"><span>${esc(p.last ? ago(p.last) : t("manager.project.noSessions"))}</span>
-        <span class="proj-tools two-rows">
-          <span class="tool-row">
-            <button class="icon-btn" data-action="terminal" title="${esc(t("action.terminalHere"))}">${icon("terminal")}</button>
-            <button class="icon-btn" data-action="explorer" title="${esc(t("action.explorerTitle"))}">${icon("open")}</button>
-            <button class="icon-btn" data-action="copy" title="${esc(t("action.copyPath"))}">${icon("copy")}</button>
-          </span>
-          <span class="tool-row">
-            ${member ? "" : buildPinButton(p)}
-            <button class="icon-btn ${member ? "on" : ""}" data-action="group-menu" title="${esc(t("manager.projectGroup.menu"))}" aria-haspopup="menu">${icon("stack")}</button>
-            <button class="icon-btn" data-action="rename" title="${esc(t("action.rename"))}">${icon("pencil")}</button>
-            <button class="icon-btn danger" data-action="remove" title="${esc(t("action.remove"))}">${icon("trash")}</button>
-          </span>
-        </span>
-      </div>
+      <span class="proj-tools">
+        <button class="icon-btn" data-action="terminal" title="${esc(t("action.terminalHere"))}">${icon("terminal")}</button>
+        <button class="icon-btn" data-action="explorer" title="${esc(t("action.explorerTitle"))}">${icon("open")}</button>
+        <button class="icon-btn" data-action="project-menu" title="${esc(t("manager.project.more"))}" aria-haspopup="menu">${icon("more")}</button>
+      </span>
     </div>`;
 }
 
@@ -179,22 +171,21 @@ function getGroupMeta(members) {
 function buildGroupHtml(u, v, shut) {
   const g = u.group;
   const count = v.toks.length ? u.sessions.filter(s => v.hitSet.has(s)).length : u.sessions.length;
+  const tip = `${g.name}\n${g.size ? `${getMemberNames(u.members)}\n${getGroupMeta(u.members)}` : t("manager.projectGroup.empty")}`;
   return `
     <div class="proj grp ${ui.selected === g.n ? "active" : ""}" data-group="${esc(g.id)}" tabindex="0" ${g.size ? getDraggableAttr(v, g.n) : ""}>
-      <div class="proj-row">
+      <div class="proj-row" title="${esc(tip)}">
         <button class="icon-btn fold" data-action="fold" title="${esc(t(shut ? "manager.projectGroup.expand" : "manager.projectGroup.collapse"))}">${icon(shut ? "right" : "down")}</button>
         ${icon("stack")}${buildNameHtml(g, v, "manager.projectGroup.newName")}
         ${isPinned(g) ? buildPinMark() : ""}
         ${projectLive(u.sessions)}
         ${buildCountHtml(count, v)}
       </div>
-      <div class="proj-meta"><span>${esc(g.size ? getGroupMeta(u.members) : t("manager.projectGroup.empty"))}</span>
-        <span class="proj-tools">
-          ${g.size ? buildPinButton(g) : ""}
-          <button class="icon-btn" data-action="rename" title="${esc(t("action.rename"))}">${icon("pencil")}</button>
-          <button class="icon-btn danger" data-action="ungroup" title="${esc(t("manager.projectGroup.delete"))}">${icon("x")}</button>
-        </span>
-      </div>
+      <span class="proj-tools">
+        ${g.size ? buildPinButton(g) : ""}
+        <button class="icon-btn" data-action="rename" title="${esc(t("action.rename"))}">${icon("pencil")}</button>
+        <button class="icon-btn danger" data-action="ungroup" title="${esc(t("manager.projectGroup.delete"))}">${icon("x")}</button>
+      </span>
     </div>`;
 }
 
@@ -553,6 +544,7 @@ async function runAction(action, btn) {
     case "rename": ui.renaming = groupId ? "g:" + groupId : normPath(path); return render();
     case "pin": return pinProject(path, groupId);
     case "group-menu": return openGroupMenu(btn, path);
+    case "project-menu": return openProjectMenu(btn, path);
     case "ungroup": return applyRegistry(await window.manager.deleteGroup(groupId));
     case "fold": return toggleCollapsed(groupId);
     case "remove":
@@ -604,6 +596,12 @@ $("projects").addEventListener("click", async e => {
   const card = e.target.closest(".proj");
   if (card) selectProject(getCardKey(card));
 });
+$("projects").addEventListener("contextmenu", e => {
+  const card = e.target.closest(".proj[data-path]");
+  if (!card?.dataset.path || e.target.classList.contains("rename")) return;
+  e.preventDefault();
+  openProjectMenu(card.querySelector("[data-action=project-menu]"), card.dataset.path);
+});
 $("projects").addEventListener("keydown", e => {
   if (e.target.classList.contains("rename")) {
     if (e.key === "Enter") { e.preventDefault(); e.target.blur(); }
@@ -640,14 +638,26 @@ $("newGroup").addEventListener("click", () => createGroup().catch(err => toast(e
 
 // ---------- projects: the group menu ----------
 // Moves a project into another group (Move to a group, then the group), a new one, or out of its own.
-function openGroupMenu(btn, path) {
+function openGroupMenu(btn, path, items = getGroupMenuItems(path)) {
   closeGroupMenu();
   groupMenu = document.createElement("div");
   groupMenu.dataset.path = path;
   groupMenu.className = "menu";
   groupMenu.setAttribute("role", "menu");
   document.body.append(groupMenu);
-  showMenuItems(getGroupMenuItems(path), btn);
+  showMenuItems(items, btn);
+}
+// A project's menu: its folder, its place in the list and its group, its name; removing it. Also on a right-click.
+function openProjectMenu(btn, path) {
+  const p = data.projects.find(x => x.n === normPath(path));
+  if (!p) return;
+  openGroupMenu(btn, path, [
+    { label: t("action.copyPath"), icon: "copy", run: async () => { await window.manager.copyText(path); toast(t("toast.copied", { path })); } },
+    ...(p.group ? [] : [{ label: t(isPinned(p) ? "action.unpin" : "action.pin"), icon: "pin", run: () => pinProject(path) }]),
+    ...getGroupMenuItems(path),
+    { label: t("action.rename"), icon: "pencil", run: async () => { ui.renaming = p.n; render(); } },
+    { label: t("action.remove"), icon: "trash", run: () => runAction("remove", btn) }
+  ]);
 }
 // A session's own menu: its id and folder, a terminal or Explorer there. Also on a right-click of the row.
 function openRowMenu(btn, s) {
@@ -709,7 +719,7 @@ document.addEventListener("keydown", e => {
     e.stopPropagation();
     const path = groupMenu.dataset.path;
     closeGroupMenu();
-    [...document.querySelectorAll(".proj[data-path]")].find(el => el.dataset.path === path)?.querySelector("[data-action=group-menu]")?.focus();
+    [...document.querySelectorAll(".proj[data-path]")].find(el => el.dataset.path === path)?.querySelector("[data-action=project-menu]")?.focus();
   }
   if (e.key === "ArrowDown" || e.key === "ArrowUp") {
     e.preventDefault();

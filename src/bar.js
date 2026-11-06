@@ -36,15 +36,6 @@ function snipHtml(s, toks) {
 let hidden = readHidden();
 const remodel = () => conceal(buildData(raw, live), hidden);
 
-function initials(name) {
-  const words = String(name).replace(/([a-z])([A-Z])/g, "$1 $2").split(/[\s\-_.]+/).filter(Boolean);
-  return (words.length > 1 ? words[0][0] + words[1][0] : (words[0] || "?").slice(0, 2)).toUpperCase();
-}
-function hue(str) {
-  let h = 0;
-  for (const c of str) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return h % 360;
-}
 const byLive = (a, b) => getLiveRank(liveOf(a)) - getLiveRank(liveOf(b)) || lastSign(liveOf(b)) - lastSign(liveOf(a));
 const liveFirst = list => [...list.filter(liveOf).sort(byLive), ...list.filter(s => !liveOf(s))];
 

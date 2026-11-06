@@ -32,38 +32,46 @@ main {
 .splitter:hover::after, .splitter:focus-visible::after, .splitter:active::after { background: var(--accent); }
 
 /* ---------- projects ---------- */
+/* A project is one line (renderer.js); --row-bg is solid so its tools, shown over the right end, hide what is under. */
 .proj {
-  padding: 11px 12px 8px; border-radius: 10px; border: 1px solid transparent;
-  margin-bottom: 4px; cursor: pointer;
+  --row-bg: var(--panel);
+  position: relative; padding: 4px 8px; border-radius: var(--r-sm); margin-bottom: 1px; cursor: pointer;
+  background: var(--row-bg);
 }
-.proj:hover { background: var(--panel-2); }
-.proj.active { background: var(--accent-weak); border-color: var(--accent-line); }
-.proj-row { display: flex; align-items: center; gap: 9px; }
-.proj-row > .i { color: var(--accent); width: 17px; height: 17px; }
-.proj-name { flex: 1; min-width: 0; font-size: 14.5px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.proj > .path { margin: 5px 0 0 26px; }
-.proj-meta { display: flex; align-items: center; gap: 6px; margin: 4px 0 0 26px; min-height: 30px; font-size: 12px; color: var(--faint); }
-.proj-meta > :first-child { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.proj-tools { margin-left: auto; display: flex; gap: 1px; opacity: 0; transition: opacity var(--dur-fast); }
-.proj-tools.two-rows { flex-direction: column; align-items: flex-end; gap: 2px; }
-.tool-row { display: flex; gap: 1px; }
-.proj:hover .proj-tools, .proj.active .proj-tools, .proj:focus-within .proj-tools { opacity: 1; }
-.proj.all { padding-bottom: 11px; margin-bottom: 8px; }
+.proj:hover { --row-bg: var(--panel-2); }
+.proj.active { --row-bg: color-mix(in srgb, var(--accent) 13%, var(--panel)); }
+.proj-row { display: flex; align-items: center; gap: 8px; min-height: 26px; }
+.proj-row > .i { color: var(--muted); width: 16px; height: 16px; }
+.proj-name { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The project's mark: as on the edge menu's tiles (bar.css), smaller. */
+.pmono {
+  --h: 215; flex: none; width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center;
+  font-size: 10px; font-weight: 700; letter-spacing: .02em;
+  background: hsl(var(--h) var(--tile-bg)); color: hsl(var(--h) var(--tile-fg));
+}
+.proj-tools {
+  position: absolute; top: 50%; right: 4px; transform: translateY(-50%); display: flex; gap: 1px;
+  padding-left: 28px; background: linear-gradient(90deg, transparent, var(--row-bg) 24px);
+  opacity: 0; pointer-events: none; transition: opacity var(--dur-fast);
+}
+.proj-tools .icon-btn { width: 26px; height: 26px; }
+.proj:hover .proj-tools, .proj.active .proj-tools, .proj:focus-within .proj-tools { opacity: 1; pointer-events: auto; }
+.proj.all { margin-bottom: 6px; }
 .proj[draggable="true"] { cursor: grab; }
 .proj.dragging { opacity: .45; }
 .proj.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
 .proj.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
-.proj.drop-into { border-color: var(--accent); background: var(--accent-weak); }
-.proj.member { margin-left: 30px; position: relative; }
+.proj.drop-into { --row-bg: color-mix(in srgb, var(--accent) 13%, var(--panel)); box-shadow: inset 0 0 0 1px var(--accent); }
+.proj.member { margin-left: 18px; }
 .proj.member::before {
-  content: ""; position: absolute; left: -6px; top: -4px; bottom: -5px;
-  border-left: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  content: ""; position: absolute; left: -7px; top: 0; bottom: 0;
+  border-left: 1px solid var(--line-2);
 }
 .proj.grp .proj-row { gap: 6px; }
 .proj.grp .fold { width: 22px; height: 22px; padding: 0; margin-left: -4px; }
 .proj.grp .fold .i { width: 14px; height: 14px; }
-.pin-mark { display: inline-flex; color: var(--accent); }
-.pin-mark .i { width: 14px; height: 14px; }
+.pin-mark { display: inline-flex; color: var(--muted); }
+.pin-mark .i { width: 13px; height: 13px; }
 .proj-tools .icon-btn.on { color: var(--accent); }
 .head-btn {
   padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line);
@@ -192,10 +200,8 @@ main {
 @media (max-width: 1180px) {
   .keys { display: none; }
   .top-actions .btn:not(.primary) .label { display: none; }
-  /* The narrower project list: a project's branch is in its tooltip, its name keeps the room, and the tools take
-     their place only while they show (pointed at, chosen or focused), so the time is not cut short. */
+  /* The narrower project list: a project's branch is in its tooltip, its name keeps the room. */
   .proj-row .git-chip .gb { display: none; }
-  .proj:not(:hover, .active, :focus-within) .proj-tools { display: none; }
 }
 @media (max-width: 1020px) {
   .brand h1 { display: none; }

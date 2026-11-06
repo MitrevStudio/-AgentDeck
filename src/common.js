@@ -226,6 +226,18 @@ function dayGroup(ms) {
   return t("time.group.older");
 }
 
+// A project's mark (edge menu tiles, manager rows): two letters of its name on a colour of its own, the hue taken from
+// its normalized path so it stays the same in both windows.
+function initials(name) {
+  const words = String(name).replace(/([a-z])([A-Z])/g, "$1 $2").split(/[\s\-_.]+/).filter(Boolean);
+  return (words.length > 1 ? words[0][0] + words[1][0] : (words[0] || "?").slice(0, 2)).toUpperCase();
+}
+function hue(str) {
+  let h = 0;
+  for (const c of str) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return h % 360;
+}
+
 // ---------- search ----------
 // Every word must match somewhere; "\" and "/" are interchangeable so pasted Windows paths work.
 const tokenize = q => q.toLowerCase().replace(/\\/g, "/").split(/\s+/).filter(Boolean);
