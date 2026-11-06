@@ -69,6 +69,8 @@ function nextTab(step) {
 // ---------- General ----------
 const THEMES = ["system", "dark", "light"];
 const SESSIONS_IN = ["windows", "tabs"];
+// prefs.js: TERMINAL_FONT_SIZES, UI_SCALES.
+const TERM_FONT_SIZES = [11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24], UI_SCALES = [0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5];
 let general = { ...window.prefs };
 const dirty = new Set(); // tabs with unsaved edits: a language switch reloads the window
 function setDirty(tab, on) {
@@ -89,6 +91,9 @@ function renderGeneral() {
   $("edgeHandle").checked = general.edgeHandle;
   $("autoUpdate").checked = general.autoUpdate;
   $("sessionsIn").innerHTML = segHtml(SESSIONS_IN.map(m => [m, t(`tray.sessionsIn.${m}`)]), general.sessionsIn || "tabs");
+  const options = (list, value, label) => list.map(v => `<option value="${v}" ${v === value ? "selected" : ""}>${esc(label(v))}</option>`).join("");
+  $("termFont").innerHTML = options(TERM_FONT_SIZES, general.terminalFontSize ?? 14, v => `${v} px${v === 14 ? ` · ${t("settings.general.default")}` : ""}`);
+  $("uiScale").innerHTML = options(UI_SCALES, general.uiScale ?? 1.1, v => `${Math.round(v * 100)}%${v === 1.1 ? ` · ${t("settings.general.default")}` : ""}`);
   $("newWindow").checked = general.newWindow !== false;
   $("newWindow").disabled = general.sessionsIn === "tabs";
   $("dayView").checked = general.dayView === true;
@@ -129,6 +134,8 @@ for (const [id, key] of [["uiLanguage", "language"], ["uiTheme", "theme"], ["ses
 $("edgeHandle").addEventListener("change", e => setPref("edgeHandle", e.target.checked));
 $("autoUpdate").addEventListener("change", e => setPref("autoUpdate", e.target.checked));
 $("newWindow").addEventListener("change", e => setPref("newWindow", e.target.checked));
+$("termFont").addEventListener("change", e => setPref("terminalFontSize", Number(e.target.value)));
+$("uiScale").addEventListener("change", e => setPref("uiScale", Number(e.target.value)));
 $("dayView").addEventListener("change", e => setPref("dayView", e.target.checked));
 $("notify").addEventListener("change", e => setPref("notify", e.target.checked));
 // Start with Windows, applied at once: the installed app only - a copy run from source shows it off and says why.

@@ -7,6 +7,10 @@ const ANSI_NAMES = [
   "brightBlack", "brightRed", "brightGreen", "brightYellow", "brightBlue", "brightMagenta", "brightCyan", "brightWhite"
 ];
 const HEADERS_REFRESH_MS = 3000;
+const TERM_FONT = '"Cascadia Mono", "Cascadia Code", Consolas, monospace';
+// prefs.js: TERMINAL_FONT_SIZES; the default 14 reads like Herdr's.
+const TERM_FONT_SIZES = [11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24], TERM_FONT_DEFAULT = 14;
+let termFontSize = window.prefs.terminalFontSize || TERM_FONT_DEFAULT;
 let ws = { activeSpace: "", spaces: {}, tabs: {}, terminals: [] };
 const termViews = new Map(); // terminal id -> { host, term, fit, attachedEnd, queue }
 let layoutSig = "";          // what the panes were last built from
@@ -36,6 +40,19 @@ function applyTermTheme() {
   const theme = getTermTheme();
   termViews.forEach(view => { view.term.options.theme = theme; });
 }
+function applyTermFont(size) {
+  if (!size || size === termFontSize) return;
+  termFontSize = size;
+  termViews.forEach(view => { view.term.options.fontSize = size; });
+  requestAnimationFrame(fitShown);
+}
+// Ctrl+= / Ctrl+- one size up or down, Ctrl+0 back to the default (saved, as in Settings).
+function stepTermFont(step) {
+  const i = TERM_FONT_SIZES.indexOf(termFontSize);
+  const next = step === 0 ? TERM_FONT_DEFAULT : TERM_FONT_SIZES[Math.max(0, Math.min(TERM_FONT_SIZES.length - 1, (i < 0 ? 3 : i) + step))];
+  applyTermFont(next);
+  window.terminals.setView({ terminalFontSize: next }).catch(() => {});
+}
 
 // ---------- terminals ----------
 // Output that arrived before the scrollback did: only what the scrollback does not hold yet is written.
@@ -54,7 +71,7 @@ async function attachView(id, view) {
 function createTermView(id) {
   const host = document.createElement("div");
   host.className = "term-host";
-  const term = new Terminal({ fontFamily: '"Cascadia Mono", Consolas, monospace', fontSize: 13, cursorBlink: true, scrollback: 10000, theme: getTermTheme() });
+  const term = new Terminal({ fontFamily: TERM_FONT, fontSize: termFontSize, cursorBlink: true, scrollback: 10000, theme: getTermTheme() });
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
   term.open(host);
@@ -99,9 +116,15 @@ function getWorkspaceKey(e) {
     if (e.code === "KeyZ") return ["zoom", {}];
   }
   if (e.ctrlKey && !e.altKey && e.key === "Tab") return ["next-tab", { back: e.shiftKey }];
+  if (e.ctrlKey && !e.altKey && !e.shiftKey) {
+    if (e.code === "Equal" || e.code === "NumpadAdd") return ["font", { step: 1 }];
+    if (e.code === "Minus" || e.code === "NumpadSubtract") return ["font", { step: -1 }];
+    if (e.code === "Digit0" || e.code === "Numpad0") return ["font", { step: 0 }];
+  }
   return null;
 }
 function runWorkspaceKey([cmd, args]) {
+  if (cmd === "font") return stepTermFont(args.step);
   const tab = getShownTab();
   focusAfterRender = true;
   if (cmd === "split") return tab ? runWorkspace("split", args) : null;
@@ -300,7 +323,7 @@ window.terminals.onWorkspace(next => {
   renderWorkspace();
   if (typeof onWorkspaceChanged === "function") onWorkspaceChanged();
 });
-window.prefs.onChanged(() => requestAnimationFrame(applyTermTheme));
+window.prefs.onChanged(p => { requestAnimationFrame(applyTermTheme); applyTermFont(p.terminalFontSize); });
 new ResizeObserver(() => fitShown()).observe($("panes"));
 
 $("tabbar").addEventListener("click", e => {
