@@ -60,7 +60,9 @@ const ICONS = {
   agentOpenCode: '<path d="m9 7-5 5 5 5"/><path d="m15 7 5 5-5 5"/>',
   agentCodex: '<path d="m5 8 4 4-4 4"/><path d="M12 17h7"/>'
 };
-const icon = name => `<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
+// An agent's glyph is drawn in that agent's colour wherever it appears (theme.css .glyph-claude ...),
+// in the lists as well as on the buttons and in the menus, so the agents tell apart at a glance.
+const icon = name => `<svg class="i${name.startsWith("agent") ? ` glyph-${name.slice(5).toLowerCase()}` : ""}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
 I18N.applyI18n(); // the body is parsed by now, and the page's own script has not written into it yet
 document.querySelectorAll("[data-icon]").forEach(el => { el.outerHTML = icon(el.dataset.icon); });
 
@@ -228,7 +230,7 @@ function getSessionGroup(s, l) {
   if (l.status === "waiting") return t("manager.group.needs");
   return l.status === "busy" ? t("manager.group.working") : t("manager.group.ready");
 }
-// The agent as a small plain glyph; its name in the tooltip.
+// The agent as a small plain glyph in its colour; its name in the tooltip.
 const agentMark = agent => `<span class="agent-mark" title="${esc(agent)}">${icon(`agent${agent}`)}</span>`;
 
 // What a redraw depends on in the live list: the running sessions, their states and their subagents.

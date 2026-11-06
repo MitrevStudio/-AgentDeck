@@ -465,6 +465,10 @@ kbd {
 /* The agent of a session, as a plain glyph (common.js). */
 .agent-mark { flex: none; display: inline-grid; place-items: center; color: var(--muted); }
 .agent-mark .i { width: 14px; height: 14px; }
+/* Every agent glyph in its agent's colour (common.js icon()); the text beside it stays neutral. */
+.i.glyph-claude { color: var(--claude); }
+.i.glyph-opencode { color: var(--opencode); }
+.i.glyph-codex { color: var(--codex); }
 
 /* ---------- subagents ---------- */
 /* A running session's subagents, under it on a line of their own: folded to a count, or listed newest first. */

@@ -208,20 +208,31 @@ const SPACE_RECENT = 6;
 function getSpaceFolder(key) {
   return data.projects.find(p => p.n === key)?.path || "";
 }
+// The agents found on this computer (all of them until the first scan tells).
+const getInstalledAgents = () => (raw.agents?.length ? raw.agents : AGENTS);
+// The keys of a new session of each agent (workspace-ui.js NEW_AGENT_KEYS), for the buttons' tooltips.
+const getNewAgentKey = a => `Ctrl+Shift+${Object.keys(NEW_AGENT_KEYS).find(code => NEW_AGENT_KEYS[code] === a).slice(-1)}`;
+// Ctrl+Shift+R: the shown project's newest session that runs nowhere, in a new tab.
+function resumeLatest() {
+  const p = data.projects.find(x => x.n === ws.activeSpace);
+  if (!p) return;
+  const s = p.sessions.filter(x => !liveOf(x) && !findSessionTab(x)).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+  if (!s) return toast(t("keys.noSession"));
+  resume(s).catch(e => toast(e.message, true));
+}
 function renderSpaceEmpty(el, key) {
   const p = data.projects.find(x => x.n === key);
   if (!p) {
     el.innerHTML = `<div class="se-box empty"><h3>${esc(t("ws.pick.title"))}</h3><p>${esc(t("ws.pick.body"))}</p></div>`;
     return;
   }
-  const agents = raw.agents?.length ? raw.agents : AGENTS;
   const recent = [...p.sessions].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, SPACE_RECENT);
   el.innerHTML = `<div class="se-box">
     <div class="se-head"><span class="pmono" style="--h:${hue(p.n)}">${esc(initials(p.name))}</span>
       <div><h2>${esc(p.name)}</h2>${pathHtml(p.path, [])}</div></div>
     <div class="se-new">
-      <button class="btn" data-new="terminal">${icon("terminal")}${esc(t("ws.newTerminal"))}</button>
-      ${agents.map(a => `<button class="btn" data-new="${esc(a)}">${icon(`agent${a}`)}${esc(a)}</button>`).join("")}
+      <button class="btn" data-new="terminal" title="${esc(t("ws.newTerminalTitle"))}">${icon("terminal")}${esc(t("ws.newTerminal"))}</button>
+      ${getInstalledAgents().map(a => `<button class="btn" data-new="${esc(a)}" title="${esc(t("ws.newAgentTitle", { agent: a, key: getNewAgentKey(a) }))}">${icon(`agent${a}`)}${esc(a)}</button>`).join("")}
     </div>
     ${recent.length ? `<p class="se-label">${esc(t("ws.recent"))}</p>${recent.map(s => `<div class="se-row" data-key="${esc(sessionKey(s))}">
       ${agentMark(s.agent)}<span class="se-title" title="${esc(s.title)}">${esc(s.title)}</span>${getContextChip(s)}
@@ -237,10 +248,9 @@ function openNewMenu(btn) {
   groupMenu.className = "menu";
   groupMenu.setAttribute("role", "menu");
   document.body.append(groupMenu);
-  const agents = raw.agents?.length ? raw.agents : AGENTS;
   showMenuItems([
     { label: t("ws.newTerminal"), icon: "terminal", run: () => openInSpace("terminal") },
-    ...agents.map(a => ({ label: a, icon: `agent${a}`, run: () => openInSpace(a) }))
+    ...getInstalledAgents().map(a => ({ label: a, icon: `agent${a}`, run: () => openInSpace(a) }))
   ], btn);
 }
 // The status bar's left end: the focused pane's folder and branch, and its session's context.
