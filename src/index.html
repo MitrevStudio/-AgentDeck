@@ -20,7 +20,13 @@
   <aside class="side">
     <div class="side-head">
       <div class="logo">⌘</div>
-      <button class="side-search" id="openPalette"><span data-icon="search"></span><span class="grow" data-i18n="palette.open"></span><kbd>Ctrl K</kbd></button>
+      <!-- One quiet row of icons: the search is a popup (palette-ui.js), not a field, so it needs no field of its own. -->
+      <span class="side-tools">
+        <button id="openPalette" class="icon-btn" data-i18n-title="palette.open"><span data-icon="search"></span></button>
+        <button id="usage" class="icon-btn" data-i18n-title="usage.button.title" aria-pressed="false"><span data-icon="chart"></span></button>
+        <button id="voiceHistory" class="icon-btn" data-i18n-title="manager.history.title"><span data-icon="clock"></span></button>
+        <button id="settings" class="icon-btn" data-i18n-title="manager.settings.title"><span data-icon="sliders"></span></button>
+      </span>
     </div>
     <div class="side-body">
       <section class="side-sec projects-sec">
@@ -36,11 +42,6 @@
         <div class="side-sec-head"><h2 data-i18n="manager.agents.title"></h2><span class="count" id="agentCount">0</span></div>
         <div class="side-list" id="agents"></div>
       </section>
-    </div>
-    <div class="side-foot">
-      <button id="usage" class="icon-btn" data-i18n-title="usage.button.title" aria-pressed="false"><span data-icon="chart"></span></button>
-      <button id="voiceHistory" class="icon-btn" data-i18n-title="manager.history.title"><span data-icon="clock"></span></button>
-      <button id="settings" class="icon-btn" data-i18n-title="manager.settings.title"><span data-icon="sliders"></span></button>
     </div>
   </aside>
   <div class="splitter" id="splitter" role="separator" aria-orientation="vertical" tabindex="0" data-i18n-title="manager.splitter"></div>
