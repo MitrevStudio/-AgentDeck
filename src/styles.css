@@ -83,7 +83,8 @@ main .count { border-color: transparent; }
 .proj-tools .icon-btn.on { color: var(--accent); }
 .head-btn {
   padding: 3px 9px; border-radius: 999px; border: 1px solid transparent;
-  background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer;
+  flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap;
 }
 .head-btn:hover { background: var(--panel-2); color: var(--text); }
 #newGroup { margin-left: auto; }
@@ -167,6 +168,7 @@ main .count { border-color: transparent; }
 .select.sm { width: auto; height: 30px; padding-left: 10px; font-size: 13px; }
 
 /* A narrower sessions panel (#sessions is a size container, usage.css): the branch goes first, then the folder. */
+@container (max-width: 700px) { .sess-line .usage-chip { display: none; } }
 @container (max-width: 640px) { .where .git-chip { display: none; } }
 @container (max-width: 480px) { .where { display: none; } }
 
