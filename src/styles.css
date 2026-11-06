@@ -132,8 +132,6 @@ main .count { border-color: transparent; }
 .sess.active { --row-bg: color-mix(in srgb, var(--accent) 13%, var(--panel)); }
 .sess-main { position: relative; }
 .sess-line { display: flex; align-items: center; gap: 8px; min-height: 26px; }
-.agent-mark { flex: none; display: inline-grid; place-items: center; color: var(--muted); }
-.agent-mark .i { width: 14px; height: 14px; }
 .sess-title {
   flex: 1 1 auto; min-width: 60px; margin: 0; font-size: 14px; font-weight: 600; line-height: 1.35;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -164,30 +162,9 @@ main .count { border-color: transparent; }
 .sess-acts .icon-btn { width: 28px; height: 28px; }
 
 /* ---------- live status ---------- */
-/* One mark per running session, at the row's right end; .none keeps the column for the others. */
-.st { flex: none; }
-.st.none { width: 12px; height: 12px; }
-.st.pulse { margin: 0 2px; }
-.st.pulse.other { background: var(--accent); animation: none; }
-.st.spinner.stale { border-color: color-mix(in srgb, var(--muted) 25%, transparent); border-top-color: var(--muted); animation-duration: 2.4s; }
-.st.spinner.loading { border-color: color-mix(in srgb, var(--accent) 25%, transparent); border-top-color: var(--accent); }
 .proj-live { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 650; color: var(--muted); }
 .proj-live .pulse { margin-left: 3px; }
 .select.sm { width: auto; height: 30px; padding-left: 10px; font-size: 13px; }
-
-/* ---------- subagents ---------- */
-/* A running session's subagents, under it on a line of their own: folded to a count, or listed newest first. */
-.subs { margin: 2px 0 2px 22px; padding-left: 10px; border-left: 1px solid var(--line-2); }
-.sub-toggle {
-  display: inline-flex; align-items: center; gap: 6px; padding: 2px 6px 2px 2px; margin-left: -2px;
-  border: 0; border-radius: var(--r-xs); background: transparent; color: var(--muted); font-size: 12px;
-}
-.sub-toggle:hover { color: var(--text); background: var(--panel-3); }
-.sub-toggle .i { width: 12px; height: 12px; }
-.sub-row { display: flex; align-items: center; gap: 8px; min-height: 22px; font-size: 12px; color: var(--muted); }
-.sub-type { flex: none; color: var(--text); font-weight: 550; }
-.sub-desc { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sub-more { padding: 2px 0; font-size: 12px; color: var(--faint); }
 
 /* A narrower sessions panel (#sessions is a size container, usage.css): the branch goes first, then the folder. */
 @container (max-width: 640px) { .where .git-chip { display: none; } }

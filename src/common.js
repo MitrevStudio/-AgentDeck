@@ -154,9 +154,6 @@ function removeEndedLaunches(getLive) {
     }
   }
 }
-function getLoadingPill() {
-  return `<span class="live loading" title="${esc(t("live.hint.loading"))}"><span class="spinner"></span>${esc(t("live.label.loading"))}</span>`;
-}
 // "waiting": blocked on the user (a permission, a question, a dialog), so it goes first everywhere.
 const LIVE_RANKS = { waiting: 0, busy: 1, idle: 3 };
 function getLiveRank(l) {
@@ -200,6 +197,62 @@ function liveText(l) {
   if (l.status === "idle" || l.status === "waiting") return t("live.idleFor", { t: shortAgo(lastSign(l)) });
   return "";
 }
+// A running session's state as one small mark (the words are in its tooltip): a spinner while it works, a red dot
+// while it needs the user, a green one while it waits for the next prompt.
+function getStatusClass(l) {
+  const kind = getLiveKind(l);
+  if (kind === "busy") return `st spinner${isStale(l) ? " stale" : ""}`;
+  if (kind === "waiting") return "st pulse attn";
+  return kind === "idle" ? "st pulse" : "st pulse other";
+}
+function getStatusTitle(l) {
+  const kind = getLiveKind(l);
+  const label = kind === "other" ? l.status : t(`live.label.${kind}`);
+  return [`${label}${liveText(l) ? ` · ${liveText(l)}` : ""}`, getLiveHint(l), `PID ${l.pid}`].join("\n");
+}
+function statusMark(l, loading) {
+  if (loading) return `<span class="st spinner loading" title="${esc(t("live.hint.loading"))}"></span>`;
+  if (!l) return '<span class="st none"></span>';
+  return `<span class="${getStatusClass(l)}" data-live="${esc(sessionKey(l))}" title="${esc(getStatusTitle(l))}"></span>`;
+}
+// The group a session is listed under: what a running one is doing, else the day it was last active.
+function getSessionGroup(s, l) {
+  if (isLoading(sessionKey(s), l)) return t("manager.group.working");
+  if (!l) return dayGroup(s.updatedAt);
+  if (l.status === "waiting") return t("manager.group.needs");
+  return l.status === "busy" ? t("manager.group.working") : t("manager.group.ready");
+}
+// The agent as a small plain glyph; its name in the tooltip.
+const agentMark = agent => `<span class="agent-mark" title="${esc(agent)}">${icon(`agent${agent}`)}</span>`;
+
+// What a redraw depends on in the live list: the running sessions, their states and their subagents.
+const liveSignature = list => list.map(l => `${sessionKey(l)}:${l.status}:${(l.subagents || []).map(a => `${a.id}${a.working ? "+" : ""}`).join(",")}`).sort().join("|");
+
+// ---------- subagents ----------
+// A running session's subagents (live.js): shown or folded by the user (sessionKey -> true/false); otherwise they show
+// while one of them works.
+const subagentsOpen = new Map();
+const SUBAGENTS_SHOWN = 10;
+function isSubagentsOpen(key, list) {
+  return subagentsOpen.has(key) ? subagentsOpen.get(key) : list.some(a => a.working);
+}
+// attr: the attribute the page's buttons carry their action in (data-action in the manager, data-act in the edge menu).
+function subagentsHtml(key, list, attr) {
+  const open = isSubagentsOpen(key, list);
+  const working = list.filter(a => a.working).length;
+  const summary = [tn("manager.subagents.count", list.length), working && tn("manager.subagents.working", working)].filter(Boolean).join(" · ");
+  const rows = open ? list.slice(0, SUBAGENTS_SHOWN).map(a => `<div class="sub-row">
+      <span class="sub-type">${esc(a.type || t("manager.subagents.agent"))}</span>
+      <span class="sub-desc" title="${esc(a.description)}">${esc(a.description)}</span>
+      <span class="when" title="${esc(fullDate(a.at))}">${esc(ago(a.at))}</span>
+      ${a.working ? `<span class="st spinner" title="${esc(t("manager.subagents.busy"))}"></span>` : '<span class="st none"></span>'}
+    </div>`).join("") : "";
+  const more = open && list.length > SUBAGENTS_SHOWN ? `<div class="sub-more">${esc(tn("manager.subagents.more", list.length - SUBAGENTS_SHOWN))}</div>` : "";
+  return `<div class="subs">
+    <button class="sub-toggle" ${attr}="subagents" data-key="${esc(key)}" aria-expanded="${open}">${icon(open ? "down" : "right")}${working ? '<span class="st spinner"></span>' : ""}<span>${esc(summary)}</span></button>
+    ${rows}${more}</div>`;
+}
+
 // What to say after "show terminal" (terminal-focus.js): nothing when the session's own tab or window came up.
 const focusNote = r => (r.ok && !r.reason ? "" : t(`term.focus.${r.reason}`, { app: r.app || "" }));
 
