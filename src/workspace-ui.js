@@ -315,13 +315,17 @@ window.terminals.onData(({ id, data, end }) => {
   if (view.attachedEnd === null) view.queue.push({ data, end });
   else writeAfter(view, data, end);
 });
+// The drawing reads renderer.js's session data, and the page may hear from main between two of its scripts (a layout
+// restored on start arrives at once): nothing is drawn before every script ran.
+const isPageLoading = () => document.readyState === "loading";
 window.terminals.onWorkspace(next => {
   const before = getShownTab()?.focus;
   ws = next;
+  if (isPageLoading()) return;
   // Something new came up (a launch, a split, "show terminal"): the keyboard goes to it.
   if (getShownTab()?.focus !== before) focusAfterRender = true;
   renderWorkspace();
-  if (typeof onWorkspaceChanged === "function") onWorkspaceChanged();
+  onWorkspaceChanged();
 });
 window.prefs.onChanged(p => { requestAnimationFrame(applyTermTheme); applyTermFont(p.terminalFontSize); });
 new ResizeObserver(() => fitShown()).observe($("panes"));
@@ -419,4 +423,8 @@ $("tabbar").addEventListener("dragend", () => { draggedTab = ""; clearTabDropMar
 
 // The headers and tab states follow the live registry and the scan.
 setInterval(() => { renderTabbar(); const tab = getShownTab(); if (tab) renderPaneHeads(tab); }, HEADERS_REFRESH_MS);
-window.terminals.getWorkspace().then(next => { ws = next; renderWorkspace(); if (typeof onWorkspaceChanged === "function") onWorkspaceChanged(); }).catch(() => {});
+function drawFirst() {
+  window.terminals.getWorkspace().then(next => { ws = next; renderWorkspace(); onWorkspaceChanged(); }).catch(e => console.error(e));
+}
+if (isPageLoading()) document.addEventListener("DOMContentLoaded", drawFirst, { once: true });
+else drawFirst();

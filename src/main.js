@@ -33,6 +33,7 @@ const limits = createAllLimits({ fetch: (url, init) => network.fetch(url, init),
   findExecutable: name => findOnPath(name), onChange: l => broadcast("limits:changed", l) });
 const { createNotifier } = require("./notify");
 const { createTerminals } = require("./terminals");
+const atomicFile = require("./voice/atomic-file");
 // AgentDeck's own terminal tabs (prefs "sessionsIn": "tabs"); their output goes to the manager window only.
 function sendToManager(channel, payload) {
   if (managerWin && !managerWin.isDestroyed()) {
@@ -42,13 +43,13 @@ function sendToManager(channel, payload) {
 // Where each terminal is on screen (workspace.js): spaces (projects), their tabs, and the panes a tab is split into.
 // The window gets the layout and the terminals' list together, as one picture.
 const { createWorkspace, getPanes } = require("./workspace");
-const workspace = createWorkspace({ onChange: () => sendWorkspace() });
+const workspace = createWorkspace({ onChange: () => { sendWorkspace(); scheduleWorkspaceSave(); } });
 const terminals = createTerminals({
   userDataDir: app.getPath("userData"),
   onData: (id, data, end) => sendToManager("terminal:data", { id, data, end }),
   // A program that ends takes its pane with it, as in Herdr.
   onExit: id => { terminals.close(id); },
-  onChange: () => { prunePanes(); sendWorkspace(); }
+  onChange: () => { prunePanes(); sendWorkspace(); scheduleWorkspaceSave(); }
 });
 // Panes whose terminal is gone (closed, or ended) leave the layout.
 function prunePanes() {
@@ -73,6 +74,81 @@ function confirmQuit() {
   const owner = managerWin && !managerWin.isDestroyed() && managerWin.isVisible() ? managerWin : null;
   return (owner ? dialog.showMessageBoxSync(owner, options) : dialog.showMessageBoxSync(options)) === 0;
 }
+// The layout is saved in userData/workspace.json (a second after a change, and on quit) with what runs in each pane,
+// so the next start puts it back (restoreWorkspace). Not while it is being restored, nor once quitting began: the
+// terminals ending then would save an emptied layout over the real one.
+const WORKSPACE_FILE = path.join(app.getPath("userData"), "workspace.json");
+const WORKSPACE_SAVE_MS = 1000;
+let workspaceSaveTimer = null, workspaceSaving = false;
+function getSavedWorkspace() {
+  const terms = Object.fromEntries(terminals.getTabs().map(x => [x.id, { cwd: x.cwd, title: x.title, agent: x.agent, sessionId: x.sessionId }]));
+  return JSON.stringify({ version: 1, layout: workspace.exportState(), terms });
+}
+function scheduleWorkspaceSave() {
+  if (!workspaceSaving || workspaceSaveTimer) return;
+  workspaceSaveTimer = setTimeout(() => {
+    workspaceSaveTimer = null;
+    if (workspaceSaving) atomicFile.write(WORKSPACE_FILE, getSavedWorkspace()).catch(e => console.error("Saving the layout failed:", e.message));
+  }, WORKSPACE_SAVE_MS);
+}
+// The last save, on quit; nothing is saved after it.
+async function saveWorkspaceFinal() {
+  if (!workspaceSaving) return;
+  workspaceSaving = false;
+  clearTimeout(workspaceSaveTimer);
+  await atomicFile.write(WORKSPACE_FILE, getSavedWorkspace()).catch(e => console.error("Saving the layout failed:", e.message));
+}
+function readSavedWorkspace() {
+  try {
+    const saved = JSON.parse(fs.readFileSync(WORKSPACE_FILE, "utf8"));
+    return saved?.version === 1 && isObj(saved.layout) && isObj(saved.terms) ? saved : null;
+  } catch {
+    return null;
+  }
+}
+// A saved pane whose terminal is gone opens anew: an agent resumes its session (when it still can), anything else
+// becomes a shell in its folder. No other command runs again. "" when its folder is gone too: the pane goes.
+async function reopenTerminal(meta, env) {
+  if (!isObj(meta) || !isDir(meta.cwd)) return "";
+  if (meta.agent && meta.sessionId) {
+    try {
+      checkResumable(meta.agent, meta.sessionId, meta.cwd);
+      const cmd = agentCommand(meta.agent, meta.sessionId).map(psQuote).join(" ");
+      const title = typeof meta.title === "string" && meta.title ? meta.title : `${meta.agent} ${meta.sessionId.slice(0, 8)}`;
+      return await openTerminal(meta.cwd, "& " + cmd, { title, agent: meta.agent, sessionId: meta.sessionId }, env, "resume");
+    } catch (e) {
+      launchLog(`resuming failed (${e.message}), a shell instead`, `cwd="${meta.cwd}"`);
+    }
+  }
+  return openTerminal(meta.cwd, null, {}, env, "reopen").catch(e => {
+    launchLog(`reopening failed (${e.message})`, `cwd="${meta.cwd}"`);
+    return "";
+  });
+}
+// The saved layout, with each pane's terminal opened anew (the terminals ended with the app). Shown space, tabs and
+// focus as they were. All spaces at once: a space shown later finds its panes ready, and the edge menu counts them.
+async function restoreWorkspace() {
+  const saved = readSavedWorkspace();
+  try {
+    if (!saved) return;
+    const panes = new Set(Object.values(saved.layout.tabs || {}).flatMap(tab => getPanes(tab?.root)));
+    if (!panes.size) return;
+    const proxy = await network.terminalProxy().catch(() => null);
+    const env = terminalEnv(process.env, proxy);
+    const ids = new Map();
+    for (const old of panes) {
+      ids.set(old, await reopenTerminal(saved.terms[old], env));
+    }
+    workspace.importState(saved.layout, old => ids.get(old) || "");
+    prunePanes();
+  } catch (e) {
+    console.error("Restoring the layout failed:", e);
+  } finally {
+    workspaceSaving = true;
+    scheduleWorkspaceSave();
+  }
+}
+let restoring = Promise.resolve();
 function sendWorkspace() {
   const view = getWorkspaceView();
   sendToManager("workspace:changed", view);
@@ -500,14 +576,21 @@ const PLACES = ["tab", "right", "down"];
 // A terminal of AgentDeck's own: the command reaches PowerShell encoded, so no quoting of it can break the command
 // line. It opens in a new tab of its project's space, or split off the focused pane (place "right" / "down").
 async function openTab(cwd, command, meta, env, place = "tab") {
-  const encoded = command ? Buffer.from(command, "utf16le").toString("base64") : "";
-  const commandLine = command ? `powershell.exe -NoLogo -NoExit -EncodedCommand ${encoded}` : "powershell.exe -NoLogo";
-  const id = await terminals.open({ cwd, commandLine, title: meta.title || path.basename(cwd), agent: meta.agent, sessionId: meta.sessionId, env });
-  launchLog(`agentdeck ${place}`, `cwd="${cwd}" cmd=${command ? `"${command.slice(0, 120)}"` : "-"}`);
+  // A layout still being restored would replace a tab opened meanwhile.
+  await restoring;
+  const id = await openTerminal(cwd, command, meta, env, place);
   const shown = workspace.getActiveTab();
   if (place !== "tab" && shown) workspace.split(shown.id, id, place);
   else workspace.addTab(getSpaceFor(cwd), id);
   showManager();
+}
+// The terminal only; the caller places it. how: for the launch log.
+async function openTerminal(cwd, command, meta, env, how) {
+  const encoded = command ? Buffer.from(command, "utf16le").toString("base64") : "";
+  const commandLine = command ? `powershell.exe -NoLogo -NoExit -EncodedCommand ${encoded}` : "powershell.exe -NoLogo";
+  const id = await terminals.open({ cwd, commandLine, title: meta.title || path.basename(cwd), agent: meta.agent, sessionId: meta.sessionId, env });
+  launchLog(`agentdeck ${how}`, `cwd="${cwd}" cmd=${command ? `"${command.slice(0, 120)}"` : "-"}`);
+  return id;
 }
 function showTab(id) {
   workspace.focus(id);
@@ -758,7 +841,8 @@ async function runWorkspaceCommand(cmd, a) {
   switch (cmd) {
     case "focus": return workspace.focus(id(a.term));
     case "focus-dir": return workspace.focusDirection(text(a.direction, 8));
-    case "ratio": return workspace.setRatio(id(a.tab), text(a.path ?? "", 32), Number(a.ratio));
+    // The root split's path is "" (which text() refuses).
+    case "ratio": return workspace.setRatio(id(a.tab), a.path === "" ? "" : text(a.path, 32), Number(a.ratio));
     case "zoom": return workspace.toggleZoom(id(a.tab));
     case "space": workspace.activateSpace(text(a.space ?? "", 2000)); return true;
     // The edge menu: the window comes up showing that project.
@@ -1179,6 +1263,8 @@ if (!app.requestSingleInstanceLock()) {
     prefs.on("changed", onPrefsChanged);
     // The proxy settings, before anything goes online (requests made meanwhile wait for them).
     network.start();
+    // Before the window: it shows the layout as soon as it is back (and updates as it comes).
+    restoring = restoreWorkspace();
     registerIpc();
     autopilot.start();
     tabLinks.start();
@@ -1261,7 +1347,7 @@ if (!app.requestSingleInstanceLock()) {
     if (quitting) return;
     quitting = true;
     e.preventDefault();
-    const shutdown = Promise.all([(async () => { await voiceStarting; await voice?.dispose(); })(), usage.flush()]);
+    const shutdown = Promise.all([(async () => { await voiceStarting; await voice?.dispose(); })(), usage.flush(), saveWorkspaceFinal()]);
     Promise.race([shutdown, new Promise(r => setTimeout(r, QUIT_GRACE_MS))])
       .catch(err => console.error("Voice shutdown failed:", err))
       .finally(() => app.quit());
@@ -1269,6 +1355,16 @@ if (!app.requestSingleInstanceLock()) {
   app.on("will-quit", () => {
     limits.stop();
     globalShortcut.unregisterAll();
+    // Quitting without before-quit (Windows ending the session) still saves the layout, at once.
+    if (workspaceSaving) {
+      workspaceSaving = false;
+      try {
+        fs.writeFileSync(`${WORKSPACE_FILE}.quit`, getSavedWorkspace());
+        fs.renameSync(`${WORKSPACE_FILE}.quit`, WORKSPACE_FILE);
+      } catch (e) {
+        console.error("Saving the layout failed:", e.message);
+      }
+    }
     terminals.closeAll();
   });
   // The hidden edge menu keeps the app alive after the manager window is closed; quitting is done from the tray.
