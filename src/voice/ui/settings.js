@@ -92,8 +92,8 @@ function renderGeneral() {
   $("autoUpdate").checked = general.autoUpdate;
   $("sessionsIn").innerHTML = segHtml(SESSIONS_IN.map(m => [m, t(`tray.sessionsIn.${m}`)]), general.sessionsIn || "tabs");
   const options = (list, value, label) => list.map(v => `<option value="${v}" ${v === value ? "selected" : ""}>${esc(label(v))}</option>`).join("");
-  $("termFont").innerHTML = options(TERM_FONT_SIZES, general.terminalFontSize ?? 14, v => `${v} px${v === 14 ? ` · ${t("settings.general.default")}` : ""}`);
-  $("uiScale").innerHTML = options(UI_SCALES, general.uiScale ?? 1.1, v => `${Math.round(v * 100)}%${v === 1.1 ? ` · ${t("settings.general.default")}` : ""}`);
+  $("termFont").innerHTML = options(TERM_FONT_SIZES, general.terminalFontSize ?? 16, v => `${v} px${v === 16 ? ` · ${t("settings.general.default")}` : ""}`);
+  $("uiScale").innerHTML = options(UI_SCALES, general.uiScale ?? 1, v => `${Math.round(v * 100)}%${v === 1 ? ` · ${t("settings.general.default")}` : ""}`);
   $("newWindow").checked = general.newWindow !== false;
   $("newWindow").disabled = general.sessionsIn === "tabs";
   $("dayView").checked = general.dayView === true;

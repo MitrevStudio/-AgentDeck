@@ -8,8 +8,8 @@ const ANSI_NAMES = [
 ];
 const HEADERS_REFRESH_MS = 3000;
 const TERM_FONT = '"Cascadia Mono", "Cascadia Code", Consolas, monospace';
-// prefs.js: TERMINAL_FONT_SIZES; the default 14 reads like Herdr's.
-const TERM_FONT_SIZES = [11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24], TERM_FONT_DEFAULT = 14;
+// prefs.js: TERMINAL_FONT_SIZES and its default.
+const TERM_FONT_SIZES = [11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24], TERM_FONT_DEFAULT = 16;
 let termFontSize = window.prefs.terminalFontSize || TERM_FONT_DEFAULT;
 let ws = { activeSpace: "", spaces: {}, tabs: {}, terminals: [] };
 const termViews = new Map(); // terminal id -> { host, term, fit, attachedEnd, queue }
@@ -49,7 +49,7 @@ function applyTermFont(size) {
 // Ctrl+= / Ctrl+- one size up or down, Ctrl+0 back to the default (saved, as in Settings).
 function stepTermFont(step) {
   const i = TERM_FONT_SIZES.indexOf(termFontSize);
-  const next = step === 0 ? TERM_FONT_DEFAULT : TERM_FONT_SIZES[Math.max(0, Math.min(TERM_FONT_SIZES.length - 1, (i < 0 ? 3 : i) + step))];
+  const next = step === 0 ? TERM_FONT_DEFAULT : TERM_FONT_SIZES[Math.max(0, Math.min(TERM_FONT_SIZES.length - 1, (i < 0 ? TERM_FONT_SIZES.indexOf(TERM_FONT_DEFAULT) : i) + step))];
   applyTermFont(next);
   window.terminals.setView({ terminalFontSize: next }).catch(() => {});
 }
