@@ -71,7 +71,24 @@ function computeTiles() {
       busy: states.some(l => l.status === "busy" && !isStale(l)), idle: states.some(l => l.status !== "busy")
     });
   }
+  // A search puts the projects whose name is closest to it first, ahead of the session results.
+  if (toks.length) {
+    const named = out.filter(x => x.p && nameCloseness(x.label, q.value) >= 0)
+      .map((x, i) => ({ x, i, d: nameCloseness(x.label, q.value) })).sort((a, b) => a.d - b.d || a.i - b.i).map(y => y.x);
+    const rest = out.filter(x => !named.includes(x));
+    return { toks, hits, tiles: [...named, ...rest] };
+  }
   return { toks, hits, tiles: out };
+}
+// The project to show for a search: the one whose name starts with it (or a word of it does), the closest first.
+function getClosestProjectTile(value) {
+  let best = null, bestD = 3;
+  for (const u of getUnits(model.projects, model.groups)) {
+    const p = u.group || u.project;
+    const d = nameCloseness(p.name, value);
+    if (d >= 0 && d < bestD) { best = "p:" + p.n; bestD = d; }
+  }
+  return best;
 }
 
 function rowsFor(tile, toks, hits) {
@@ -368,7 +385,7 @@ async function setQuery(value) {
   const v = value.trim(), ticket = ++dirCheck;
   st.dir = looksLikePath(v) ? await window.manager.isDir(v) : "";
   if (ticket !== dirCheck) return; // a newer keystroke won
-  if (value) st.tile = "results";
+  if (value) st.tile = getClosestProjectTile(value) || "results";
   ftsSearch(value);
   render();
 }

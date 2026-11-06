@@ -146,8 +146,9 @@ function toggleCollapsed(id) {
 function renderOrderToggle() {
   const custom = raw.registry.order === "custom";
   const el = $("projectOrder");
-  el.textContent = t(custom ? "manager.order.custom" : "manager.order.activity");
-  el.title = t(custom ? "manager.order.customTitle" : "manager.order.activityTitle");
+  el.innerHTML = icon(custom ? "sortCustom" : "sortActivity");
+  el.classList.toggle("on", custom);
+  el.title = `${t(custom ? "manager.order.custom" : "manager.order.activity")}: ${t(custom ? "manager.order.customTitle" : "manager.order.activityTitle")}`;
   el.hidden = !data.projects.length;
   $("newGroup").hidden = !data.projects.length;
 }
