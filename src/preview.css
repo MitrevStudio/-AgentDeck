@@ -1,4 +1,4 @@
-/* Session preview (preview-ui.js): the edge menu's pane beside the session list and the manager's hover card. Linked
+/* Session preview (preview-ui.js): the edge menu's pane beside the session list and the manager's search. Linked
    after the page's own stylesheet; colours from theme.css tokens only. Nothing in the edge menu's pane moves. */
 .pv { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .pv-title { display: flex; align-items: center; gap: 8px; padding: 11px 14px 0; font-size: 13px; font-weight: 650; }
@@ -53,10 +53,3 @@
 .dbody > .pv { flex: none; width: clamp(300px, 33%, 440px); border-left: 1px solid var(--line); }
 
 /* ---------- manager: the hover card ---------- */
-.pv-card {
-  position: fixed; z-index: 30; overflow: hidden;
-  border-radius: var(--r-lg); border: 1px solid var(--line-2); background: var(--raised); box-shadow: var(--shadow-pop);
-  animation: rise var(--dur) var(--ease-out);
-}
-.pv-card .pv-title { padding-top: 12px; }
-@media (prefers-reduced-motion: reduce) { .pv-card { animation: none; } }

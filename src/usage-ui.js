@@ -73,13 +73,6 @@ function usageTitle(a, scope = "") {
 }
 
 // ---------- markup ----------
-// Session card (manager): "1.2m tok · $3.40"; a narrow window keeps the cost only (usage.css).
-function usageChip(s) {
-  const a = usageOf(s);
-  if (!a) return "";
-  const tokens = esc(tokensText(a.tokens));
-  return `<span class="usage-chip" title="${esc(usageTitle(a))}">${a.cost == null ? tokens : `<span class="uc-tokens">${tokens} · </span>${esc(fmtUsd(a.cost))}`}</span>`;
-}
 // Session row (edge menu): the cost alone, or the tokens when there is no price.
 function usageCost(s) {
   const a = usageOf(s);

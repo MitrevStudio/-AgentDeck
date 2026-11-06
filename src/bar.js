@@ -9,6 +9,14 @@ let shownDetail = ""; // the list #detail shows: which opening of the menu, tile
 const st = { tile: "", row: -1, confirm: "", del: "", dir: "", shown: false, opened: 0 };
 const q = $("q");
 const liveOf = s => live.get(sessionKey(s));
+// AgentDeck's own terminals (workspace.js in main): which sessions run in them, and each project's open tabs.
+let deck = { sessions: new Set(), tabs: {} };
+function setDeck(w) {
+  deck = {
+    sessions: new Set(w.terminals.filter(x => x.sessionId && !x.exited).map(x => `${x.agent}:${x.sessionId}`)),
+    tabs: Object.fromEntries(Object.entries(w.spaces).map(([key, s]) => [key, s.tabs.length]))
+  };
+}
 // Whole conversations, searched in main's index (search.js): a session whose text matches joins the hits even when
 // its title does not, with the matching passage under its title. Words under three letters are not searched there.
 const fts = { q: "", hits: new Map() };
@@ -159,6 +167,7 @@ function renderDetail(tile, toks) {
         ${hideBtn("project", tile.p.n, hidden.projects.has(tile.p.n))}
         ${tile.p.total === 0 ? `<button class="icon-btn danger" data-act="remove-project" data-path="${esc(tile.p.path)}" title="${esc(t("action.remove"))}">${icon("trash")}</button>` : ""}
         <div class="dactions">${newButtons(tile.p.path)}
+          <button class="btn" data-act="show-space" data-space="${esc(tile.p.n)}" title="${esc(t("bar.showSpaceTitle"))}">${icon("window")}${esc(deck.tabs[tile.p.n] ? tn("bar.showSpaceTabs", deck.tabs[tile.p.n]) : t("bar.showSpace"))}</button>
           <button class="btn" data-act="terminal" data-path="${esc(tile.p.path)}">${icon("terminal")}${esc(t("action.terminal"))}</button>
           <button class="btn" data-act="explorer" data-path="${esc(tile.p.path)}">${icon("open")}${esc(t("action.explorer"))}</button></div></div>`
     : tile.kind === "group"
@@ -202,7 +211,7 @@ function rowHtml(r, i, toks) {
   return `${head}<div class="row ${i === st.row ? "sel" : ""} ${s.concealed ? "concealed" : ""}" data-i="${i}">
     ${agentMark(s.agent)}
     <div class="rmain"><div class="t" title="${esc(s.title)}">${hl(s.title, toks)}</div>${r.showPath && s.cwd ? pathHtml(s.cwd, toks) : ""}${snipHtml(s, toks)}</div>
-    ${getContextChip(s)}${usageCost(s)}<span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span>
+    ${deck.sessions.has(key) ? `<span class="in-deck" title="${esc(t("bar.inDeck"))}">${icon("terminal")}</span>` : ""}${getContextChip(s)}${usageCost(s)}<span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span>
     ${statusMark(l, isLoading(key, l))}
     <span class="ract">${hideBtn("session", key, hidden.sessions.has(key))}${s.cwd ? `<button class="icon-btn" data-act="terminal" data-path="${esc(s.cwd)}" title="${esc(t("bar.terminalIn", { path: s.cwd }))}">${icon("terminal")}</button>
       <button class="icon-btn" data-act="copy" data-path="${esc(s.cwd)}" title="${esc(t("action.copyPath"))}">${icon("copy")}</button>` : ""}
@@ -310,6 +319,7 @@ async function act(name, el) {
     if (name === "explorer") { const err = await window.manager.openPath(path); if (err) throw new Error(err); return hide(); }
     if (name === "copy") { await window.manager.copyText(path); return toast(t("toast.copied", { path })); }
     if (name === "show-live") { setQuery(""); return selectTile("live"); }
+    if (name === "show-space") { await window.terminals.command("show-space", { space: el.dataset.space }); return hide(); }
     if (name === "subagents") {
       const key = el.dataset.key;
       subagentsOpen.set(key, !isSubagentsOpen(key, live.get(key)?.subagents || []));
@@ -496,3 +506,5 @@ document.addEventListener("keydown", e => {
 
 window.manager.getData({ cached: true }).then(applyData).catch(() => {});
 setInterval(pollLive, 2000);
+window.terminals.onWorkspace(w => { setDeck(w); if (st.shown) render({ strip: false }); });
+window.terminals.getWorkspace().then(setDeck).catch(() => {});

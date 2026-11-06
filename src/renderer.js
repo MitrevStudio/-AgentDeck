@@ -10,7 +10,7 @@ let groupOfPath = new Map();
 let groupMenu = null;
 const getGroupOf = path => groupOfPath.get(path) || "";
 // selected: the shown space (workspace-ui.js decides it; a project's normalized path).
-const ui = { query: "", selected: "", renaming: "", loading: false, loaded: false };
+const ui = { selected: "", renaming: "", loading: false, loaded: false };
 
 // Running sessions, keyed like `Claude:<id>`; refreshed every couple of seconds from the agents' own registries.
 let live = new Map(), liveSig = "", pendingRender = false;
@@ -25,42 +25,12 @@ function prepare() {
 }
 const getEmptyUnit = g => ({ group: g, members: [], sessions: [] });
 
-// Whole conversations too, from main's full-text index (as in the edge menu): a session whose text matches joins the
-// hits even when its title does not. Words under three letters are not searched there.
-const TEXT_SEARCH_DELAY_MS = 220;
-const textSearch = { q: "", keys: new Set() };
-let textSearchTimer = 0, textSearchTicket = 0;
-function searchConversations(value) {
-  clearTimeout(textSearchTimer);
-  const v = value.trim();
-  if (!v.split(/\s+/).some(w => [...w].length >= 3)) {
-    textSearch.q = "";
-    textSearch.keys = new Set();
-    return;
-  }
-  const ticket = ++textSearchTicket;
-  textSearchTimer = setTimeout(async () => {
-    let hits = [];
-    try { hits = await window.manager.searchText(v); } catch {}
-    if (ticket !== textSearchTicket || ui.query.trim() !== v) return;
-    textSearch.q = v;
-    textSearch.keys = new Set(hits.map(h => h.key));
-    render();
-  }, TEXT_SEARCH_DELAY_MS);
-}
-function isTextHit(s) {
-  return textSearch.q !== "" && textSearch.q === ui.query.trim() && textSearch.keys.has(sessionKey(s));
-}
-
+// toks stays empty: the sidebar lists everything, searching is the palette's (palette-ui.js).
 function compute() {
-  const toks = tokenize(ui.query);
-  const hits = toks.length ? data.sessions.filter(s => matches(s.hay, toks) || isTextHit(s)) : data.sessions;
+  const toks = [];
+  const hits = data.sessions;
   const hitSet = new Set(hits);
-  // A group found by its name shows all of its projects.
-  const groupHits = new Set(toks.length ? data.groups.filter(g => matches(g.hay, toks)).map(g => g.id) : []);
-  const projects = data.projects
-    .map(p => ({ p, count: toks.length ? p.sessions.filter(s => hitSet.has(s)).length : p.sessions.length }))
-    .filter(x => !toks.length || x.count > 0 || matches(x.p.hay, toks) || x.p.n === ui.selected || groupHits.has(x.p.group));
+  const projects = data.projects.map(p => ({ p, count: p.sessions.length }));
   // The agents: running sessions, those that need the user first.
   const running = hits.filter(liveOf).sort((a, b) => getLiveRank(liveOf(a)) - getLiveRank(liveOf(b)) || lastSign(liveOf(b)) - lastSign(liveOf(a)));
   const liveCounts = countLiveGroups(data.sessions.map(liveOf).filter(Boolean));
@@ -76,7 +46,8 @@ function render() {
   renderAgents(v);
   renderTitle(v);
   if (!getShownTab()) renderSpaceEmpty($("spaceEmpty"), ws.activeSpace);
-  $("clearSearch").hidden = !ui.query;
+  renderFocusInfo();
+  window.searchPalette?.render();
   const input = document.querySelector(".rename");
   if (input && document.activeElement !== input) { input.focus(); input.select(); }
 }
@@ -95,7 +66,6 @@ function renderProjects(v) {
     return buildGroupHtml(u, v, shut) + (shut ? "" : u.members.map(p => buildProjectHtml(p, counts.get(p), v)).join(""));
   }).join("");
   if (!total && ui.loaded) html += `<div class="empty small">${esc(t("manager.projects.empty"))}</div>`;
-  else if (!v.projects.length && v.toks.length) html += `<div class="empty small">${esc(t("manager.projects.noMatch", { q: ui.query }))}</div>`;
   $("projects").innerHTML = html;
 }
 const getDraggableAttr = (v, n) => (v.toks.length || ui.renaming === n ? "" : 'draggable="true"');
@@ -272,6 +242,15 @@ function openNewMenu(btn) {
     ...agents.map(a => ({ label: a, icon: `agent${a}`, run: () => openInSpace(a) }))
   ], btn);
 }
+// The status bar's left end: the focused pane's folder and branch, and its session's context.
+function renderFocusInfo() {
+  const x = getTerminal(getShownTab()?.focus);
+  const s = x && getTermSession(x);
+  const html = x ? `<span class="fi-dir" title="${esc(x.cwd)}">${icon("folder")}${esc(x.cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop())}</span>${gitChip(x.cwd)}${s ? getContextChip(s) : ""}` : "";
+  const el = $("focusInfo");
+  if (el.dataset.html !== html) { el.dataset.html = html; el.innerHTML = html; }
+  $("status").hidden = Boolean(x);
+}
 // workspace-ui.js: the layout changed - the shown space is the selected project.
 function onWorkspaceChanged() {
   ui.selected = ws.activeSpace;
@@ -312,6 +291,7 @@ async function load() {
     prepare();
     render();
     showSummary();
+    window.limitsUi?.refresh();
   } catch (e) {
     setStatus(t("manager.status.scanFailed", { error: e.message }));
     toast(e.message, true);
@@ -362,12 +342,13 @@ function selectProject(key) {
   runWorkspace("space", { space: key });
 }
 
-async function resume(s) {
+// place: "tab" (a new tab of its project) or "right" (beside the focused pane).
+async function resume(s, place = "tab") {
   if (showSessionTab(s)) return;
   if (!s?.cwd) return toast(t("errors.sessionNoDir"), true);
   const l = liveOf(s);
   if (l && !confirm(t("manager.confirm.openAgain", { pid: l.pid }))) return;
-  await window.manager.launchAgent(s.agent, s.id, s.cwd);
+  await window.manager.launchAgent(s.agent, s.id, s.cwd, place);
   toast(t("manager.toast.resuming", { agent: s.agent, cwd: s.cwd }));
 }
 async function showTerminal(s) {
@@ -402,7 +383,6 @@ async function pinProject(path, groupId) {
 }
 // Empty, or with the project at `path` in it; either way named right away (an empty one shows only without a search).
 async function createGroup(path) {
-  if (!path && ui.query) setQuery("");
   const known = new Set(data.groups.map(g => g.id));
   applyRegistry(await window.manager.createGroup(path));
   const g = data.groups.find(x => !known.has(x.id));
@@ -483,7 +463,6 @@ async function runAction(action, btn) {
       subagentsOpen.set(key, !isSubagentsOpen(key, live.get(key)?.subagents || []));
       return render();
     }
-    case "clear-search": return setQuery("");
   }
 }
 async function onAction(e) {
@@ -494,16 +473,7 @@ async function onAction(e) {
   return true;
 }
 
-function setQuery(q) {
-  ui.query = q;
-  if ($("search").value !== q) $("search").value = q;
-  searchConversations(q);
-  render();
-}
-
 // ---------- events ----------
-$("search").addEventListener("input", e => setQuery(e.target.value));
-$("clearSearch").addEventListener("click", () => { setQuery(""); $("search").focus(); });
 // $("refresh").addEventListener("click", load);
 for (const [id, open] of [["voiceHistory", window.manager.openVoiceHistory], ["settings", window.manager.openSettings]]) {
   $(id).addEventListener("click", async () => { if (!(await open())) toast(t("manager.unavailable"), true); });
@@ -727,17 +697,11 @@ $("spaceEmpty").addEventListener("click", async e => {
   if (row && e.detail === 2) openSession(sessionByKey(row.dataset.key)).catch(err => toast(err.message, true));
 });
 
+// F5 scans again; "/" outside a terminal or a field opens the search.
 document.addEventListener("keydown", e => {
-  // Keys typed into a terminal belong to what runs there (Ctrl+K included).
-  if (e.target.closest?.(".term-host")) return;
-  const inSearch = e.target === $("search");
-  const typing = !inSearch && e.target.matches?.("input, textarea");
-  if ((e.ctrlKey && (e.key === "k" || e.key === "f")) || (e.key === "/" && !typing && !inSearch)) {
-    e.preventDefault(); $("search").focus(); $("search").select(); return;
-  }
+  if (e.target.closest?.(".term-host") || e.target.matches?.("input, textarea, select")) return;
   if (e.key === "F5") { e.preventDefault(); load(); return; }
-  if (typing) return;
-  if (e.key === "Escape" && ui.query) setQuery("");
+  if (e.key === "/") { e.preventDefault(); window.searchPalette.open(); }
 });
 
 // A scan started elsewhere (e.g. by the edge menu) updates this window as well.
@@ -754,7 +718,6 @@ window.manager.onDataChanged(d => {
   raw = d;
   prepare();
   showSummary();
-  if (ui.query) searchConversations(ui.query);
   if (ui.renaming) pendingRender = true; else render();
 });
 // Git branches beside projects and session folders, and a session's last messages on hover (git-ui.js, preview-ui.js).
