@@ -17,9 +17,6 @@ kbd { font-size: 10.5px; border-bottom-width: 1px; border-radius: 4px; padding: 
 .icon-btn { width: 32px; height: 32px; border-radius: 8px; }
 .btn { gap: 6px; height: 32px; padding: 0 11px; border-radius: 8px; font-size: 13px; font-weight: 600; }
 .btn .i { width: 14px; height: 14px; }
-.btn.new.claude { color: var(--claude); }
-.btn.new.opencode { color: var(--opencode); }
-.btn.new.codex { color: var(--codex); }
 .path { font-size: 13px; line-height: 1.4; }
 .live { gap: 6px; height: 22px; padding: 0 9px; font-size: 11.5px; }
 .empty { padding: 34px 16px; }
@@ -60,7 +57,7 @@ kbd { font-size: 10.5px; border-bottom-width: 1px; border-radius: 4px; padding: 
 .tile > .mono { width: 44px; height: 44px; }
 .tile:hover { background: var(--panel-2); }
 .mono.group { box-shadow: 3px -3px 0 -1px color-mix(in srgb, hsl(var(--h) 60% 55%) 45%, transparent); }
-.tile .tpin { position: absolute; top: 4px; right: 4px; display: inline-flex; color: var(--accent); }
+.tile .tpin { position: absolute; top: 4px; right: 4px; display: inline-flex; color: var(--muted); }
 .tile .tpin .i { width: 12px; height: 12px; }
 .tile.sel { background: var(--accent-weak); border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
 .mono {
@@ -93,17 +90,16 @@ kbd { font-size: 10.5px; border-bottom-width: 1px; border-radius: 4px; padding: 
 .dactions { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .dhead .path { font-size: 16px; }
 .rows { flex: 1; overflow: auto; padding: 6px 8px 8px; }
-.row { display: flex; align-items: center; gap: 11px; min-height: 46px; padding: 7px 10px; border-radius: 10px; cursor: pointer; }
-.row.sel { background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--line-2); }
-.row.is-live { box-shadow: inset 3px 0 0 var(--working); }
-.row.is-live.sel { box-shadow: inset 3px 0 0 var(--working), inset 0 0 0 1px var(--line-2); }
-.row:has(.live.idle) { box-shadow: inset 3px 0 0 var(--ready); }
-.row:has(.live.waiting) { box-shadow: inset 3px 0 0 var(--needs); }
-.adot { width: 9px; height: 9px; flex: none; border-radius: 50%; }
-.adot.claude { background: var(--claude); }
-.adot.opencode { background: var(--opencode); }
-.adot.codex { background: var(--codex); }
-.ricon { color: var(--accent); display: grid; }
+.row { display: flex; align-items: center; gap: 11px; min-height: 40px; padding: 5px 10px; border-radius: 10px; cursor: pointer; }
+.row:hover { background: color-mix(in srgb, var(--panel-2) 60%, transparent); }
+.row.sel { background: var(--panel-2); }
+/* A heading over each group of sessions (bar.js): Need you, Working, Waiting for you, then the days. */
+.rgroup {
+  padding: 10px 10px 4px; font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
+}
+.rgroup:first-child { padding-top: 4px; }
+.row .subs, .rows > .subs { margin: 0 10px 4px 32px; }
+.ricon { color: var(--muted); display: grid; }
 .rmain { flex: 1; min-width: 0; }
 .rmain .t { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rmain .path { font-size: 12.5px; margin-top: 1px; }
@@ -112,15 +108,15 @@ kbd { font-size: 10.5px; border-bottom-width: 1px; border-radius: 4px; padding: 
 .when { flex: none; min-width: 88px; text-align: right; font-size: 12px; color: var(--muted); white-space: nowrap; }
 .ract { flex: none; display: flex; gap: 2px; opacity: 0; }
 .row:hover .ract, .row.sel .ract, .ract.show { opacity: 1; }
-.ract .go { color: var(--accent); }
+.ract .go { color: var(--text); }
 .confirm {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 2px 6px 8px 30px; padding: 9px 12px;
   border-radius: var(--r-md); background: var(--wait-bg); color: var(--wait); font-size: 13px;
 }
 
 /* ---------- live summary ---------- */
-#liveSum .sum { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: var(--r-pill); border: 1px solid var(--line-2); font-size: 12.5px; font-weight: 600; white-space: nowrap; background: transparent; }
-#liveSum .sum:hover { border-color: var(--accent); }
+#liveSum .sum { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 10px; border-radius: var(--r-pill); border: 1px solid transparent; font-size: 12.5px; font-weight: 600; color: var(--muted); white-space: nowrap; background: transparent; }
+#liveSum .sum:hover { color: var(--text); background: var(--panel-2); }
 #liveSum .sep { width: 1px; height: 14px; margin: 0 3px; background: var(--line-2); }
 
 .keys { display: flex; align-items: center; gap: 5px; padding: 7px 16px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--faint); }

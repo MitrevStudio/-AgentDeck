@@ -78,6 +78,19 @@ function rowsFor(tile, toks, hits) {
   return liveFirst(list).map(s => ({ type: "session", s, showPath: s.cwdN !== tile.p.n }));
 }
 
+// Session rows under a heading wherever their group changes (common.js: Need you, Working, Waiting for you, then
+// the days); the first row of a group carries its name.
+function markGroups(list) {
+  let last = "";
+  return list.map(r => {
+    if (!r.s) return r;
+    const g = getSessionGroup(r.s, liveOf(r.s));
+    const out = g === last ? r : { ...r, group: g };
+    last = g;
+    return out;
+  });
+}
+
 // ---------- rendering ----------
 function render({ strip = true } = {}) {
   removeEndedLaunches(key => live.get(key));
@@ -85,7 +98,7 @@ function render({ strip = true } = {}) {
   tiles = list;
   if (!tiles.some(tile => tile.key === st.tile)) { st.tile = (tiles.find(x => x.kind !== "day") || tiles[0])?.key || ""; st.row = q.value ? 0 : -1; }
   const cur = tiles.find(tile => tile.key === st.tile);
-  rows = rowsFor(cur, toks, hits);
+  rows = markGroups(rowsFor(cur, toks, hits));
   if (st.row >= rows.length) st.row = rows.length ? 0 : -1;
   if (strip) renderStrip(toks); else markTiles();
   renderDetail(cur, toks);
@@ -131,7 +144,7 @@ function updateNav() {
 
 function newButtons(cwd) {
   return (raw.agents?.length ? raw.agents : AGENTS).map(a =>
-    `<button class="btn new ${a.toLowerCase()}" data-act="new" data-agent="${a}" data-path="${esc(cwd)}" title="${esc(t("bar.newSession", { agent: a, path: cwd }))}">${icon("plus")}${a}</button>`).join("");
+    `<button class="btn new" data-act="new" data-agent="${a}" data-path="${esc(cwd)}" title="${esc(t("bar.newSession", { agent: a, path: cwd }))}">${icon(`agent${a}`)}${a}</button>`).join("");
 }
 function renderDetail(tile, toks) {
   if (tile?.kind === "day") { $("detail").innerHTML = window.dayUi.html(); shownDetail = ""; return; }
@@ -167,15 +180,6 @@ function renderDetail(tile, toks) {
 }
 // The preview beside the rows (preview-ui.js) follows the highlighted session, or shows the first one while none is.
 const syncPreview = () => showPreview($("pv"), rows[st.row]?.s || rows.find(r => r.s)?.s);
-function livePill(l, key) {
-  if (isLoading(key, l)) {
-    return getLoadingPill();
-  }
-  if (!l) return "";
-  const group = getLiveGroup(l);
-  return `<span class="live ${group} ${isStale(l) ? "stale" : ""}" data-live="${esc(key)}" title="${esc(getLiveHint(l))}">
-    <span class="${group === "busy" ? "spinner" : group === "waiting" ? "pulse attn" : "pulse"}"></span>${esc(t(`live.label.${group}`))}<span class="live-t">${esc(liveText(l))}</span></span>`;
-}
 function rowHtml(r, i, toks) {
   if (r.type === "dir") {
     return `<div class="row dir ${i === st.row ? "sel" : ""}" data-i="${i}"><span class="ricon">${icon("folder")}</span>
@@ -193,17 +197,20 @@ function rowHtml(r, i, toks) {
     ? `<div class="confirm danger del"><span class="msg" title="${esc(delMsg)}">${esc(delMsg)}</span>
         <button class="btn danger" data-act="delete-yes">${icon("trash")}${esc(t("action.delete"))}</button><button class="icon-btn" data-act="cancel" title="${esc(t("common.cancel"))}">${icon("x")}</button></div>`
     : "";
-  return `<div class="row ${i === st.row ? "sel" : ""} ${l ? "is-live" : ""} ${s.concealed ? "concealed" : ""}" data-i="${i}">
-    <span class="adot ${s.agent.toLowerCase()}" title="${esc(s.agent)}"></span>
+  const head = r.group ? `<div class="rgroup">${esc(r.group)}</div>` : "";
+  const subs = l?.subagents?.length ? subagentsHtml(key, l.subagents, "data-act") : "";
+  return `${head}<div class="row ${i === st.row ? "sel" : ""} ${s.concealed ? "concealed" : ""}" data-i="${i}">
+    ${agentMark(s.agent)}
     <div class="rmain"><div class="t" title="${esc(s.title)}">${hl(s.title, toks)}</div>${r.showPath && s.cwd ? pathHtml(s.cwd, toks) : ""}${snipHtml(s, toks)}</div>
-    ${livePill(l, key)}${getContextChip(s)}${usageCost(s)}<span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span>
+    ${getContextChip(s)}${usageCost(s)}<span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span>
+    ${statusMark(l, isLoading(key, l))}
     <span class="ract">${hideBtn("session", key, hidden.sessions.has(key))}${s.cwd ? `<button class="icon-btn" data-act="terminal" data-path="${esc(s.cwd)}" title="${esc(t("bar.terminalIn", { path: s.cwd }))}">${icon("terminal")}</button>
       <button class="icon-btn" data-act="copy" data-path="${esc(s.cwd)}" title="${esc(t("action.copyPath"))}">${icon("copy")}</button>` : ""}
       ${l ? `<button class="icon-btn" data-act="resume" title="${esc(t("bar.alreadyOpen"))}">${icon("play")}</button>
       <button class="icon-btn go" data-act="show-terminal" title="${esc(t("term.showTitle", { pid: l.pid }))}">${icon("raise")}</button>`
         : `<button class="icon-btn danger" data-act="delete" title="${esc(t("bar.delete"))}">${icon("trash")}</button>
       <button class="icon-btn go" data-act="resume" title="${esc(t("action.resume"))}">${icon("play")}</button>`}</span>
-  </div>${confirm}${del}`;
+  </div>${subs}${confirm}${del}`;
 }
 function renderLiveSum() {
   const { busy, waiting, idle } = countLiveGroups(model.sessions.map(liveOf).filter(Boolean));
@@ -220,8 +227,8 @@ function updateLiveTexts() {
   document.querySelectorAll("[data-live]").forEach(el => {
     const l = live.get(el.dataset.live);
     if (!l) return;
-    el.querySelector(".live-t").textContent = liveText(l);
-    el.classList.toggle("stale", isStale(l));
+    el.className = getStatusClass(l);
+    el.title = getStatusTitle(l);
   });
 }
 function markRows() {
@@ -303,6 +310,11 @@ async function act(name, el) {
     if (name === "explorer") { const err = await window.manager.openPath(path); if (err) throw new Error(err); return hide(); }
     if (name === "copy") { await window.manager.copyText(path); return toast(t("toast.copied", { path })); }
     if (name === "show-live") { setQuery(""); return selectTile("live"); }
+    if (name === "subagents") {
+      const key = el.dataset.key;
+      subagentsOpen.set(key, !isSubagentsOpen(key, live.get(key)?.subagents || []));
+      return render({ strip: false });
+    }
     if (name === "toggle-hidden") {
       const set = el.dataset.kind === "project" ? hidden.projects : hidden.sessions;
       set.has(el.dataset.key) ? set.delete(el.dataset.key) : set.add(el.dataset.key);
@@ -360,7 +372,7 @@ async function pollLive() {
   let list;
   try { list = await window.manager.getLive(); } catch { return; }
   live = new Map(list.map(l => [sessionKey(l), l]));
-  const sig = list.map(l => `${sessionKey(l)}:${l.status}`).sort().join("|");
+  const sig = liveSignature(list);
   if (sig === liveSig) return updateLiveTexts();
   liveSig = sig;
   model = remodel();

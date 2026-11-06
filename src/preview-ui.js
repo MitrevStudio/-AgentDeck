@@ -98,7 +98,7 @@ async function continueFresh(s) {
 
 // d: main's answer; undefined while it is on its way (a skeleton), null when the session cannot be read.
 function previewHtml(s, d) {
-  const title = `<div class="pv-title"><span class="adot ${s.agent.toLowerCase()}"></span><span class="t" title="${esc(s.title)}">${esc(s.title)}</span></div>`;
+  const title = `<div class="pv-title">${agentMark(s.agent)}<span class="t" title="${esc(s.title)}">${esc(s.title)}</span></div>`;
   const body = html => `<div class="pv-scroll"><div class="pv-list">${html}</div></div>`;
   if (d === undefined) {
     return `${title}<div class="pv-head"><div class="pv-skel" style="width: 62%"></div></div>

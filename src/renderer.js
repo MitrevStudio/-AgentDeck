@@ -9,31 +9,10 @@ let groupOfPath = new Map();
 let groupMenu = null;
 const getGroupOf = path => groupOfPath.get(path) || "";
 const ui = { query: "", agent: "", selected: "", active: -1, renaming: "", loading: false, loaded: false };
-// A running session's subagents: shown or folded by the user (sessionKey -> true/false); otherwise they show while
-// one of them works.
-const subagentsOpen = new Map();
 
 // Running sessions, keyed like `Claude:<id>`; refreshed every couple of seconds from the agents' own registries.
 let live = new Map(), liveSig = "", pendingRender = false;
 const liveOf = s => live.get(sessionKey(s));
-// A running session's state as one small mark (the words are in its tooltip): a spinner while it works, a red dot
-// while it needs the user, a green one while it waits for the next prompt.
-function getStatusClass(l) {
-  const kind = getLiveKind(l);
-  if (kind === "busy") return `st spinner${isStale(l) ? " stale" : ""}`;
-  if (kind === "waiting") return "st pulse attn";
-  return kind === "idle" ? "st pulse" : "st pulse other";
-}
-function getStatusTitle(l) {
-  const kind = getLiveKind(l);
-  const label = kind === "other" ? l.status : t(`live.label.${kind}`);
-  return [`${label}${liveText(l) ? ` · ${liveText(l)}` : ""}`, getLiveHint(l), `PID ${l.pid}`].join("\n");
-}
-function statusMark(l, loading) {
-  if (loading) return `<span class="st spinner loading" title="${esc(t("live.hint.loading"))}"></span>`;
-  if (!l) return '<span class="st none"></span>';
-  return `<span class="${getStatusClass(l)}" data-live="${esc(sessionKey(l))}" title="${esc(getStatusTitle(l))}"></span>`;
-}
 
 function prepare() {
   const built = buildData(raw, live);
@@ -235,14 +214,6 @@ function renderAgentFilter(v) {
   $("agentFilter").innerHTML = options.map(([key, label, n]) =>
     `<option value="${key}" ${ui.agent === key ? "selected" : ""} ${n || ui.agent === key || !key ? "" : "disabled"}>${esc(label)} (${n})</option>`).join("");
 }
-// The group a session is listed under: what a running one is doing, else the day it was last active.
-function getSessionGroup(s) {
-  const l = liveOf(s);
-  if (isLoading(sessionKey(s), l)) return t("manager.group.working");
-  if (!l) return dayGroup(s.updatedAt);
-  if (l.status === "waiting") return t("manager.group.needs");
-  return l.status === "busy" ? t("manager.group.working") : t("manager.group.ready");
-}
 
 function renderSessions(v) {
   $("sessionCount").textContent = v.sessions.length;
@@ -266,7 +237,7 @@ function renderSessions(v) {
 
   const groups = new Map();
   visible.forEach((s, i) => {
-    const g = getSessionGroup(s);
+    const g = getSessionGroup(s, liveOf(s));
     if (!groups.has(g)) groups.set(g, []);
     groups.get(g).push(sessionHtml(s, i, v.toks));
   });
@@ -299,37 +270,14 @@ function sessionHtml(s, i, toks) {
       <div class="sess-acts">${actions}
         <button class="icon-btn" data-action="row-menu" title="${esc(t("manager.session.more"))}" aria-haspopup="menu">${icon("more")}</button></div>
     </div>
-    ${l?.subagents?.length ? subagentsHtml(key, l.subagents) : ""}
+    ${l?.subagents?.length ? subagentsHtml(key, l.subagents, "data-action") : ""}
   </article>`;
 }
-// The agent as a small plain glyph; its name in the tooltip.
-const agentMark = agent => `<span class="agent-mark" title="${esc(agent)}">${icon(`agent${agent}`)}</span>`;
 // The folder's name (the whole path in the tooltip) and its branch.
 function whereHtml(s, toks) {
   if (!s.cwd) return `<span class="where unknown" title="${esc(t("manager.session.noDir"))}">${icon("alert")}</span>`;
   const leaf = s.cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || s.cwd;
   return `<span class="where"><span class="where-dir" title="${esc(s.cwd)}">${hl(leaf, toks)}</span>${gitChip(s.workDir || s.cwd)}</span>`;
-}
-
-// ---------- subagents ----------
-const SUBAGENTS_SHOWN = 10;
-function isSubagentsOpen(key, list) {
-  return subagentsOpen.has(key) ? subagentsOpen.get(key) : list.some(a => a.working);
-}
-function subagentsHtml(key, list) {
-  const open = isSubagentsOpen(key, list);
-  const working = list.filter(a => a.working).length;
-  const summary = [tn("manager.subagents.count", list.length), working && tn("manager.subagents.working", working)].filter(Boolean).join(" · ");
-  const rows = open ? list.slice(0, SUBAGENTS_SHOWN).map(a => `<div class="sub-row">
-      <span class="sub-type">${esc(a.type || t("manager.subagents.agent"))}</span>
-      <span class="sub-desc" title="${esc(a.description)}">${esc(a.description)}</span>
-      <span class="when" title="${esc(fullDate(a.at))}">${esc(ago(a.at))}</span>
-      ${a.working ? `<span class="st spinner" title="${esc(t("manager.subagents.busy"))}"></span>` : '<span class="st none"></span>'}
-    </div>`).join("") : "";
-  const more = open && list.length > SUBAGENTS_SHOWN ? `<div class="sub-more">${esc(tn("manager.subagents.more", list.length - SUBAGENTS_SHOWN))}</div>` : "";
-  return `<div class="subs">
-    <button class="sub-toggle" data-action="subagents" data-key="${esc(key)}" aria-expanded="${open}">${icon(open ? "down" : "right")}${working ? '<span class="st spinner"></span>' : ""}<span>${esc(summary)}</span></button>
-    ${rows}${more}</div>`;
 }
 
 function emptySessions(v) {
@@ -391,7 +339,7 @@ function applyRegistry(registry) { raw.registry = registry; prepare(); render();
 // Returns true when the set of running sessions, any of their states or their subagents changed.
 function setLive(list) {
   live = new Map(list.map(l => [sessionKey(l), l]));
-  const sig = list.map(l => `${sessionKey(l)}:${l.status}:${(l.subagents || []).map(a => `${a.id}${a.working ? "+" : ""}`).join(",")}`).sort().join("|");
+  const sig = liveSignature(list);
   if (sig === liveSig) return false;
   liveSig = sig;
   return true;
