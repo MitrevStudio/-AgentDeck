@@ -10,7 +10,8 @@
 const path = require("node:path");
 const { EventEmitter } = require("node:events");
 const { createSessions } = require("./sessions");
-const { createTerminals } = require("./terminals");
+// Windows: a DockPty per terminal, which outlives the host; elsewhere node-pty, children of the host.
+const { createTerminals } = require(process.platform === "win32" ? "./terminals" : "./terminals-pty");
 const { createLaunch } = require("./launch");
 const { createTabLinks } = require("./tab-links");
 const { liveSessions, findTranscript } = require("./live");

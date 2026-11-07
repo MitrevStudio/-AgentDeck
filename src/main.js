@@ -30,6 +30,7 @@ const limits = createAllLimits({ fetch: (url, init) => network.fetch(url, init),
 const { createNotifier } = require("./notify");
 const { createHost } = require("./host");
 const { createLinks } = require("./mesh/links");
+const { createServed } = require("./mesh/serve");
 const { DEFAULT_PORT } = require("./mesh/identity");
 const frames = require("./mesh/frames");
 const { normPath } = require("./shared/util");
@@ -255,51 +256,6 @@ const { isAgent, SESSION_ID } = launch;
 // status. What changes here is pushed to every connected peer.
 const writeMeshLog = createLog("mesh.log");
 const meshLog = line => writeMeshLog(`${new Date().toISOString()} ${line}`);
-// A peer's terminals here: opened for it (owner: its id), their output sent to it as frames while it is attached.
-const watchers = new Map(); // terminal id -> Set of peer ids attached to it
-const peerTabs = peer => terminals.getTabs().filter(x => x.owner === peer);
-function ownTerm(id, peer) {
-  const tab = terminals.getTabs().find(x => x.id === id && x.owner === peer);
-  if (!tab) throw new HostError("invalidData", "Not a terminal of yours here.");
-  return tab;
-}
-const MESH_API = {
-  "host.info": () => ({ ...links.self(), code: undefined, platform: process.platform, agents: sessions.get()?.agents || [] }),
-  "sessions.list": () => sessions.data(),
-  "live.list": () => liveSessions(),
-  "git.status": () => gitStatus.get(),
-  "terminals.list": (_p, peer) => peerTabs(peer.id),
-  // {cwd, kind: "shell" | "new" | "resume" | "prompt", agent, sessionId, prompt} -> the tab, opened here for the peer.
-  "terminals.open": async (p, peer) => {
-    const cwd = text(p?.cwd, 4096);
-    const { command, meta, undo } = launch.commandFor({ kind: text(p?.kind, 16), agent: p?.agent, sessionId: p?.sessionId, prompt: p?.prompt }, cwd);
-    try {
-      const proxy = await network.terminalProxy().catch(() => null);
-      const id = await launch.openTerminal(cwd, command, { ...meta, owner: peer.id }, terminalEnv(process.env, proxy), `peer ${peer.name}`);
-      return terminals.getTabs().find(x => x.id === id);
-    } catch (e) {
-      undo();
-      throw e;
-    }
-  },
-  "terminals.attach": (p, peer) => {
-    const tab = ownTerm(text(p?.id, 64), peer.id);
-    if (!watchers.has(tab.id)) watchers.set(tab.id, new Set());
-    watchers.get(tab.id).add(peer.id);
-    return terminals.attach(tab.id);
-  },
-  "terminals.detach": (p, peer) => { watchers.get(text(p?.id, 64))?.delete(peer.id); return true; },
-  "terminals.close": (p, peer) => terminals.close(ownTerm(text(p?.id, 64), peer.id).id)
-};
-host.on("terminal:data", ({ id, data, end }) => {
-  const peers = watchers.get(id);
-  if (peers) for (const peer of peers) links.sendBinary(peer, frames.encodeOutput(id, data, end));
-});
-host.on("terminals", tabs => {
-  for (const id of watchers.keys()) if (!tabs.some(x => x.id === id)) watchers.delete(id);
-  // Each peer hears of its own terminals here.
-  for (const n of links.nodes()) if (n.status === "online") links.notify(n.id, "terminals", tabs.filter(x => x.owner === n.id));
-});
 // The terminals of other computers that have a pane here: what they are, by the terminal's id (a UUID both sides
 // use). Their output arrives as frames and goes to the window like a local terminal's; input and sizes go back the
 // same way. One whose computer is away keeps its pane (note "offline"); one gone there loses its pane.
@@ -354,14 +310,10 @@ async function remoteLaunch(node, args) {
   showManager();
   return tab.id;
 }
-const links = createLinks({
-  dir: path.join(app.getPath("userData"), "node"), defaultName: os.hostname(), kind: "desktop", version: app.getVersion(),
-  api: (method, params, peer) => {
-    if (!Object.hasOwn(MESH_API, method)) throw new HostError("unknownMethod");
-    return MESH_API[method](params, peer);
-  },
-  log: meshLog
-});
+// What the peers may ask of this computer, and what it pushes to them (mesh/serve.js).
+const served = createServed({ host, env: async () => terminalEnv(process.env, await network.terminalProxy().catch(() => null)) });
+const links = createLinks({ dir: path.join(app.getPath("userData"), "node"), defaultName: os.hostname(), kind: "desktop", version: app.getVersion(), api: served.api, log: meshLog });
+served.attach(links);
 // What the other computers show - their last list, live status and git - kept per node and pushed to the manager
 // window with the nodes themselves ("mesh:nodes").
 const remote = new Map(); // node id -> { data, live, git }
@@ -378,21 +330,15 @@ links.on("event", ({ node, name, data }) => {
   remote.set(node, { ...remote.get(node), [name]: data });
   nodesChanged();
 });
+// Output of this computer's terminals on other computers, to the window (keystrokes for a peer's terminals here are
+// mesh/serve.js's).
 links.on("binary", ({ node, data }) => {
   const f = frames.decode(data);
-  if (!f) return;
-  if (f.type === "output") {
-    if (remoteTerms.get(f.id)?.node === node) sendToManager("terminal:data", { id: f.id, data: f.data, end: f.end });
-  } else if (f.type === "input") {
-    if (terminals.getTabs().some(x => x.id === f.id && x.owner === node)) terminals.input(f.id, f.data);
-  } else if (f.type === "resize") {
-    if (terminals.getTabs().some(x => x.id === f.id && x.owner === node)) terminals.resize(f.id, f.cols, f.rows);
-  }
+  if (f?.type === "output" && remoteTerms.get(f.id)?.node === node) sendToManager("terminal:data", { id: f.id, data: f.data, end: f.end });
 });
 // A link that just came up: everything the peer has, at once; one that went: its last picture stays, marked offline.
 links.on("link", async ({ node, up }) => {
   if (!up) {
-    for (const peers of watchers.values()) peers.delete(node);
     remoteTermsChanged(); // the panes of its terminals say "offline"
     return nodesChanged();
   }
@@ -412,20 +358,6 @@ links.on("link", async ({ node, up }) => {
     meshLog(`reading ${node.slice(0, 8)} failed: ${e.message}`);
   }
 });
-host.on("data", data => links.notifyAll("data", data));
-host.on("git", g => links.notifyAll("git", g));
-// The live status has no event of its own (the windows poll it): connected peers get it every few seconds, when it
-// changed.
-let lastLiveSig = "";
-setInterval(async () => {
-  if (!links.nodes().some(n => n.status === "online")) return;
-  const live = await liveSessions();
-  const sig = JSON.stringify(live);
-  if (sig !== lastLiveSig) {
-    lastLiveSig = sig;
-    links.notifyAll("live", live);
-  }
-}, 3000).unref();
 // Settings -> Computers (voice/windows.js serves the page): the picture, the settings of this node, pairing and
 // forgetting. Errors come as texts in the user's language, not as exceptions.
 const ADDRESS = /^\s*(\[[0-9a-f:.]+\]|[^:\s[\]]+)(?::(\d{1,5}))?\s*$/i;
