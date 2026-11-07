@@ -74,6 +74,17 @@ function renderCentre() {
   if (el.dataset.html !== html) { el.dataset.html = html; el.innerHTML = html; }
 }
 function renderProjects(v) {
+  renderNodeTabs();
+  // A paired computer's tab: its projects alone (nodes-ui.js); nothing here to add, order or group.
+  const node = shownNodeId();
+  $("add").hidden = Boolean(node);
+  if (node) {
+    $("projectCount").textContent = getNode(node).view.projects.length;
+    $("projectOrder").hidden = true;
+    $("newGroup").hidden = true;
+    $("projects").innerHTML = nodesHtml(ui.selected, node) || `<div class="empty small">${esc(t("manager.nodes.noProjects"))}</div>`;
+    return;
+  }
   const total = data.projects.length;
   $("projectCount").textContent = v.toks.length ? `${v.projects.length} / ${total}` : total;
   renderOrderToggle();
@@ -87,7 +98,6 @@ function renderProjects(v) {
     return buildGroupHtml(u, v, shut) + (shut ? "" : u.members.map(p => buildProjectHtml(p, counts.get(p), v)).join(""));
   }).join("");
   if (!total && ui.loaded) html += `<div class="empty small">${esc(t("manager.projects.empty"))}</div>`;
-  html += nodesHtml(ui.selected); // the other computers' projects (nodes-ui.js)
   $("projects").innerHTML = html;
 }
 const getDraggableAttr = (v, n) => (v.toks.length || ui.renaming === n ? "" : 'draggable="true"');
