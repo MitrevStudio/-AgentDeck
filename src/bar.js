@@ -456,6 +456,20 @@ window.manager.onBarEvent(ev => {
 });
 
 q.addEventListener("input", () => setQuery(q.value));
+// The command centre's field: Enter sends what was typed, the menu goes and the window shows the centre.
+const cmd = $("cmd");
+cmd.addEventListener("keydown", async e => {
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  const line = cmd.value.trim();
+  if (!line) return;
+  cmd.value = "";
+  try {
+    await window.manager.centreSend(line);
+    toast(t("bar.command.sent"));
+    hide();
+  } catch (err) { toast(err.message, true); }
+});
 $("openManager").addEventListener("click", () => window.manager.barCommand("open-manager"));
 // F5 scans now (main scans by itself every few minutes); the result comes back as "data:changed".
 async function refresh() {
@@ -494,6 +508,7 @@ $("detail").addEventListener("mousemove", e => {
 });
 
 document.addEventListener("keydown", e => {
+  if (e.target === cmd && e.key !== "Escape") return; // the command field keeps its keys
   const inQ = e.target === q;
   if (e.key === "F5") { e.preventDefault(); refresh(); return; }
   if (e.key === "Escape") {

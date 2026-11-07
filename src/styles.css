@@ -33,6 +33,13 @@ main {
 .side-sec-head .icon-btn .i { width: 15px; height: 15px; }
 .side-sec-head .icon-btn.on { color: var(--accent); }
 .side-list { flex: 1; min-height: 0; overflow: auto; padding: 0 6px 8px; }
+/* The command centre (renderer.js renderCentre): one card above the projects. */
+.centre-sec { flex: none; padding: 6px 6px 2px; }
+.centre-mark { display: grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 6px; background: var(--accent-weak); color: var(--accent); }
+.centre-mark .i { width: 14px; height: 14px; }
+.centre-sub { flex: none; font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.se-box .centre-mark { width: 36px; height: 36px; border-radius: 10px; }
+.se-box .centre-mark .i { width: 20px; height: 20px; }
 
 /* ---------- projects ---------- */
 /* A project is one line (renderer.js); --row-bg is solid so its tools, shown over the right end, hide what is under. */

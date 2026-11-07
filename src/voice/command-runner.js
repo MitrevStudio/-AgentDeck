@@ -1,26 +1,27 @@
-// One voice command at a time, from the microphone to the session (commands.js has the reasoning): recording ->
-// recognising -> understanding -> (writing the prompt) -> the card with its countdown, or choices -> running it ->
-// a line in History. Esc, Cancel, the dictation key or a new hold stop it at any point before it runs (the dictation
-// key and a click on the panel finish a recording that the menu's microphone started).
+// One voice command at a time, from the microphone to the command centre (orchestrator.js): recording -> recognising
+// -> the transcript typed into the command centre's terminal, which does what it says -> a line in History. Esc,
+// Cancel, the dictation key or a new hold stop it before it is sent (the dictation key and a click on the panel
+// finish a recording that the menu's microphone started).
 //
 // The controller lends it the recorder, the voice panel (panel.*, so it knows who owns the panel) and the Esc
-// hotkey; main lends it the launchers (app.*). Everything is injected, so tests can drive it without Electron.
+// hotkey; main lends it the command centre (app.orchestrate). Everything is injected, so tests can drive it without
+// Electron.
 const { t } = require("../i18n");
-const cmd = require("./commands");
 const { applyReplacements } = require("./dictionary");
 const { defaultModelFor } = require("./catalog");
 const { BYTES_PER_SECOND, HEADER_BYTES } = require("./wav");
 const { maxRecordingBytes } = require("./transcription");
 
-// deps: recorder, store (job-store), settings, transcribe(opts), generate(opts), rewrite(text, opts), vocabulary(),
-// panel {fresh(state, data), show(state, data), update(data), close()}, escape {register(onPress), unregister()},
-// busy() (a dictation is recording), stopReading(), addRecord(id), balloon(text, opts),
-// app {data(), live(), launchNew(agent, cwd, prompt), launchAgent(agent, id, cwd), focus(opts), showProject(path),
+const LIMIT_SECONDS = 60; // a command is a sentence or two
+
+// deps: recorder, store (job-store), settings, transcribe(opts), vocabulary(), panel {fresh(state, data),
+// show(state, data), update(data), close()}, escape {register(onPress), unregister()}, busy() (a dictation is
+// recording), stopReading(), addRecord(id), balloon(text, opts), app {orchestrate(text) -> {ok, started},
 // onState({enabled, state})}, holdLabel() (the edge hotkey as shown), now().
 function createCommandRunner(deps) {
   const { recorder, store, settings, panel, app } = deps;
   const now = deps.now || Date.now;
-  let cur = null; // {id, phase, source, ac, s, createdAt, transcript, plan, plans, timer, left, since, hovered, audio, stopping}
+  let cur = null; // {id, phase, source, ac, s, createdAt, transcript, audio, stopping}
   let disposed = false;
 
   const enabled = () => settings.load().commands.enabled;
@@ -32,7 +33,6 @@ function createCommandRunner(deps) {
   function end(c) {
     if (cur !== c) return false;
     cur = null;
-    clearTimeout(c.timer);
     deps.escape.unregister();
     report("idle");
     return true;
@@ -46,11 +46,11 @@ function createCommandRunner(deps) {
   }
 
   // source: "hold" (the edge menu's hotkey held down) or "menu" (its microphone). A new hold replaces a command that
-  // is being understood or waits on its card - the user is saying it again; one still recording keeps the microphone.
+  // is being recognised - the user is saying it again; one still recording keeps the microphone.
   function start(source) {
     if (disposed || !enabled()) return { ok: false };
     if (cur) {
-      if (source !== "hold" || cur.phase === "running" || cur.phase === "recording") return { ok: false };
+      if (source !== "hold" || cur.phase !== "thinking") return { ok: false };
       cancel();
     }
     if (deps.busy()) return { ok: false, error: t("voice.command.busy") };
@@ -62,10 +62,10 @@ function createCommandRunner(deps) {
     // Started from the menu, it is finished by the microphone, the dictation key or a click on the panel: the menu
     // may have gone meanwhile.
     const hint = source === "hold" ? t("voice.command.hint.release", { key: deps.holdLabel() || "" }) : t("voice.command.hint.click");
-    panel.fresh("listening", { command: true, hint, cancelKey: "Esc", limitSeconds: cmd.LIMIT_SECONDS });
+    panel.fresh("listening", { command: true, hint, cancelKey: "Esc", limitSeconds: LIMIT_SECONDS });
     recorder.start({
       deviceId: s.microphoneDeviceId, deviceName: s.microphoneName, wavPath: store.wavPath(c.id),
-      maxBytes: Math.min(maxRecordingBytes(s), cmd.LIMIT_SECONDS * BYTES_PER_SECOND),
+      maxBytes: Math.min(maxRecordingBytes(s), LIMIT_SECONDS * BYTES_PER_SECOND),
       onLevel: (level, elapsed) => { if (cur === c && c.phase === "recording") panel.update({ level, elapsed }); },
       onLimit: result => stopped(c, result),
       onEnded: result => stopped(c, result)
@@ -105,12 +105,11 @@ function createCommandRunner(deps) {
     understand(c).catch(e => fail(c, e));
   }
 
-  // ---------- understanding ----------
+  // ---------- recognising, then off to the command centre ----------
   async function understand(c) {
-    const s = c.s, signal = c.ac.signal;
-    const terms = deps.vocabulary();
+    const s = c.s;
     const raw = await deps.transcribe({ wavPath: store.wavPath(c.id), provider: s.provider, model: s.models?.[s.provider] || defaultModelFor(s.provider),
-      language: s.language, vocabulary: terms, getApiKey: settings.getApiKey, signal });
+      language: s.language, vocabulary: deps.vocabulary(), getApiKey: settings.getApiKey, signal: c.ac.signal });
     if (cur !== c) return;
     const transcript = applyReplacements(String(raw ?? ""), s.dictionary?.replacements).trim();
     if (!transcript) {
@@ -118,127 +117,24 @@ function createCommandRunner(deps) {
       return panel.fresh("notice", { title: t("voice.command.noSpeech"), detail: "" });
     }
     c.transcript = transcript;
-    panel.update({ rewriting: "command" });
-    const [data, live] = await Promise.all([app.data(), app.live().catch(() => [])]);
-    if (cur !== c) return;
-    c.agents = Array.isArray(data?.agents) ? data.agents : null;
-    const candidates = cmd.buildCandidates({ ...data, live }, transcript);
-    const answer = await deps.generate({ system: cmd.INSTRUCTIONS, text: cmd.intentInput(transcript, candidates, now()), provider: s.provider,
-      model: cmd.COMMAND_MODELS[s.provider], temperature: 0, schema: cmd.intentSchema(candidates), signal, timeoutMs: cmd.INTENT_TIMEOUT_MS });
-    if (cur !== c) return;
-    c.intent = cmd.parseIntent(answer);
-    if (!c.intent) console.error("The command answer was not usable JSON; searching instead:", String(answer).slice(0, 200));
-    const r = cmd.resolveIntent(c.intent, transcript, candidates, { defaultAgent: s.commands.agent });
-    if (r.type === "unknown") return unclear(c);
-    if (r.type === "choose") return offer(c, r.plans);
-    await prepare(c, r.plan, true);
-  }
-
-  // A new session's prompt, written in the chosen mode; a rewrite that fails leaves the task as spoken.
-  async function prepare(c, plan, countdown) {
-    c.plan = plan;
-    if (plan.action === "new_session") {
-      if (c.agents && !c.agents.includes(plan.agent)) throw new Error(t("voice.command.error.agentMissing", { agent: plan.agent }));
-      const mode = c.s.commands.promptMode;
-      if (plan.task && mode !== "verbatim") {
-        panel.update({ rewriting: mode });
-        try {
-          plan.prompt = await deps.rewrite(plan.task, { mode, dictionary: deps.vocabulary(), language: c.s.language, signal: c.ac.signal });
-        } catch (e) {
-          if (c.ac.signal.aborted) throw e;
-          console.error(`Writing the command's prompt (${mode}) failed, using the task as spoken:`, e?.longMessage || e?.message);
-          plan.rewriteError = e?.shortMessage || e?.message || String(e);
-        }
-      }
-      plan.prompt ||= plan.task;
-      if (cur !== c) return;
-    }
-    if (countdown) confirm(c);
-    else run(c);
-  }
-
-  // ---------- the card ----------
-  function confirm(c) {
-    const seconds = c.s.commands.countdown;
-    if (!seconds) return run(c);
-    c.phase = "confirm";
-    c.left = seconds * 1000;
-    c.hovered = false;
-    panel.show("confirm", { ...cmd.describe(c.plan), seconds });
-    arm(c);
-  }
-
-  function arm(c) {
-    clearTimeout(c.timer);
-    c.since = now();
-    c.timer = setTimeout(() => run(c), c.left);
-  }
-
-  // The pointer resting on the card stops the countdown, so a long prompt can be read to the end.
-  function hold(on) {
-    const c = cur;
-    if (!c || c.phase !== "confirm" || on === c.hovered) return;
-    c.hovered = on;
-    if (on) { clearTimeout(c.timer); c.left = Math.max(0, c.left - (now() - c.since)); }
-    else arm(c);
-  }
-
-  function offer(c, plans) {
-    c.phase = "choices";
-    c.plans = plans;
-    panel.show("choices", {
-      title: t("voice.command.choose.title"), detail: c.transcript,
-      choices: plans.map(p => { const d = cmd.describe(p); return { label: d.title, sub: d.kind === "new" || d.kind === "project" ? d.sub : d.detail }; })
-    });
-    c.timer = setTimeout(cancel, cmd.CHOICE_TIMEOUT_MS);
-  }
-
-  // A choice clicked: it runs at once, except a new session whose prompt has not been seen yet.
-  function choose(i) {
-    const c = cur;
-    const plan = c?.phase === "choices" ? c.plans?.[i] : null;
-    if (!plan) return;
-    clearTimeout(c.timer);
-    const needsPrompt = plan.action === "new_session" && plan.task;
-    if (needsPrompt) thinking(c);
-    prepare(c, plan, needsPrompt).catch(e => fail(c, e));
-  }
-
-  function unclear(c) {
-    record(c, "Done", { outcome: "unclear" });
-    if (!end(c)) return;
-    panel.show("notice", { title: t("voice.command.unclear"), detail: t("voice.command.quoted", { text: c.transcript }), durationMs: 5000 });
-  }
-
-  // ---------- running ----------
-  async function run(c) {
-    if (cur !== c || c.phase === "running") return;
-    clearTimeout(c.timer);
-    c.phase = "running";
+    // From here it is the command centre's: Esc no longer takes it back.
+    c.phase = "sending";
     deps.escape.unregister();
-    const d = cmd.describe(c.plan);
-    let r;
-    try { r = await cmd.execute(c.plan, app); } catch (e) { r = { ok: false, outcome: "failed", note: e?.message || String(e) }; }
-    record(c, r.ok ? "Done" : "Failed", r);
+    panel.show("notice", { title: t("voice.command.sending"), detail: t("voice.command.quoted", { text: transcript }) });
+    const r = await app.orchestrate(transcript);
+    record(c, r?.ok ? "Done" : "Failed", { outcome: r?.ok ? "sent" : "failed", note: r?.ok ? "" : t("voice.command.error.title") });
     if (!end(c)) return;
-    if (!r.ok) return panel.show("error", { title: t("voice.command.error.title"), detail: r.note, canRetry: false });
-    if (r.note) return panel.show("notice", { title: d.title, detail: r.note, durationMs: 4500 });
-    // A terminal coming up, or the menu, says enough; a new or resumed session gets a short "started".
-    if (r.outcome === "launched" || r.outcome === "resumed") panel.show("success", { title: t(`voice.command.done.${r.outcome}`), detail: d.label });
-    else panel.close();
+    if (!r?.ok) return panel.show("error", { title: t("voice.command.error.title"), detail: transcript, canRetry: false });
+    panel.show("success", { title: t(r.started ? "voice.command.sentStarted" : "voice.command.sent"), detail: transcript });
   }
 
-  // Esc, Cancel, the dictation key, a new hold, a reading started from History. Not once it runs.
+  // Esc, Cancel, the dictation key, a new hold, a reading started from History. Not once it is being sent.
   function cancel() {
     const c = cur;
-    if (!c || c.phase === "running") return;
+    if (!c || c.phase === "sending") return;
     c.ac.abort();
     if (c.phase === "recording") c.stopping = recorder.cancel().catch(logError("Cancelling the command recording failed"));
-    if (c.transcript) {
-      record(c, "Done", { outcome: "cancelled" });
-      end(c);
-      panel.close();
-    } else drop(c);
+    drop(c);
   }
 
   function fail(c, e) {
@@ -255,20 +151,14 @@ function createCommandRunner(deps) {
 
   // ---------- History ----------
   function record(c, status, { outcome, note = "", short } = {}) {
-    const s = c.s, p = c.plan;
-    const d = p ? cmd.describe(p) : null;
+    const s = c.s;
     try {
       store.create("Command", {
         Id: c.id, CreatedAt: store.stamp(c.createdAt), CompletedAt: store.stamp(new Date(now())),
         DurationSeconds: c.audio?.seconds || 0, Provider: s.provider, Model: s.models?.[s.provider] || defaultModelFor(s.provider),
         Language: s.language || "auto", Status: status, AttemptCount: 1, ResultText: c.transcript, Mode: "verbatim",
         LastErrorShort: status === "Failed" ? short || t("voice.command.error.title") : null, LastError: status === "Failed" ? note : null,
-        // kind: how History words it in the language of the moment (summary: as it was said then).
-        Command: {
-          action: p?.action || "unknown", kind: d?.kind || null, summary: d?.title || "", agent: p?.agent || null,
-          project: p?.project?.name || null, path: p?.project?.path || null, session: p?.session ? d.detail : null,
-          prompt: p?.prompt || null, rewriteError: p?.rewriteError || null, outcome, note: note || null
-        }
+        Command: { action: "orchestrate", kind: "sent", summary: t("voice.command.sent"), outcome, note: note || null }
       });
       if (c.audio?.bytes) store.setAudio(c.id, c.audio.bytes);
       deps.addRecord(c.id);
@@ -278,16 +168,13 @@ function createCommandRunner(deps) {
   // ---------- panel buttons ----------
   function onAction(a) {
     if (!cur) return;
-    if (a.type === "run" && cur.phase === "confirm") run(cur);
-    else if (a.type === "finish") finish();
+    if (a.type === "finish") finish();
     else if (a.type === "cancel") cancel();
-    else if (a.type === "choose") choose(Number(a.index));
-    else if (a.type === "hold") hold(Boolean(a.on));
   }
 
   return {
     start, finish, cancel, onAction,
-    // The menu's microphone: start, finish speaking, or stop a command that has not run.
+    // The menu's microphone: start, finish speaking, or stop a command not sent yet.
     toggle() {
       if (!cur) return start("menu");
       if (cur.phase === "recording") finish();
@@ -306,10 +193,9 @@ function createCommandRunner(deps) {
       const c = cur;
       if (!c) return;
       c.ac.abort();
-      clearTimeout(c.timer);
       cur = null;
     }
   };
 }
 
-module.exports = { createCommandRunner };
+module.exports = { createCommandRunner, LIMIT_SECONDS };

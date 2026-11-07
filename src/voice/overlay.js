@@ -28,8 +28,7 @@ const REVEAL_TIMEOUT_MS = 250; // show anyway if the page has not confirmed the 
 const EXIT_MS = 240;        // the page's exit animation; the window is hidden after it
 const NOTICE_MS = 3500;
 const SUCCESS_MS = 1200;
-// confirm and choices: a voice command's card (command-runner.js), which goes away only when the command does.
-const STATES = new Set(["listening", "transcribing", "success", "error", "preparing", "speaking", "notice", "confirm", "choices"]);
+const STATES = new Set(["listening", "transcribing", "success", "error", "preparing", "speaking", "notice"]);
 // States that go away by themselves unless something replaced them.
 const AUTO_HIDE = { notice: NOTICE_MS, success: SUCCESS_MS };
 
