@@ -31,6 +31,8 @@ const { createNotifier } = require("./notify");
 const { createHost } = require("./host");
 const { createLinks } = require("./mesh/links");
 const { DEFAULT_PORT } = require("./mesh/identity");
+const frames = require("./mesh/frames");
+const { normPath } = require("./shared/util");
 const { HostError } = require("./host/errors");
 const { getProject, isPinned, setPin, setGroups, unpinEmptyGroups, repin } = require("./host/registry");
 const atomicFile = require("./shared/atomic-file");
@@ -71,13 +73,13 @@ host.on("terminal:exit", ({ id, lost }) => { if (lost) terminals.setNote(id, t("
 host.on("terminals", () => { prunePanes(); sendWorkspace(); scheduleWorkspaceSave(); updateTrayCount(); orchestrator.terminalsChanged(); });
 // Panes whose terminal is gone (closed, or ended) leave the layout.
 function prunePanes() {
-  const alive = new Set(terminals.getTabs().map(x => x.id));
+  const alive = new Set([...terminals.getTabs().map(x => x.id), ...remoteTerms.keys()]);
   for (const tab of Object.values(workspace.snapshot().tabs)) {
     getPanes(tab.root).filter(term => !alive.has(term)).forEach(term => workspace.removeTerm(term));
   }
 }
 function getWorkspaceView() {
-  return { ...workspace.snapshot(), terminals: terminals.getTabs() };
+  return { ...workspace.snapshot(), terminals: [...terminals.getTabs().filter(x => !x.owner), ...remoteTabs()] };
 }
 // Quitting leaves AgentDeck's own terminals running (the next start attaches to them again); the tray's "Stop all
 // terminals and quit" ends them, asked first while any runs.
@@ -103,7 +105,10 @@ const WORKSPACE_FILE = path.join(app.getPath("userData"), "workspace.json");
 const WORKSPACE_SAVE_MS = 1000;
 let workspaceSaveTimer = null, workspaceSaving = false;
 function getSavedWorkspace() {
-  const terms = Object.fromEntries(terminals.getTabs().map(x => [x.id, { cwd: x.cwd, title: x.title, agent: x.agent, sessionId: x.sessionId }]));
+  const terms = Object.fromEntries([
+    ...terminals.getTabs().filter(x => !x.owner).map(x => [x.id, { cwd: x.cwd, title: x.title, agent: x.agent, sessionId: x.sessionId }]),
+    ...[...remoteTerms.values()].map(x => [x.id, { node: x.node, cwd: x.cwd, title: x.title, agent: x.agent, sessionId: x.sessionId }])
+  ]);
   return JSON.stringify({ version: 1, layout: workspace.exportState(), terms });
 }
 function scheduleWorkspaceSave() {
@@ -161,6 +166,14 @@ async function restoreWorkspace() {
     const { attached, kept } = await terminals.restore();
     const running = new Set(attached), held = new Set(kept);
     const panes = saved ? new Set(Object.values(saved.layout.tabs || {}).flatMap(tab => getPanes(tab?.root))) : new Set();
+    // A pane of a terminal on another computer keeps its place: once that computer is connected again, the terminal
+    // is found there (or the pane goes).
+    for (const [old, meta] of Object.entries(saved?.terms || {})) {
+      if (isObj(meta) && typeof meta.node === "string" && meta.node && panes.has(old) && frames.UUID.test(old)) {
+        remoteTerms.set(old, { id: old, node: meta.node, cwd: String(meta.cwd || ""), title: String(meta.title || ""), agent: String(meta.agent || ""), sessionId: String(meta.sessionId || ""), exited: false, pending: true });
+        running.add(old);
+      }
+    }
     const ids = new Map([...panes].filter(old => running.has(old)).map(old => [old, old]));
     // A pane whose terminal still runs but could not be attached goes: opened anew, its agent would run a second time
     // on the same session. The terminal gets a tab of its own once a start attaches it.
@@ -174,7 +187,7 @@ async function restoreWorkspace() {
     }
     if (saved) workspace.importState(saved.layout, old => ids.get(old) || "");
     restored = true;
-    const unplaced = terminals.getTabs().filter(x => !workspace.findTab(x.id));
+    const unplaced = terminals.getTabs().filter(x => !x.owner && !workspace.findTab(x.id));
     unplaced.forEach(x => workspace.addTab(getSpaceFor(x.cwd), x.id));
     if (unplaced.length && saved?.layout.activeSpace) workspace.activateSpace(saved.layout.activeSpace);
     prunePanes();
@@ -242,17 +255,110 @@ const { isAgent, SESSION_ID } = launch;
 // status. What changes here is pushed to every connected peer.
 const writeMeshLog = createLog("mesh.log");
 const meshLog = line => writeMeshLog(`${new Date().toISOString()} ${line}`);
+// A peer's terminals here: opened for it (owner: its id), their output sent to it as frames while it is attached.
+const watchers = new Map(); // terminal id -> Set of peer ids attached to it
+const peerTabs = peer => terminals.getTabs().filter(x => x.owner === peer);
+function ownTerm(id, peer) {
+  const tab = terminals.getTabs().find(x => x.id === id && x.owner === peer);
+  if (!tab) throw new HostError("invalidData", "Not a terminal of yours here.");
+  return tab;
+}
 const MESH_API = {
   "host.info": () => ({ ...links.self(), code: undefined, platform: process.platform, agents: sessions.get()?.agents || [] }),
   "sessions.list": () => sessions.data(),
   "live.list": () => liveSessions(),
-  "git.status": () => gitStatus.get()
+  "git.status": () => gitStatus.get(),
+  "terminals.list": (_p, peer) => peerTabs(peer.id),
+  // {cwd, kind: "shell" | "new" | "resume" | "prompt", agent, sessionId, prompt} -> the tab, opened here for the peer.
+  "terminals.open": async (p, peer) => {
+    const cwd = text(p?.cwd, 4096);
+    const { command, meta, undo } = launch.commandFor({ kind: text(p?.kind, 16), agent: p?.agent, sessionId: p?.sessionId, prompt: p?.prompt }, cwd);
+    try {
+      const proxy = await network.terminalProxy().catch(() => null);
+      const id = await launch.openTerminal(cwd, command, { ...meta, owner: peer.id }, terminalEnv(process.env, proxy), `peer ${peer.name}`);
+      return terminals.getTabs().find(x => x.id === id);
+    } catch (e) {
+      undo();
+      throw e;
+    }
+  },
+  "terminals.attach": (p, peer) => {
+    const tab = ownTerm(text(p?.id, 64), peer.id);
+    if (!watchers.has(tab.id)) watchers.set(tab.id, new Set());
+    watchers.get(tab.id).add(peer.id);
+    return terminals.attach(tab.id);
+  },
+  "terminals.detach": (p, peer) => { watchers.get(text(p?.id, 64))?.delete(peer.id); return true; },
+  "terminals.close": (p, peer) => terminals.close(ownTerm(text(p?.id, 64), peer.id).id)
 };
+host.on("terminal:data", ({ id, data, end }) => {
+  const peers = watchers.get(id);
+  if (peers) for (const peer of peers) links.sendBinary(peer, frames.encodeOutput(id, data, end));
+});
+host.on("terminals", tabs => {
+  for (const id of watchers.keys()) if (!tabs.some(x => x.id === id)) watchers.delete(id);
+  // Each peer hears of its own terminals here.
+  for (const n of links.nodes()) if (n.status === "online") links.notify(n.id, "terminals", tabs.filter(x => x.owner === n.id));
+});
+// The terminals of other computers that have a pane here: what they are, by the terminal's id (a UUID both sides
+// use). Their output arrives as frames and goes to the window like a local terminal's; input and sizes go back the
+// same way. One whose computer is away keeps its pane (note "offline"); one gone there loses its pane.
+const remoteTerms = new Map(); // id -> { id, node, cwd, title, agent, sessionId, exited, pending }
+const nodeName = id => links.nodes().find(n => n.id === id)?.name || id.slice(0, 8);
+function remoteTabs() {
+  return [...remoteTerms.values()].map(x => ({
+    id: x.id, node: x.node, cwd: x.cwd, title: `${x.title} · ${nodeName(x.node)}`, agent: x.agent, sessionId: x.sessionId, exited: x.exited, lost: false,
+    createdAt: x.createdAt || 0, note: links.online(x.node) ? "" : t("manager.node.offline")
+  }));
+}
+function remoteTermsChanged() {
+  prunePanes();
+  sendWorkspace();
+  scheduleWorkspaceSave();
+}
+// The peer's list of our terminals there: titles and states follow, and a terminal gone there takes its pane.
+function reconcileRemote(node, tabs) {
+  const there = new Map(tabs.map(x => [x.id, x]));
+  for (const [id, x] of remoteTerms) {
+    if (x.node !== node) continue;
+    const tab = there.get(id);
+    if (!tab) remoteTerms.delete(id);
+    else Object.assign(x, { cwd: tab.cwd, title: tab.title, agent: tab.agent, sessionId: tab.sessionId, exited: tab.exited, createdAt: tab.createdAt, pending: false });
+  }
+  remoteTermsChanged();
+}
+// Attaching to a terminal: local, or on its computer (which then sends its output here) - null while that computer
+// is away.
+async function attachTerm(id) {
+  const x = remoteTerms.get(id);
+  if (!x) return terminals.attach(id);
+  if (!links.online(x.node)) return null;
+  return links.call(x.node, "terminals.attach", { id });
+}
+function closeTerm(id) {
+  const x = remoteTerms.get(id);
+  if (!x) return terminals.close(id);
+  remoteTerms.delete(id);
+  if (links.online(x.node)) links.call(x.node, "terminals.close", { id }).catch(e => meshLog(`closing ${id.slice(0, 8)} on ${nodeName(x.node)} failed: ${e.message}`));
+  remoteTermsChanged();
+  return true;
+}
+// A terminal on another computer, in a new tab of that project's space here: {cwd, kind, agent, sessionId, prompt}.
+async function remoteLaunch(node, args) {
+  if (!links.online(node)) throw new HostError("offline");
+  const tab = await links.call(node, "terminals.open", args);
+  if (!isObj(tab) || !frames.UUID.test(tab.id)) throw new HostError("invalidData");
+  remoteTerms.set(tab.id, { id: tab.id, node, cwd: tab.cwd, title: tab.title, agent: tab.agent, sessionId: tab.sessionId, exited: false, createdAt: tab.createdAt });
+  await restoring;
+  workspace.addTab(`node:${node}:${normPath(args.cwd)}`, tab.id);
+  showManager();
+  return tab.id;
+}
 const links = createLinks({
   dir: path.join(app.getPath("userData"), "node"), defaultName: os.hostname(), kind: "desktop", version: app.getVersion(),
-  api: (method, params) => {
+  api: (method, params, peer) => {
     if (!Object.hasOwn(MESH_API, method)) throw new HostError("unknownMethod");
-    return MESH_API[method](params);
+    return MESH_API[method](params, peer);
   },
   log: meshLog
 });
@@ -267,17 +373,41 @@ function nodesChanged() {
 }
 links.on("nodes", nodesChanged);
 links.on("event", ({ node, name, data }) => {
+  if (name === "terminals") return reconcileRemote(node, Array.isArray(data) ? data.filter(x => isObj(x) && frames.UUID.test(x.id)) : []);
   if (!["data", "live", "git"].includes(name)) return;
   remote.set(node, { ...remote.get(node), [name]: data });
   nodesChanged();
 });
+links.on("binary", ({ node, data }) => {
+  const f = frames.decode(data);
+  if (!f) return;
+  if (f.type === "output") {
+    if (remoteTerms.get(f.id)?.node === node) sendToManager("terminal:data", { id: f.id, data: f.data, end: f.end });
+  } else if (f.type === "input") {
+    if (terminals.getTabs().some(x => x.id === f.id && x.owner === node)) terminals.input(f.id, f.data);
+  } else if (f.type === "resize") {
+    if (terminals.getTabs().some(x => x.id === f.id && x.owner === node)) terminals.resize(f.id, f.cols, f.rows);
+  }
+});
 // A link that just came up: everything the peer has, at once; one that went: its last picture stays, marked offline.
 links.on("link", async ({ node, up }) => {
-  if (!up) return nodesChanged();
+  if (!up) {
+    for (const peers of watchers.values()) peers.delete(node);
+    remoteTermsChanged(); // the panes of its terminals say "offline"
+    return nodesChanged();
+  }
   try {
-    const [data, live, git] = await Promise.all([links.call(node, "sessions.list"), links.call(node, "live.list"), links.call(node, "git.status")]);
+    const [data, live, git, tabs] = await Promise.all([links.call(node, "sessions.list"), links.call(node, "live.list"), links.call(node, "git.status"), links.call(node, "terminals.list")]);
     remote.set(node, { data, live, git });
     nodesChanged();
+    reconcileRemote(node, Array.isArray(tabs) ? tabs.filter(x => isObj(x) && frames.UUID.test(x.id)) : []);
+    // The output missed while it was away: attaching again brings the scrollback, of which the window writes only
+    // what it does not have (workspace-ui.js writeAfter).
+    for (const x of remoteTerms.values()) {
+      if (x.node !== node) continue;
+      const a = await links.call(node, "terminals.attach", { id: x.id }).catch(() => null);
+      if (a?.scrollback) sendToManager("terminal:data", { id: x.id, data: a.scrollback, end: a.end });
+    }
   } catch (e) {
     meshLog(`reading ${node.slice(0, 8)} failed: ${e.message}`);
   }
@@ -469,8 +599,8 @@ async function runWorkspaceCommand(cmd, a) {
     case "merge-tab": return workspace.mergeTab(id(a.tab), id(a.into), id(a.at), text(a.side, 8));
     case "move-pane": return workspace.movePane(id(a.term), id(a.into), id(a.at), text(a.side, 8));
     case "detach-pane": return workspace.detachPane(id(a.term));
-    case "close-pane": return terminals.close(id(a.term));
-    case "close-tab": workspace.getTabTerms(id(a.tab)).forEach(term => terminals.close(term)); return true;
+    case "close-pane": return closeTerm(id(a.term));
+    case "close-tab": workspace.getTabTerms(id(a.tab)).forEach(closeTerm); return true;
     // A shell beside the focused pane, in its folder (or the shown space's).
     case "split": {
       const dir = a.dir === "down" ? "down" : "right";
@@ -782,16 +912,20 @@ function registerIpc() {
   // The terminals' text size and the window's scale, from the window's own keys (Ctrl+= / Ctrl+- / Ctrl+0).
   handle("prefs:set-view", patch => prefs.set({ terminalFontSize: patch?.terminalFontSize, uiScale: patch?.uiScale }));
   handle("workspace:command", (cmd, args) => runWorkspaceCommand(text(cmd, 32), isObj(args) ? args : {}));
-  handle("terminal:attach", id => terminals.attach(text(id, 64)));
+  handle("terminal:attach", id => attachTerm(text(id, 64)));
   handle("terminal:move", async (agent, id) => {
     await moveToTab(text(agent), text(id));
     return true;
   });
   ipcMain.on("terminal:input", (e, id, data) => {
-    if (trusted(e) && typeof data === "string" && data.length <= 1_000_000) terminals.input(id, data);
+    if (!trusted(e) || typeof data !== "string" || data.length > 1_000_000) return;
+    const node = remoteTerms.get(id)?.node;
+    if (node) links.sendBinary(node, frames.encodeInput(id, data)); else terminals.input(id, data);
   });
   ipcMain.on("terminal:resize", (e, id, cols, rows) => {
-    if (trusted(e)) terminals.resize(id, Number(cols), Number(rows));
+    if (!trusted(e)) return;
+    const node = remoteTerms.get(id)?.node;
+    if (node) links.sendBinary(node, frames.encodeResize(id, Number(cols), Number(rows))); else terminals.resize(id, Number(cols), Number(rows));
   });
   // Tokens and API-equivalent cost (usage.js): the last result at once, or a fresh pass over the transcripts.
   handle("usage:get", () => usage.get());
@@ -856,6 +990,7 @@ function registerIpc() {
   handle("centre:start", async () => { showTab(await orchestrator.open()); return true; });
   // The other computers (mesh/links.js) with what they show.
   handle("mesh:nodes", () => nodesView());
+  handle("mesh:launch", (node, args) => remoteLaunch(text(node, 64), isObj(args) ? args : {}));
   handle("centre:send", s => orchestrator.send(text(s, 20000)));
   // Every page, voice ones included, reads the language and theme from its preload before it renders.
   ipcMain.on("prefs:get", e => { e.returnValue = prefs.get(); });

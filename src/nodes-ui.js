@@ -23,6 +23,11 @@ function parseRemoteKey(key) {
   const at = rest.indexOf(":");
   return at < 0 ? null : { id: rest.slice(0, at), n: rest.slice(at + 1) };
 }
+// How many tabs are open in a remote project's space here (workspace-ui.js's ws).
+function remoteTabsHtml(key) {
+  const count = typeof ws === "object" ? ws.spaces[key]?.tabs.length || 0 : 0;
+  return count ? `<span class="proj-tabs" title="${esc(tn("ws.tabCount", count))}">${icon("terminal")}${count}</span>` : "";
+}
 const nodeLabel = n => `${n.name || n.id.slice(0, 8)}${n.status === "online" ? "" : ` · ${t("manager.node.offline")}`}`;
 
 // Running sessions of a node, those that need the user first (as the agents list orders this computer's).
@@ -50,7 +55,7 @@ function nodesHtml(selected) {
       <div class="proj remote member ${selected === remoteKey(n.id, p.n) ? "active" : ""}" data-node="${esc(n.id)}" data-remote="${esc(p.n)}" tabindex="0" title="${esc(`${p.name}\n${p.path}\n${n.name}`)}">
         <div class="proj-row"><span class="pmono" style="--h:${hue(p.n)}">${esc(initials(p.name))}</span>
           <span class="proj-name">${esc(p.name)}</span>${remoteLive(n, p.sessions)}
-          <span class="count">${p.sessions.length}</span></div></div>`).join("");
+          ${remoteTabsHtml(remoteKey(n.id, p.n))}<span class="count">${p.sessions.length}</span></div></div>`).join("");
   }).join("");
 }
 // The nodes' running sessions after this computer's, each group headed by the node's name.
@@ -73,8 +78,10 @@ function remoteAgentsHtml() {
 const remoteAgentCount = () => nodes.reduce((sum, n) => sum + remoteRunning(n).length, 0);
 
 // ---------- the centre: a remote project ----------
-// Its name, folder and computer, and its latest sessions as seen from there; nothing opens from here yet.
+// Its name, folder and computer, a terminal or an agent session to open there (in a pane here), and its latest
+// sessions as seen from there, to resume there.
 const REMOTE_RECENT = 8;
+const remoteAgents = n => (n.data?.agents?.length ? n.data.agents : AGENTS);
 function renderRemoteSpace(el, key) {
   const r = parseRemoteKey(key);
   if (!r) return false;
@@ -84,16 +91,35 @@ function renderRemoteSpace(el, key) {
     el.innerHTML = `<div class="se-box empty"><h3>${esc(t("ws.pick.title"))}</h3><p>${esc(t("manager.node.gone"))}</p></div>`;
     return true;
   }
+  const online = n.status === "online";
   const recent = [...p.sessions].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, REMOTE_RECENT);
   el.innerHTML = `<div class="se-box">
     <div class="se-head"><span class="pmono" style="--h:${hue(p.n)}">${esc(initials(p.name))}</span>
-      <div><h2>${esc(p.name)}</h2>${pathHtml(p.path, [])}<p class="se-body">${esc(t("manager.node.readOnly", { node: nodeLabel(n) }))}</p></div></div>
-    ${recent.length ? `<p class="se-label">${esc(t("ws.recent"))}</p>${recent.map(s => `<div class="se-row remote">
+      <div><h2>${esc(p.name)}</h2>${pathHtml(p.path, [])}<p class="se-body">${esc(t(online ? "manager.node.on" : "manager.node.offlineBody", { node: n.name || n.id.slice(0, 8) }))}</p></div></div>
+    ${online ? `<div class="se-new">
+      <button class="btn" data-rnew="shell" title="${esc(t("ws.newTerminalTitle"))}">${icon("terminal")}${esc(t("ws.newTerminal"))}</button>
+      ${remoteAgents(n).map(a => `<button class="btn" data-rnew="${esc(a)}">${icon(`agent${a}`)}${esc(a)}</button>`).join("")}
+    </div>` : ""}
+    ${recent.length ? `<p class="se-label">${esc(t("ws.recent"))}</p>${recent.map(s => `<div class="se-row remote" data-rkey="${esc(sessionKey(s))}">
       ${agentMark(s.agent)}<span class="se-title" title="${esc(s.title)}">${esc(s.title)}</span>
       <span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span>
-      ${n.liveMap.has(sessionKey(s)) ? statusMark(n.liveMap.get(sessionKey(s)), false) : ""}</div>`).join("")}` : ""}
+      ${n.liveMap.has(sessionKey(s)) ? statusMark(n.liveMap.get(sessionKey(s)), false) : online && s.cwd ? `<span class="se-acts"><button class="btn sm" data-rresume="${esc(sessionKey(s))}">${icon("play")}${esc(t("action.resume"))}</button></span>` : ""}</div>`).join("")}` : ""}
   </div>`;
+  el.onclick = e => onRemoteSpaceClick(e, n, p).catch(err => toast(err.message, true));
   return true;
+}
+// A terminal, a new agent session or a resumed one on the node, placed in a new tab of this space (main does both).
+async function onRemoteSpaceClick(e, n, p) {
+  const make = e.target.closest("[data-rnew]"), resumeBtn = e.target.closest("[data-rresume]");
+  if (make) {
+    const kind = make.dataset.rnew;
+    await window.manager.remoteLaunch(n.id, kind === "shell" ? { kind: "shell", cwd: p.path } : { kind: "new", cwd: p.path, agent: kind });
+  } else if (resumeBtn) {
+    const s = p.sessions.find(x => sessionKey(x) === resumeBtn.dataset.rresume);
+    if (!s) return;
+    await window.manager.remoteLaunch(n.id, { kind: "resume", cwd: s.cwd, agent: s.agent, sessionId: s.id });
+  } else return;
+  toast(t("manager.node.toast.opened", { node: n.name }));
 }
 
 window.manager.onNodesChanged(list => {
