@@ -64,18 +64,27 @@ function findTranscript(id) {
   return "";
 }
 
-// What Claude Code wrote about a subagent when it started it (agentType, description); read once, it does not change.
+// What Claude Code wrote about a subagent when it started it (agentType, description); remembered once read, it does
+// not change. A file not there yet, or still being written, is read again on the next poll.
+const NO_META = Object.freeze({ type: "", description: "" });
 function readSubagentMeta(file) {
-  if (!subagentMeta.has(file)) {
-    let m = {};
-    try { m = JSON.parse(fs.readFileSync(file, "utf8")); } catch {}
-    subagentMeta.set(file, { type: String(m.agentType || ""), description: String(m.description || "") });
+  let meta = subagentMeta.get(file);
+  if (!meta) {
+    let m;
+    try { m = JSON.parse(fs.readFileSync(file, "utf8")); } catch { return NO_META; }
+    meta = { type: String(m?.agentType || ""), description: String(m?.description || "") };
+    subagentMeta.set(file, meta);
   }
-  return subagentMeta.get(file);
+  return meta;
 }
 function listSubagents(dir, now) {
   let names;
   try { names = fs.readdirSync(dir).filter(f => f.endsWith(".jsonl")); } catch { return []; }
+  // The subagents gone from this folder are forgotten.
+  const ids = new Set(names.map(f => f.slice(0, -".jsonl".length)));
+  for (const file of subagentMeta.keys()) {
+    if (path.dirname(file) === dir && !ids.has(path.basename(file, ".meta.json"))) subagentMeta.delete(file);
+  }
   return names.map(f => {
     const id = f.slice(0, -".jsonl".length);
     const at = mtime(path.join(dir, f));

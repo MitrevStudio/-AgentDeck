@@ -136,11 +136,15 @@ async function reopenTerminal(meta, env) {
 // before it opened) gets a tab of its own.
 async function restoreWorkspace() {
   const saved = readSavedWorkspace();
+  let restored = !saved; // with no layout to put back, there is nothing a save could spoil
   try {
-    const running = new Set(await terminals.restore());
+    const { attached, kept } = await terminals.restore();
+    const running = new Set(attached), held = new Set(kept);
     const panes = saved ? new Set(Object.values(saved.layout.tabs || {}).flatMap(tab => getPanes(tab?.root))) : new Set();
     const ids = new Map([...panes].filter(old => running.has(old)).map(old => [old, old]));
-    const gone = [...panes].filter(old => !running.has(old));
+    // A pane whose terminal still runs but could not be attached goes: opened anew, its agent would run a second time
+    // on the same session. The terminal gets a tab of its own once a start attaches it.
+    const gone = [...panes].filter(old => !running.has(old) && !held.has(old));
     if (gone.length) {
       const proxy = await network.terminalProxy().catch(() => null);
       const env = terminalEnv(process.env, proxy);
@@ -149,6 +153,7 @@ async function restoreWorkspace() {
       }
     }
     if (saved) workspace.importState(saved.layout, old => ids.get(old) || "");
+    restored = true;
     const unplaced = terminals.getTabs().filter(x => !workspace.findTab(x.id));
     unplaced.forEach(x => workspace.addTab(getSpaceFor(x.cwd), x.id));
     if (unplaced.length && saved?.layout.activeSpace) workspace.activateSpace(saved.layout.activeSpace);
@@ -156,8 +161,13 @@ async function restoreWorkspace() {
   } catch (e) {
     console.error("Restoring the layout failed:", e);
   } finally {
-    workspaceSaving = true;
-    scheduleWorkspaceSave();
+    // The saved layout never got in: it stays as it is for the next start, and nothing is saved over it this time.
+    if (restored) {
+      workspaceSaving = true;
+      scheduleWorkspaceSave();
+    } else {
+      console.error("The layout is not saved this time: the saved one is kept for the next start.");
+    }
   }
 }
 let restoring = Promise.resolve();
@@ -861,10 +871,15 @@ async function runWorkspaceCommand(cmd, a) {
     // The edge menu: the window comes up showing that project.
     case "show-space": workspace.activateSpace(text(a.space ?? "", 2000)); showManager(); return true;
     case "tab": return workspace.activateTab(id(a.tab));
-    case "rename-tab": return workspace.renameTab(id(a.tab), text(a.name ?? "", 200));
+    // "" takes the tab back to its automatic title.
+    case "rename-tab": return workspace.renameTab(id(a.tab), a.name === "" ? "" : text(a.name, 200));
     case "reorder-tabs":
       if (!Array.isArray(a.ids) || a.ids.length > 1000) throw new Error(t("errors.invalidData"));
       return workspace.reorderTabs(text(a.space ?? "", 2000), a.ids.map(id));
+    // Dragging: a tab's panes beside a pane of another tab; a pane beside another one; a pane into a tab of its own.
+    case "merge-tab": return workspace.mergeTab(id(a.tab), id(a.into), id(a.at), text(a.side, 8));
+    case "move-pane": return workspace.movePane(id(a.term), id(a.into), id(a.at), text(a.side, 8));
+    case "detach-pane": return workspace.detachPane(id(a.term));
     case "close-pane": return terminals.close(id(a.term));
     case "close-tab": workspace.getTabTerms(id(a.tab)).forEach(term => terminals.close(term)); return true;
     // A shell beside the focused pane, in its folder (or the shown space's).

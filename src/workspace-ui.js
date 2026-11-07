@@ -8,12 +8,13 @@ const ANSI_NAMES = [
 ];
 const HEADERS_REFRESH_MS = 3000;
 const TERM_FONT = '"Cascadia Mono", "Cascadia Code", Consolas, monospace';
-// prefs.js: TERMINAL_FONT_SIZES and its default.
-const TERM_FONT_SIZES = [11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24], TERM_FONT_DEFAULT = 16;
+// prefs.js: TERMINAL_FONT_SIZES (as the prefs snapshot brings it) and its default.
+const TERM_FONT_SIZES = window.prefs.terminalFontSizes, TERM_FONT_DEFAULT = 16;
 let termFontSize = window.prefs.terminalFontSize || TERM_FONT_DEFAULT;
 let ws = { activeSpace: "", spaces: {}, tabs: {}, terminals: [] };
 const termViews = new Map(); // terminal id -> { host, term, fit, attachedEnd, queue }
 let layoutSig = "";          // what the panes were last built from
+let wsPushed = false;        // main sent the layout at least once
 let focusAfterRender = false;
 
 const runWorkspace = (cmd, args = {}) => window.terminals.command(cmd, args).catch(e => toast(e.message, true));
@@ -26,6 +27,9 @@ function getPanesOf(node, out = []) {
   else { getPanesOf(node.a, out); getPanesOf(node.b, out); }
   return out;
 }
+// A layout's shape without its ratios: what the panes are rebuilt for. A ratio changes in place (applyRatios).
+const getShape = node => (node.term ? node.term : [node.dir, getShape(node.a), getShape(node.b)]);
+const clampRatio = r => Math.min(0.9, Math.max(0.1, Number(r) || 0.5));
 
 // ---------- looks ----------
 // theme.css --term-* tokens: --term-ansi-black ... --term-ansi-bright-white for the 16 colours.
@@ -254,20 +258,26 @@ function getTabLive(tab) {
 function renderTabbar() {
   const space = getShownSpace();
   const tabs = space.tabs.map(id => ws.tabs[id]).filter(Boolean);
-  $("tabbar").innerHTML = tabs.map((tab, i) => {
+  const html = tabs.map((tab, i) => {
     const l = getTabLive(tab);
     const label = tab.name || getTermTitle(getTerminal(tab.focus)) || String(i + 1);
     return `<div class="wtab ${tab.id === space.active ? "active" : ""}" data-tab="${esc(tab.id)}" role="tab" draggable="true" title="${esc(label)}">
       ${l ? statusMark(l, false) : ""}<span class="wtab-name">${esc(label)}</span>
       <button class="wtab-close" data-ws="close-tab" title="${esc(t("ws.closeTab"))}">${icon("x")}</button></div>`;
   }).join("") + `<button class="icon-btn wtab-new" data-ws="new-menu" title="${esc(t("ws.new"))}" aria-haspopup="menu">${icon("plus")}</button>`;
+  // Rebuilt only when something shows differently, and not while a tab is dragged: a click or a drag in progress is
+  // not lost.
+  const bar = $("tabbar");
+  if (draggedTab || bar.dataset.html === html) return;
+  bar.dataset.html = html;
+  bar.innerHTML = html;
 }
 // The panes of the shown tab (or its zoomed pane), built anew only when the layout changed; the terminals' own
 // elements move into them, so nothing they show is lost.
 function renderPanes() {
   const tab = getShownTab();
   const root = tab ? (tab.zoom ? { term: tab.zoom } : tab.root) : null;
-  const sig = JSON.stringify([ws.activeSpace, tab?.id, root]);
+  const sig = JSON.stringify([ws.activeSpace, tab?.id, root && getShape(root)]);
   $("panes").hidden = !tab;
   $("spaceEmpty").hidden = Boolean(tab);
   if (!tab) {
@@ -279,6 +289,8 @@ function renderPanes() {
     layoutSig = sig;
     const box = $("panes");
     box.replaceChildren(buildNode(root, ""));
+    requestAnimationFrame(fitShown);
+  } else if (applyRatios($("panes").firstElementChild, root)) {
     requestAnimationFrame(fitShown);
   }
   renderPaneHeads(tab);
@@ -293,25 +305,41 @@ function buildNode(node, path) {
     const el = document.createElement("div");
     el.className = "pane";
     el.dataset.term = node.term;
-    el.innerHTML = '<div class="pane-head"></div><div class="pane-body"></div>';
+    el.innerHTML = '<div class="pane-head" draggable="true"></div><div class="pane-body"></div>';
     const view = termViews.get(node.term) || createTermView(node.term);
     el.lastChild.appendChild(view.host);
     return el;
   }
   const el = document.createElement("div");
   el.className = `split ${node.dir}`;
-  const ratio = Math.min(0.9, Math.max(0.1, Number(node.ratio) || 0.5));
-  const a = buildNode(node.a, path + "a"), b = buildNode(node.b, path + "b");
-  a.style.flex = `${ratio} 1 0`;
-  b.style.flex = `${1 - ratio} 1 0`;
   const divider = document.createElement("div");
   divider.className = "divider";
   divider.dataset.path = path;
-  el.append(a, divider, b);
+  el.append(buildNode(node.a, path + "a"), divider, buildNode(node.b, path + "b"));
+  setSplitRatio(el, clampRatio(node.ratio));
   return el;
+}
+// A split's two sides sharing it `ratio` to 1 - `ratio`. Answers whether that changed.
+function setSplitRatio(split, ratio) {
+  if (split.dataset.ratio === String(ratio)) return false;
+  split.dataset.ratio = String(ratio);
+  const [a, , b] = split.children;
+  a.style.flex = `${ratio} 1 0`;
+  b.style.flex = `${1 - ratio} 1 0`;
+  return true;
+}
+// The layout's ratios on the splits built for it, in place; a split being dragged keeps the pointer's. Answers whether
+// any changed (the terminals are then fitted again).
+function applyRatios(el, node) {
+  if (!node || node.term || !el?.classList.contains("split")) return false;
+  const [a, , b] = el.children;
+  const here = !el.classList.contains("dragging") && setSplitRatio(el, clampRatio(node.ratio));
+  const inA = applyRatios(a, node.a), inB = applyRatios(b, node.b);
+  return here || inA || inB;
 }
 // Each pane's header: the agent, what runs, its context, its state, and the pane's buttons.
 function renderPaneHeads(tab) {
+  if (draggedPane) return; // the header being dragged stays the same element until it is let go
   const many = getPanesOf(tab.root).length > 1;
   document.querySelectorAll("#panes .pane").forEach(el => {
     const x = getTerminal(el.dataset.term);
@@ -350,6 +378,7 @@ const isPageLoading = () => document.readyState === "loading";
 window.terminals.onWorkspace(next => {
   const before = getShownTab()?.focus;
   ws = next;
+  wsPushed = true;
   if (isPageLoading()) return;
   // Something new came up (a launch, a split, "show terminal"): the keyboard goes to it.
   if (getShownTab()?.focus !== before) focusAfterRender = true;
@@ -397,32 +426,84 @@ $("panes").addEventListener("pointerdown", e => {
   const divider = e.target.closest(".divider");
   if (!divider) return;
   e.preventDefault();
-  const split = divider.parentElement, [a, , b] = split.children;
+  const split = divider.parentElement;
   const across = split.classList.contains("right");
   const rect = split.getBoundingClientRect();
-  let ratio = 0.5;
+  let ratio = null; // the pointer's, once it moved
   divider.setPointerCapture(e.pointerId);
   split.classList.add("dragging");
   const move = ev => {
     ratio = Math.min(0.9, Math.max(0.1, across ? (ev.clientX - rect.left) / rect.width : (ev.clientY - rect.top) / rect.height));
-    a.style.flex = `${ratio} 1 0`;
-    b.style.flex = `${1 - ratio} 1 0`;
+    setSplitRatio(split, ratio);
   };
   divider.addEventListener("pointermove", move);
   divider.addEventListener("lostpointercapture", () => {
     divider.removeEventListener("pointermove", move);
     split.classList.remove("dragging");
+    if (ratio === null) return; // a click: the split stays as it is
     fitShown();
     runWorkspace("ratio", { tab: getShownTab()?.id, path: divider.dataset.path, ratio });
   }, { once: true });
 });
 
-// ---------- tabs: drag to reorder ----------
-let draggedTab = "";
+// ---------- dragging: tabs to reorder or to join, panes to move ----------
+// A tab dragged onto another tab takes its place; onto a pane, its panes go beside that one. A pane's header dragged
+// onto another pane moves the pane there; onto the tab bar, the pane gets a tab of its own.
+let draggedTab = "", draggedPane = "";
+const PANE_SIDES = ["left", "right", "up", "down"];
 const getTabDropSide = (el, e) => (e.clientX > el.getBoundingClientRect().left + el.offsetWidth / 2 ? "after" : "before");
+// The side of the pane the pointer is nearest to.
+function getPaneDropSide(el, e) {
+  const r = el.getBoundingClientRect();
+  const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+  return Math.min(x, 1 - x) < Math.min(y, 1 - y) ? (x < 0.5 ? "left" : "right") : (y < 0.5 ? "up" : "down");
+}
 function clearTabDropMarks() {
   document.querySelectorAll(".wtab.drop-before, .wtab.drop-after, .wtab.dragging").forEach(el => el.classList.remove("drop-before", "drop-after", "dragging"));
 }
+function clearPaneDropMarks() {
+  document.querySelectorAll("#panes .pane").forEach(el => el.classList.remove(...PANE_SIDES.map(s => "drop-" + s)));
+  $("tabbar").classList.remove("drop-new");
+}
+function endDrag() {
+  draggedTab = "";
+  draggedPane = "";
+  clearTabDropMarks();
+  clearPaneDropMarks();
+}
+// The pane under the pointer that the dragged tab or pane may land beside: not the dragged pane itself, nor a pane of
+// the dragged tab (the shown one).
+function getDropPane(e) {
+  const el = e.target.closest?.(".pane");
+  if (!el || (!draggedTab && !draggedPane)) return null;
+  return draggedPane === el.dataset.term || draggedTab === getShownTab()?.id ? null : el;
+}
+$("panes").addEventListener("dragstart", e => {
+  const pane = e.target.closest?.(".pane-head")?.closest(".pane");
+  if (!pane) return;
+  draggedPane = pane.dataset.term;
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData("text/plain", draggedPane);
+});
+$("panes").addEventListener("dragover", e => {
+  const el = getDropPane(e);
+  if (!el) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "move";
+  const mark = "drop-" + getPaneDropSide(el, e);
+  if (!el.classList.contains(mark)) { clearPaneDropMarks(); el.classList.add(mark); }
+});
+$("panes").addEventListener("dragleave", e => { if (!$("panes").contains(e.relatedTarget)) clearPaneDropMarks(); });
+$("panes").addEventListener("drop", e => {
+  const el = getDropPane(e);
+  if (!el) return;
+  e.preventDefault();
+  const side = getPaneDropSide(el, e), into = getShownTab()?.id, at = el.dataset.term;
+  if (draggedTab) runWorkspace("merge-tab", { tab: draggedTab, into, at, side });
+  else runWorkspace("move-pane", { term: draggedPane, into, at, side });
+  endDrag();
+});
+$("panes").addEventListener("dragend", endDrag);
 $("tabbar").addEventListener("dragstart", e => {
   const el = e.target.closest?.(".wtab");
   if (!el) return;
@@ -432,28 +513,50 @@ $("tabbar").addEventListener("dragstart", e => {
   el.classList.add("dragging");
 });
 $("tabbar").addEventListener("dragover", e => {
+  if (draggedPane) {
+    // A pane alone in its tab has a tab of its own already.
+    if (getPanesOf(getShownTab()?.root).length < 2) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    $("tabbar").classList.add("drop-new");
+    return;
+  }
   const el = e.target.closest?.(".wtab");
   if (!el || !draggedTab || el.dataset.tab === draggedTab) return;
   e.preventDefault();
   document.querySelectorAll(".wtab.drop-before, .wtab.drop-after").forEach(x => x.classList.remove("drop-before", "drop-after"));
   el.classList.add("drop-" + getTabDropSide(el, e));
 });
+$("tabbar").addEventListener("dragleave", e => { if (!$("tabbar").contains(e.relatedTarget)) $("tabbar").classList.remove("drop-new"); });
 $("tabbar").addEventListener("drop", e => {
+  if (draggedPane) {
+    e.preventDefault();
+    runWorkspace("detach-pane", { term: draggedPane });
+    endDrag();
+    return;
+  }
   const el = e.target.closest?.(".wtab");
   if (!el || !draggedTab) return;
   e.preventDefault();
   const ids = getShownSpace().tabs.filter(id => id !== draggedTab);
   ids.splice(ids.indexOf(el.dataset.tab) + (getTabDropSide(el, e) === "after" ? 1 : 0), 0, draggedTab);
-  draggedTab = "";
-  clearTabDropMarks();
+  endDrag();
   runWorkspace("reorder-tabs", { space: ws.activeSpace, ids });
 });
-$("tabbar").addEventListener("dragend", () => { draggedTab = ""; clearTabDropMarks(); });
+$("tabbar").addEventListener("dragend", endDrag);
 
 // The headers and tab states follow the live registry and the scan.
 setInterval(() => { renderTabbar(); const tab = getShownTab(); if (tab) renderPaneHeads(tab); }, HEADERS_REFRESH_MS);
+// The first drawing: of the layout main sent while the page loaded when it did, else of the one asked for - unless
+// main sends one before the answer comes (a layout restored on start): the older answer would put back what that showed.
 function drawFirst() {
-  window.terminals.getWorkspace().then(next => { ws = next; renderWorkspace(); onWorkspaceChanged(); }).catch(e => console.error(e));
+  const draw = () => { renderWorkspace(); onWorkspaceChanged(); };
+  if (wsPushed) return draw();
+  window.terminals.getWorkspace().then(next => {
+    if (wsPushed) return;
+    ws = next;
+    draw();
+  }).catch(e => console.error(e));
 }
 if (isPageLoading()) document.addEventListener("DOMContentLoaded", drawFirst, { once: true });
 else drawFirst();

@@ -34,7 +34,8 @@ const fraction = v => (typeof v === "number" && v >= 0 && v <= 1 ? v : null);
 
 // themeSource also gives native title bars and dialogs the chosen look; "system" follows Windows.
 const resolvedTheme = () => (nativeTheme.shouldUseDarkColors ? "dark" : "light");
-const get = () => ({ ...state, resolvedTheme: resolvedTheme(), dev: !app.isPackaged });
+// With the choices the pages offer (the lists above), so none keeps a copy of them.
+const get = () => ({ ...state, resolvedTheme: resolvedTheme(), dev: !app.isPackaged, terminalFontSizes: TERMINAL_FONT_SIZES, uiScales: UI_SCALES });
 const background = () => BACKGROUND[resolvedTheme()];
 
 function load() {

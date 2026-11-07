@@ -69,8 +69,8 @@ function nextTab(step) {
 // ---------- General ----------
 const THEMES = ["system", "dark", "light"];
 const SESSIONS_IN = ["windows", "tabs"];
-// prefs.js: TERMINAL_FONT_SIZES, UI_SCALES.
-const TERM_FONT_SIZES = [11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24], UI_SCALES = [0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5];
+// prefs.js: TERMINAL_FONT_SIZES and UI_SCALES, as the prefs snapshot brings them.
+const { terminalFontSizes: TERM_FONT_SIZES, uiScales: UI_SCALES } = window.prefs;
 let general = { ...window.prefs };
 const dirty = new Set(); // tabs with unsaved edits: a language switch reloads the window
 function setDirty(tab, on) {

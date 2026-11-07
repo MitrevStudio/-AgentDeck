@@ -118,8 +118,15 @@ function createWorkspace({ onChange = () => {} } = {}) {
   }
   // The pane of a terminal that ended or was closed goes; an emptied tab goes with it.
   function removeTerm(term) {
+    if (!takeTerm(term)) return false;
+    changed();
+    return true;
+  }
+  // The pane of `term` out of its tab (which goes once empty), as a node to put elsewhere; null when it is in no tab.
+  // No "changed" of its own: the caller's move ends with one.
+  function takeTerm(term) {
     const tab = findTab(term);
-    if (!tab) return false;
+    if (!tab) return null;
     const panes = getPanes(tab.root);
     const at = panes.indexOf(term);
     tab.root = replacePane(tab.root, term, () => null);
@@ -132,6 +139,52 @@ function createWorkspace({ onChange = () => {} } = {}) {
       }
       if (tab.zoom === term) tab.zoom = "";
     }
+    return { term };
+  }
+  // ---------- moving panes (dragging in workspace-ui.js) ----------
+  const SIDES = { left: "right", right: "right", up: "down", down: "down" }; // side of a pane -> the split's direction
+  // `node` (a pane, or a whole tab's panes) on `side` of the pane of `target` in `tabId`, taking half of it; `focus`:
+  // the pane of `node` the keyboard goes to.
+  function placeBeside(tabId, target, side, node, focus) {
+    const tab = tabs.get(tabId);
+    const dir = SIDES[side];
+    if (!tab || !dir || !hasTerm(tab.root, target)) return false;
+    const first = side === "left" || side === "up";
+    tab.root = replacePane(tab.root, target, pane => ({ dir, ratio: 0.5, a: first ? node : pane, b: first ? pane : node }));
+    tab.focus = focus;
+    tab.zoom = "";
+    const s = getSpace(tab.space);
+    s.active = tabId;
+    activeSpace = tab.space;
+    changed();
+    return true;
+  }
+  // A tab's panes, splits and all, beside a pane of another tab; the tab goes.
+  function mergeTab(tabId, intoId, target, side) {
+    const tab = tabs.get(tabId), into = tabs.get(intoId);
+    if (!tab || !into || tab === into || !SIDES[side] || !hasTerm(into.root, target)) return false;
+    closeTabOnly(tabId);
+    return placeBeside(intoId, target, side, tab.root, tab.focus);
+  }
+  // A pane beside another one, of its own tab or of another; its tab goes once empty.
+  function movePane(term, intoId, target, side) {
+    const into = tabs.get(intoId);
+    if (!into || term === target || !SIDES[side] || !hasTerm(into.root, target)) return false;
+    const node = takeTerm(term);
+    return node ? placeBeside(intoId, target, side, node, term) : false;
+  }
+  // A pane of a tab with others into a tab of its own, right after that tab.
+  function detachPane(term) {
+    const tab = findTab(term);
+    if (!tab || getPanes(tab.root).length < 2) return false;
+    const s = getSpace(tab.space);
+    const at = s.tabs.indexOf(tab.id);
+    takeTerm(term);
+    const id = crypto.randomUUID();
+    tabs.set(id, { id, space: tab.space, name: "", root: { term }, focus: term, zoom: "" });
+    s.tabs.splice(at + 1, 0, id);
+    s.active = id;
+    activeSpace = tab.space;
     changed();
     return true;
   }
@@ -268,8 +321,8 @@ function createWorkspace({ onChange = () => {} } = {}) {
   }
 
   return {
-    addTab, split, removeTerm, getTabTerms, focus, focusDirection, setRatio, toggleZoom, activateSpace, activateTab,
-    renameTab, reorderTabs, getActiveTab, findTab, snapshot, exportState, importState
+    addTab, split, removeTerm, mergeTab, movePane, detachPane, getTabTerms, focus, focusDirection, setRatio, toggleZoom,
+    activateSpace, activateTab, renameTab, reorderTabs, getActiveTab, findTab, snapshot, exportState, importState
   };
 }
 
