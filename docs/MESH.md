@@ -344,6 +344,21 @@ shell в таб, продължаване на сесия в split, команд
 devws (с разрешение): клонът трябва да е качен в GitHub, после
 `AGENTDECK_BRANCH=feat/mesh bash <(curl -fsSL …/feat/mesh/host/install.sh)`; `claude`/`codex` там още ги няма.
 
+### Фаза 4 на devws и фаза 5 – състояние (2026-11-07)
+
+- **devws**: `install.sh` от клона `feat/mesh` (sparse checkout в `~/.agentdeck/app`, пакети в `host/`, systemd user
+  услуга `agentdeck-host`, linger). Сдвоен с работната станция; shell на devws в панел тук, resize, затваряне –
+  работят на истински Linux (node-pty backend). `agentdeck-host update` обновява от клона. Node 20 → без търсене.
+- **Фаза 5**: „Клонирай на…“ в менюто на проект (`clone-ui.js`): компютър, папка там (`~/work/<име>`), бранч (нов от
+  базата или съществуващ), агент и prompt; `launch.cloneCommand` → един терминал там (стойностите в AGENTDECK_*
+  променливи, не на командния ред), папката влиза в проектите на възела. Проверено на devws: клонира, превключи
+  `feat/mesh`, проектът се появи. `host/setup.js` + Настройки → Компютри → **Подготовка**: git, SSH ключ (генерира се
+  там, показва се само публичният), `ssh-keyscan` в known_hosts, git идентичност, агентите. На devws: git 2.34, има
+  `id_rsa`, няма known hosts/идентичност/агенти.
+
+Остава: `claude`/`codex` на devws (инсталация + вход през отдалечен терминал); известия от друг възел; палитрата
+по възли; firewall правило в инсталатора; headless на Windows; `node:sqlite` при Node 22.
+
 ---
 
 ## 10. Рискове и отворени въпроси
