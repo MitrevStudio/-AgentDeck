@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="440" viewBox="0 0 1280 440" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">AgentDeck</title>
+  <desc id="desc">AI sessions, projects and voice in one place. Decorative illustration of connected terminal panes.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1280" y2="440" gradientUnits="userSpaceOnUse"><stop stop-color="#0D101B"/><stop offset="1" stop-color="#171F38"/></linearGradient>
+    <linearGradient id="accent" x1="74" y1="70" x2="190" y2="180" gradientUnits="userSpaceOnUse"><stop stop-color="#A78BFA"/><stop offset="1" stop-color="#67E8F9"/></linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" stroke="#9DAFE8" stroke-opacity=".045"/></pattern>
+  </defs>
+  <rect width="1280" height="440" rx="24" fill="url(#bg)"/>
+  <rect width="1280" height="440" rx="24" fill="url(#grid)"/>
+  <circle cx="1194" cy="44" r="228" stroke="#A78BFA" stroke-opacity=".10"/>
+  <circle cx="1194" cy="44" r="288" stroke="#67E8F9" stroke-opacity=".06"/>
+  <rect x="64" y="60" width="66" height="66" rx="19" fill="url(#accent)"/>
+  <path d="M82 82L94 93L82 104M101 104H113" stroke="#101525" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="150" y="104" font-family="Segoe UI,Arial,sans-serif" font-size="19" font-weight="700" letter-spacing="4" fill="#B8C4E8">YOUR AI WORKSPACE</text>
+  <text x="60" y="216" font-family="Segoe UI,Arial,sans-serif" font-size="83" font-weight="750" letter-spacing="-4" fill="#F1F5FF">AgentDeck</text>
+  <text x="66" y="270" font-family="Segoe UI,Arial,sans-serif" font-size="24" fill="#B7C3DF">AI sessions, projects and voice in one place.</text>
+  <g font-family="Segoe UI,Arial,sans-serif" font-size="14" font-weight="600">
+    <rect x="66" y="321" width="117" height="35" rx="17.5" fill="#A78BFA" fill-opacity=".12" stroke="#A78BFA" stroke-opacity=".3"/><text x="87" y="344" fill="#D0BDFF">Claude Code</text>
+    <rect x="195" y="321" width="87" height="35" rx="17.5" fill="#67E8F9" fill-opacity=".09" stroke="#67E8F9" stroke-opacity=".25"/><text x="218" y="344" fill="#A8F0FA">Codex</text>
+    <rect x="294" y="321" width="110" height="35" rx="17.5" fill="#34D399" fill-opacity=".09" stroke="#34D399" stroke-opacity=".25"/><text x="313" y="344" fill="#8CE6C5">OpenCode</text>
+  </g>
+  <g transform="translate(734 70)">
+    <rect width="472" height="294" rx="15" fill="#0D1322" stroke="#435277"/>
+    <path d="M1 43H471" stroke="#2A3653"/>
+    <circle cx="22" cy="22" r="4" fill="#A78BFA"/><circle cx="38" cy="22" r="4" fill="#67E8F9"/><circle cx="54" cy="22" r="4" fill="#34D399"/>
+    <text x="78" y="27" font-family="Segoe UI,Arial,sans-serif" font-size="12" fill="#91A2C6">PROJECT / WORKSPACE</text>
+    <rect x="18" y="60" width="128" height="214" rx="7" fill="#151D30"/>
+    <g font-family="Segoe UI,Arial,sans-serif" font-size="12">
+      <text x="32" y="85" fill="#7283A8" letter-spacing="1">PROJECTS</text>
+      <rect x="27" y="99" width="109" height="29" rx="5" fill="#A78BFA" fill-opacity=".16"/>
+      <text x="38" y="118" fill="#D8CCFF">website</text><text x="38" y="152" fill="#8B9CBF">backend</text><text x="38" y="186" fill="#8B9CBF">dev-host</text>
+      <circle cx="39" cy="244" r="3" fill="#34D399"/><text x="50" y="248" fill="#8B9CBF">host connected</text>
+    </g>
+    <rect x="161" y="60" width="292" height="122" rx="7" fill="#111B2C" stroke="#293A56"/>
+    <text x="177" y="82" font-family="Consolas,monospace" font-size="12" fill="#BCA5FA">&gt; claude</text>
+    <rect x="177" y="97" width="223" height="5" rx="2.5" fill="#425273"/><rect x="177" y="111" width="182" height="5" rx="2.5" fill="#2B3A57"/><rect x="177" y="125" width="208" height="5" rx="2.5" fill="#2B3A57"/>
+    <circle cx="181" cy="157" r="3" fill="#34D399"/><text x="192" y="161" font-family="Segoe UI,Arial,sans-serif" font-size="11" fill="#83DCC0">Working</text>
+    <rect x="161" y="194" width="140" height="80" rx="7" fill="#111B2C" stroke="#293A56"/><rect x="313" y="194" width="140" height="80" rx="7" fill="#111B2C" stroke="#293A56"/>
+    <text x="176" y="218" font-family="Consolas,monospace" font-size="12" fill="#85DFEE">&gt; codex</text><text x="328" y="218" font-family="Consolas,monospace" font-size="12" fill="#85DFB8">&gt; shell</text>
+    <path d="M177 235H262M177 247H244M329 235H414M329 247H386" stroke="#334662" stroke-width="4" stroke-linecap="round"/>
+  </g>
+  <text x="1205" y="393" text-anchor="end" font-family="Segoe UI,Arial,sans-serif" font-size="11" letter-spacing="2" fill="#7284AB">LOCAL FIRST · CONNECTED BY CHOICE</text>
+</svg>
