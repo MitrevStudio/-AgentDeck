@@ -8,6 +8,7 @@
 const { HostError } = require("../host/errors");
 const { terminalEnv } = require("../host/terminal-env");
 const frames = require("./frames");
+const { savePaste, MAX_BYTES } = require("../host/paste");
 
 const LIVE_MS = 3000;
 
@@ -85,6 +86,11 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
       const id = await launch.openTerminal(parent, spec.command, { ...spec.meta, owner: peer.id }, { ...(await env()), ...spec.env }, `peer ${peer.name} clone`, spec.argv);
       registerOnceCloned(dir);
       return { ...terminals.getTabs().find(x => x.id === id), dir };
+    },
+    // A file for a terminal here (a pasted picture, a dropped file): {name, data (base64)} -> its path here.
+    "files.put": p => {
+      if (typeof p?.data === "string" && p.data.length > Math.ceil(MAX_BYTES * 4 / 3) + 4) throw new HostError("tooBig");
+      return savePaste(str(p?.name, 200), Buffer.from(str(p?.data, Infinity), "base64"));
     },
     "git.branches": p => setup.branches(str(p?.dir, 4096)),
     "setup.status": () => setup.status(),

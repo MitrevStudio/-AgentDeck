@@ -74,8 +74,10 @@ contextBridge.exposeInMainWorld("terminals", {
   resize: (id, cols, rows) => ipcRenderer.send("terminal:resize", id, cols, rows),
   // A clipboard picture saved as a PNG (its path, "" when the clipboard holds text or no picture), and a dropped
   // file's path.
-  saveClipboardImage: () => ipcRenderer.invoke("clipboard:image-file"),
+  saveClipboardImage: id => ipcRenderer.invoke("clipboard:image-file", id),
   getPathForFile: file => webUtils.getPathForFile(file),
+  // A dropped file for a terminal on another computer: its bytes go there, its path there comes back.
+  uploadFile: (id, name, bytes) => ipcRenderer.invoke("terminal:upload", id, name, new Uint8Array(bytes)),
   onData: cb => ipcRenderer.on("terminal:data", (_e, d) => cb(d)),
   onWorkspace: cb => ipcRenderer.on("workspace:changed", (_e, w) => cb(w))
 });

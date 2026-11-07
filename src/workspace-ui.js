@@ -79,18 +79,28 @@ function createTermView(id) {
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
   term.open(host);
-  term.attachCustomKeyEventHandler(e => handleTermKey(term, e));
+  term.attachCustomKeyEventHandler(e => handleTermKey(term, e, id));
   term.onData(d => window.terminals.input(id, d));
   // Files dropped on a terminal: their paths typed in, quoted when they have spaces (as Windows Terminal does).
   host.addEventListener("dragover", e => {
     if (e.dataTransfer?.types.includes("Files")) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }
   });
   host.addEventListener("drop", e => {
-    const paths = [...(e.dataTransfer?.files || [])].map(f => window.terminals.getPathForFile(f)).filter(Boolean);
-    if (!paths.length) return;
+    const files = [...(e.dataTransfer?.files || [])];
+    if (!files.length) return;
     e.preventDefault();
     term.focus();
-    term.paste(paths.map(p => (/\s/.test(p) ? `"${p}"` : p)).join(" "));
+    const quote = p => (/\s/.test(p) ? `"${p}"` : p);
+    // A terminal on another computer cannot read a path here: the files go there first (up to 10 MB each).
+    if (getTerminal(id)?.node) {
+      Promise.all(files.map(async f => {
+        if (f.size > 10 * 1024 * 1024) { toast(t("term.uploadTooBig", { name: f.name }), true); return ""; }
+        return window.terminals.uploadFile(id, f.name, await f.arrayBuffer());
+      })).then(paths => { const list = paths.filter(Boolean); if (list.length) term.paste(list.map(quote).join(" ")); }, err => toast(err.message, true));
+      return;
+    }
+    const paths = files.map(f => window.terminals.getPathForFile(f)).filter(Boolean);
+    if (paths.length) term.paste(paths.map(quote).join(" "));
   });
   // Clicking into a terminal makes its pane the focused one.
   term.textarea?.addEventListener("focus", () => { if (getShownTab()?.focus !== id) runWorkspace("focus", { term: id }); });
@@ -170,7 +180,7 @@ function runWorkspaceKey([cmd, args]) {
     return runWorkspace("tab", { tab: list[(i + (args.back ? -1 : 1) + list.length) % list.length] });
   }
 }
-function handleTermKey(term, e) {
+function handleTermKey(term, e, id) {
   if (e.type !== "keydown") return true;
   const key = getWorkspaceKey(e, true);
   if (key) {
@@ -186,7 +196,7 @@ function handleTermKey(term, e) {
   }
   // The browser pastes; xterm picks the text up from the paste event. A picture has no text: its saved file's path goes in.
   if (e.code !== "KeyV") return true;
-  window.terminals.saveClipboardImage().then(file => { if (file) term.paste(file); }, err => toast(err.message, true));
+  window.terminals.saveClipboardImage(id).then(file => { if (file) term.paste(file); }, err => toast(err.message, true));
   return false;
 }
 // The same keys when the keyboard is elsewhere in the window (not typing in a field).
