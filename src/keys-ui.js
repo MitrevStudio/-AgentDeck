@@ -34,7 +34,8 @@
         ["Ctrl+= / Ctrl+- / Ctrl+0", t("keys.font")]
       ]]
     ];
-    $("keysList").innerHTML = groups.map(([title, rows]) => `<h3>${esc(t(title))}</h3>${rows.map(([k, what]) => row(k, what)).join("")}`).join("");
+    $("keysList").innerHTML = groups.map(([title, rows]) => `<h3>${esc(t(title))}</h3>${rows.map(([k, what]) => row(k, what)).join("")}`).join("")
+      + `<p class="keys-note">${esc(t("keys.dragNote"))}</p>`;
   }
   function toggle() {
     box.hidden = !box.hidden;

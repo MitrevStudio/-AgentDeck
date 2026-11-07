@@ -4,8 +4,9 @@
 // it (detachAll), and the next start attaches again (restore) and gets the output DockPty kept. Output chunks carry
 // `end`, the output's length since attaching, so a page attaching midway skips what its scrollback already holds.
 //
-// Pipe frames both ways: [type:1][length:4 LE][payload]. To DockPty: 0 input, 1 resize (cols:2 LE, rows:2 LE), 2 kill,
-// 3 set-meta (JSON). From it: 0 output, 1 exited (code:4 LE), 2 hello (JSON: v, id, pid, token, meta).
+// Pipe frames both ways: [type:1][length:4 LE][payload]. To DockPty: 0 input, 1 resize (cols:2 LE, rows:2 LE), 2 kill.
+// From it: 0 output, 1 exited (code:4 LE), 2 hello (JSON: v, id, pid, token). A frame longer than MAX_FRAME, or of a
+// negative length, is not DockPty's: that pipe is dropped.
 // While a terminal runs, userData/terminals/<id>.json says how to reach it again (id, pid, token, meta).
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -21,7 +22,8 @@ const SCROLLBACK_CHARS = 512 * 1024;
 const DEFAULT_COLS = 120, DEFAULT_ROWS = 32, MAX_SIZE = 1000;
 const PROTOCOL = 1;
 const PIPE_PREFIX = "\\\\.\\pipe\\agentdeck-term-";
-const FRAME_INPUT = 0, FRAME_RESIZE = 1, FRAME_KILL = 2, FRAME_SET_META = 3;
+const FRAME_INPUT = 0, FRAME_RESIZE = 1, FRAME_KILL = 2;
+const MAX_FRAME = 16 * 1024 * 1024; // DockPty's bound, both ways
 const FRAME_OUTPUT = 0, FRAME_EXITED = 1, FRAME_HELLO = 2;
 // A DockPty just started makes its pipe first thing; one that answers no hello within HELLO_MS is not taken. Starting
 // it gets longer: a busy machine or an antivirus scan of the freshly compiled exe can hold it for seconds.
@@ -57,6 +59,10 @@ function readFrames(socket, onFrame) {
     pending = pending.length ? Buffer.concat([pending, chunk]) : chunk;
     while (pending.length >= 5) {
       const length = pending.readInt32LE(1);
+      if (length < 0 || length > MAX_FRAME) {
+        socket.destroy(Object.assign(new Error(`A frame of ${length} bytes`), { code: "EPROTO" }));
+        return;
+      }
       if (pending.length < 5 + length) {
         break;
       }
@@ -136,10 +142,6 @@ function createTerminals({ userDataDir, onData, onExit, onChange }) {
   }
   function removeEntry(id) {
     atomicFile.remove(getEntryFile(id)).catch(e => console.error("Removing a terminal failed:", e.message));
-  }
-  // DockPty keeps it too, in case the registry file is gone: it comes back in every hello.
-  function sendMeta(terminal) {
-    write(terminal, FRAME_SET_META, Buffer.from(JSON.stringify(getMeta(terminal)), "utf8"));
   }
 
   // ---------- output ----------
@@ -291,14 +293,16 @@ function createTerminals({ userDataDir, onData, onExit, onChange }) {
       throw new Error(`The terminal could not start: ${e.message}`);
     }
     saveEntry(terminal);
-    sendMeta(terminal);
     onChange(getTabs());
     return id;
   }
   // The terminals the last AgentDeck left running, attached again with the output their DockPty kept. An entry whose
-  // DockPty is gone is dropped. Answers the ids attached.
+  // DockPty is gone is dropped. Answers the ids attached, and as `kept` those whose DockPty still runs but could not be
+  // attached this time (no hello in time, the pipe busy, another protocol): their entries stay for a later start, and
+  // the caller must not open them anew.
   async function restore() {
     let names = [];
+    const kept = [];
     try {
       names = fs.readdirSync(registryDir).filter(name => name.endsWith(".json"));
     } catch {}
@@ -322,18 +326,19 @@ function createTerminals({ userDataDir, onData, onExit, onChange }) {
         return entry.id;
       } catch (e) {
         terminals.delete(entry.id);
-        if (e.code === "PROTOCOL") {
-          others.set(entry.id, entry.pid);
-        } else if (e.code === "ENOENT" || e.code === "EPROTO") {
+        if (e.code === "ENOENT" || e.code === "EPROTO") {
           // No pipe (the pid belongs to another process now), or not this terminal's.
           await atomicFile.remove(file).catch(() => {});
+        } else {
+          if (e.code === "PROTOCOL") others.set(entry.id, entry.pid);
+          kept.push(entry.id);
         }
         console.error(`Terminal ${entry.id} could not be attached:`, e.message);
         return "";
       }
     }));
     onChange(getTabs());
-    return attached.filter(Boolean);
+    return { attached: attached.filter(Boolean), kept };
   }
 
   // Typed by AgentDeck itself (autopilot.js): unlike input(), not counted as the user's typing.
@@ -374,14 +379,6 @@ function createTerminals({ userDataDir, onData, onExit, onChange }) {
   function attach(id) {
     const terminal = terminals.get(id);
     return terminal ? { scrollback: getScrollback(terminal), end: terminal.end, exitCode: terminal.exitCode } : null;
-  }
-  // The tabs in the order of `ids`; any tab missing from it keeps its place after them.
-  function reorder(ids) {
-    const sorted = [...ids.filter(id => terminals.has(id)), ...terminals.keys()];
-    const entries = [...new Set(sorted)].map(id => [id, terminals.get(id)]);
-    terminals.clear();
-    entries.forEach(([id, x]) => terminals.set(id, x));
-    onChange(getTabs());
   }
   // Ends the terminal (its program tree with it) and forgets it.
   function close(id) {
@@ -426,7 +423,6 @@ function createTerminals({ userDataDir, onData, onExit, onChange }) {
       terminal.agent = agent;
       terminal.sessionId = sessionId;
       saveEntry(terminal);
-      sendMeta(terminal);
       onChange(getTabs());
     }
   }
@@ -443,7 +439,7 @@ function createTerminals({ userDataDir, onData, onExit, onChange }) {
   const countRunning = () => [...terminals.values()].filter(x => x.exitCode === null).length + others.size;
 
   return {
-    open, restore, input, type, getLastInputAt, setNote, resize, attach, close, stopAll, detachAll, link, reorder, getTabs,
+    open, restore, input, type, getLastInputAt, setNote, resize, attach, close, stopAll, detachAll, link, getTabs,
     getUnlinkedTabs, countRunning
   };
 }

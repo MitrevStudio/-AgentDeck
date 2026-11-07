@@ -7,11 +7,10 @@
 //
 // Pipe \\.\pipe\agentdeck-term-<id>: the current user only, one client at a time. Frames both ways:
 // [type:1][length:4 LE][payload].
-//   client -> host: 0 input bytes, 1 resize (cols:2 LE, rows:2 LE), 2 kill (ends the program tree), 3 set-meta (bytes
-//   kept and repeated in every hello).
-//   host -> client: 0 output bytes, 1 exited (code:4 LE), 2 hello (JSON: v, id, pid, token, cols, rows, and meta as
-//   base64). A client gets the hello, then the last RING_SIZE bytes of output (behind the terminal modes switched
-//   before them), then the live output.
+//   client -> host: 0 input bytes, 1 resize (cols:2 LE, rows:2 LE), 2 kill (ends the program tree).
+//   host -> client: 0 output bytes, 1 exited (code:4 LE), 2 hello (JSON: v, id, pid, token, cols, rows). A client gets
+//   the hello, then the last RING_SIZE bytes of output (behind the terminal modes switched before them), then the live
+//   output.
 // The program runs in a kill-on-close job only this process holds, so it ends with this process. This process ends
 // when the program does, or on a kill frame - never because a client went away.
 using System;
@@ -123,7 +122,7 @@ static class DockPty
     const int RING_SIZE = 512 * 1024;
     const int MAX_FRAME = 16 * 1024 * 1024;
     const string TOKEN_VARIABLE = "AGENTDECK_PIPE_TOKEN";
-    const byte FRAME_INPUT = 0, FRAME_RESIZE = 1, FRAME_KILL = 2, FRAME_SET_META = 3;
+    const byte FRAME_INPUT = 0, FRAME_RESIZE = 1, FRAME_KILL = 2;
     const byte FRAME_OUTPUT = 0, FRAME_EXITED = 1, FRAME_HELLO = 2;
     static readonly IntPtr PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = (IntPtr)0x00020016;
 
@@ -177,7 +176,6 @@ static class DockPty
     static IntPtr pseudoConsole;
     static string id, token;
     static short cols, rows;
-    static byte[] meta = new byte[0];
     // Guarded by `gate`: output is kept and sent to the client in one step, so a client attaching gets each byte exactly
     // once (in the replay or live).
     static readonly object gate = new object();
@@ -441,20 +439,13 @@ static class DockPty
             // Exiting closes the job, which ends the whole program tree.
             Environment.Exit(0);
         }
-        else if (type == FRAME_SET_META && payload.Length <= 64 * 1024)
-        {
-            lock (gate)
-            {
-                meta = payload;
-            }
-        }
     }
 
     // id is a GUID and token hex (AgentDeck makes both), so neither needs escaping.
     static byte[] GetHello()
     {
         string json = "{\"v\":" + PROTOCOL + ",\"id\":\"" + id + "\",\"pid\":" + Process.GetCurrentProcess().Id + ",\"token\":\"" + token
-            + "\",\"cols\":" + cols + ",\"rows\":" + rows + ",\"meta\":\"" + Convert.ToBase64String(meta) + "\"}";
+            + "\",\"cols\":" + cols + ",\"rows\":" + rows + "}";
         return Encoding.UTF8.GetBytes(json);
     }
 

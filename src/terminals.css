@@ -23,6 +23,7 @@
 .wtab.drop-before { box-shadow: inset 2px 0 0 var(--accent); }
 .wtab.drop-after { box-shadow: inset -2px 0 0 var(--accent); }
 .wtab-new { width: 28px; height: 28px; border-radius: 50%; }
+.tabbar.drop-new { box-shadow: inset 0 0 0 1px var(--accent); border-radius: var(--r-md); }
 
 /* ---------- panes ---------- */
 /* A tab's panes as cards on the canvas, a gap between them; the focused one has the accent's edge. */
@@ -43,16 +44,22 @@
 .split.dragging { cursor: inherit; user-select: none; }
 
 .pane {
-  display: flex; flex-direction: column; overflow: hidden;
+  position: relative; display: flex; flex-direction: column; overflow: hidden;
   border-radius: var(--r-md); border: 1px solid var(--line); background: var(--term-bg);
 }
 .pane.focused { border-color: var(--accent-line); }
+/* Where a dragged tab or pane would land: that half of the pane lights up. */
+.pane[class*="drop-"]::after { content: ""; position: absolute; inset: 0; z-index: 2; pointer-events: none; background: var(--accent-weak); box-shadow: inset 0 0 0 1px var(--accent); }
+.pane.drop-left::after { right: 50%; }
+.pane.drop-right::after { left: 50%; }
+.pane.drop-up::after { bottom: 50%; }
+.pane.drop-down::after { top: 50%; }
 .pane-head {
   flex: none; display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 4px 0 10px;
   border-bottom: 1px solid var(--line); background: var(--panel); font-size: 12.5px; color: var(--muted);
 }
 .pane.focused .pane-head { color: var(--text); }
-.pane-title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 550; }
+.pane-title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 550; cursor: grab; }
 .pane-note { flex: none; padding: 0 6px; border-radius: var(--r-pill); background: var(--accent-weak); color: var(--accent); font-size: 11px; }
 .pane-tools { flex: none; display: flex; gap: 1px; opacity: 0; transition: opacity var(--dur-fast); }
 .pane:hover .pane-tools, .pane.focused .pane-tools, .pane-tools:focus-within { opacity: 1; }
