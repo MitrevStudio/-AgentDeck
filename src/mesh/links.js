@@ -7,7 +7,7 @@
 // smaller id opened stays, the other goes.
 //
 // Events: "nodes" (the list changed: status, name, address), "self" (this node's settings changed), "discovered",
-// "event" ({ node, name, data }), "link" ({ node, up: true | false }).
+// "event" ({ node, name, data }), "binary" ({ node, data }: a frame, frames.js), "link" ({ node, up: true | false }).
 const { EventEmitter } = require("node:events");
 const { loadIdentity } = require("./identity");
 const { createPeers } = require("./peers");
@@ -58,6 +58,7 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
     const helloSeen = new Promise(r => { settleHello = r; });
     const link = createLink(ws, {
       onRequest: (method, params) => api(method, params, { id, name: info?.name || peer.name, kind: info?.kind || peer.kind }),
+      onBinary: data => out.emit("binary", { node: id, data }),
       onEvent: (name, data) => {
         if (name === "hello") {
           info = data && typeof data === "object" ? data : {};
@@ -216,6 +217,14 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
   function notifyAll(name, data) {
     for (const l of links.values()) l.link.notify(name, data);
   }
+  // An event to one node (dropped when it is not connected), and to all of them.
+  function notify(id, name, data) {
+    links.get(id)?.link.notify(name, data);
+  }
+  // A binary frame (frames.js) to one node; dropped when it is not connected.
+  function sendBinary(id, buffer) {
+    links.get(id)?.link.sendBinary(buffer);
+  }
   const online = id => links.has(id);
 
   // ---------- this node ----------
@@ -267,7 +276,7 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
   }
 
   return Object.assign(out, {
-    start, stop, self, setSelf, regenerateCode, nodes, discovered: () => discovery?.list() || [], pair, forget, call, notifyAll, online,
+    start, stop, self, setSelf, regenerateCode, nodes, discovered: () => discovery?.list() || [], pair, forget, call, notify, notifyAll, sendBinary, online,
     peers: () => peers, identity: () => identity
   });
 }

@@ -110,7 +110,7 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
     if (!isDir(cwd)) fail("folderMissing");
     const encoded = command ? Buffer.from(command, "utf16le").toString("base64") : "";
     const commandLine = command ? `powershell.exe -NoLogo -NoExit -EncodedCommand ${encoded}` : "powershell.exe -NoLogo";
-    const id = await terminals.open({ cwd, commandLine, title: meta.title || path.basename(cwd), agent: meta.agent, sessionId: meta.sessionId, env });
+    const id = await terminals.open({ cwd, commandLine, title: meta.title || path.basename(cwd), agent: meta.agent, sessionId: meta.sessionId, owner: meta.owner, env });
     log(`agentdeck ${how}`, `cwd="${cwd}" cmd=${command ? `"${command.slice(0, 120)}"` : "-"}`);
     return id;
   }
