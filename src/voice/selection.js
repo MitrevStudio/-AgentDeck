@@ -14,8 +14,8 @@
 const path = require("node:path");
 const { Worker } = require("node:worker_threads");
 const w = require("./win32");
-const { sleep } = require("./util");
-const { createLog } = require("./log-file");
+const { sleep } = require("../shared/util");
+const { createLog } = require("../shared/log-file");
 const i18n = require("../i18n");
 const { CF } = w;
 

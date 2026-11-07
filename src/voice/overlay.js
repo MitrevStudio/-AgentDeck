@@ -11,7 +11,7 @@ const { BrowserWindow, ipcMain, screen } = require("electron");
 const { EventEmitter } = require("node:events");
 const path = require("node:path");
 const { t } = require("../i18n");
-const { createLog } = require("./log-file");
+const { createLog } = require("../shared/log-file");
 const { acceptClicks } = require("../window-clicks");
 
 // userData/logs/overlay.log: shows and where, the shapes reported, hover changes and button actions - to tell, when a

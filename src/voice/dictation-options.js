@@ -1,7 +1,7 @@
 // The dictation options on top of VoiceTray's settings: the default mode, the language of a prompt, how the dictation
 // key behaves, and the dictionary. normalize() repairs whatever settings.json holds; validate() checks what the
 // Settings page sends (it is not trusted to have offered only valid choices).
-const { isObj, flat, fold } = require("./util");
+const { isObj, flat, fold } = require("../shared/util");
 const { t } = require("../i18n");
 
 const MODES = Object.freeze(["verbatim", "clean", "prompt"]);

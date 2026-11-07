@@ -13,7 +13,7 @@ const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { isObj } = require("./voice/util");
+const { isObj } = require("./shared/util");
 
 const SPACE = "orchestrator";
 const SESSION_NAME = "AgentDeck";

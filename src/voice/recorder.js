@@ -7,7 +7,7 @@
 const { BrowserWindow, ipcMain } = require("electron");
 const path = require("node:path");
 const { createWavWriter, BYTES_PER_SECOND } = require("./wav");
-const { toBuffer } = require("./util");
+const { toBuffer } = require("../shared/util");
 const { t } = require("../i18n");
 
 // Anything shorter is a mis-tap, not speech (VoiceTray's MinimumRecordingSeconds). The caller drops those.

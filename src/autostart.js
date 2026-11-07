@@ -4,7 +4,7 @@
 // that it did (`startup` in settings.json), so turning it off sticks.
 const { app } = require("electron");
 const settings = require("./voice/settings");
-const { isObj } = require("./voice/util");
+const { isObj } = require("./shared/util");
 
 const ARG = "--autostart";
 

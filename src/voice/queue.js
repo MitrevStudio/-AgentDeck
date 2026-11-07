@@ -14,7 +14,7 @@ const { EventEmitter } = require("node:events");
 const { classify } = require("./errors");
 const { defaultModelFor } = require("./catalog");
 const { applyReplacements } = require("./dictionary");
-const { sleep, hhmm } = require("./util");
+const { sleep, hhmm } = require("../shared/util");
 const { t } = require("../i18n");
 
 const IN_FLIGHT = new Set(["Transcribing", "Delivering"]);

@@ -2,7 +2,7 @@
 // reading a file's duration, and wrapping synthesised PCM for history.
 const fs = require("node:fs");
 const path = require("node:path");
-const { toBuffer } = require("./util");
+const { toBuffer } = require("../shared/util");
 
 const SAMPLE_RATE = 16000;
 const BYTES_PER_SECOND = SAMPLE_RATE * 2;

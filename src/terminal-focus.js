@@ -14,7 +14,7 @@
 // terminalSelection() reads what is selected in a terminal for read-aloud, through the same helper.
 const path = require("node:path");
 const { app, utilityProcess } = require("electron");
-const { liveSessions } = require("./live");
+const { liveSessions } = require("./host/live");
 
 const LOCATE_TIMEOUT_MS = 1500;
 const SELECT_TIMEOUT_MS = 2500;   // UI Automation; a hung terminal is given up on, its window is still raised

@@ -14,9 +14,9 @@ const net = require("node:net");
 const path = require("node:path");
 const { execFile } = require("node:child_process");
 const { StringDecoder } = require("node:string_decoder");
-const atomicFile = require("./voice/atomic-file");
+const atomicFile = require("../shared/atomic-file");
 
-const BRIDGE_SOURCE = path.join(__dirname, "..", "native", "DockPty.cs");
+const BRIDGE_SOURCE = path.join(__dirname, "..", "..", "native", "DockPty.cs");
 const CSC = path.join(process.env.WINDIR || "C:\\Windows", "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe");
 const SCROLLBACK_CHARS = 512 * 1024;
 const DEFAULT_COLS = 120, DEFAULT_ROWS = 32, MAX_SIZE = 1000;

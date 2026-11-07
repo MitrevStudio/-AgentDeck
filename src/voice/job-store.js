@@ -6,8 +6,8 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const atomic = require("./atomic-file");
-const { SAFE_ID } = require("./util");
+const atomic = require("../shared/atomic-file");
+const { SAFE_ID } = require("../shared/util");
 const { t } = require("../i18n");
 
 const STATUSES = ["Pending", "Transcribing", "ReadyForDelivery", "Delivering", "Failed", "Done", "Abandoned"];

@@ -3,7 +3,7 @@
 // SelectionCaptureService and ClipboardSnapshot. Loaded by the main thread (hotkeys, focus, delivery) and by the
 // selection worker (selection-worker.js), which owns the slow part of reading the clipboard.
 const koffi = require("koffi");
-const { sleep } = require("./util");
+const { sleep } = require("../shared/util");
 
 const user32 = koffi.load("user32.dll");
 const kernel32 = koffi.load("kernel32.dll");

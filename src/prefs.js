@@ -11,7 +11,7 @@ const { app, nativeTheme } = require("electron");
 const { EventEmitter } = require("node:events");
 const settings = require("./voice/settings");
 const i18n = require("./i18n");
-const { isObj } = require("./voice/util");
+const { isObj } = require("./shared/util");
 
 const LANGUAGES = Object.keys(i18n.LANGUAGES);
 const THEMES = ["system", "dark", "light"];
