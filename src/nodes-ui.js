@@ -106,7 +106,7 @@ function renderRemoteSpace(el, key) {
       <span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span>
       ${n.liveMap.has(sessionKey(s)) ? statusMark(n.liveMap.get(sessionKey(s)), false) : online && s.cwd ? `<span class="se-acts"><button class="btn sm" data-rresume="${esc(sessionKey(s))}">${icon("play")}${esc(t("action.resume"))}</button></span>` : ""}</div>`).join("")}` : ""}
   </div>`;
-  el.onclick = e => onRemoteSpaceClick(e, n, p).catch(err => toast(err.message, true));
+  el.onclick = e => onRemoteSpaceClick(e, n, p).catch(err => toast(String(err.message || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""), true));
   return true;
 }
 // A terminal, a new agent session or a resumed one on the node, placed in a new tab of this space (main does both).

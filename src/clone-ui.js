@@ -12,7 +12,7 @@ function buildCloneDialog() {
   d.innerHTML = `<form method="dialog" class="modal-form">
     <h2>${icon("nodes")}<span id="cloneTitle"></span></h2>
     <label><span>${esc(t("clone.node"))}</span><select id="cloneNode" class="select"></select></label>
-    <label><span>${esc(t("clone.url"))}</span><input id="cloneUrl" class="input mono" spellcheck="false"></label>
+    <label><span>${esc(t("clone.url"))}</span><div class="modal-url"><input id="cloneUrl" class="input mono" spellcheck="false"><button type="button" class="btn sm" id="cloneHttps" title="${esc(t("clone.httpsTitle"))}">HTTPS</button></div><span class="modal-note" id="cloneUrlHint"></span></label>
     <label><span>${esc(t("clone.dir"))}</span><input id="cloneDir" class="input mono" spellcheck="false"></label>
     <div class="modal-row">
       <label><span>${esc(t("clone.branch"))}</span><input id="cloneBranch" class="input mono" spellcheck="false" placeholder="feat/…"></label>
@@ -31,9 +31,25 @@ function buildCloneDialog() {
   document.body.append(d);
   d.querySelector("#cloneCancel").addEventListener("click", () => d.close());
   d.querySelector("#cloneNode").addEventListener("change", fillCloneDir);
+  d.querySelector("#cloneUrl").addEventListener("input", renderUrlHint);
+  d.querySelector("#cloneHttps").addEventListener("click", () => { $("cloneUrl").value = toHttps($("cloneUrl").value); renderUrlHint(); });
   d.querySelector("#cloneAgent").addEventListener("change", () => { $("clonePrompt").disabled = !$("cloneAgent").value; });
   d.querySelector("form").addEventListener("submit", e => { e.preventDefault(); submitClone().catch(err => { $("cloneHint").textContent = err.message; $("cloneHint").className = "modal-hint err"; }); });
   return d;
+}
+// git@github.com:a/b.git -> https://github.com/a/b.git; ssh://git@host/a/b -> https://host/a/b.
+function toHttps(url) {
+  const u = url.trim();
+  let m = /^[\w.-]+@([\w.-]+):(.+)$/.exec(u);
+  if (m) return `https://${m[1]}/${m[2]}`;
+  m = /^ssh:\/\/(?:[\w.-]+@)?([\w.-]+)(?::\d+)?\/(.+)$/.exec(u);
+  return m ? `https://${m[1]}/${m[2]}` : u;
+}
+const isSsh = url => /^[\w.-]+@[\w.-]+:|^ssh:\/\//.test(url.trim());
+function renderUrlHint() {
+  const ssh = isSsh($("cloneUrl").value);
+  $("cloneUrlHint").textContent = ssh ? t("clone.sshHint") : "";
+  $("cloneHttps").hidden = !ssh;
 }
 // The folder on the chosen computer: its work folder, by the project's name.
 function fillCloneDir() {
@@ -56,6 +72,7 @@ async function openCloneDialog(path, node) {
   $("cloneNode").innerHTML = list.map(n => `<option value="${esc(n.id)}" ${n.id === node?.id ? "selected" : ""}>${esc(n.name)}</option>`).join("");
   const info = await window.manager.gitInfo(path).catch(() => ({ url: "", branch: "" }));
   $("cloneUrl").value = info.url || "";
+  renderUrlHint();
   $("cloneBase").value = info.branch || "";
   $("cloneBranch").value = "";
   $("clonePrompt").value = "";
