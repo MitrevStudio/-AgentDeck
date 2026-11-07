@@ -4,8 +4,13 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { fail } = require("./errors");
+const { normPath } = require("../shared/util");
 
 const norm = p => path.resolve(p).replace(/\\/g, "/").toLowerCase();
+// A project's key: its folder here, or "node:<id>:<folder there>" for one of another computer (the pages use the
+// same key as the project's space). keyify: a path or a key as the pages send it.
+const keyOf = x => (x.node ? `node:${x.node}:${normPath(x.path)}` : norm(x.path));
+const keyify = p => (typeof p === "string" && p.startsWith("node:") ? p : norm(p));
 
 function createRegistry(file) {
   function read() {
@@ -27,7 +32,7 @@ function createRegistry(file) {
   return { read, write };
 }
 
-const getProject = (data, p) => data.projects.find(x => norm(x.path) === norm(p));
+const getProject = (data, p) => data.projects.find(x => keyOf(x) === keyify(p));
 const isPinned = x => Number.isInteger(x?.pin);
 // slot: where to keep the item, or null to let it move again.
 function setPin(item, slot) {
@@ -39,9 +44,9 @@ function setPin(item, slot) {
 function setGroups(data, groupOf, text = p => p) {
   if (!groupOf || typeof groupOf !== "object") return;
   const ids = new Set(data.groups.map(g => g.id));
-  const byPath = new Map(data.projects.map(x => [norm(x.path), x]));
+  const byPath = new Map(data.projects.map(x => [keyOf(x), x]));
   for (const [p, id] of Object.entries(groupOf)) {
-    const item = byPath.get(norm(text(p)));
+    const item = byPath.get(keyify(text(p)));
     if (!item || (id && !ids.has(id))) continue;
     if (!id) delete item.group;
     else {
@@ -59,12 +64,12 @@ function unpinEmptyGroups(data) {
 }
 // Each pinned project or group is pinned where it now is among the top-level items.
 function repin(data) {
-  const units = [...new Set(data.projects.map(x => (x.group ? "g:" + x.group : norm(x.path))))];
+  const units = [...new Set(data.projects.map(x => (x.group ? "g:" + x.group : keyOf(x))))];
   for (const g of data.groups.filter(isPinned)) {
     g.pin = units.indexOf("g:" + g.id);
     if (g.pin < 0) delete g.pin;
   }
-  for (const x of data.projects.filter(isPinned)) x.pin = units.indexOf(norm(x.path));
+  for (const x of data.projects.filter(isPinned)) x.pin = units.indexOf(keyOf(x));
 }
 
-module.exports = { createRegistry, norm, getProject, isPinned, setPin, setGroups, unpinEmptyGroups, repin };
+module.exports = { createRegistry, norm, keyOf, keyify, getProject, isPinned, setPin, setGroups, unpinEmptyGroups, repin };

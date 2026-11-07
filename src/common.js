@@ -378,11 +378,13 @@ function buildData(raw, live) {
   const known = new Set((raw.sessions || []).map(sessionKey));
   const fresh = [...live.values()].filter(l => !known.has(sessionKey(l)))
     .map(l => ({ agent: l.agent, id: l.id, cwd: l.cwd, title: t("session.new"), prompt: "", updatedAt: l.startedAt }));
+  // A session or project of another computer is keyed "node:<id>:<folder there>", as its space is (nodes-ui.js).
+  const keyOf = (node, p) => (node ? `node:${node}:${normPath(p)}` : normPath(p));
   const sessions = [...(raw.sessions || []), ...fresh].map(s => ({
-    ...s, cwdN: normPath(s.cwd), hay: searchable(s.title, s.prompt, s.recap, s.id, s.cwd, s.projectName, s.agent)
+    ...s, cwdN: keyOf(s.node, s.cwd), hay: searchable(s.title, s.prompt, s.recap, s.id, s.cwd, s.projectName, s.agent, s.nodeName)
   }));
   const projects = (raw.registry?.projects || []).map(p => {
-    const proj = { ...p, n: normPath(p.path), hay: searchable(p.name, p.path) };
+    const proj = { ...p, n: keyOf(p.node, p.path), hay: searchable(p.name, p.path) };
     proj.sessions = sessions.filter(s => inProject(s, proj));
     proj.last = proj.sessions.reduce((m, s) => Math.max(m, s.updatedAt || 0), 0);
     // A session can be found by the (possibly renamed) name of any project it belongs to.

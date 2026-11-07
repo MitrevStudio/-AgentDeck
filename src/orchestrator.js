@@ -174,7 +174,7 @@ function createOrchestrator(deps) {
   function resolveProject(data, text) {
     const q = str(text, 1000);
     if (!q) throw new Error("project is required: a name or a path from list_projects");
-    const projects = (data.registry?.projects || []).filter(p => !isOwn(p.path));
+    const projects = (data.registry?.projects || []).filter(p => !p.node && !isOwn(p.path));
     const low = q.toLowerCase();
     const tries = [
       p => deps.norm(p.path) === deps.norm(q),
@@ -207,7 +207,7 @@ function createOrchestrator(deps) {
 
   async function listProjects() {
     const [data, live] = await Promise.all([deps.data(), deps.liveSessions()]);
-    return (data.registry?.projects || []).filter(p => !isOwn(p.path)).map(p => {
+    return (data.registry?.projects || []).filter(p => !p.node && !isOwn(p.path)).map(p => {
       const n = deps.norm(p.path);
       const sessions = data.sessions.filter(s => inFolder(s.cwd, n));
       return { name: p.name, path: p.path, sessions: sessions.length, lastActivity: iso(Math.max(0, ...sessions.map(s => s.updatedAt || 0))),

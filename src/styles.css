@@ -33,8 +33,7 @@ main {
 .side-sec-head .icon-btn .i { width: 15px; height: 15px; }
 .side-sec-head .icon-btn.on { color: var(--accent); }
 .side-list { flex: 1; min-height: 0; overflow: auto; padding: 0 6px 8px; }
-/* The computers (nodes-ui.js): a section of its own, each paired computer a foldable block with its projects. */
-.nodes-sec { flex: 0 1 auto; max-height: 40%; }
+
 /* The command centre (renderer.js renderCentre): one card above the projects. */
 .centre-sec { flex: none; padding: 6px 6px 2px; }
 .centre-mark { display: grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 6px; background: var(--accent-weak); color: var(--accent); }
@@ -75,17 +74,11 @@ main {
 .proj.drop-into { --row-bg: color-mix(in srgb, var(--accent) 13%, var(--panel)); box-shadow: inset 0 0 0 1px var(--accent); }
 .proj.member { margin-left: 18px; }
 .proj.member::before { content: ""; position: absolute; left: -7px; top: 0; bottom: 0; border-left: 1px solid var(--line-2); }
-/* The other computers (nodes-ui.js): a header per node, its projects as members below it; nothing opens from them yet. */
-.proj.node-head { cursor: pointer; }
-.proj.node-head .proj-row { gap: 6px; }
-.proj.node-head .fold { width: 22px; height: 22px; padding: 0; margin-left: -4px; }
-.proj.node-head .fold .i { width: 14px; height: 14px; }
-.proj.node-head .proj-name { font-weight: 650; }
-.proj.node-head .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--ok, var(--accent)); }
-.proj.node-head.offline .dot { background: var(--faint); }
-.proj.node-head.offline .proj-name, .proj.node-head.offline > .proj-row > .i { color: var(--faint); }
-.proj.node-head > .proj-row > .i { color: var(--accent); }
-.proj.remote .proj-name { color: var(--path-parent); }
+/* A project of another computer (nodes-ui.js) in the same list: the computer's name beside it, in place of git. */
+.proj-node { flex: none; display: inline-flex; align-items: center; gap: 3px; max-width: 96px; font-size: 11px; font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.proj-node .i { width: 12px; height: 12px; flex: none; color: var(--accent); }
+.proj-node.offline { color: var(--faint); }
+.proj-node.offline .i { color: var(--faint); }
 .agent.remote { cursor: default; }
 .se-row.remote { cursor: default; }
 /* Clone to… (clone-ui.js): a modal form. */
