@@ -29,6 +29,7 @@ const limits = createAllLimits({ fetch: (url, init) => network.fetch(url, init),
   findExecutable: name => findOnPath(name), onChange: l => broadcast("limits:changed", l) });
 const { createNotifier } = require("./notify");
 const { createHost } = require("./host");
+const { savePaste } = require("./host/paste");
 const { createLinks } = require("./mesh/links");
 const { createServed } = require("./mesh/serve");
 const { DEFAULT_PORT } = require("./mesh/identity");
@@ -737,24 +738,23 @@ async function checkFromTray() {
 // Only the manager window and the edge menu may call these (not the voice windows, nor any other), and every
 // argument is checked: they reach a shell, a terminal and the file system.
 const trusted = e => [managerWin, bar?.win].some(w => w && !w.isDestroyed() && e.sender === w.webContents);
+// A file for a terminal (host/paste.js): saved here for a terminal of this computer, or sent to the computer whose
+// terminal it is (mesh/serve.js files.put) - either way the path answered is one the program there can read.
+async function putFile(termId, name, bytes) {
+  const x = remoteTerms.get(termId);
+  if (!x) return savePaste(name, bytes);
+  if (!links.online(x.node)) throw new HostError("offline");
+  return links.call(x.node, "files.put", { name, data: bytes.toString("base64") }, { timeout: 120000 });
+}
 // A picture copied to the clipboard, pasted into a terminal: saved as a PNG and its path typed in, which Claude Code
 // and Codex attach as an image (a program in a pseudo console cannot read the clipboard picture the window holds the
-// paste for). Only when the clipboard has no text, so a normal paste stays a normal paste. Pastes older than a week go.
-const PASTE_DIR = path.join(os.tmpdir(), "agentdeck-paste"), PASTE_KEEP_MS = 7 * 24 * 3600 * 1000;
-async function saveClipboardImage() {
+// paste for). Only when the clipboard has no text, so a normal paste stays a normal paste.
+async function saveClipboardImage(termId) {
   if (await clipboard.readText()) return "";
   const item = (await clipboard.read()).find(i => i.types.includes("image/png"));
   if (!item) return "";
   const png = Buffer.from(await (await item.getType("image/png")).arrayBuffer());
-  await fs.promises.mkdir(PASTE_DIR, { recursive: true });
-  for (const name of await fs.promises.readdir(PASTE_DIR).catch(() => [])) {
-    const file = path.join(PASTE_DIR, name);
-    const stat = await fs.promises.stat(file).catch(() => null);
-    if (stat && Date.now() - stat.mtimeMs > PASTE_KEEP_MS) await fs.promises.rm(file, { force: true }).catch(() => {});
-  }
-  const file = path.join(PASTE_DIR, `paste-${new Date().toISOString().replace(/[:.]/g, "-")}.png`);
-  await fs.promises.writeFile(file, png);
-  return file;
+  return putFile(termId, `paste-${new Date().toISOString().replace(/[:.]/g, "-")}.png`, png);
 }
 
 // An error from the host carries a code (host/errors.js); the window gets its text in the user's language.
@@ -889,7 +889,9 @@ function registerIpc() {
   // Folders only: shell.openPath() on a file runs it.
   handle("open:path", p => (isDir(p) ? shell.openPath(p) : t("errors.folderMissing")));
   handle("clipboard:write", async value => { await clipboard.writeText(text(value, 1_000_000)); return true; });
-  handle("clipboard:image-file", () => saveClipboardImage());
+  handle("clipboard:image-file", id => saveClipboardImage(text(id, 64)));
+  // A file dropped on a pane of a terminal on another computer: sent there, its path there answered.
+  handle("terminal:upload", (id, name, bytes) => putFile(text(id, 64), text(name, 200), Buffer.from(bytes)));
   handle("live:get", () => liveSessions());
   // AgentDeck's own terminals and their layout. Keystrokes and sizes come as plain messages (many, no answer needed).
   handle("workspace:get", () => getWorkspaceView());
