@@ -8,8 +8,11 @@ const MAX_DEPTH = 6;
 const SNAPSHOT = 'Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId)" }';
 
 function getParentMap() {
+  const [file, args] = process.platform === "win32"
+    ? ["powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", SNAPSHOT]]
+    : ["ps", ["-e", "-o", "pid=,ppid="]];
   return new Promise(resolve => {
-    execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", SNAPSHOT], { windowsHide: true, timeout: 10000 }, (err, stdout) => {
+    execFile(file, args, { windowsHide: true, timeout: 10000 }, (err, stdout) => {
       resolve(err ? null : new Map(String(stdout).trim().split(/\r?\n/).map(line => line.trim().split(/\s+/).map(Number))));
     });
   });

@@ -325,6 +325,25 @@ shell в таб, продължаване на сесия в split, команд
 Остава от фаза 3: палитрата да търси в другите възли; командният център с `node`; известия „чака те“ от друг възел;
 `{node}` в заглавието на панела е суфикс в title (достатъчно засега).
 
+### Фаза 4 – състояние (2026-11-07, клон `feat/mesh`)
+
+Направено локално (проверено на Windows: демонът `node host/bin/agentdeck-host.js run --data-dir … --port 0` се
+сдвои с тестов desktop, който видя проектите, сесиите и живия статус на хоста и отвори shell там през връзката):
+- `src/mesh/serve.js` – `createServed({ host, env, info })`: методите, които един хост сервира (`host.info`,
+  `sessions.list`, `live.list`, `git.status`, `terminals.*`), наблюдателите на изхода, push на `data`/`git`/`live`,
+  клавишите и размерите от peer-а. Ползва се и от `main.js`, и от демона.
+- `host/bin/agentdeck-host.js` – демонът: `run` (по подразбиране), `pair` (кодът), `status`, `logs`, `update`
+  (`git pull` + `npm ci` + restart), `uninstall`. Опции `--data-dir`, `--port`, `--name`, `--pair-token`,
+  `--no-discovery`, `--interface`. `host/package.json` (ws, selfsigned, bonjour-service, node-pty), `host/install.sh`
+  (sparse checkout на `host/ src/host src/mesh src/shared`, `npm ci`, systemd user unit, linger, отпечатва кода).
+- Linux: `src/host/terminals-pty.js` (node-pty, същия интерфейс като DockPty), `launch.commandFor` връща и `argv`
+  (на Linux prompt-ът е аргумент, без файл), `live.js` проверява `procStart` с `ps -o pid=,lstart=`, `tab-links.js` с
+  `ps -e -o pid=,ppid=`, `log-file.js` приема папка. `createHost` избира backend по платформа.
+
+Не е проверено на Linux: node-pty backend-ът, `ps`-базираният жив статус, install.sh и systemd. Следващата стъпка е
+devws (с разрешение): клонът трябва да е качен в GitHub, после
+`AGENTDECK_BRANCH=feat/mesh bash <(curl -fsSL …/feat/mesh/host/install.sh)`; `claude`/`codex` там още ги няма.
+
 ---
 
 ## 10. Рискове и отворени въпроси

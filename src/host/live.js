@@ -31,9 +31,23 @@ function pidAlive(pid) {
   try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; }
 }
 
-// Process creation times as Windows FILETIME ticks, the format Claude Code writes to `procStart`.
+// Process creation times in the format Claude Code writes to `procStart`: Windows FILETIME ticks; on Linux and
+// macOS the text of `ps -o lstart=` (LC_ALL=C, TZ=UTC), as it is.
 function processStartTimes(pids) {
-  if (process.platform !== "win32" || !pids.length) return Promise.resolve(null);
+  if (!pids.length) return Promise.resolve(null);
+  if (process.platform !== "win32") {
+    return new Promise(resolve => {
+      execFile("ps", ["-o", "pid=,lstart=", "-p", pids.join(",")], { env: { ...process.env, LC_ALL: "C", TZ: "UTC" }, timeout: 8000 }, (err, stdout) => {
+        if (err && !stdout) return resolve(null);
+        const map = new Map();
+        for (const line of String(stdout).split(/\r?\n/)) {
+          const m = /^\s*(\d+)\s+(.+?)\s*$/.exec(line);
+          if (m) map.set(m[1], m[2]);
+        }
+        resolve(map);
+      });
+    });
+  }
   const script = `Get-Process -Id ${pids.join(",")} -ErrorAction SilentlyContinue | ForEach-Object { "$($_.Id) $($_.StartTime.ToFileTimeUtc())" }`;
   return new Promise(resolve => {
     execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { windowsHide: true, timeout: 8000 }, (err, stdout) => {

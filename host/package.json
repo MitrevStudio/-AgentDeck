@@ -1,0 +1,19 @@
+{
+  "name": "agentdeck-host",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AgentDeck's headless host: serves this machine's agent sessions and terminals to paired AgentDecks",
+  "license": "MIT",
+  "bin": {
+    "agentdeck-host": "bin/agentdeck-host.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "bonjour-service": "^1.4.4",
+    "node-pty": "^1.1.0",
+    "selfsigned": "^5.5.0",
+    "ws": "^8.22.1"
+  }
+}

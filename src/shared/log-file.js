@@ -5,10 +5,11 @@ const path = require("node:path");
 
 const MAX_BYTES = 200 * 1024;
 
-function createLog(name) {
+// dir: the logs folder; without one, Electron's userData/logs.
+function createLog(name, dir = null) {
   let file = null, chain = Promise.resolve();
   async function append(line) {
-    file ??= path.join(require("electron").app.getPath("userData"), "logs", name);
+    file ??= path.join(dir || path.join(require("electron").app.getPath("userData"), "logs"), name);
     await fs.promises.mkdir(path.dirname(file), { recursive: true });
     const size = await fs.promises.stat(file).then(s => s.size, () => 0);
     if (size > MAX_BYTES) await fs.promises.rename(file, `${file}.1`);

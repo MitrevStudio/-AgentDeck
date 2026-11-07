@@ -54,29 +54,34 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
   }
 
   // ---------- the commands ----------
-  // Each answers { command, meta: { title, agent, sessionId }, undo() } - undo() drops what the command would have
-  // read (a prompt or handoff file) when the terminal never started. command: null is a plain shell.
+  // Each answers { command, argv, meta: { title, agent, sessionId }, undo() }: command is the PowerShell line (Windows),
+  // argv the program and its arguments as a pseudo terminal spawns them directly (Linux); undo() drops what the
+  // command would have read (a prompt or handoff file) when the terminal never started. Both null: a plain shell.
   const none = () => {};
   function shellCommand() {
-    return { command: null, meta: {}, undo: none };
+    return { command: null, argv: null, meta: {}, undo: none };
   }
   function newCommand(agent, cwd) {
     checkAgent(agent);
-    return { command: "& " + psQuote(NEW_SESSION[agent]), meta: { title: `${agent} · ${path.basename(cwd)}`, agent }, undo: none };
+    return { command: "& " + psQuote(NEW_SESSION[agent]), argv: [NEW_SESSION[agent]], meta: { title: `${agent} · ${path.basename(cwd)}`, agent }, undo: none };
   }
   function resumeCommand(agent, id, cwd) {
     checkResumable(agent, id, cwd);
-    const cmd = agentCommand(agent, id).map(psQuote).join(" ");
-    return { command: "& " + cmd, meta: { title: getSessionTitle(agent, id), agent, sessionId: id }, undo: none };
+    const argv = agentCommand(agent, id);
+    return { command: "& " + argv.map(psQuote).join(" "), argv, meta: { title: getSessionTitle(agent, id), agent, sessionId: id }, undo: none };
   }
   // A new session that starts on a prompt (voice commands, the command centre, a peer): the prompt travels in a file,
   // never on a command line. The terminal deletes the file once read; one whose terminal never started goes at once.
   function promptCommand(agent, cwd, prompt) {
     checkAgent(agent);
-    const file = promptLaunch.writePrompt(PROMPTS_DIR, prompt);
+    const text = String(prompt ?? "").trim();
+    if (!text) fail("invalidData");
+    const meta = { title: `${agent} · ${path.basename(cwd)}`, agent };
+    // A pseudo terminal takes the prompt as an argument as it is; only PowerShell needs the file.
+    if (process.platform !== "win32") return { command: null, argv: [NEW_SESSION[agent], ...(agent === "OpenCode" ? ["--prompt"] : []), text], meta, undo: none };
+    const file = promptLaunch.writePrompt(PROMPTS_DIR, text);
     return {
-      command: promptLaunch.command(agent, NEW_SESSION[agent], file, noLauncher(NEW_SESSION[agent])),
-      meta: { title: `${agent} · ${path.basename(cwd)}`, agent },
+      command: promptLaunch.command(agent, NEW_SESSION[agent], file, noLauncher(NEW_SESSION[agent])), argv: null, meta,
       undo: () => { promptLaunch.remove(file); promptLaunch.sweep(PROMPTS_DIR); }
     };
   }
@@ -87,8 +92,8 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
     fs.mkdirSync(HANDOFFS_DIR, { recursive: true });
     const file = path.join(HANDOFFS_DIR, `prompt-${crypto.randomBytes(8).toString("hex")}.txt`);
     fs.writeFileSync(file, handoff);
-    const cmd = [NEW_SESSION.Claude, "--append-system-prompt-file", file].map(psQuote).join(" ");
-    return { command: "& " + cmd, meta: { title: `Claude · ${path.basename(cwd)}`, agent: "Claude" }, undo: () => promptLaunch.remove(file) };
+    const argv = [NEW_SESSION.Claude, "--append-system-prompt-file", file];
+    return { command: "& " + argv.map(psQuote).join(" "), argv, meta: { title: `Claude · ${path.basename(cwd)}`, agent: "Claude" }, undo: () => promptLaunch.remove(file) };
   }
   // The command for a launch described as data (what a peer or the command centre asks for):
   // kind "shell" | "new" | "resume" | "prompt" | "handoff".
@@ -104,13 +109,14 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
   }
 
   // ---------- the host's own terminals ----------
-  // A terminal of the host's own with the command in it (null: a shell). env: already prepared by terminal-env.js.
-  // how: for the launch log.
-  async function openTerminal(cwd, command, meta, env, how) {
+  // A terminal of the host's own with the command in it (null: a shell): on Windows the PowerShell line `command`
+  // (DockPty, terminals.js), elsewhere the program of `argv` (terminals-pty.js). env: already prepared by
+  // terminal-env.js. how: for the launch log.
+  async function openTerminal(cwd, command, meta, env, how, argv = null) {
     if (!isDir(cwd)) fail("folderMissing");
     const encoded = command ? Buffer.from(command, "utf16le").toString("base64") : "";
     const commandLine = command ? `powershell.exe -NoLogo -NoExit -EncodedCommand ${encoded}` : "powershell.exe -NoLogo";
-    const id = await terminals.open({ cwd, commandLine, title: meta.title || path.basename(cwd), agent: meta.agent, sessionId: meta.sessionId, owner: meta.owner, env });
+    const id = await terminals.open({ cwd, commandLine, argv, title: meta.title || path.basename(cwd), agent: meta.agent, sessionId: meta.sessionId, owner: meta.owner, env });
     log(`agentdeck ${how}`, `cwd="${cwd}" cmd=${command ? `"${command.slice(0, 120)}"` : "-"}`);
     return id;
   }
