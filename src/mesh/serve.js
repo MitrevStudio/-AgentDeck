@@ -32,7 +32,7 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
   }
 
   const METHODS = {
-    "host.info": () => ({ ...(links?.self() || {}), code: undefined, platform: process.platform, agents: sessions.get()?.agents || [], ...info() }),
+    "host.info": () => ({ ...(links?.self() || {}), code: undefined, platform: process.platform, home: host.home, agents: sessions.get()?.agents || [], ...info() }),
     "sessions.list": () => sessions.data(),
     "live.list": () => liveSessions(),
     "git.status": () => git.get(),
