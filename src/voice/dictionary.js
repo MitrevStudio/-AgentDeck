@@ -2,7 +2,7 @@
 // fix what still comes out wrong ("сигноз" -> "SigNoz"), in one pass over the transcript, so a rule never rewrites
 // what another rule wrote.
 
-const { flat, fold } = require("./util");
+const { flat, fold } = require("../shared/util");
 
 // Gemini's transcription model takes up to 1,000 terms and does best with up to 100.
 const MAX_VOCABULARY = 100;

@@ -7,8 +7,8 @@
 const fs = require("node:fs");
 const { t } = require("../i18n");
 const path = require("node:path");
-const atomic = require("./atomic-file");
-const { isObj } = require("./util");
+const atomic = require("../shared/atomic-file");
+const { isObj } = require("../shared/util");
 const dictation = require("./dictation-options");
 const commandOptions = require("./command-options");
 

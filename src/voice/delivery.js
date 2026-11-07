@@ -2,7 +2,7 @@
 // recording started, or onto the clipboard when that window cannot be brought back (better there than typed into
 // whatever happens to be in front). The clipboard is deliberately not restored afterwards.
 const w = require("./win32");
-const { sleep } = require("./util");
+const { sleep } = require("../shared/util");
 
 const SETTLE_BEFORE_PASTE_MS = 80;
 const SETTLE_AFTER_PASTE_MS = 80;

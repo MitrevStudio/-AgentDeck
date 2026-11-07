@@ -6,7 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const scan = require("./usage-scan");
-const atomic = require("./voice/atomic-file");
+const atomic = require("../shared/atomic-file");
 const { readAt, lineChunks } = require("./file-chunks");
 
 const VERSION = 3;          // of the cache layout and of what the parsers extract (3: Codex's context window)

@@ -21,7 +21,7 @@ const { maxRecordingBytes, maxRecordingMinutesFor, transcribeFile } = require(".
 const { createCommandRunner } = require("./command-runner");
 const commandOptions = require("./command-options");
 const { HEADER_BYTES } = require("./wav");
-const { hhmm, keyLabel } = require("./util");
+const { hhmm, keyLabel } = require("../shared/util");
 const { t, tn, formatNumber, locale } = require("../i18n");
 
 // Stand in for a job id while the panel belongs to a reading, or to a voice command.

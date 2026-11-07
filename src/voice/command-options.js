@@ -1,7 +1,7 @@
 // The voice-command settings (`commands` in the voice settings): on or off, and whether holding the edge menu's
 // hotkey speaks one (the menu's microphone always does). What a command does is the command centre's business
 // (orchestrator.js). normalize() repairs whatever settings.json holds; validate() checks what the Settings page sends.
-const { isObj } = require("./util");
+const { isObj } = require("../shared/util");
 
 const TRIGGERS = Object.freeze(["hold", "off"]); // hold: the edge menu's hotkey held down; off: the menu's microphone only
 

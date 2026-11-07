@@ -17,7 +17,7 @@
 // passwordEnc - and never goes to a page.
 const { net, session, safeStorage } = require("electron");
 const settings = require("./voice/settings");
-const { isObj } = require("./voice/util");
+const { isObj } = require("./shared/util");
 const { t } = require("./i18n");
 
 const MODES = ["system", "pac", "manual", "direct"];

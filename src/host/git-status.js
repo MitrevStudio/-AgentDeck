@@ -19,7 +19,7 @@ const MISSING_RETRY_MS = 5 * 60 * 1000;
 const ARGS = ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain=v2", "--branch", "-z", "--ignore-submodules=dirty"];
 
 // As the pages' normPath(): the keys they look folders up by.
-const { normPath: norm } = require("./voice/util");
+const { normPath: norm } = require("../shared/util");
 
 // ---------- parsing ----------
 // `git status --porcelain=v2 --branch -z`: "# " headers, then one entry per changed path. A rename/copy entry ("2")

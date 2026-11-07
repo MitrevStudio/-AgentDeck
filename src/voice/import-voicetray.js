@@ -6,7 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const settings = require("./settings");
 const store = require("./job-store");
-const { SAFE_ID, isObj } = require("./util");
+const { SAFE_ID, isObj } = require("../shared/util");
 
 const MARKER = ".imported-from-voicetray";
 
