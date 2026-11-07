@@ -205,7 +205,7 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
     link.close(1000, "paired");
     changed();
     scheduleConnect(id, 0);
-    return { id, name: r?.name || "", kind: r?.kind || "desktop" };
+    return { id, name: r?.name || "", kind: r?.kind || "desktop", already: r?.already === true };
   }
   // tell: the other side hears of it (and forgets this node) before the link closes.
   function forget(id, { tell = true } = {}) {
@@ -215,6 +215,7 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
     l?.link.close(1000, "forgotten");
     clearRetry(id);
     const had = peers.remove(id);
+    if (l) out.emit("link", { node: id, up: false });
     if (had) changed();
     return had;
   }

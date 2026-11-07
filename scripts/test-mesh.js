@@ -64,12 +64,20 @@ const node = (name, api) => {
   await back;
   assert.deepEqual(await a2.call(selfB.id, "ping"), { answered: "B2:ping" });
 
-  // Forgotten on one side: the link goes, and the other side sees it offline.
+  // Forgotten on one side only (the peers file edited): pairing again needs no code, the other side still trusts it.
+  a2.peers().remove(selfB.id);
+  const r2 = await a2.pair("127.0.0.1", b2.self().port, "wrong-code");
+  assert.equal(r2.id, selfB.id);
+  assert.equal(r2.already, true, "the other side still trusted this one");
+  assert.ok(a2.peers().get(selfB.id), "trusted again here");
+  assert.deepEqual(await a2.call(selfB.id, "ping"), { answered: "B2:ping" });
+
+  // Forgotten: the link goes, and the other side forgets too.
   const down = until(b2, "link", l => !l.up);
   a2.forget(selfB.id);
   await down;
   assert.equal(a2.nodes().length, 0);
-  assert.equal(b2.nodes()[0].status, "offline");
+  assert.equal(b2.nodes().length, 0, "the other side forgot as well");
 
   a2.stop();
   b2.stop();
