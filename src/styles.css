@@ -33,6 +33,14 @@ main {
 .side-sec-head .icon-btn .i { width: 15px; height: 15px; }
 .side-sec-head .icon-btn.on { color: var(--accent); }
 .side-list { flex: 1; min-height: 0; overflow: auto; padding: 0 6px 8px; }
+/* The computers (nodes-ui.js): a tab for this one and one per paired computer, when there are any. */
+.side-tabs { flex: none; display: flex; flex-wrap: wrap; gap: 4px; padding: 0 10px 6px; }
+.side-tabs button { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border: 1px solid var(--line); border-radius: var(--r-pill); background: transparent; color: var(--muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.side-tabs button:hover { color: var(--text); border-color: var(--line-2); }
+.side-tabs button.on { color: var(--text); background: var(--accent-weak); border-color: transparent; }
+.side-tabs button .i { width: 13px; height: 13px; }
+.side-tabs button .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok, var(--accent)); }
+.side-tabs button.offline .dot { background: var(--faint); }
 /* The command centre (renderer.js renderCentre): one card above the projects. */
 .centre-sec { flex: none; padding: 6px 6px 2px; }
 .centre-mark { display: grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 6px; background: var(--accent-weak); color: var(--accent); }
@@ -74,7 +82,7 @@ main {
 .proj.member { margin-left: 18px; }
 .proj.member::before { content: ""; position: absolute; left: -7px; top: 0; bottom: 0; border-left: 1px solid var(--line-2); }
 /* The other computers (nodes-ui.js): a header per node, its projects as members below it; nothing opens from them yet. */
-.proj.node-head { margin-top: 8px; cursor: default; }
+.proj.node-head { margin-top: 8px; cursor: default; display: none; }
 .proj.node-head .proj-name { font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 .proj.node-head.offline .proj-name, .proj.node-head.offline > .proj-row > .i { color: var(--faint); }
 .proj.node-head > .proj-row > .i { color: var(--accent); }

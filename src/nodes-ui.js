@@ -7,6 +7,29 @@
 // fullDate, pathHtml and countLiveGroups from common.js.
 const REMOTE_KEY = "node:"; // a remote project's space key: node:<id>:<project path, normalized>
 let nodes = []; // [{ id, name, kind, status, data, live, git, view: { projects, sessions }, liveMap }]
+// The tab shown above the projects: "" for this computer, else a paired computer's id (kept across restarts).
+const NODE_TAB_KEY = "agentdeck.nodeTab";
+let shownNode = (() => { try { return localStorage.getItem(NODE_TAB_KEY) || ""; } catch { return ""; } })();
+function showNodeTab(id) {
+  shownNode = id;
+  try { localStorage.setItem(NODE_TAB_KEY, id); } catch {}
+  if (typeof render === "function") render();
+}
+const shownNodeId = () => (getNode(shownNode) ? shownNode : "");
+// The tabs: only when a computer is paired. This computer first, then each paired one with its state.
+function nodeTabsHtml() {
+  if (!nodes.length) return "";
+  const shown = shownNodeId();
+  return [`<button class="${shown ? "" : "on"}" data-node-tab="">${icon("window")}<span>${esc(t("manager.nodes.thisComputer"))}</span></button>`,
+    ...nodes.map(n => `<button class="${shown === n.id ? "on" : ""} ${n.status}" data-node-tab="${esc(n.id)}" title="${esc(nodeLabel(n))}">${icon(n.kind === "host" ? "terminal" : "nodes")}<span>${esc(n.name || n.id.slice(0, 8))}</span><span class="dot"></span></button>`)
+  ].join("");
+}
+function renderNodeTabs() {
+  const el = $("nodeTabs");
+  const html = nodeTabsHtml();
+  if (el.dataset.html !== html) { el.dataset.html = html; el.innerHTML = html; }
+  el.hidden = !html;
+}
 
 function setNodes(list) {
   nodes = (list || []).map(n => {
@@ -46,8 +69,8 @@ function remoteLive(n, sessions) {
 // ---------- the sidebar ----------
 // Each node: a header with its name and state, then its projects (by activity; a remote project has no menu, no
 // drag and no git here).
-function nodesHtml(selected) {
-  return nodes.map(n => {
+function nodesHtml(selected, only = "") {
+  return nodes.filter(n => !only || n.id === only).map(n => {
     const projects = n.view.projects;
     const head = `<div class="proj node-head ${n.status}" data-node="${esc(n.id)}" title="${esc(`${n.name}\n${n.address || ""}`)}">
       <div class="proj-row">${icon(n.kind === "host" ? "terminal" : "nodes")}<span class="proj-name">${esc(nodeLabel(n))}</span>
@@ -123,6 +146,10 @@ async function onRemoteSpaceClick(e, n, p) {
   toast(t("manager.node.toast.opened", { node: n.name }));
 }
 
+$("nodeTabs").addEventListener("click", e => {
+  const b = e.target.closest("[data-node-tab]");
+  if (b) showNodeTab(b.dataset.nodeTab);
+});
 window.manager.onNodesChanged(list => {
   setNodes(list);
   if (typeof renderSoon === "function") renderSoon();
