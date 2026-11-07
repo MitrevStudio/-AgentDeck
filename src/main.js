@@ -1024,6 +1024,26 @@ async function checkFromTray() {
 // Only the manager window and the edge menu may call these (not the voice windows, nor any other), and every
 // argument is checked: they reach a shell, a terminal and the file system.
 const trusted = e => [managerWin, bar?.win].some(w => w && !w.isDestroyed() && e.sender === w.webContents);
+// A picture copied to the clipboard, pasted into a terminal: saved as a PNG and its path typed in, which Claude Code
+// and Codex attach as an image (a program in a pseudo console cannot read the clipboard picture the window holds the
+// paste for). Only when the clipboard has no text, so a normal paste stays a normal paste. Pastes older than a week go.
+const PASTE_DIR = path.join(os.tmpdir(), "agentdeck-paste"), PASTE_KEEP_MS = 7 * 24 * 3600 * 1000;
+async function saveClipboardImage() {
+  if (await clipboard.readText()) return "";
+  const item = (await clipboard.read()).find(i => i.types.includes("image/png"));
+  if (!item) return "";
+  const png = Buffer.from(await (await item.getType("image/png")).arrayBuffer());
+  await fs.promises.mkdir(PASTE_DIR, { recursive: true });
+  for (const name of await fs.promises.readdir(PASTE_DIR).catch(() => [])) {
+    const file = path.join(PASTE_DIR, name);
+    const stat = await fs.promises.stat(file).catch(() => null);
+    if (stat && Date.now() - stat.mtimeMs > PASTE_KEEP_MS) await fs.promises.rm(file, { force: true }).catch(() => {});
+  }
+  const file = path.join(PASTE_DIR, `paste-${new Date().toISOString().replace(/[:.]/g, "-")}.png`);
+  await fs.promises.writeFile(file, png);
+  return file;
+}
+
 function handle(channel, fn) {
   ipcMain.handle(channel, (e, ...args) => {
     if (!trusted(e)) throw new Error(t("errors.accessDenied"));
@@ -1152,6 +1172,7 @@ function registerIpc() {
   // Folders only: shell.openPath() on a file runs it.
   handle("open:path", p => (isDir(p) ? shell.openPath(p) : t("errors.folderMissing")));
   handle("clipboard:write", async value => { await clipboard.writeText(text(value, 1_000_000)); return true; });
+  handle("clipboard:image-file", () => saveClipboardImage());
   handle("live:get", () => liveSessions());
   // AgentDeck's own terminals and their layout. Keystrokes and sizes come as plain messages (many, no answer needed).
   handle("workspace:get", () => getWorkspaceView());

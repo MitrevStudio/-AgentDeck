@@ -77,6 +77,17 @@ function createTermView(id) {
   term.open(host);
   term.attachCustomKeyEventHandler(e => handleTermKey(term, e));
   term.onData(d => window.terminals.input(id, d));
+  // Files dropped on a terminal: their paths typed in, quoted when they have spaces (as Windows Terminal does).
+  host.addEventListener("dragover", e => {
+    if (e.dataTransfer?.types.includes("Files")) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }
+  });
+  host.addEventListener("drop", e => {
+    const paths = [...(e.dataTransfer?.files || [])].map(f => window.terminals.getPathForFile(f)).filter(Boolean);
+    if (!paths.length) return;
+    e.preventDefault();
+    term.focus();
+    term.paste(paths.map(p => (/\s/.test(p) ? `"${p}"` : p)).join(" "));
+  });
   // Clicking into a terminal makes its pane the focused one.
   term.textarea?.addEventListener("focus", () => { if (getShownTab()?.focus !== id) runWorkspace("focus", { term: id }); });
   const view = { host, term, fit, attachedEnd: null, queue: [] };
@@ -164,13 +175,15 @@ function handleTermKey(term, e) {
     return false;
   }
   if (!e.ctrlKey) return true;
-  if (e.key === "c" && term.hasSelection()) {
+  if (e.code === "KeyC" && term.hasSelection()) {
     window.manager.copyText(term.getSelection());
     term.clearSelection();
     return false;
   }
-  // The browser pastes; xterm picks the text up from the paste event.
-  return e.key !== "v";
+  // The browser pastes; xterm picks the text up from the paste event. A picture has no text: its saved file's path goes in.
+  if (e.code !== "KeyV") return true;
+  window.terminals.saveClipboardImage().then(file => { if (file) term.paste(file); }, err => toast(err.message, true));
+  return false;
 }
 // The same keys when the keyboard is elsewhere in the window (not typing in a field).
 document.addEventListener("keydown", e => {
