@@ -87,6 +87,7 @@ function renderProjects(v) {
     return buildGroupHtml(u, v, shut) + (shut ? "" : u.members.map(p => buildProjectHtml(p, counts.get(p), v)).join(""));
   }).join("");
   if (!total && ui.loaded) html += `<div class="empty small">${esc(t("manager.projects.empty"))}</div>`;
+  html += nodesHtml(ui.selected); // the other computers' projects (nodes-ui.js)
   $("projects").innerHTML = html;
 }
 const getDraggableAttr = (v, n) => (v.toks.length || ui.renaming === n ? "" : 'draggable="true"');
@@ -197,9 +198,10 @@ function renderTitle(v) {
 // The sessions running now under Need you / Working / Waiting for you, each with its project and subagents. One open
 // in AgentDeck is brought up by a click, one in another terminal too (or moved here from its menu).
 function renderAgents(v) {
-  $("agentCount").textContent = v.running.length;
+  const remote = remoteAgentsHtml(); // the other computers' running sessions (nodes-ui.js)
+  $("agentCount").textContent = v.running.length + remoteAgentCount();
   if (!v.running.length) {
-    $("agents").innerHTML = `<div class="side-empty">${esc(t(ui.loaded ? "manager.agents.none" : "manager.status.scanning"))}</div>`;
+    $("agents").innerHTML = remote || `<div class="side-empty">${esc(t(ui.loaded ? "manager.agents.none" : "manager.status.scanning"))}</div>`;
     return;
   }
   let last = "", html = "";
@@ -209,7 +211,7 @@ function renderAgents(v) {
     last = group;
     html += agentHtml(s, l, v.toks);
   }
-  $("agents").innerHTML = html;
+  $("agents").innerHTML = html + remote;
 }
 function agentHtml(s, l, toks) {
   const key = sessionKey(s), here = findSessionTab(s);
@@ -242,6 +244,7 @@ function resumeLatest() {
   resume(s).catch(e => toast(e.message, true));
 }
 function renderSpaceEmpty(el, key) {
+  if (renderRemoteSpace(el, key)) return; // a project of another computer (nodes-ui.js)
   if (key === CENTRE) {
     el.innerHTML = `<div class="se-box">
       <div class="se-head"><span class="centre-mark">${icon("bolt")}</span><div><h2>${esc(t("centre.title"))}</h2><p class="se-body">${esc(t("centre.body"))}</p></div></div>
@@ -523,6 +526,7 @@ $("add").addEventListener("click", async () => {
 $("projects").addEventListener("click", async e => {
   if (e.target.classList.contains("rename") || await onAction(e)) return;
   const card = e.target.closest(".proj");
+  if (card?.dataset.remote) return selectProject(remoteKey(card.dataset.node, card.dataset.remote));
   if (card) selectProject(getCardKey(card));
 });
 $("projects").addEventListener("contextmenu", e => {
@@ -539,7 +543,7 @@ $("projects").addEventListener("keydown", e => {
   }
   if ((e.key === "Enter" || e.key === " ") && e.target.classList.contains("proj")) {
     e.preventDefault();
-    selectProject(getCardKey(e.target));
+    selectProject(e.target.dataset.remote ? remoteKey(e.target.dataset.node, e.target.dataset.remote) : getCardKey(e.target));
   }
   if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown") && e.target.matches(".proj[draggable]")) {
     e.preventDefault();

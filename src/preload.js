@@ -36,6 +36,9 @@ contextBridge.exposeInMainWorld("manager", {
   onGitChanged: cb => ipcRenderer.on("git:changed", (_e, g) => cb(g)),
   focusTerminal: (agent, id) => ipcRenderer.invoke("terminal:focus", agent, id),
   // The command centre (orchestrator.js): its terminal, and a typed command for it.
+  // The other computers (mesh): their projects, sessions and live status, pushed again on every change.
+  getNodes: () => ipcRenderer.invoke("mesh:nodes"),
+  onNodesChanged: cb => ipcRenderer.on("mesh:nodes", (_e, nodes) => cb(nodes)),
   centreStart: () => ipcRenderer.invoke("centre:start"),
   centreSend: text => ipcRenderer.invoke("centre:send", text),
   // The voice question's answer window only.

@@ -266,6 +266,16 @@ function createVoiceWindows({ settings, store, queue, listDevices, onReread, onS
     return { reachable: false, route: r.route, short: e.shortMessage, long: e.longMessage };
   });
 
+  // Computers (the mesh, ../mesh/links.js): this node, the paired ones and those found on the network, applied at
+  // once; the whole picture is pushed again on every change.
+  const mesh = general?.mesh;
+  handle("mesh:get", settingsOwner, () => mesh?.state() ?? null);
+  handle("mesh:set", settingsOwner, patch => mesh?.set(isObj(patch) ? patch : {}) ?? null);
+  handle("mesh:new-code", settingsOwner, () => mesh?.newCode() ?? null);
+  handle("mesh:pair", settingsOwner, (address, code) => mesh?.pair(String(address ?? ""), String(code ?? "")) ?? { ok: false });
+  handle("mesh:forget", settingsOwner, id => mesh?.forget(String(id ?? "")) ?? null);
+  mesh?.on(state => { if (alive(settingsWin)) settingsWin.webContents.send("mesh:changed", state); });
+
   // The page is recording a new combination while one of its hotkey fields has the focus.
   handle("voice:settings:capture", settingsOwner, on => { onHotkeyCapture?.(on === true); return true; });
 

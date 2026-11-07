@@ -29,6 +29,9 @@ const limits = createAllLimits({ fetch: (url, init) => network.fetch(url, init),
   findExecutable: name => findOnPath(name), onChange: l => broadcast("limits:changed", l) });
 const { createNotifier } = require("./notify");
 const { createHost } = require("./host");
+const { createLinks } = require("./mesh/links");
+const { DEFAULT_PORT } = require("./mesh/identity");
+const { HostError } = require("./host/errors");
 const { getProject, isPinned, setPin, setGroups, unpinEmptyGroups, repin } = require("./host/registry");
 const atomicFile = require("./shared/atomic-file");
 // AgentDeck's own terminal tabs (prefs "sessionsIn": "tabs"); their output goes to the manager window only.
@@ -233,6 +236,86 @@ const orchestrator = createOrchestrator({
 const writeLaunchLog = createLog("launch.log");
 const launchLog = (...parts) => writeLaunchLog([new Date().toISOString(), ...parts].join(" "));
 const { isAgent, SESSION_ID } = launch;
+
+// ---------- the mesh (mesh/links.js): the other computers ----------
+// What a peer may ask of this computer - for now only to look: the projects and sessions, the live status, the git
+// status. What changes here is pushed to every connected peer.
+const writeMeshLog = createLog("mesh.log");
+const meshLog = line => writeMeshLog(`${new Date().toISOString()} ${line}`);
+const MESH_API = {
+  "host.info": () => ({ ...links.self(), code: undefined, platform: process.platform, agents: sessions.get()?.agents || [] }),
+  "sessions.list": () => sessions.data(),
+  "live.list": () => liveSessions(),
+  "git.status": () => gitStatus.get()
+};
+const links = createLinks({
+  dir: path.join(app.getPath("userData"), "node"), defaultName: os.hostname(), kind: "desktop", version: app.getVersion(),
+  api: (method, params) => {
+    if (!Object.hasOwn(MESH_API, method)) throw new HostError("unknownMethod");
+    return MESH_API[method](params);
+  },
+  log: meshLog
+});
+// What the other computers show - their last list, live status and git - kept per node and pushed to the manager
+// window with the nodes themselves ("mesh:nodes").
+const remote = new Map(); // node id -> { data, live, git }
+const nodesView = () => links.nodes().map(n => ({ ...n, ...(remote.get(n.id) || {}) }));
+let nodesTimer = null;
+function nodesChanged() {
+  if (nodesTimer) return;
+  nodesTimer = setTimeout(() => { nodesTimer = null; sendToManager("mesh:nodes", nodesView()); }, 150);
+}
+links.on("nodes", nodesChanged);
+links.on("event", ({ node, name, data }) => {
+  if (!["data", "live", "git"].includes(name)) return;
+  remote.set(node, { ...remote.get(node), [name]: data });
+  nodesChanged();
+});
+// A link that just came up: everything the peer has, at once; one that went: its last picture stays, marked offline.
+links.on("link", async ({ node, up }) => {
+  if (!up) return nodesChanged();
+  try {
+    const [data, live, git] = await Promise.all([links.call(node, "sessions.list"), links.call(node, "live.list"), links.call(node, "git.status")]);
+    remote.set(node, { data, live, git });
+    nodesChanged();
+  } catch (e) {
+    meshLog(`reading ${node.slice(0, 8)} failed: ${e.message}`);
+  }
+});
+host.on("data", data => links.notifyAll("data", data));
+host.on("git", g => links.notifyAll("git", g));
+// The live status has no event of its own (the windows poll it): connected peers get it every few seconds, when it
+// changed.
+let lastLiveSig = "";
+setInterval(async () => {
+  if (!links.nodes().some(n => n.status === "online")) return;
+  const live = await liveSessions();
+  const sig = JSON.stringify(live);
+  if (sig !== lastLiveSig) {
+    lastLiveSig = sig;
+    links.notifyAll("live", live);
+  }
+}, 3000).unref();
+// Settings -> Computers (voice/windows.js serves the page): the picture, the settings of this node, pairing and
+// forgetting. Errors come as texts in the user's language, not as exceptions.
+const ADDRESS = /^\s*(\[[0-9a-f:.]+\]|[^:\s[\]]+)(?::(\d{1,5}))?\s*$/i;
+const meshSettings = {
+  state: () => ({ self: links.self(), nodes: links.nodes(), discovered: links.discovered() }),
+  set: patch => { links.setSelf(patch); return meshSettings.state(); },
+  newCode: () => { links.regenerateCode(); return meshSettings.state(); },
+  pair: async (address, code) => {
+    const m = ADDRESS.exec(address);
+    if (!m) return { ok: false, error: t("errors.badAddress") };
+    try {
+      const r = await links.pair(m[1].replace(/^\[|\]$/g, ""), Number(m[2]) || DEFAULT_PORT, code);
+      return { ok: true, node: r };
+    } catch (e) {
+      return { ok: false, error: translated(e).message };
+    }
+  },
+  forget: id => { links.forget(id); return meshSettings.state(); },
+  on: cb => { for (const ev of ["nodes", "self", "discovered"]) links.on(ev, () => cb(meshSettings.state())); }
+};
 function spawnDetached(file, args, opts) {
   const child = spawn(file, args, { detached: true, stdio: "ignore", ...opts });
   child.unref();
@@ -771,6 +854,8 @@ function registerIpc() {
   handle("voice:command-state", () => voice?.command.state() ?? { enabled: false, state: "idle" });
   // The command centre (orchestrator.js): its terminal, and what the edge menu's command field says to it.
   handle("centre:start", async () => { showTab(await orchestrator.open()); return true; });
+  // The other computers (mesh/links.js) with what they show.
+  handle("mesh:nodes", () => nodesView());
   handle("centre:send", s => orchestrator.send(text(s, 20000)));
   // Every page, voice ones included, reads the language and theme from its preload before it renders.
   ipcMain.on("prefs:get", e => { e.returnValue = prefs.get(); });
@@ -855,6 +940,7 @@ if (!app.requestSingleInstanceLock()) {
     autostart.applyDefault().catch(err => console.error("Could not set up starting with Windows:", err.message));
     launch.sweepPrompts(); // prompts of voice commands whose terminal never started
     host.start(); // the scans, the usage figures, the git status, the tabs' links to their sessions
+    links.start().then(nodesChanged, e => console.error("The mesh could not start:", e.message));
     answerPopup = require("./answer-popup").createAnswerPopup({ preload: PRELOAD, background: prefs.background, copy: async s => clipboard.writeText(s), icon: makeIcon(64) });
     voiceContext.start();
     // Started once the windows are up: the first run copies VoiceTray's history first, and a voice part that cannot
@@ -865,7 +951,7 @@ if (!app.requestSingleInstanceLock()) {
         // The dictionary may include the projects' names.
         projectNames: () => [...readRegistry().projects.map(p => p.name), ...voiceContext.terms()],
         general: { set: patch => prefs.set(patch), hotkey: () => ({ current: hotkeyLabel(), candidates: HOTKEYS.map(k => keyLabel(k, " + ")) }), updates: updater, network,
-          autostart },
+          autostart, mesh: meshSettings },
         // What a voice command says goes to the command centre.
         commands: {
           orchestrate: s => orchestrator.send(s),
@@ -894,6 +980,7 @@ if (!app.requestSingleInstanceLock()) {
     limits.stop();
     orchestrator.stop();
     host.stop();
+    links.stop();
     globalShortcut.unregisterAll();
     // Quitting without before-quit (Windows ending the session) still saves the layout, at once.
     if (workspaceSaving) {
