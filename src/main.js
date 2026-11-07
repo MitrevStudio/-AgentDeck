@@ -35,7 +35,7 @@ const { DEFAULT_PORT } = require("./mesh/identity");
 const frames = require("./mesh/frames");
 const { normPath } = require("./shared/util");
 const { HostError } = require("./host/errors");
-const { getProject, isPinned, setPin, setGroups, unpinEmptyGroups, repin } = require("./host/registry");
+const { getProject, isPinned, setPin, setGroups, unpinEmptyGroups, repin, keyOf, keyify } = require("./host/registry");
 const atomicFile = require("./shared/atomic-file");
 // AgentDeck's own terminal tabs (prefs "sessionsIn": "tabs"); their output goes to the manager window only.
 function sendToManager(channel, payload) {
@@ -338,7 +338,30 @@ const nodesView = () => links.nodes().map(n => ({ ...n, ...(remote.get(n.id) || 
 let nodesTimer = null;
 function nodesChanged() {
   if (nodesTimer) return;
-  nodesTimer = setTimeout(() => { nodesTimer = null; sendToManager("mesh:nodes", nodesView()); }, 150);
+  nodesTimer = setTimeout(() => { nodesTimer = null; syncRemoteProjects(); sendToManager("mesh:nodes", nodesView()); }, 150);
+}
+// The paired computers' projects are kept in this computer's registry too (node + the folder there), so they are
+// pinned, ordered and grouped like its own: added as they appear there, dropped as they go (or the computer is
+// forgotten); one removed here stays out. The name stays as first seen (it can be renamed here).
+function syncRemoteProjects() {
+  const data = readRegistry();
+  const wanted = new Map();
+  for (const n of links.nodes()) {
+    for (const p of remote.get(n.id)?.data?.registry?.projects || []) {
+      if (typeof p?.path === "string" && p.path) wanted.set(keyOf({ node: n.id, path: p.path }), { node: n.id, name: String(p.name || path.basename(p.path)), path: p.path });
+    }
+  }
+  const before = data.projects.length;
+  data.projects = data.projects.filter(p => !p.node || wanted.has(keyOf(p)));
+  let changed = data.projects.length !== before;
+  const have = new Set(data.projects.map(keyOf)), removed = new Set(data.removed);
+  for (const [key, p] of wanted) {
+    if (!have.has(key) && !removed.has(key)) { data.projects.push(p); changed = true; }
+  }
+  if (changed) {
+    unpinEmptyGroups(data);
+    saveRegistry(data);
+  }
 }
 links.on("nodes", nodesChanged);
 links.on("event", ({ node, name, data }) => {
@@ -419,7 +442,7 @@ function getSpaceFor(cwd) {
   const n = norm(cwd);
   const registry = readRegistry();
   const owner = registry.projects
-    .filter(p => n === norm(p.path) || n.startsWith(norm(p.path).replace(/\/$/, "") + "/"))
+    .filter(p => !p.node && (n === norm(p.path) || n.startsWith(norm(p.path).replace(/\/$/, "") + "/")))
     .sort((a, b) => b.path.length - a.path.length)[0];
   if (owner) return norm(owner.path);
   if (!registry.removed.includes(n)) {
@@ -773,8 +796,8 @@ function registerIpc() {
   handle("project:remove", (p, remember) => {
     text(p);
     const data = readRegistry();
-    const n = norm(p);
-    data.projects = data.projects.filter(x => norm(x.path) !== n);
+    const n = keyify(p);
+    data.projects = data.projects.filter(x => keyOf(x) !== n);
     if (remember !== false && !data.removed.includes(n)) data.removed.push(n);
     unpinEmptyGroups(data);
     return saveRegistry(data);
@@ -791,10 +814,10 @@ function registerIpc() {
   // the group ids ("" for none) of the projects that changed groups.
   handle("project:arrange", (paths, groupOf) => {
     if (!Array.isArray(paths) || paths.length > 10000) throw new Error(t("errors.invalidData"));
-    const at = new Map(paths.map((p, i) => [norm(text(p)), i]));
+    const at = new Map(paths.map((p, i) => [keyify(text(p)), i]));
     const data = readRegistry();
     setGroups(data, groupOf, text);
-    const rank = x => at.get(norm(x.path)) ?? paths.length;
+    const rank = x => at.get(keyOf(x)) ?? paths.length;
     data.projects.sort((a, b) => rank(a) - rank(b));
     repin(data);
     data.order = "custom";

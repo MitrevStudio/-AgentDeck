@@ -16,10 +16,14 @@ const ui = { selected: "", renaming: "", loading: false, loaded: false };
 let live = new Map(), liveSig = "", pendingRender = false;
 const liveOf = s => live.get(sessionKey(s));
 
+// A card stands for its project by `ref`: the folder here, or the key of a project of another computer (nodes-ui.js
+// mergeNodes brings those computers' sessions and live states in beside this computer's).
+const refOf = p => (p.node ? p.n : p.path);
 function prepare() {
-  const built = buildData(raw, live);
-  order = built.projects.map(p => p.path);
-  groupOfPath = new Map(built.projects.map(p => [p.path, p.group || ""]));
+  const m = mergeNodes(raw, live);
+  const built = buildData(m.raw, m.live);
+  order = built.projects.map(refOf);
+  groupOfPath = new Map(built.projects.map(p => [refOf(p), p.group || ""]));
   data = conceal(built, readHidden());
   if (groupMenu?.dataset.path && !groupOfPath.has(groupMenu.dataset.path)) closeGroupMenu();
 }
@@ -74,7 +78,6 @@ function renderCentre() {
   if (el.dataset.html !== html) { el.dataset.html = html; el.innerHTML = html; }
 }
 function renderProjects(v) {
-  renderNodesSection(ui.selected); // the paired computers' section (nodes-ui.js)
   const total = data.projects.length;
   $("projectCount").textContent = v.toks.length ? `${v.projects.length} / ${total}` : total;
   renderOrderToggle();
@@ -103,18 +106,19 @@ const buildNameHtml = (x, v, label) => (ui.renaming === x.n
 // A terminal and Explorer show while the row is pointed at or chosen, the rest is in its menu.
 function buildProjectHtml(p, count, v) {
   const member = Boolean(p.group);
-  const tip = `${p.name}\n${p.path}\n${p.last ? ago(p.last) : t("manager.project.noSessions")}`;
+  const node = p.node ? getNode(p.node) : null;
+  const tip = `${p.name}\n${p.path}${node ? `\n${nodeLabel(node)}` : ""}\n${p.last ? ago(p.last) : t("manager.project.noSessions")}`;
   return `
-    <div class="proj ${member ? "member" : ""} ${ui.selected === p.n ? "active" : ""}" data-path="${esc(p.path)}" tabindex="0" ${getDraggableAttr(v, p.n)}>
+    <div class="proj ${member ? "member" : ""} ${ui.selected === p.n ? "active" : ""}" data-path="${esc(refOf(p))}" ${p.node ? `data-node="${esc(p.node)}"` : ""} tabindex="0" ${getDraggableAttr(v, p.n)}>
       <div class="proj-row" title="${esc(tip)}"><span class="pmono" style="--h:${hue(p.n)}">${esc(initials(p.name))}</span>
         ${buildNameHtml(p, v, "manager.project.newName")}
         ${isPinned(p) ? buildPinMark() : ""}
-        ${gitChip(p.path)}${projectLive(p.sessions)}
+        ${node ? `<span class="proj-node ${node.status}" title="${esc(nodeLabel(node))}">${icon(node.kind === "host" ? "terminal" : "nodes")}${esc(node.name)}</span>` : gitChip(p.path)}${projectLive(p.sessions)}
         ${getSpaceTabsHtml(p.n)}
       </div>
       <span class="proj-tools">
         <button class="icon-btn" data-action="terminal" title="${esc(t("action.terminalHere"))}">${icon("terminal")}</button>
-        <button class="icon-btn" data-action="explorer" title="${esc(t("action.explorerTitle"))}">${icon("open")}</button>
+        ${p.node ? "" : `<button class="icon-btn" data-action="explorer" title="${esc(t("action.explorerTitle"))}">${icon("open")}</button>`}
         <button class="icon-btn" data-action="project-menu" title="${esc(t("manager.project.more"))}" aria-haspopup="menu">${icon("more")}</button>
       </span>
     </div>`;
@@ -198,10 +202,9 @@ function renderTitle(v) {
 // The sessions running now under Need you / Working / Waiting for you, each with its project and subagents. One open
 // in AgentDeck is brought up by a click, one in another terminal too (or moved here from its menu).
 function renderAgents(v) {
-  const remote = remoteAgentsHtml(); // the other computers' running sessions (nodes-ui.js)
-  $("agentCount").textContent = v.running.length + remoteAgentCount();
+  $("agentCount").textContent = v.running.length;
   if (!v.running.length) {
-    $("agents").innerHTML = remote || `<div class="side-empty">${esc(t(ui.loaded ? "manager.agents.none" : "manager.status.scanning"))}</div>`;
+    $("agents").innerHTML = `<div class="side-empty">${esc(t(ui.loaded ? "manager.agents.none" : "manager.status.scanning"))}</div>`;
     return;
   }
   let last = "", html = "";
@@ -211,13 +214,14 @@ function renderAgents(v) {
     last = group;
     html += agentHtml(s, l, v.toks);
   }
-  $("agents").innerHTML = html + remote;
+  $("agents").innerHTML = html;
 }
 function agentHtml(s, l, toks) {
   const key = sessionKey(s), here = findSessionTab(s);
   const project = isCentreSession(s) ? t("centre.title") : data.projects.find(p => inProject(s, p))?.name || s.cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop();
-  return `<div class="agent ${here ? "here" : ""}" data-key="${esc(key)}" title="${esc(`${s.title}\n${s.cwd}`)}">${agentMark(s.agent)}
-      <div class="agent-main"><div class="agent-title">${hl(s.title, toks)}</div><div class="agent-sub">${esc(project)}${here ? "" : ` · ${esc(t("manager.agents.outside"))}`}</div></div>
+  const where = s.node ? ` · ${esc(s.nodeName || nodeNameOf(s.node))}` : here ? "" : ` · ${esc(t("manager.agents.outside"))}`;
+  return `<div class="agent ${here ? "here" : ""}" data-key="${esc(key)}" title="${esc(`${s.title}\n${s.cwd}${s.node ? `\n${s.nodeName || ""}` : ""}`)}">${agentMark(s.agent)}
+      <div class="agent-main"><div class="agent-title">${hl(s.title, toks)}</div><div class="agent-sub">${esc(project)}${where}</div></div>
       ${statusMark(l, isLoading(key, l))}</div>
     ${l.subagents?.length ? subagentsHtml(key, l.subagents, "data-action", SIDEBAR_SUBAGENTS) : ""}`;
 }
@@ -228,8 +232,10 @@ const sessionByKey = key => data.sessions.find(s => sessionKey(s) === key) || nu
 // ---------- a project with no terminals open ----------
 // Its name, a new terminal or agent session, and its latest sessions to resume.
 const SPACE_RECENT = 6;
+// "" for a project of another computer: nothing opens here for it (nodes-ui.js opens there).
 function getSpaceFolder(key) {
-  return data.projects.find(p => p.n === key)?.path || "";
+  const p = data.projects.find(p => p.n === key);
+  return p && !p.node ? p.path : "";
 }
 // The agents found on this computer (all of them until the first scan tells).
 const getInstalledAgents = () => (raw.agents?.length ? raw.agents : AGENTS);
@@ -388,6 +394,11 @@ function selectProject(key) {
 async function resume(s, place = "tab") {
   if (showSessionTab(s)) return;
   if (!s?.cwd) return toast(t("errors.sessionNoDir"), true);
+  // A session of another computer resumes there, in a pane here.
+  if (s.node) {
+    await window.manager.remoteLaunch(s.node, { kind: "resume", cwd: s.cwd, agent: s.agent, sessionId: s.id });
+    return toast(t("manager.node.toast.opened", { node: s.nodeName || nodeNameOf(s.node) }));
+  }
   const l = liveOf(s);
   if (l && !confirm(t("manager.confirm.openAgain", { pid: l.pid }))) return;
   await window.manager.launchAgent(s.agent, s.id, s.cwd, place);
@@ -395,6 +406,7 @@ async function resume(s, place = "tab") {
 }
 async function showTerminal(s) {
   if (!s || showSessionTab(s)) return;
+  if (s.node) return toast(t("manager.node.sessionThere", { node: s.nodeName || nodeNameOf(s.node) }));
   const r = await window.manager.focusTerminal(s.agent, s.id);
   const note = focusNote(r);
   if (note) toast(note, !r.ok);
@@ -420,7 +432,7 @@ async function pinProject(path, groupId) {
     if (g) applyRegistry(await window.manager.pinGroup(g.id, isPinned(g) ? null : g.slot));
     return;
   }
-  const p = data.projects.find(x => x.n === normPath(path));
+  const p = data.projects.find(x => refOf(x) === path);
   if (p) applyRegistry(await window.manager.pinProject(path, isPinned(p) ? null : p.slot));
 }
 // Empty, or with the project at `path` in it; either way named right away (an empty one shows only without a search).
@@ -483,14 +495,19 @@ async function runAction(action, btn) {
   const path = btn.dataset.path || btn.closest("[data-path]")?.dataset.path;
   const groupId = btn.closest("[data-group]")?.dataset.group;
   const session = () => sessionByKey(btn.closest("[data-key]")?.dataset.key);
+  // The project of the card: its folder, and the computer it is on when not this one.
+  const p = path ? data.projects.find(x => refOf(x) === path) : null;
+  const folder = p?.path || path;
   switch (action) {
     case "resume": return resume(session());
     case "fresh": await continueFresh(session()); return toast(t("preview.fresh.started"));
     case "show-terminal": return showTerminal(session());
     case "move-here": return moveSessionHere(session());
-    case "terminal": await window.manager.launchFolder(path); return toast(t("manager.toast.terminal", { path }));
-    case "explorer": { const err = await window.manager.openPath(path); if (err) throw new Error(err); return; }
-    case "copy": await window.manager.copyText(path); return toast(t("toast.copied", { path }));
+    case "terminal":
+      if (p?.node) { await window.manager.remoteLaunch(p.node, { kind: "shell", cwd: p.path }); return toast(t("manager.node.toast.opened", { node: nodeNameOf(p.node) })); }
+      await window.manager.launchFolder(folder); return toast(t("manager.toast.terminal", { path: folder }));
+    case "explorer": { const err = await window.manager.openPath(folder); if (err) throw new Error(err); return; }
+    case "copy": await window.manager.copyText(folder); return toast(t("toast.copied", { path: folder }));
     case "rename": ui.renaming = groupId ? "g:" + groupId : normPath(path); return render();
     case "pin": return pinProject(path, groupId);
     case "group-menu": return openGroupMenu(btn, path);
@@ -498,7 +515,7 @@ async function runAction(action, btn) {
     case "ungroup": return applyRegistry(await window.manager.deleteGroup(groupId));
     case "fold": return toggleCollapsed(groupId);
     case "remove":
-      if (!confirm(t("manager.confirm.remove", { path }))) return;
+      if (!confirm(t("manager.confirm.remove", { path: folder }))) return;
       return applyRegistry(await window.manager.removeProject(path));
     case "subagents": {
       const key = btn.dataset.key;
@@ -581,14 +598,14 @@ function openGroupMenu(btn, path, items = getGroupMenuItems(path)) {
 }
 // A project's menu: its folder, its place in the list and its group, its name; removing it. Also on a right-click.
 function openProjectMenu(btn, path) {
-  const p = data.projects.find(x => x.n === normPath(path));
+  const p = data.projects.find(x => refOf(x) === path);
   if (!p) return;
   openGroupMenu(btn, path, [
-    { label: t("action.copyPath"), icon: "copy", run: async () => { await window.manager.copyText(path); toast(t("toast.copied", { path })); } },
+    { label: t("action.copyPath"), icon: "copy", run: async () => { await window.manager.copyText(p.path); toast(t("toast.copied", { path: p.path })); } },
     ...(p.group ? [] : [{ label: t(isPinned(p) ? "action.unpin" : "action.pin"), icon: "pin", run: () => pinProject(path) }]),
     ...getGroupMenuItems(path),
-    // Cloned on another computer, with a branch and an agent (clone-ui.js).
-    ...(onlineNodes().length ? [{ label: t("clone.menu"), icon: "nodes", items: onlineNodes().map(n => ({ label: n.name, icon: n.kind === "host" ? "terminal" : "window", run: () => openCloneDialog(path, n) })) }] : []),
+    // Cloned on another computer, with a branch and an agent (clone-ui.js); a project of another computer stays there.
+    ...(!p.node && onlineNodes().length ? [{ label: t("clone.menu"), icon: "nodes", items: onlineNodes().map(n => ({ label: n.name, icon: n.kind === "host" ? "terminal" : "window", run: () => openCloneDialog(path, n) })) }] : []),
     { label: t("action.rename"), icon: "pencil", run: async () => { ui.renaming = p.n; render(); } },
     { label: t("action.remove"), icon: "trash", run: () => runAction("remove", btn) }
   ]);
@@ -604,9 +621,9 @@ function openRowMenu(btn, s) {
   const copy = (text, msg) => async () => { await window.manager.copyText(text); toast(msg); };
   showMenuItems([
     { label: t("term.show"), icon: "raise", run: () => showTerminal(s) },
-    ...(liveOf(s) && isMoveHereOffered(s) ? [{ label: t("term.moveHere"), icon: "download", run: () => moveSessionHere(s) }] : []),
+    ...(!s.node && liveOf(s) && isMoveHereOffered(s) ? [{ label: t("term.moveHere"), icon: "download", run: () => moveSessionHere(s) }] : []),
     { label: t("manager.session.copyId"), icon: "copy", run: copy(s.id, t("manager.toast.copiedId", { id: s.id })) },
-    ...(s.cwd ? [
+    ...(s.cwd && !s.node ? [
       { label: t("action.copyPath"), icon: "copy", run: copy(s.cwd, t("toast.copied", { path: s.cwd })) },
       { label: t("action.terminalHere"), icon: "terminal", run: async () => { await window.manager.launchFolder(s.cwd); toast(t("manager.toast.terminal", { path: s.cwd })); } },
       { label: t("action.explorerTitle"), icon: "open", run: async () => { const err = await window.manager.openPath(s.cwd); if (err) throw new Error(err); } }

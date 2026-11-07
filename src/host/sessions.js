@@ -294,7 +294,7 @@ function createSessions({ dataDir, home, isExcluded = () => false, untitled = (a
       const s = parseClaude(f);
       if (s) {
         const projectFolder = path.basename(path.dirname(f));
-        const p = reg.projects.find(p => projectFolder === p.path.replace(/:/g, "-").replace(/\\/g, "-").replace(/\//g, "-") ||
+        const p = reg.projects.filter(p => !p.node).find(p => projectFolder === p.path.replace(/:/g, "-").replace(/\\/g, "-").replace(/\//g, "-") ||
           projectFolder.toLowerCase().includes(path.basename(p.path).toLowerCase()));
         if (!s.cwd && p) s.cwd = p.path;
         if (s.cwd || p) { s.cwd = s.cwd || p.path; s.projectName = p?.name; }
@@ -307,7 +307,7 @@ function createSessions({ dataDir, home, isExcluded = () => false, untitled = (a
     for (const f of codexFiles) {
       const s = parseCodexCached(f);
       if (s) {
-        const p = reg.projects.find(p => s.cwd && norm(p.path) === norm(s.cwd));
+        const p = reg.projects.find(p => !p.node && s.cwd && norm(p.path) === norm(s.cwd));
         if (p) s.projectName = p.name;
         found.push(s);
       }
@@ -322,7 +322,7 @@ function createSessions({ dataDir, home, isExcluded = () => false, untitled = (a
     for (const s of found) {
       if (!s.cwd || !path.isAbsolute(s.cwd) || removed.has(norm(s.cwd)) || isExcluded(s.cwd) || !fs.existsSync(s.cwd)) continue;
       try { if (!fs.statSync(s.cwd).isDirectory()) continue; } catch { continue; }
-      let project = reg.projects.find(p => norm(p.path) === norm(s.cwd));
+      let project = reg.projects.find(p => !p.node && norm(p.path) === norm(s.cwd));
       if (!project) {
         project = { name: path.basename(s.cwd), path: path.resolve(s.cwd) };
         reg.projects.push(project); changed = true;

@@ -80,7 +80,7 @@ function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () 
     usage.start({ claudeDir: sessions.CLAUDE_DIR, codexDir: sessions.CODEX_DIR, openCodeDb: sessions.OPENCODE_DB, userData: dataDir, onChange: u => host.emit("usage", u) })
       .catch(err => console.error("Usage scan failed:", err.message));
     gitStatus.start({
-      dirs: () => { const data = sessions.get(); return data ? [...data.registry.projects.map(p => p.path), ...data.sessions.flatMap(s => [s.cwd, s.workDir])] : []; },
+      dirs: () => { const data = sessions.get(); return data ? [...data.registry.projects.filter(p => !p.node).map(p => p.path), ...data.sessions.flatMap(s => [s.cwd, s.workDir])] : []; },
       onChange: g => host.emit("git", g),
       active: gitActive
     });
