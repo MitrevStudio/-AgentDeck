@@ -57,12 +57,21 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
     let settleHello;
     const helloSeen = new Promise(r => { settleHello = r; });
     const link = createLink(ws, {
-      onRequest: (method, params) => api(method, params, { id, name: info?.name || peer.name, kind: info?.kind || peer.kind }),
+      onRequest: (method, params) => {
+        // A node this one trusts that asks to pair again (it forgot this one): no code needed, it is the same node.
+        if (method === "pair") return { ok: true, id: identity.id, name: identity.settings.name, kind, version, already: true };
+        return api(method, params, { id, name: info?.name || peer.name, kind: info?.kind || peer.kind });
+      },
       onBinary: data => out.emit("binary", { node: id, data }),
       onEvent: (name, data) => {
         if (name === "hello") {
           info = data && typeof data === "object" ? data : {};
           settleHello(true);
+          return;
+        }
+        // The other side forgot this node: this one forgets it too, so neither keeps calling.
+        if (name === "forget") {
+          forget(id, { tell: false });
           return;
         }
         out.emit("event", { node: id, name, data });
@@ -198,9 +207,11 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
     scheduleConnect(id, 0);
     return { id, name: r?.name || "", kind: r?.kind || "desktop" };
   }
-  function forget(id) {
+  // tell: the other side hears of it (and forgets this node) before the link closes.
+  function forget(id, { tell = true } = {}) {
     const l = links.get(id);
     links.delete(id);
+    if (l && tell) l.link.notify("forget", {});
     l?.link.close(1000, "forgotten");
     clearRetry(id);
     const had = peers.remove(id);
