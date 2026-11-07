@@ -31,6 +31,24 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
     return tab;
   }
 
+  // The folder joins the projects once the clone has made it (a failed clone leaves nothing behind); given up after
+  // CLONE_WAIT_MS.
+  const CLONE_WAIT_MS = 30 * 60 * 1000, CLONE_POLL_MS = 2000;
+  function registerOnceCloned(dir) {
+    const from = Date.now();
+    const timer = setInterval(() => {
+      if (!fs.existsSync(path.join(dir, ".git"))) {
+        if (Date.now() - from > CLONE_WAIT_MS) clearInterval(timer);
+        return;
+      }
+      clearInterval(timer);
+      const reg = sessions.registry.read();
+      reg.removed = reg.removed.filter(x => x !== sessions.norm(dir));
+      if (!reg.projects.some(x => sessions.norm(x.path) === sessions.norm(dir))) reg.projects.push({ name: path.basename(dir), path: dir });
+      sessions.registry.save(reg);
+    }, CLONE_POLL_MS);
+    timer.unref?.();
+  }
   const METHODS = {
     "host.info": () => ({ ...(links?.self() || {}), code: undefined, platform: process.platform, home: host.home, agents: sessions.get()?.agents || [], ...info() }),
     "sessions.list": () => sessions.data(),
@@ -65,10 +83,7 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
       const parent = path.dirname(dir);
       fs.mkdirSync(parent, { recursive: true });
       const id = await launch.openTerminal(parent, spec.command, { ...spec.meta, owner: peer.id }, { ...(await env()), ...spec.env }, `peer ${peer.name} clone`, spec.argv);
-      const reg = sessions.registry.read();
-      reg.removed = reg.removed.filter(x => x !== sessions.norm(dir));
-      if (!reg.projects.some(x => sessions.norm(x.path) === sessions.norm(dir))) reg.projects.push({ name: path.basename(dir), path: dir });
-      sessions.registry.save(reg);
+      registerOnceCloned(dir);
       return { ...terminals.getTabs().find(x => x.id === id), dir };
     },
     "git.branches": p => setup.branches(str(p?.dir, 4096)),
