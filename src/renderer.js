@@ -14,13 +14,15 @@ const ui = { selected: "", renaming: "", loading: false, loaded: false };
 
 // Running sessions, keyed like `Claude:<id>`; refreshed every couple of seconds from the agents' own registries.
 let live = new Map(), liveSig = "", pendingRender = false;
-const liveOf = s => live.get(sessionKey(s));
+let allLive = new Map();
+const liveOf = s => allLive.get(sessionKey(s));
 
 // A card stands for its project by `ref`: the folder here, or the key of a project of another computer (nodes-ui.js
 // mergeNodes brings those computers' sessions and live states in beside this computer's).
 const refOf = p => (p.node ? p.n : p.path);
 function prepare() {
   const m = mergeNodes(raw, live);
+  allLive = m.live;
   const built = buildData(m.raw, m.live);
   order = built.projects.map(refOf);
   groupOfPath = new Map(built.projects.map(p => [refOf(p), p.group || ""]));
@@ -44,7 +46,7 @@ function compute() {
 // ---------- rendering ----------
 function render() {
   pendingRender = false;
-  removeEndedLaunches(key => live.get(key));
+  removeEndedLaunches(key => allLive.get(key));
   const v = compute();
   renderCentre();
   renderProjects(v);
@@ -67,7 +69,7 @@ const isCentreSession = s => Boolean(s?.id && getCentreTerm()?.sessionId === s.i
 function renderCentre() {
   const term = getCentreTerm();
   const key = term?.sessionId ? `Claude:${term.sessionId}` : "";
-  const l = key ? live.get(key) : null;
+  const l = key ? allLive.get(key) : null;
   const running = Boolean(term && !term.exited);
   const sub = !running ? t("centre.status.off") : !l ? t("live.hint.loading")
     : l.status === "busy" ? t("manager.group.working") : l.status === "waiting" ? t("manager.group.needs") : t("manager.group.ready");
@@ -113,7 +115,7 @@ function buildProjectHtml(p, count, v) {
       <div class="proj-row" title="${esc(tip)}"><span class="pmono" style="--h:${hue(p.n)}">${esc(initials(p.name))}</span>
         ${buildNameHtml(p, v, "manager.project.newName")}
         ${isPinned(p) ? buildPinMark() : ""}
-        ${node ? `<span class="proj-node ${node.status}" title="${esc(nodeLabel(node))}">${icon(node.kind === "host" ? "terminal" : "nodes")}${esc(node.name)}</span>` : gitChip(p.path)}${projectLive(p.sessions)}
+        ${node ? `<span class="proj-node ${node.status}" title="${esc(nodeLabel(node))}">${icon(node.kind === "host" ? "terminal" : "nodes")}${esc(node.name)}</span>${gitChip(p.path, node.git || {})}` : gitChip(p.path)}${projectLive(p.sessions)}
         ${getSpaceTabsHtml(p.n)}
       </div>
       <span class="proj-tools">
@@ -314,7 +316,7 @@ function toast(msg, isError = false) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove("show"), isError ? 5000 : 2200);
 }
-const setStatus = s => { $("status").textContent = s; };
+const setStatus = s => { $("status").textContent = s; $("status").title = s; };
 
 function showSummary() {
   const byAgent = AGENTS.map(a => [a, data.sessions.filter(s => s.agent === a).length]).filter(([, n]) => n).map(([a, n]) => `${I18N.formatNumber(n)} ${a}`);
@@ -322,6 +324,7 @@ function showSummary() {
     sessions: tn("manager.status.sessions", data.sessions.length), agents: byAgent.join(" · ") || t("common.none"),
     projects: tn("manager.status.projects", data.projects.length), time: I18N.formatTime(Date.now())
   }));
+  $("status").innerHTML = `<span class="summary-count">${icon("terminal")}${esc(I18N.formatNumber(data.sessions.length))}</span><span class="summary-count">${icon("folder")}${esc(I18N.formatNumber(data.projects.length))}</span>`;
 }
 
 async function load() {
@@ -355,6 +358,7 @@ function applyRegistry(registry) { raw.registry = registry; prepare(); render();
 // Returns true when the set of running sessions, any of their states or their subagents changed.
 function setLive(list) {
   live = new Map(list.map(l => [sessionKey(l), l]));
+  allLive = mergeNodes(raw, live).live;
   const sig = liveSignature(list);
   if (sig === liveSig) return false;
   liveSig = sig;
@@ -375,7 +379,7 @@ async function pollLive() {
 // Between state changes only the "activity N sec ago" texts and a stalled spinner move; update them in place.
 function updateLiveTexts() {
   document.querySelectorAll("[data-live]").forEach(el => {
-    const l = live.get(el.dataset.live);
+    const l = allLive.get(el.dataset.live);
     if (!l) return;
     el.className = getStatusClass(l);
     el.title = getStatusTitle(l);
@@ -519,7 +523,7 @@ async function runAction(action, btn) {
       return applyRegistry(await window.manager.removeProject(path));
     case "subagents": {
       const key = btn.dataset.key;
-      subagentsOpen.set(key, !isSubagentsOpen(key, live.get(key)?.subagents || []));
+      subagentsOpen.set(key, !isSubagentsOpen(key, allLive.get(key)?.subagents || []));
       return render();
     }
   }

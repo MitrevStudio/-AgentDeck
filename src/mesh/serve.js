@@ -55,6 +55,9 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
     "sessions.list": () => sessions.data(),
     "live.list": () => liveSessions(),
     "git.status": () => git.get(),
+    "usage.get": () => host.usage.get(),
+    "limits.get": () => { host.limits.refresh().catch(() => {}); return host.limits.get(); },
+    "resources.get": () => host.resources.get() || host.resources.refresh(),
     "terminals.list": (_p, peer) => peerTabs(peer.id),
     // {cwd, kind: "shell" | "new" | "resume" | "prompt", agent, sessionId, prompt} -> the tab, opened here for the peer.
     "terminals.open": async (p, peer) => {
@@ -116,6 +119,9 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
     });
     host.on("data", data => links.notifyAll("data", data));
     host.on("git", g => links.notifyAll("git", g));
+    host.on("usage", u => links.notifyAll("usage", u));
+    host.on("limits", l => links.notifyAll("limits", l));
+    host.on("resources", r => links.notifyAll("resources", r));
     // The live status has no event of its own (the windows poll it): connected peers get it every few seconds,
     // when it changed.
     let lastLiveSig = "";

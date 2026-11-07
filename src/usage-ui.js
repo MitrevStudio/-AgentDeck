@@ -113,10 +113,11 @@ function getContextClass(c) {
 }
 // The usage scan has read the session's transcript as it is now.
 function isUsageCurrent(s) {
-  return Boolean(usage) && usage.at >= s.updatedAt;
+  const summary = s.node ? getNode(s.node)?.usage : usage;
+  return Boolean(summary) && summary.at >= s.updatedAt;
 }
 function getContextChip(s) {
-  const c = contextBySession.get(sessionKey(s));
+  const c = s.node ? getNode(s.node)?.usage?.sessions?.find(x => x.key === `${s.agent}:${s.id}`)?.context : contextBySession.get(sessionKey(s));
   // A Claude session that never reached the model (only commands such as /clear) has nothing to re-read.
   if (!c) {
     return s.agent === "Claude" && isUsageCurrent(s) ? `<span class="ctx-chip empty" title="${esc(t("context.tip.empty"))}">${esc(t("context.label", { n: 0 }))}</span>` : "";
@@ -126,11 +127,11 @@ function getContextChip(s) {
   // The share in use also fills the chip from the left, as a thin line along its bottom.
   const label = fill == null ? t("context.label", { n }) : t("context.labelFill", { n, pct: getFillText(c) });
   const style = fill == null ? "" : ` style="--fill: ${Math.round(fill * 1000) / 10}%"`;
-  return `<span class="${getContextClass(c)}" data-ctx="${esc(sessionKey(s))}"${style} title="${esc(getContextTitle(c, getContextState(c)))}">${esc(label)}</span>`;
+  return `<span class="${getContextClass(c)}" data-ctx="${esc(`${s.agent}:${s.id}`)}"${s.node ? ` data-ctx-node="${esc(s.node)}"` : ""}${style} title="${esc(getContextTitle(c, getContextState(c)))}">${esc(label)}</span>`;
 }
 function refreshContextChips() {
   document.querySelectorAll("[data-ctx]").forEach(el => {
-    const c = contextBySession.get(el.dataset.ctx);
+    const c = el.dataset.ctxNode ? getNode(el.dataset.ctxNode)?.usage?.sessions?.find(x => x.key === el.dataset.ctx)?.context : contextBySession.get(el.dataset.ctx);
     if (!c) {
       return;
     }

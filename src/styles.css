@@ -159,6 +159,27 @@ main {
 .fi-dir .i { width: 14px; height: 14px; color: var(--muted); }
 .status #limits { margin-left: auto; }
 .status #limits .lim-group { height: 24px; padding: 0 8px; background: transparent; border-color: transparent; }
+.status { flex-wrap: nowrap; gap: 8px; padding: 3px 10px; font-size: 10px; }
+.status #status { display: inline-flex; align-items: center; gap: 9px; max-width: 160px; white-space: nowrap; flex-shrink: 0; cursor: help; }
+.summary-count { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
+.summary-count .i { width: 13px; height: 13px; }
+.status .focus-info { max-width: 140px; overflow: hidden; flex-shrink: 3; }
+.status #limits { flex: 1; flex-direction: row-reverse; justify-content: flex-start; direction: ltr; margin-left: 0; gap: 6px; overflow-x: auto; scrollbar-width: thin; }
+.machine-status { display: flex; align-items: center; gap: 7px; height: 26px; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--panel-2); flex: none; white-space: nowrap; }
+.machine-status > strong { display: inline-flex; align-items: center; gap: 4px; color: var(--text); max-width: 90px; overflow: hidden; text-overflow: ellipsis; font-size: 10px; }
+.machine-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--codex); flex: none; }
+.offline .machine-dot { background: var(--muted); }
+.machine-providers { display: inline-flex; align-items: center; gap: 7px; }
+.status #limits .machine-status .lim-group { gap: 4px; height: 22px; padding: 0; border: 0; border-radius: 0; }
+.status #limits .machine-status .lim-provider { font-size: 10px; }
+.status #limits .machine-status .lim { font-size: 10px; gap: 2px; height: 22px; }
+.status #limits .machine-status .lim + .lim { padding-left: 3px; border-left: 0; }
+.status #limits .machine-status .lim-bar { display: none; }
+.status #limits .machine-status .lim-k { font-size: 9px; }
+.machine-status.offline { opacity: .55; }
+.machine-resources { display: inline-flex; align-items: center; gap: 6px; border-left: 1px solid var(--line-2); padding-left: 7px; font-size: 10px; font-variant-numeric: tabular-nums; cursor: help; }
+.resource-value { display: inline-flex; align-items: center; gap: 3px; }
+.resource-value .i { width: 12px; height: 12px; color: var(--muted); }
 
 /* ---------- search (palette-ui.js) ---------- */
 .pal-back { position: fixed; inset: 0; z-index: 60; display: flex; justify-content: center; align-items: flex-start; padding-top: 10vh; background: var(--backdrop); }

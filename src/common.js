@@ -138,7 +138,7 @@ document.addEventListener("scroll", hideTip, true);
 window.addEventListener("blur", hideTip);
 
 // ---------- live status ----------
-const sessionKey = s => `${s.agent}:${s.id}`;
+const sessionKey = s => `${s.node ? `node:${s.node}:` : ""}${s.agent}:${s.id}`;
 const STALE_MS = 10 * 60 * 1000;
 const lastSign = l => Math.max(l.activityAt || 0, l.statusAt || 0);
 const isStale = l => l.status === "busy" && Date.now() - lastSign(l) > STALE_MS;
@@ -377,7 +377,7 @@ function buildData(raw, live) {
   // A running session that has no transcript yet (nothing sent so far) is still worth showing.
   const known = new Set((raw.sessions || []).map(sessionKey));
   const fresh = [...live.values()].filter(l => !known.has(sessionKey(l)))
-    .map(l => ({ agent: l.agent, id: l.id, cwd: l.cwd, title: t("session.new"), prompt: "", updatedAt: l.startedAt }));
+    .map(l => ({ node: l.node, nodeName: l.nodeName, agent: l.agent, id: l.id, cwd: l.cwd, title: t("session.new"), prompt: "", updatedAt: l.startedAt }));
   // A session or project of another computer is keyed "node:<id>:<folder there>", as its space is (nodes-ui.js).
   const keyOf = (node, p) => (node ? `node:${node}:${normPath(p)}` : normPath(p));
   const sessions = [...(raw.sessions || []), ...fresh].map(s => ({

@@ -9,7 +9,8 @@
 // Its subagents (<transcript>/subagents/agent-*.jsonl, described by the .meta.json beside each) come along as
 // `subagents`, newest first; one written to within SUBAGENT_ACTIVE_MS counts as working.
 //
-// OpenCode and Codex keep no such registry, so they have no live status.
+// Codex's rollout lifecycle is read separately by codex-live.js and merged in host/index.js.
+// OpenCode has no live status source here.
 const { execFile } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");

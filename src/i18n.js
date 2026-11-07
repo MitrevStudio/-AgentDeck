@@ -7,6 +7,13 @@
 (() => {
   const STRINGS = {
     en: {
+      "resources.local": "This computer",
+      "resources.noLimits": "Plan limits are not available for this agent",
+      "resources.unavailable": "Resources unavailable",
+      "resources.agentsUnavailable": "Agent information unavailable",
+      "resources.measured": "Whole computer · measured at {when}",
+      "resources.diskFree": "Disk {free}/{total} GiB free",
+      "resources.diskPath": "Disk containing {path}",
       "bar.shortcuts.title": "Keyboard shortcuts (F1)",
       "bar.shortcuts.global": "Anywhere",
       "bar.shortcuts.inMenu": "In this menu",
@@ -1102,6 +1109,13 @@
     },
 
     bg: {
+      "resources.local": "Този компютър",
+      "resources.noLimits": "Няма данни за лимитите на този агент",
+      "resources.unavailable": "Няма данни за ресурсите",
+      "resources.agentsUnavailable": "Няма данни за наличните агенти",
+      "resources.measured": "Целият компютър · измерено в {when}",
+      "resources.diskFree": "Диск {free}/{total} GiB свободни",
+      "resources.diskPath": "Дискът, съдържащ {path}",
       "bar.shortcuts.title": "Клавишни комбинации (F1)",
       "bar.shortcuts.global": "Навсякъде",
       "bar.shortcuts.inMenu": "В това меню",

@@ -13,7 +13,10 @@ const nodeNameOf = id => getNode(id)?.name || id.slice(0, 8);
 function mergeNodes(raw, live) {
   const sessions = [...(raw.sessions || []), ...nodes.flatMap(n => (n.data?.sessions || []).map(s => ({ ...s, node: n.id, nodeName: n.name })))];
   const merged = new Map(live);
-  for (const n of nodes) for (const [k, l] of n.liveMap) merged.set(k, { ...l, node: n.id });
+  for (const n of nodes) for (const l of n.liveMap.values()) {
+    const state = { ...l, node: n.id, nodeName: n.name };
+    merged.set(sessionKey(state), state);
+  }
   return { raw: { ...raw, sessions }, live: merged };
 }
 
@@ -72,6 +75,7 @@ function renderRemoteSpace(el, key) {
     </div>` : ""}
     ${recent.length ? `<p class="se-label">${esc(t("ws.recent"))}</p>${recent.map(s => `<div class="se-row remote" data-rkey="${esc(sessionKey(s))}">
       ${agentMark(s.agent)}<span class="se-title" title="${esc(s.title)}">${esc(s.title)}</span>
+      ${getContextChip({ ...s, node: n.id })}
       <span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span>
       ${n.liveMap.has(sessionKey(s)) ? statusMark(n.liveMap.get(sessionKey(s)), false) : online && s.cwd ? `<span class="se-acts"><button class="btn sm" data-rresume="${esc(sessionKey(s))}">${icon("play")}${esc(t("action.resume"))}</button></span>` : ""}</div>`).join("")}` : ""}
   </div>`;
@@ -92,8 +96,13 @@ async function onRemoteSpaceClick(e, n, p) {
   toast(t("manager.node.toast.opened", { node: n.name }));
 }
 
-window.manager.onNodesChanged(list => {
+// The other computers' sessions and live states are part of the lists (prepare), so a change there - a session
+// that started working or finished - is worked in, not only drawn again.
+function applyNodes(list) {
   setNodes(list);
-  if (typeof renderSoon === "function") renderSoon();
-});
-window.manager.getNodes().then(list => { setNodes(list); if (typeof renderSoon === "function") renderSoon(); }).catch(() => {});
+  if (typeof prepare !== "function" || typeof renderSoon !== "function") return;
+  if (ui.loaded && !ui.loading) prepare();
+  renderSoon();
+}
+window.manager.onNodesChanged(applyNodes);
+window.manager.getNodes().then(applyNodes).catch(() => {});

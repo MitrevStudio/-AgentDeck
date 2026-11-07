@@ -15,7 +15,8 @@ const { createTerminals } = require(process.platform === "win32" ? "./terminals"
 const { createLaunch } = require("./launch");
 const { createTabLinks } = require("./tab-links");
 const { createSetup } = require("./setup");
-const { liveSessions, findTranscript } = require("./live");
+const { liveSessions: claudeLiveSessions, findTranscript } = require("./live");
+const { createCodexLive } = require("./codex-live");
 const sessionPreview = require("./session-preview");
 const gitStatus = require("./git-status");
 const usage = require("./usage");
@@ -38,8 +39,10 @@ function createSearch(dbFile) {
 // isExcluded(cwd): folders whose sessions are not the user's work; untitled(agent, shortId) and noLauncher(exe):
 // texts in the user's language; log(...parts): the launch log; gitActive(): whether anything shows the git status
 // now (it is refreshed in the background only then).
-function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () => {}, gitActive = () => true }) {
+function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () => {}, gitActive = () => true, fetch: fetchLimits = globalThis.fetch }) {
   const host = new EventEmitter();
+  const limits = require("../limits").createAllLimits({ fetch: fetchLimits, findExecutable: require("./sessions").findOnPath, onChange: l => host.emit("limits", l) });
+  const resources = require("./resources").createResources({ home, onChange: r => host.emit("resources", r) });
   const search = createSearch(path.join(dataDir, "search.db"));
   let lastKeysSig = "", lastIndexAt = 0;
 
@@ -66,6 +69,8 @@ function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () 
     onExit: (id, code, lost) => host.emit("terminal:exit", { id, code, lost }),
     onChange: tabs => host.emit("terminals", tabs)
   });
+  const codexLive = createCodexLive({ sessions: () => sessions.get()?.sessions || [], tabs: () => terminals.getTabs() });
+  const liveSessions = async () => (await Promise.all([claudeLiveSessions(), codexLive()])).flat();
   const launch = createLaunch({ dataDir, terminals, sessions, liveSessions, findTranscript, log, noLauncher });
   const tabLinks = createTabLinks({ terminals, liveSessions });
   const setup = createSetup({ agents: () => sessions.agents });
@@ -74,6 +79,8 @@ function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () 
   // The background work: watching the transcripts, the periodic full scan, linking tabs to their sessions, the usage
   // figures, the git status, and the first scan.
   function start() {
+    limits.start();
+    resources.start();
     sessions.watchTranscripts();
     sessions.scanPeriodically();
     tabLinks.start();
@@ -90,12 +97,14 @@ function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () 
   // or stop.
   const flush = () => usage.flush();
   function stop() {
+    limits.stop();
+    resources.stop();
     sessions.stop();
   }
 
   return Object.assign(host, {
     dataDir, home, sessions, terminals, launch, setup, liveSessions, findTranscript, preview, search,
-    git: gitStatus, usage, start, flush, stop
+    git: gitStatus, usage, limits, resources, start, flush, stop
   });
 }
 

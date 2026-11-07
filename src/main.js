@@ -24,9 +24,7 @@ const updater = require("./updater");
 let answerPopup = null;
 const day = require("./day");
 const voiceContext = require("./voice-context").createVoiceContext({ liveSessions: (...a) => liveSessions(...a), findTranscript: id => findTranscript(id) });
-const { createAllLimits } = require("./limits");
-const limits = createAllLimits({ fetch: (url, init) => network.fetch(url, init),
-  findExecutable: name => findOnPath(name), onChange: l => broadcast("limits:changed", l) });
+
 const { createNotifier } = require("./notify");
 const { createHost } = require("./host");
 const { savePaste } = require("./host/paste");
@@ -55,7 +53,7 @@ const workspace = createWorkspace({ onChange: () => { sendWorkspace(); scheduleW
 // The host (host/index.js): the sessions, the terminals, the launches, the git status and the usage of this computer.
 // Its events go to the windows; the command centre's own folder is left out of the user's projects and sessions.
 const host = createHost({
-  dataDir: app.getPath("userData"), home: os.homedir(),
+  dataDir: app.getPath("userData"), home: os.homedir(), fetch: (url, init) => network.fetch(url, init),
   isExcluded: cwd => orchestrator.isOwn(cwd),
   untitled: (agent, id) => t("session.untitled", { agent, id }),
   noLauncher: exe => t("voice.command.error.noLauncher", { exe }),
@@ -64,7 +62,9 @@ const host = createHost({
   // and every two minutes while either is in view.
   gitActive: () => Boolean(bar?.isVisible() || (managerWin && !managerWin.isDestroyed() && managerWin.isVisible() && !managerWin.isMinimized()))
 });
-const { sessions, terminals, launch, liveSessions, findTranscript, usage, git: gitStatus, search: fullText } = host;
+const { sessions, terminals, launch, liveSessions, findTranscript, usage, limits, resources, git: gitStatus, search: fullText } = host;
+host.on("limits", l => broadcast("limits:changed", l));
+host.on("resources", r => broadcast("resources:changed", r));
 host.on("data", data => broadcast("data:changed", data));
 host.on("usage", u => broadcast("usage:changed", u));
 host.on("git", g => broadcast("git:changed", g));
@@ -367,7 +367,7 @@ function syncRemoteProjects() {
 links.on("nodes", nodesChanged);
 links.on("event", ({ node, name, data }) => {
   if (name === "terminals") return reconcileRemote(node, Array.isArray(data) ? data.filter(x => isObj(x) && frames.UUID.test(x.id)) : []);
-  if (!["data", "live", "git"].includes(name)) return;
+  if (!["data", "live", "git", "usage", "limits", "resources"].includes(name)) return;
   remote.set(node, { ...remote.get(node), [name]: data });
   nodesChanged();
 });
@@ -384,8 +384,8 @@ links.on("link", async ({ node, up }) => {
     return nodesChanged();
   }
   try {
-    const [data, live, git, tabs, info] = await Promise.all([links.call(node, "sessions.list"), links.call(node, "live.list"), links.call(node, "git.status"), links.call(node, "terminals.list"), links.call(node, "host.info").catch(() => null)]);
-    remote.set(node, { data, live, git, info });
+    const [data, live, git, tabs, info, usage, limits, resources] = await Promise.all([links.call(node, "sessions.list"), links.call(node, "live.list"), links.call(node, "git.status"), links.call(node, "terminals.list"), links.call(node, "host.info").catch(() => null), links.call(node, "usage.get").catch(() => null), links.call(node, "limits.get").catch(() => null), links.call(node, "resources.get").catch(() => null)]);
+    remote.set(node, { ...remote.get(node), data, live, git, info, usage, limits, resources });
     nodesChanged();
     reconcileRemote(node, Array.isArray(tabs) ? tabs.filter(x => isObj(x) && frames.UUID.test(x.id)) : []);
     // The output missed while it was away: attaching again brings the scrollback, of which the window writes only
@@ -937,6 +937,7 @@ function registerIpc() {
     return day.summarize(rep, { claude, language: require("./i18n").language() });
   });
   handle("search:text", q => fullText.query(text(q, 500)));
+  handle("resources:get", () => resources.get() || resources.refresh());
   handle("limits:get", () => limits.refresh());
   handle("limits:refresh", () => limits.refresh(true));
   // The figures themselves come as "usage:changed" when they changed; the answer only says when they were checked.
@@ -1042,7 +1043,6 @@ if (!app.requestSingleInstanceLock()) {
     tray.on("balloon-click", () => { const click = balloonClick; balloonClick = null; click?.(); });
     updater.on("changed", onUpdateChanged);
     updater.start({ auto: prefs.get().autoUpdate });
-    limits.start();
     notifier = createNotifier({
       liveSessions, focus: focusSessionAnywhere, balloon, t, tn, onChange: buildTrayMenu,
       quiet: () => Boolean(bar?.isVisible()),
@@ -1100,7 +1100,6 @@ if (!app.requestSingleInstanceLock()) {
       .finally(() => app.quit());
   });
   app.on("will-quit", () => {
-    limits.stop();
     orchestrator.stop();
     host.stop();
     links.stop();

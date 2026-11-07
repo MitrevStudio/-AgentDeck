@@ -16,6 +16,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      - run: node scripts/test-remote-state.js
+      - run: node scripts/test-resources.js
+      - run: node scripts/test-codex-live.js
+      - run: npm run test:limits
       - name: Package (unpacked, no installer)
         run: npx electron-builder --win --dir --publish never
         env:

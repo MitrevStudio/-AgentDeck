@@ -232,7 +232,7 @@ async function openInSpace(what, place = "tab") {
 
 // ---------- sessions <-> terminals (main links a new session's terminal: tab-links.js) ----------
 function findSessionTab(s) {
-  return ws.terminals.find(x => x.agent === s.agent && x.sessionId === s.id && !x.exited) || null;
+  return ws.terminals.find(x => x.agent === s.agent && x.sessionId === s.id && (x.node || "") === (s.node || "") && !x.exited) || null;
 }
 // Brings up the session's pane when it has one; false otherwise.
 function showSessionTab(s) {
@@ -252,11 +252,11 @@ async function moveSessionHere(s) {
 }
 // The session a terminal runs, from the scan (renderer.js data), if it is linked to one.
 function getTermSession(x) {
-  return x?.sessionId ? data.sessions.find(s => s.agent === x.agent && s.id === x.sessionId) || null : null;
+  return x?.sessionId ? data.sessions.find(s => s.agent === x.agent && s.id === x.sessionId && (s.node || "") === (x.node || "")) || null : null;
 }
 const getTermTitle = x => getTermSession(x)?.title || x?.title || "";
 function getTermLive(x) {
-  return x?.sessionId ? live.get(`${x.agent}:${x.sessionId}`) || null : null;
+  return x?.sessionId ? allLive.get(sessionKey({ agent: x.agent, id: x.sessionId, node: x.node })) || null : null;
 }
 // A tab's state: the most urgent of its panes' (needs you, working, waiting).
 function getTabLive(tab) {

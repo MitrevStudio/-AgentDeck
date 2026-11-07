@@ -4,7 +4,7 @@
 let git = { dirs: {}, repos: {} };
 ICONS.branch = '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="7" r="2"/><path d="M6 7v10"/><path d="M18 9c0 4-3 6-7 6H6"/>';
 
-const gitOf = dir => { const repo = dir && git.dirs?.[normPath(dir)]; return (repo && git.repos?.[repo]) || null; };
+const gitOf = (dir, state = git) => { const repo = dir && state?.dirs?.[normPath(dir)]; return (repo && state?.repos?.[repo]) || null; };
 const gitHead = g => (g.detached ? g.oid.slice(0, 7) : g.branch);
 const gitDirty = g => g.staged + g.unstaged + g.untracked + g.conflicts > 0;
 
@@ -48,8 +48,8 @@ function gitTile(dir) {
   return g && !g.error ? `<span class="tgit"><span class="gb">${esc(gitHead(g))}</span>${gitDot(g)}${gitAb(g)}</span>` : "";
 }
 // Compact, with a tooltip: a manager project or session folder.
-function gitChip(dir) {
-  const g = gitOf(dir);
+function gitChip(dir, state = git) {
+  const g = gitOf(dir, state);
   if (!g || g.error) return "";
   return `<span class="git-chip" title="${esc(gitTitle(g))}">${icon("branch")}<span class="gb">${esc(gitHead(g))}</span>${gitDot(g)}${gitAb(g)}</span>`;
 }
