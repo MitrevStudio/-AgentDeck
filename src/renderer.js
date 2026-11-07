@@ -74,17 +74,7 @@ function renderCentre() {
   if (el.dataset.html !== html) { el.dataset.html = html; el.innerHTML = html; }
 }
 function renderProjects(v) {
-  renderNodeTabs();
-  // A paired computer's tab: its projects alone (nodes-ui.js); nothing here to add, order or group.
-  const node = shownNodeId();
-  $("add").hidden = Boolean(node);
-  if (node) {
-    $("projectCount").textContent = getNode(node).view.projects.length;
-    $("projectOrder").hidden = true;
-    $("newGroup").hidden = true;
-    $("projects").innerHTML = nodesHtml(ui.selected, node) || `<div class="empty small">${esc(t("manager.nodes.noProjects"))}</div>`;
-    return;
-  }
+  renderNodesSection(ui.selected); // the paired computers' section (nodes-ui.js)
   const total = data.projects.length;
   $("projectCount").textContent = v.toks.length ? `${v.projects.length} / ${total}` : total;
   renderOrderToggle();
@@ -536,7 +526,6 @@ $("add").addEventListener("click", async () => {
 $("projects").addEventListener("click", async e => {
   if (e.target.classList.contains("rename") || await onAction(e)) return;
   const card = e.target.closest(".proj");
-  if (card?.dataset.remote) return selectProject(remoteKey(card.dataset.node, card.dataset.remote));
   if (card) selectProject(getCardKey(card));
 });
 $("projects").addEventListener("contextmenu", e => {
@@ -553,7 +542,7 @@ $("projects").addEventListener("keydown", e => {
   }
   if ((e.key === "Enter" || e.key === " ") && e.target.classList.contains("proj")) {
     e.preventDefault();
-    selectProject(e.target.dataset.remote ? remoteKey(e.target.dataset.node, e.target.dataset.remote) : getCardKey(e.target));
+    selectProject(getCardKey(e.target));
   }
   if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown") && e.target.matches(".proj[draggable]")) {
     e.preventDefault();
