@@ -113,7 +113,7 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
   function closePanel() { overlay.hide(); owner = null; }
 
   function onAction(a) {
-    if (["run", "finish", "cancel", "choose", "hold"].includes(a.type)) return commands.onAction(a);
+    if (["finish", "cancel"].includes(a.type)) return commands.onAction(a);
     if (a.type === "notice-action") { if (a.id === READ_CLIPBOARD) readOffer("button"); return; }
     if (a.type === "retry") {
       closePanel();
@@ -516,8 +516,6 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
   const commands = createCommandRunner({
     recorder, store, settings, balloon,
     transcribe: opts => transcribeFile(opts),
-    generate: opts => require("./rewrite").generate(opts),
-    rewrite: (text, opts) => require("./rewrite").rewrite(text, opts),
     vocabulary: () => vocabulary({ ...settings.load().dictionary, projectNames: true }, projects()),
     panel: {
       fresh: (state, data) => freshPanel(state, data, COMMAND),
@@ -531,7 +529,7 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
     addRecord: id => q.addRecord(id),
     holdLabel: () => general?.hotkey?.()?.current || "",
     app: {
-      data: async () => ({ registry: { projects: [] }, sessions: [] }), live: async () => [],
+      orchestrate: async () => ({ ok: false }),
       ...app,
       onState: s => { try { app?.onState?.(s); } catch (e) { console.error("Command state:", e); } }
     }
@@ -562,7 +560,7 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
 
   // Settings -> Commands, applied at once.
   function commandSettings() {
-    return { commands: settings.load().commands, agents: [...commandOptions.AGENTS], hotkey: general?.hotkey?.()?.current || "" };
+    return { commands: settings.load().commands, hotkey: general?.hotkey?.()?.current || "" };
   }
   async function setCommandSettings(patch) {
     const r = commandOptions.validate(patch, settings.load().commands);

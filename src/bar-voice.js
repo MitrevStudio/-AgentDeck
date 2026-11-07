@@ -1,7 +1,6 @@
 // The edge menu's part in voice commands (voice/command-runner.js): a microphone in the header that starts a command
-// by click and finishes it with the next click (or a click on the voice panel), and the project a command asked to
-// see. Loaded after bar.js, whose selectTile() and toast() it uses; main pushes {enabled, state, error?} and
-// {select: folder} on "voice:command-state".
+// by click and finishes it with the next click (or a click on the voice panel). Loaded after bar.js, whose toast() it
+// uses; main pushes {enabled, state, error?} on "voice:command-state".
 (() => {
   const btn = $("voiceCmd");
   let shown = { enabled: false, state: "idle" };
@@ -16,7 +15,6 @@
 
   function apply(s) {
     if (!s) return;
-    if (s.select) return selectTile("p:" + normPath(s.select));
     if (s.error) toast(s.error, true); // the hotkey held while a dictation records
     shown = { enabled: Boolean(s.enabled), state: s.state || "idle" };
     paint();

@@ -18,6 +18,7 @@ const { liveSessions, findTranscript } = require("./live");
 const { focusSession, allowForeground, terminalWindows, raiseNewTerminal } = require("./terminal-focus");
 const { createLog } = require("./voice/log-file");
 const promptLaunch = require("./prompt-launch");
+const { createOrchestrator } = require("./orchestrator");
 const { createEdgeBar } = require("./edge-bar");
 const { makeIcon } = require("./app-icon");
 const prefs = require("./prefs");
@@ -50,7 +51,7 @@ const terminals = createTerminals({
   // A program that ends takes its pane with it, as in Herdr. A terminal lost with its DockPty (killed, or Windows
   // shutting down first) keeps its pane, which opens anew on the next start.
   onExit: (id, code, lost) => { if (lost) terminals.setNote(id, t("term.lost")); else terminals.close(id); },
-  onChange: () => { prunePanes(); sendWorkspace(); scheduleWorkspaceSave(); updateTrayCount(); }
+  onChange: () => { prunePanes(); sendWorkspace(); scheduleWorkspaceSave(); updateTrayCount(); orchestrator.terminalsChanged(); }
 });
 // Panes whose terminal is gone (closed, or ended) leave the layout.
 function prunePanes() {
@@ -115,6 +116,10 @@ function readSavedWorkspace() {
 // becomes a shell in its folder. No other command runs again. "" when its folder is gone too: the pane goes.
 async function reopenTerminal(meta, env) {
   if (!isObj(meta) || !isDir(meta.cwd)) return "";
+  // The command centre comes back with its own command (and its session resumed).
+  if (orchestrator.isOwn(meta.cwd)) {
+    return orchestrator.open(false).catch(e => { launchLog(`the command centre failed (${e.message})`); return ""; });
+  }
   if (meta.agent && meta.sessionId) {
     try {
       checkResumable(meta.agent, meta.sessionId, meta.cwd);
@@ -197,6 +202,26 @@ const DATA = path.join(app.getPath("userData"), "registry.json");
 const CLAUDE_DIR = path.join(USER, ".claude", "projects");
 const CODEX_DIR = path.join(USER, ".codex", "sessions");
 const OPENCODE_DB = path.join(process.env.XDG_DATA_HOME || path.join(USER, ".local", "share"), "opencode", "opencode.db");
+// The command centre (orchestrator.js): a Claude Code session of AgentDeck's own, in a space of its own, that does
+// what the user says or types with the tools AgentDeck serves it.
+const orchestrator = createOrchestrator({
+  userData: app.getPath("userData"), version: app.getVersion(), terminals, workspace,
+  liveSessions: (...a) => liveSessions(...a), findTranscript: id => findTranscript(id),
+  data: async () => cache ?? await scan(),
+  preview: (s, o) => sessionPreview.preview(s, { ...o, openCodeDb: OPENCODE_DB }),
+  norm,
+  openTerminal: async (cwd, args, meta) => {
+    const proxy = await network.terminalProxy().catch(() => null);
+    return openTerminal(cwd, "& " + args.map(psQuote).join(" "), meta, terminalEnv(process.env, proxy), "centre");
+  },
+  launchNew: (agent, cwd, prompt) => launchNewWithPrompt(agent, cwd, prompt),
+  focusSession: opts => focusSessionAnywhere(opts),
+  showSpace: key => { workspace.activateSpace(key); showManager(); },
+  showTab: id => showTab(id),
+  balloon: (content, { onClick }) => balloon(content, { title: t("centre.title"), onClick }),
+  managerInFront: () => Boolean(managerWin && !managerWin.isDestroyed() && managerWin.isVisible() && !managerWin.isMinimized() && managerWin.isFocused()),
+  t: (...a) => t(...a)
+});
 
 function readRegistry() {
   try {
@@ -554,7 +579,7 @@ function indexProjects(found) {
   const removed = new Set(registry.removed);
   let changed = false;
   for (const s of found) {
-    if (!s.cwd || !path.isAbsolute(s.cwd) || removed.has(norm(s.cwd)) || !fs.existsSync(s.cwd)) continue;
+    if (!s.cwd || !path.isAbsolute(s.cwd) || removed.has(norm(s.cwd)) || orchestrator.isOwn(s.cwd) || !fs.existsSync(s.cwd)) continue;
     try { if (!fs.statSync(s.cwd).isDirectory()) continue; } catch { continue; }
     let project = registry.projects.find(p => norm(p.path) === norm(s.cwd));
     if (!project) {
@@ -565,9 +590,10 @@ function indexProjects(found) {
   }
   if (changed) writeRegistry(registry);
   const seen = new Set();
+  // The command centre's own sessions are not the user's work: its card shows its state.
   return found.filter(s => {
     const key = `${s.agent}:${s.id}`;
-    if (seen.has(key)) return false;
+    if (seen.has(key) || orchestrator.isOwn(s.cwd)) return false;
     seen.add(key); return true;
   }).sort((a,b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 1000);
 }
@@ -582,6 +608,7 @@ function spawnDetached(file, args, opts) {
 // The space a folder belongs to: the listed project that holds it (the deepest one), else the folder itself, which
 // joins the list as a project of its own (as the scan adds the folders sessions ran in) unless the user removed it.
 function getSpaceFor(cwd) {
+  if (orchestrator.isOwn(cwd)) return orchestrator.SPACE;
   const n = norm(cwd);
   const registry = readRegistry();
   const owner = registry.projects
@@ -1280,6 +1307,9 @@ function registerIpc() {
   // The edge menu's microphone: a voice command by click; its state is also pushed as "voice:command-state".
   handle("voice:command", () => voice?.command.toggle() ?? { ok: false });
   handle("voice:command-state", () => voice?.command.state() ?? { enabled: false, state: "idle" });
+  // The command centre (orchestrator.js): its terminal, and what the edge menu's command field says to it.
+  handle("centre:start", async () => { showTab(await orchestrator.open()); return true; });
+  handle("centre:send", s => orchestrator.send(text(s, 20000)));
   // Every page, voice ones included, reads the language and theme from its preload before it renders.
   ipcMain.on("prefs:get", e => { e.returnValue = prefs.get(); });
 }
@@ -1314,12 +1344,14 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on("second-instance", showManager);
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     prefs.load();
     carryOverNotify();
     prefs.on("changed", onPrefsChanged);
     // The proxy settings, before anything goes online (requests made meanwhile wait for them).
     network.start();
+    // The command centre's tool server, before its terminal (restored or new) looks for it.
+    await orchestrator.start().catch(e => console.error("The command centre could not start:", e.message));
     // Before the window: it shows the layout as soon as it is back (and updates as it comes).
     restoring = restoreWorkspace();
     registerIpc();
@@ -1383,11 +1415,9 @@ if (!app.requestSingleInstanceLock()) {
         projectNames: () => [...readRegistry().projects.map(p => p.name), ...voiceContext.terms()],
         general: { set: patch => prefs.set(patch), hotkey: () => ({ current: hotkeyLabel(), candidates: HOTKEYS.map(k => keyLabel(k, " + ")) }), updates: updater, network,
           autostart },
-        // Voice commands open sessions with the menu's own launchers; a project is shown in the menu itself.
+        // What a voice command says goes to the command centre.
         commands: {
-          data: async () => cache ?? await scan(), live: liveSessions, focus: focusSessionAnywhere, launchAgent,
-          launchNew: (agent, cwd, prompt) => (prompt ? launchNewWithPrompt(agent, cwd, prompt) : launchNew(agent, cwd)),
-          showProject: dir => { bar.show("hotkey"); bar.win.webContents.send("voice:command-state", { select: dir }); },
+          orchestrate: s => orchestrator.send(s),
           // While a command is being spoken the menu stays, wherever the pointer or the focus goes (edge-bar.js).
           onState: s => {
             bar.keepOpen(s.state === "recording");
@@ -1411,6 +1441,7 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.on("will-quit", () => {
     limits.stop();
+    orchestrator.stop();
     globalShortcut.unregisterAll();
     // Quitting without before-quit (Windows ending the session) still saves the layout, at once.
     if (workspaceSaving) {

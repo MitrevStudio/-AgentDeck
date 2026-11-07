@@ -42,6 +42,7 @@ function render() {
   pendingRender = false;
   removeEndedLaunches(key => live.get(key));
   const v = compute();
+  renderCentre();
   renderProjects(v);
   renderAgents(v);
   renderTitle(v);
@@ -52,6 +53,26 @@ function render() {
   if (input && document.activeElement !== input) { input.focus(); input.select(); }
 }
 
+// The command centre (orchestrator.js): its space, its terminal and the state of its session.
+const CENTRE = "orchestrator";
+function getCentreTerm() {
+  const tab = ws.tabs[ws.spaces[CENTRE]?.tabs[0]];
+  return tab ? getTerminal(getPanesOf(tab.root)[0]) : null;
+}
+const isCentreSession = s => Boolean(s?.id && getCentreTerm()?.sessionId === s.id);
+function renderCentre() {
+  const term = getCentreTerm();
+  const key = term?.sessionId ? `Claude:${term.sessionId}` : "";
+  const l = key ? live.get(key) : null;
+  const running = Boolean(term && !term.exited);
+  const sub = !running ? t("centre.status.off") : !l ? t("live.hint.loading")
+    : l.status === "busy" ? t("manager.group.working") : l.status === "waiting" ? t("manager.group.needs") : t("manager.group.ready");
+  const html = `<div class="proj ${ui.selected === CENTRE ? "active" : ""}" data-centre tabindex="0" title="${esc(t("centre.sub"))}">
+      <div class="proj-row"><span class="centre-mark">${icon("bolt")}</span><span class="proj-name">${esc(t("centre.title"))}</span>
+        <span class="centre-sub">${esc(sub)}</span>${running ? statusMark(l, !l) : ""}</div></div>`;
+  const el = $("centre");
+  if (el.dataset.html !== html) { el.dataset.html = html; el.innerHTML = html; }
+}
 function renderProjects(v) {
   const total = data.projects.length;
   $("projectCount").textContent = v.toks.length ? `${v.projects.length} / ${total}` : total;
@@ -192,7 +213,7 @@ function renderAgents(v) {
 }
 function agentHtml(s, l, toks) {
   const key = sessionKey(s), here = findSessionTab(s);
-  const project = data.projects.find(p => inProject(s, p))?.name || s.cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop();
+  const project = isCentreSession(s) ? t("centre.title") : data.projects.find(p => inProject(s, p))?.name || s.cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop();
   return `<div class="agent ${here ? "here" : ""}" data-key="${esc(key)}" title="${esc(`${s.title}\n${s.cwd}`)}">${agentMark(s.agent)}
       <div class="agent-main"><div class="agent-title">${hl(s.title, toks)}</div><div class="agent-sub">${esc(project)}${here ? "" : ` · ${esc(t("manager.agents.outside"))}`}</div></div>
       ${statusMark(l, isLoading(key, l))}</div>
@@ -221,6 +242,13 @@ function resumeLatest() {
   resume(s).catch(e => toast(e.message, true));
 }
 function renderSpaceEmpty(el, key) {
+  if (key === CENTRE) {
+    el.innerHTML = `<div class="se-box">
+      <div class="se-head"><span class="centre-mark">${icon("bolt")}</span><div><h2>${esc(t("centre.title"))}</h2><p class="se-body">${esc(t("centre.body"))}</p></div></div>
+      <div class="se-new"><button class="btn" data-new="centre">${icon("play")}${esc(t("centre.start"))}</button></div>
+    </div>`;
+    return;
+  }
   const p = data.projects.find(x => x.n === key);
   if (!p) {
     el.innerHTML = `<div class="se-box empty"><h3>${esc(t("ws.pick.title"))}</h3><p>${esc(t("ws.pick.body"))}</p></div>`;
@@ -700,8 +728,11 @@ $("agents").addEventListener("contextmenu", e => {
   e.preventDefault();
   openRowMenu(row, sessionByKey(row.dataset.key));
 });
+$("centre").addEventListener("click", () => selectProject(CENTRE));
+$("centre").addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectProject(CENTRE); } });
 $("spaceEmpty").addEventListener("click", async e => {
   const make = e.target.closest("[data-new]");
+  if (make?.dataset.new === "centre") return window.manager.centreStart().catch(err => toast(err.message, true));
   if (make) return openInSpace(make.dataset.new === "terminal" ? "terminal" : make.dataset.new);
   if (await onAction(e)) return;
   const row = e.target.closest(".se-row");

@@ -42,6 +42,10 @@ kbd { font-size: 10.5px; border-bottom-width: 1px; border-radius: 4px; padding: 
 .search { flex: 1; min-width: 150px; }
 .search > .i { left: 13px; width: 18px; height: 18px; }
 .search input { height: 42px; padding: 0 14px 0 42px; border-radius: 11px; font-size: 15px; user-select: text; }
+/* The command centre's field (bar.js): what is typed here goes to it, as a spoken command does. */
+.cmdline { position: relative; padding: 0 16px 8px; }
+.cmdline > .i { position: absolute; left: 29px; top: 50%; transform: translateY(-62%); width: 16px; height: 16px; color: var(--accent); pointer-events: none; }
+.cmdline input { width: 100%; height: 34px; padding: 0 12px 0 40px; border-radius: 9px; font-size: 13.5px; user-select: text; }
 
 /* ---------- project strip ---------- */
 .strip-wrap { position: relative; border-bottom: 1px solid var(--line); }

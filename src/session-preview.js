@@ -25,7 +25,7 @@ function contentText(c) {
   return Array.isArray(c) ? c.filter(v => v?.type === "text").map(v => v.text || "").join(" ") : "";
 }
 
-const clip = s => (s.length > TEXT_MAX ? { text: s.slice(0, TEXT_MAX), cut: true } : { text: s });
+const clipTo = (s, max) => (s.length > max ? { text: s.slice(0, max), cut: true } : { text: s });
 const parse = line => { try { return JSON.parse(line); } catch { return null; } };
 const time = v => (typeof v === "number" ? v : Date.parse(v) || 0);
 
@@ -216,10 +216,10 @@ function remember(key, entry) {
   cache.set(key, entry);
   if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value);
 }
-function result(agentName, id, { head, counts, tail, subagents }) {
-  const messages = tail.messages.reverse().map(m => ({ role: m.role, at: m.at, ...clip(m.text) }));
+function result(agentName, id, { head, counts, tail, subagents }, textMax) {
+  const messages = tail.messages.reverse().map(m => ({ role: m.role, at: m.at, ...clipTo(m.text, textMax) }));
   // Shown apart only when it is not among the last messages anyway.
-  const first = head.firstPrompt && !(messages[0]?.role === "user" && !tail.more && messages[0].text === clip(head.firstPrompt).text) ? clip(head.firstPrompt) : null;
+  const first = head.firstPrompt && !(messages[0]?.role === "user" && !tail.more && messages[0].text === clipTo(head.firstPrompt, textMax).text) ? clipTo(head.firstPrompt, textMax) : null;
   return {
     agent: agentName, id, startedAt: head.startedAt || messages[0]?.at || 0, lastAt: tail.lastAt || messages.at(-1)?.at || 0,
     prompts: counts ? counts.prompts : null, replies: counts ? counts.replies : null, model: tail.model || "",
@@ -227,11 +227,11 @@ function result(agentName, id, { head, counts, tail, subagents }) {
   };
 }
 
-async function fromTranscript(agentName, id, file) {
+async function fromTranscript(agentName, id, file, textMax) {
   const agent = agentName === "Codex" ? codex : claude;
   const st = await fs.promises.stat(file);
   let e = cache.get(file);
-  if (e && e.size === st.size && e.mtime === st.mtimeMs) return e.result;
+  if (e && e.size === st.size && e.mtime === st.mtimeMs && e.textMax === textMax) return e.result;
   if (e && st.size < e.counts.offset) e = null; // rewritten, not appended to
   const fh = await fs.promises.open(file, "r");
   try {
@@ -242,8 +242,8 @@ async function fromTranscript(agentName, id, file) {
     const tail = { lastAt: st.mtimeMs, model: "", more: false, messages: [] };
     tail.messages = await agent.tail(linesFromEnd(fh, st.size), tail);
     const subagents = agentName === "Claude" ? await subagentCount(file) : 0;
-    const res = result(agentName, id, { head, counts, tail, subagents });
-    remember(file, { size: st.size, mtime: st.mtimeMs, head, counts, result: res });
+    const res = result(agentName, id, { head, counts, tail, subagents }, textMax);
+    remember(file, { size: st.size, mtime: st.mtimeMs, head, counts, result: res, textMax });
     return res;
   } finally { await fh.close(); }
 }
@@ -251,7 +251,7 @@ async function fromTranscript(agentName, id, file) {
 // ---------- OpenCode ----------
 // Messages are rows of `message` (role, model, times in data) with their text in `part` rows; a reply is counted per
 // finished turn (finish "stop"), since every tool step of a turn is a message of its own.
-function fromOpenCode(id, dbFile) {
+function fromOpenCode(id, dbFile, textMax) {
   let DatabaseSync;
   try { ({ DatabaseSync } = require("node:sqlite")); } catch { return null; }
   if (!fs.existsSync(dbFile)) return null;
@@ -260,7 +260,7 @@ function fromOpenCode(id, dbFile) {
     const s = db.prepare("SELECT time_created AS created, time_updated AS updated FROM session WHERE id = ?").get(id);
     if (!s) return null;
     const key = `OpenCode:${id}`, e = cache.get(key);
-    if (e && e.updated === s.updated) return e.result;
+    if (e && e.updated === s.updated && e.textMax === textMax) return e.result;
     const recent = db.prepare("SELECT id, time_created AS at, data FROM message WHERE session_id = ? ORDER BY time_created DESC, id DESC LIMIT 40").all(id);
     const first = db.prepare("SELECT id, time_created AS at, data FROM message WHERE session_id = ? AND json_extract(data, '$.role') = 'user' ORDER BY time_created, id LIMIT 1").all(id);
     const rows = [...recent, ...first];
@@ -286,22 +286,23 @@ function fromOpenCode(id, dbFile) {
       sum(json_extract(data, '$.role') = 'assistant' AND json_extract(data, '$.finish') = 'stop') AS replies FROM message WHERE session_id = ?`).get(id);
     const subagents = db.prepare("SELECT count(*) AS n FROM session WHERE parent_id = ?").get(id).n;
     const head = { startedAt: Number(s.created) || 0, firstPrompt: first[0] ? texts.get(first[0].id) || "" : "" };
-    const res = result("OpenCode", id, { head, counts: { prompts: Number(c.prompts) || 0, replies: Number(c.replies) || 0 }, tail, subagents: Number(subagents) || 0 });
-    remember(key, { updated: s.updated, result: res });
+    const res = result("OpenCode", id, { head, counts: { prompts: Number(c.prompts) || 0, replies: Number(c.replies) || 0 }, tail, subagents: Number(subagents) || 0 }, textMax);
+    remember(key, { updated: s.updated, result: res, textMax });
     return res;
   } finally { db.close(); }
 }
 
 // ---------- entry ----------
-// session: { agent, id, file } as main's scan found it; openCodeDb: where OpenCode keeps its database.
-// Resolves to the preview, or null when there is nothing to read.
-function preview(session, { openCodeDb } = {}) {
-  const key = `${session.agent}:${session.id}`;
+// session: { agent, id, file } as main's scan found it; openCodeDb: where OpenCode keeps its database; textMax:
+// characters of a message (the page's TEXT_MAX unless a reader wants more). Resolves to the preview, or null when
+// there is nothing to read.
+function preview(session, { openCodeDb, textMax = TEXT_MAX } = {}) {
+  const key = `${session.agent}:${session.id}:${textMax}`;
   if (pending.has(key)) return pending.get(key);
   const job = (async () => {
-    if (session.agent === "OpenCode") return openCodeDb ? fromOpenCode(session.id, openCodeDb) : null;
+    if (session.agent === "OpenCode") return openCodeDb ? fromOpenCode(session.id, openCodeDb, textMax) : null;
     if (!session.file) return null;
-    return fromTranscript(session.agent, session.id, session.file);
+    return fromTranscript(session.agent, session.id, session.file, textMax);
   })().finally(() => pending.delete(key));
   pending.set(key, job);
   return job;

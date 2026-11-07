@@ -35,6 +35,9 @@ contextBridge.exposeInMainWorld("manager", {
   refreshGit: () => ipcRenderer.invoke("git:refresh"),
   onGitChanged: cb => ipcRenderer.on("git:changed", (_e, g) => cb(g)),
   focusTerminal: (agent, id) => ipcRenderer.invoke("terminal:focus", agent, id),
+  // The command centre (orchestrator.js): its terminal, and a typed command for it.
+  centreStart: () => ipcRenderer.invoke("centre:start"),
+  centreSend: text => ipcRenderer.invoke("centre:send", text),
   // The voice question's answer window only.
   onAnswer: cb => ipcRenderer.on("answer:show", (_e, a) => cb(a)),
   answerAction: a => ipcRenderer.send("answer:action", a),

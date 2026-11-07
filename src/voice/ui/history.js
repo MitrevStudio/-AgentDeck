@@ -9,7 +9,7 @@ const KINDS = [["", "common.all"], ["Dictation", "voice.history.kind.dictation"]
   ["Command", "voice.history.kind.command"], ["Failed", "voice.history.kind.failed"]];
 const TAG = { done: "ok", failed: "danger", work: "warn", read: "read", quiet: "" };
 // A voice command's outcome -> its tag's tone (the label is voice.history.command.<outcome>).
-const COMMAND_TONE = { launched: "done", resumed: "done", focused: "done", shown: "done", cancelled: "quiet", unclear: "work", failed: "failed" };
+const COMMAND_TONE = { sent: "done", launched: "done", resumed: "done", focused: "done", shown: "done", cancelled: "quiet", unclear: "work", failed: "failed" };
 const KIND_LOOK = { Dictation: ["mic", ""], ReadAloud: ["speaker", " read"], Command: ["terminal", " cmd"] }; // icon, class
 const num = n => I18N.formatNumber(n);
 
@@ -41,12 +41,12 @@ function shorten(text) {
   return flat.length <= PREVIEW_CHARS ? flat : flat.slice(0, PREVIEW_CHARS) + "…";
 }
 
-// A voice command: what it was taken to mean, what was said, and the prompt a new session got.
-const CARD = { new: "voice.command.card.new", resume: "voice.command.card.resume", show: "voice.command.card.show", project: "voice.command.card.project" };
+// A voice command: where it went (its summary, worded when it ran), what was said, and - from before the command
+// centre - the prompt a new session got.
 function commandView(j) {
   const c = j.Command || {};
   const outcome = COMMAND_TONE[c.outcome] ? c.outcome : j.Status === "Failed" ? "failed" : "unclear";
-  const summary = CARD[c.kind] ? t(CARD[c.kind], { agent: c.agent || "", project: c.project || t("voice.command.noProject") }) : c.summary;
+  const summary = c.summary || "";
   const body = [[summary, c.session].filter(Boolean).join("\n"), t("voice.history.command.said", { text: j.ResultText || "" }), c.note,
     c.prompt ? `${t("voice.history.command.prompt")}\n${c.prompt}` : "",
     c.rewriteError ? t("voice.history.command.rewriteFailed", { reason: c.rewriteError }) : ""].filter(Boolean).join("\n\n");

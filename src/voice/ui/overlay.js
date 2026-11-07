@@ -6,12 +6,8 @@ Object.assign(ICONS, {
   pause: '<rect x="6.5" y="5" width="3.6" height="14" rx="1.2" fill="currentColor" stroke="none"/><rect x="13.9" y="5" width="3.6" height="14" rx="1.2" fill="currentColor" stroke="none"/>',
   stop: '<rect x="6" y="6" width="12" height="12" rx="2.6" fill="currentColor" stroke="none"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.6h.01"/>',
-  ask: '<circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.1-2.4 3.7M12 16.9h.01"/>'
 });
-// A voice command's countdown: a ring that drains around the seconds left.
-const RING = '<svg class="ring" viewBox="0 0 24 24" aria-hidden="true"><circle class="ring-track" cx="12" cy="12" r="10"/>' +
-  '<circle class="ring-arc" cx="12" cy="12" r="10" pathLength="100"/></svg><span class="ring-n" id="ringN"></span>';
-const CARD_STATES = new Set(["error", "notice", "confirm", "choices"]);
+const CARD_STATES = new Set(["error", "notice"]);
 
 const api = window.voiceOverlay;
 const body = document.body, stage = $("stage"), pill = $("pill"), row = $("row"), msg = $("msg"), tip = $("tip");
@@ -281,55 +277,21 @@ function refreshPlayback() {
 
 const textTip = text => (text ? `<span class="t">${esc(text)}</span>` : "");
 
-// buttons: "close" (an error: Close, and Retry when it can), "command" (Cancel, Run now), "choices" (Cancel),
-// "notice" (Close and the notice's own actions) or none.
-function showMsg({ tone, ico, title, detail, quote = "", sub = "", buttons = null, retry, autoHideMs, choices = [], actions = [] }) {
+// buttons: "close" (an error: Close, and Retry when it can), "notice" (Close and the notice's own actions) or none.
+function showMsg({ tone, ico, title, detail, quote = "", buttons = null, retry, autoHideMs, actions = [] }) {
   setTone(tone);
-  $("msgIco").innerHTML = ico === "ring" ? RING : icon(ico);
+  $("msgIco").innerHTML = icon(ico);
   setText("msgTitle", title || "");
   setText("msgQuote", quote || "");
   setText("msgDetail", detail || "");
-  setText("msgSub", sub || "");
-  $("msgChoices").innerHTML = choices.map((c, i) => `<button class="mchoice" type="button" data-i="${i}"><span class="ct">${esc(c.label)}</span>` +
-    `<span class="cs">${esc(c.sub || "")}</span></button>`).join("");
   $("msgActions").hidden = !buttons;
   $("dismiss").hidden = buttons !== "close" && buttons !== "notice";
   $("retry").hidden = buttons !== "close" || !retry;
-  $("cmdCancel").hidden = buttons !== "command" && buttons !== "choices";
-  $("cmdRun").hidden = buttons !== "command";
   $("retry").innerHTML = `${icon("refresh")}<span>${esc(t("voice.overlay.retry"))}</span>`;
-  $("cmdRun").innerHTML = `${icon("play")}<span>${esc(t("voice.command.runNow"))}</span>`;
   for (const b of $("msgActions").querySelectorAll("[data-action]")) b.remove();
   $("msgActions").insertAdjacentHTML("beforeend", actions.map(a => `<button class="mbtn${a.primary ? " primary" : ""}" type="button" ` +
     `data-action="${esc(a.id)}">${a.primary ? icon("play") : ""}<span>${esc(a.label)}</span></button>`).join(""));
   if (autoHideMs) msg.style.setProperty("--notice-ms", `${autoHideMs}ms`);
-}
-
-// The command card's countdown, kept here only for the number in the ring: main runs the command when its own timer
-// ends. Both stop while the pointer rests on the card (main hears it as a "hold" action).
-let countdown = null; // {left, since, paused, timer}
-function startCountdown(seconds) {
-  stopCountdown();
-  msg.style.setProperty("--cd-ms", `${seconds * 1000}ms`);
-  countdown = { left: seconds * 1000, since: performance.now(), paused: false, timer: setInterval(showSecondsLeft, 100) };
-  showSecondsLeft();
-}
-function showSecondsLeft() {
-  const c = countdown;
-  if (!c) return;
-  const left = c.paused ? c.left : c.left - (performance.now() - c.since);
-  setText("ringN", I18N.formatNumber(Math.max(1, Math.ceil(left / 1000))));
-}
-function pauseCountdown(on) {
-  const c = countdown;
-  if (!c || c.paused === on) return;
-  if (on) c.left -= performance.now() - c.since;
-  else c.since = performance.now();
-  c.paused = on;
-}
-function stopCountdown() {
-  if (countdown) clearInterval(countdown.timer);
-  countdown = null;
 }
 
 let playbackTimer = null;
@@ -350,7 +312,6 @@ function render(next, d, animate) {
   shownWarn = null;
   setTone("");
   setTip("");
-  stopCountdown();
 
   const layer = CARD_STATES.has(next) ? "msg" : "row";
   stage.dataset.layer = layer;
@@ -394,15 +355,6 @@ function render(next, d, animate) {
     case "error":
       showMsg({ tone: "danger", ico: "alert", title: data.title || t("voice.overlay.error"), detail: data.detail, buttons: "close", retry: data.canRetry !== false });
       break;
-    case "confirm":
-      // What a voice command will do: a new session's prompt, the session or the folder; it runs when the ring is empty.
-      showMsg({ tone: "", ico: "ring", title: data.title, detail: data.detail, sub: data.sub, buttons: "command" });
-      startCountdown(Number(data.seconds) || 3);
-      break;
-    case "choices":
-      showMsg({ tone: "", ico: "ask", title: data.title, detail: data.detail ? t("voice.command.quoted", { text: data.detail }) : "", buttons: "choices",
-        choices: Array.isArray(data.choices) ? data.choices.slice(0, 3) : [] });
-      break;
     case "notice": {
       const actions = Array.isArray(data.actions) ? data.actions.slice(0, 2) : [];
       body.classList.toggle("actions", actions.length > 0);
@@ -433,7 +385,7 @@ function show(next, d) {
     fit(true);
   }
   startLoop();
-  // Still under the pointer: the new state gets the hover effects too (a confirm card pauses its countdown).
+  // Still under the pointer: the new state gets the hover effects too.
   if (interactive) { interactive = false; setInteractive(true); }
   // Before main hears that the state is rendered: a hidden window is shown with its shape in place.
   reportShape();
@@ -442,7 +394,6 @@ function show(next, d) {
 function hide() {
   state = null;
   hidden = true;
-  stopCountdown();
   setInteractive(false); // the shape stays as it is for the exit animation; main hides the window after it
   stage.classList.add("out");
   clearInterval(playbackTimer);
@@ -493,15 +444,9 @@ $("retry").addEventListener("click", () => api.action("retry", data.jobId ?? nul
 $("dismiss").addEventListener("click", () => api.action("close"));
 $("pause").addEventListener("click", () => api.action("pause"));
 $("stop").addEventListener("click", () => api.action("stop"));
-$("cmdRun").addEventListener("click", () => api.action("run"));
-$("cmdCancel").addEventListener("click", () => api.action("cancel"));
 $("msgActions").addEventListener("click", e => {
   const b = e.target.closest("[data-action]");
   if (b) api.action("notice-action", b.dataset.action);
-});
-$("msgChoices").addEventListener("click", e => {
-  const b = e.target.closest(".mchoice");
-  if (b) api.action("choose", Number(b.dataset.i));
 });
 // A voice command being spoken is finished by a click anywhere on the pill (the menu that started it may be gone).
 pill.addEventListener("click", () => { if (state === "listening" && data.command) api.action("finish"); });
@@ -567,7 +512,6 @@ function setInteractive(on) {
   if (on === interactive) return;
   interactive = on;
   body.classList.toggle("hover", on);
-  if (state === "confirm") { pauseCountdown(on); api.action("hold", on); }
   api.hover(on); // main holds a notice meanwhile
   // The tip comes with it, and stays in the shape while it fades out (also a pointer that is back at once finds the
   // shape as it was).
