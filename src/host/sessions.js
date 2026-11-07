@@ -9,6 +9,7 @@ const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
 const { createRegistry, norm } = require("./registry");
 const { NOISE_PROMPT, contentText } = require("./session-preview");
+const { readCodexTitles } = require("./codex-titles");
 
 const execFileAsync = promisify(execFile);
 const RECAP_CHARS = 220;
@@ -230,7 +231,9 @@ function createSessions({ dataDir, home, isExcluded = () => false, untitled = (a
       if (x.type === "session_meta" && x.payload) {
         id = x.payload.id || id; cwd = x.payload.cwd || cwd;
       }
-      const text = x.payload?.message || x.payload?.content?.map?.(c => c.text || "").join(" ") || "";
+      const isUser = (x.type === "event_msg" && x.payload?.type === "user_message") || (x.type === "response_item" && x.payload?.role === "user");
+      const raw = isUser ? x.payload?.message || x.payload?.content?.map?.(c => c.text || "").join(" ") || "" : "";
+      const text = /^\s*(<(environment_context|user_instructions|permissions|ide_context)|# AGENTS\.md)/i.test(raw) ? "" : raw;
       if (!title && typeof text === "string" && text.trim() && !text.startsWith("#")) title = titleFromText(text);
       const at = x.timestamp || x.message?.timestamp;
       if (at) updatedAt = Math.max(updatedAt, new Date(at).getTime() || 0);
@@ -303,10 +306,12 @@ function createSessions({ dataDir, home, isExcluded = () => false, untitled = (a
     }
     // Codex transcripts.
     const codexFiles = walkFiles(CODEX_DIR, ".jsonl");
+    const codexTitles = readCodexTitles(path.join(path.dirname(CODEX_DIR), "session_index.jsonl"));
     forgetMissing(codexReads, codexFiles);
     for (const f of codexFiles) {
       const s = parseCodexCached(f);
       if (s) {
+        if (codexTitles.has(s.id)) s.title = codexTitles.get(s.id);
         const p = reg.projects.find(p => !p.node && s.cwd && norm(p.path) === norm(s.cwd));
         if (p) s.projectName = p.name;
         found.push(s);

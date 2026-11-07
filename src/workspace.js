@@ -247,6 +247,12 @@ function createWorkspace({ onChange = () => {} } = {}) {
     changed();
     return true;
   }
+  // Show the project's session picker while keeping its terminal tabs running.
+  function showSessions() {
+    getSpace(activeSpace).active = "";
+    changed();
+    return true;
+  }
   function renameTab(tabId, name) {
     const tab = tabs.get(tabId);
     if (!tab) return false;
@@ -306,7 +312,7 @@ function createWorkspace({ onChange = () => {} } = {}) {
         });
         space.tabs.push(id);
       }
-      space.active = space.tabs.includes(s.active) ? s.active : space.tabs[0] || "";
+      space.active = s.active === "" ? "" : space.tabs.includes(s.active) ? s.active : space.tabs[0] || "";
     }
     if (typeof saved.activeSpace === "string" && spaces.has(saved.activeSpace)) activeSpace = saved.activeSpace;
     changed();
@@ -322,7 +328,7 @@ function createWorkspace({ onChange = () => {} } = {}) {
 
   return {
     addTab, split, removeTerm, mergeTab, movePane, detachPane, getTabTerms, focus, focusDirection, setRatio, toggleZoom,
-    activateSpace, activateTab, renameTab, reorderTabs, getActiveTab, findTab, snapshot, exportState, importState
+    activateSpace, activateTab, showSessions, renameTab, reorderTabs, getActiveTab, findTab, snapshot, exportState, importState
   };
 }
 

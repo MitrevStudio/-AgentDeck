@@ -575,6 +575,7 @@ async function runWorkspaceCommand(cmd, a) {
     // The edge menu: the window comes up showing that project.
     case "show-space": workspace.activateSpace(text(a.space ?? "", 2000)); showManager(); return true;
     case "tab": return workspace.activateTab(id(a.tab));
+    case "sessions": return workspace.showSessions();
     // "" takes the tab back to its automatic title.
     case "rename-tab": return workspace.renameTab(id(a.tab), a.name === "" ? "" : text(a.name, 200));
     case "reorder-tabs":

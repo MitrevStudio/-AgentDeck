@@ -233,7 +233,6 @@ const sessionByKey = key => data.sessions.find(s => sessionKey(s) === key) || nu
 
 // ---------- a project with no terminals open ----------
 // Its name, a new terminal or agent session, and its latest sessions to resume.
-const SPACE_RECENT = 6;
 // "" for a project of another computer: nothing opens here for it (nodes-ui.js opens there).
 function getSpaceFolder(key) {
   const p = data.projects.find(p => p.n === key);
@@ -252,6 +251,7 @@ function resumeLatest() {
   resume(s).catch(e => toast(e.message, true));
 }
 function renderSpaceEmpty(el, key) {
+  el.onclick = null;
   if (renderRemoteSpace(el, key)) return; // a project of another computer (nodes-ui.js)
   if (key === CENTRE) {
     el.innerHTML = `<div class="se-box">
@@ -265,7 +265,7 @@ function renderSpaceEmpty(el, key) {
     el.innerHTML = `<div class="se-box empty"><h3>${esc(t("ws.pick.title"))}</h3><p>${esc(t("ws.pick.body"))}</p></div>`;
     return;
   }
-  const recent = [...p.sessions].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, SPACE_RECENT);
+  const recent = [...p.sessions].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   el.innerHTML = `<div class="se-box">
     <div class="se-head"><span class="pmono" style="--h:${hue(p.n)}">${esc(initials(p.name))}</span>
       <div><h2>${esc(p.name)}</h2>${pathHtml(p.path, [])}</div></div>
@@ -273,13 +273,13 @@ function renderSpaceEmpty(el, key) {
       <button class="btn" data-new="terminal" title="${esc(t("ws.newTerminalTitle"))}">${icon("terminal")}${esc(t("ws.newTerminal"))}</button>
       ${getInstalledAgents().map(a => `<button class="btn" data-new="${esc(a)}" title="${esc(t("ws.newAgentTitle", { agent: a, key: getNewAgentKey(a) }))}">${icon(`agent${a}`)}${esc(a)}</button>`).join("")}
     </div>
-    ${recent.length ? `<p class="se-label">${esc(t("ws.recent"))}</p>${recent.map(s => `<div class="se-row" data-key="${esc(sessionKey(s))}">
+    ${recent.length ? `<p class="se-label">${esc(t("ws.sessions"))}</p>${recent.map(s => `<div class="se-row" data-key="${esc(sessionKey(s))}">
       ${agentMark(s.agent)}<span class="se-title" title="${esc(s.title)}">${esc(s.title)}</span>${getContextChip(s)}
       <span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span>
       <span class="se-acts">${liveOf(s) ? `<button class="btn sm" data-action="show-terminal">${icon("raise")}${esc(t("term.show"))}</button>` : getSessionActions(s)}</span></div>`).join("")}` : ""}
   </div>`;
 }
-// The + of the tab bar: a terminal or an agent, in a new tab of the shown space.
+// A menu for starting a terminal or agent in the shown space.
 function openNewMenu(btn) {
   if (!getSpaceFolder(ws.activeSpace)) return;
   closeGroupMenu();
@@ -296,10 +296,10 @@ function openNewMenu(btn) {
 function renderFocusInfo() {
   const x = getTerminal(getShownTab()?.focus);
   const s = x && getTermSession(x);
-  const html = x ? `<span class="fi-dir" title="${esc(x.cwd)}">${icon("folder")}${esc(x.cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop())}</span>${gitChip(x.cwd)}${s ? getContextChip(s) : ""}` : "";
+  const html = x ? `<span class="fi-dir" title="${esc(x.cwd)}">${icon("folder")}<span>${esc(x.cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop())}</span></span>` : "";
   const el = $("focusInfo");
   if (el.dataset.html !== html) { el.dataset.html = html; el.innerHTML = html; }
-  $("status").hidden = Boolean(x);
+  $("status").hidden = false;
 }
 // workspace-ui.js: the layout changed - the shown space is the selected project.
 function onWorkspaceChanged() {

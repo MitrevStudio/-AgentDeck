@@ -7,6 +7,7 @@
 (() => {
   const STRINGS = {
     en: {
+      "ws.sessions": "Project sessions",
       "resources.local": "This computer",
       "resources.noLimits": "Plan limits are not available for this agent",
       "resources.unavailable": "Resources unavailable",
@@ -1109,6 +1110,7 @@
     },
 
     bg: {
+      "ws.sessions": "Сесии на проекта",
       "resources.local": "Този компютър",
       "resources.noLimits": "Няма данни за лимитите на този агент",
       "resources.unavailable": "Няма данни за ресурсите",

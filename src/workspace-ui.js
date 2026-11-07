@@ -170,7 +170,7 @@ function runWorkspaceKey([cmd, args]) {
   if (cmd === "focus-dir") return runWorkspace("focus-dir", args);
   if (cmd === "close-pane") return tab ? closePane(tab.focus) : null;
   if (cmd === "zoom") return tab ? runWorkspace("zoom", { tab: tab.id }) : null;
-  if (cmd === "new-tab") return openInSpace("terminal");
+  if (cmd === "new-tab") return runWorkspace("sessions");
   if (cmd === "new-agent") return getInstalledAgents().includes(args.agent) ? openInSpace(args.agent, args.place) : null;
   if (cmd === "resume-latest") return resumeLatest();
   if (cmd === "next-tab") {
@@ -273,12 +273,13 @@ function renderTabbar() {
     const label = tab.name || getTermTitle(getTerminal(tab.focus)) || String(i + 1);
     return `<div class="wtab ${tab.id === space.active ? "active" : ""}" data-tab="${esc(tab.id)}" role="tab" draggable="true" title="${esc(label)}">
       ${l ? statusMark(l, false) : ""}<span class="wtab-name">${esc(label)}</span>
+      <button class="wtab-close wtab-rename-btn" data-ws="rename-tab" title="${esc(t("action.rename"))}" aria-label="${esc(t("action.rename"))}">${icon("pencil")}</button>
       <button class="wtab-close" data-ws="close-tab" title="${esc(t("ws.closeTab"))}">${icon("x")}</button></div>`;
-  }).join("") + `<button class="icon-btn wtab-new" data-ws="new-menu" title="${esc(t("ws.new"))}" aria-haspopup="menu">${icon("plus")}</button>`;
+  }).join("") + `<button class="icon-btn wtab-new ${!space.active ? "active" : ""}" data-ws="sessions" title="${esc(t("ws.sessions"))}" aria-label="${esc(t("ws.sessions"))}">${icon("plus")}</button>`;
   // Rebuilt only when something shows differently, and not while a tab is dragged: a click or a drag in progress is
   // not lost.
   const bar = $("tabbar");
-  if (draggedTab || bar.dataset.html === html) return;
+  if (draggedTab || bar.querySelector(".wtab-rename") || bar.dataset.html === html) return;
   bar.dataset.html = html;
   bar.innerHTML = html;
 }
@@ -355,7 +356,7 @@ function renderPaneHeads(tab) {
     const x = getTerminal(el.dataset.term);
     const s = getTermSession(x), l = getTermLive(x);
     const html = `${x?.agent ? agentMark(x.agent) : `<span class="agent-mark">${icon("terminal")}</span>`}
-      <span class="pane-title" title="${esc(x?.cwd || "")}">${esc(getTermTitle(x))}</span>
+      <span class="pane-title" title="${esc(x?.cwd || "")}">${esc(!many && tab.name ? tab.name : getTermTitle(x))}</span>
       ${x?.note ? `<span class="pane-note">${esc(x.note)}</span>` : ""}
       ${s ? getContextChip(s) : ""}${l ? statusMark(l, isLoading(sessionKey(l), l)) : ""}
       <span class="pane-tools">
@@ -399,10 +400,12 @@ window.prefs.onChanged(p => { requestAnimationFrame(applyTermTheme); applyTermFo
 new ResizeObserver(() => fitShown()).observe($("panes"));
 
 $("tabbar").addEventListener("click", e => {
+  if (e.target.closest(".wtab-rename")) return;
   const tabEl = e.target.closest("[data-tab]");
   const btn = e.target.closest("[data-ws]");
   if (btn?.dataset.ws === "close-tab") { e.stopPropagation(); return closeTab(tabEl.dataset.tab); }
-  if (btn?.dataset.ws === "new-menu") return openNewMenu(btn);
+  if (btn?.dataset.ws === "rename-tab") { e.stopPropagation(); return renameWorkspaceTab(tabEl); }
+  if (btn?.dataset.ws === "sessions") return runWorkspace("sessions");
   if (tabEl) { focusAfterRender = true; runWorkspace("tab", { tab: tabEl.dataset.tab }); }
 });
 $("tabbar").addEventListener("auxclick", e => {
@@ -412,9 +415,34 @@ $("tabbar").addEventListener("auxclick", e => {
 $("tabbar").addEventListener("dblclick", e => {
   const tabEl = e.target.closest("[data-tab]");
   if (!tabEl || e.target.closest("button")) return;
-  const name = prompt(t("ws.renamePrompt"), ws.tabs[tabEl.dataset.tab]?.name || "");
-  if (name !== null) runWorkspace("rename-tab", { tab: tabEl.dataset.tab, name });
+  renameWorkspaceTab(tabEl);
 });
+function renameWorkspaceTab(tabEl) {
+  if (!tabEl || tabEl.querySelector("input")) return;
+  const tab = ws.tabs[tabEl.dataset.tab];
+  if (!tab) return;
+  const input = document.createElement("input");
+  input.className = "wtab-rename";
+  input.maxLength = 80;
+  input.value = tab.name || getTermTitle(getTerminal(tab.focus));
+  input.setAttribute("aria-label", t("action.rename"));
+  tabEl.draggable = false;
+  tabEl.querySelector(".wtab-name").replaceWith(input);
+  let cancelled = false;
+  input.addEventListener("keydown", e => {
+    e.stopPropagation();
+    if (e.key === "Escape") { cancelled = true; input.blur(); }
+    else if (e.key === "Enter") { e.preventDefault(); input.blur(); }
+  });
+  input.addEventListener("blur", async () => {
+    const name = input.value.trim();
+    input.remove();
+    $("tabbar").dataset.html = "";
+    if (!cancelled) await runWorkspace("rename-tab", { tab: tab.id, name });
+    renderTabbar();
+  }, { once: true });
+  input.focus(); input.select();
+}
 $("panes").addEventListener("click", e => {
   const btn = e.target.closest("[data-ws]");
   const pane = e.target.closest(".pane");

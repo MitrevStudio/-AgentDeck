@@ -19,6 +19,8 @@
 .wtab:hover .wtab-close, .wtab.active .wtab-close { opacity: 1; }
 .wtab-close:hover { background: var(--line-2); color: var(--text); }
 .wtab-close .i { width: 12px; height: 12px; }
+.wtab-rename { width: 150px; min-width: 50px; padding: 2px 5px; border: 1px solid var(--accent); border-radius: 4px; background: var(--panel); color: var(--text); font: inherit; outline: none; }
+.wtab:has(.wtab-rename) { max-width: 280px; }
 .wtab.dragging { opacity: .5; }
 .wtab.drop-before { box-shadow: inset 2px 0 0 var(--accent); }
 .wtab.drop-after { box-shadow: inset -2px 0 0 var(--accent); }

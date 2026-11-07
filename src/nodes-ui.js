@@ -53,7 +53,6 @@ function remoteLive(n, sessions) {
 // ---------- the centre: a remote project ----------
 // Its name, folder and computer, a terminal or an agent session to open there (in a pane here), and its latest
 // sessions as seen from there, to resume there.
-const REMOTE_RECENT = 8;
 const remoteAgents = n => (n.data?.agents?.length ? n.data.agents : AGENTS);
 function renderRemoteSpace(el, key) {
   const r = parseRemoteKey(key);
@@ -65,7 +64,7 @@ function renderRemoteSpace(el, key) {
     return true;
   }
   const online = n.status === "online";
-  const recent = [...p.sessions].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, REMOTE_RECENT);
+  const recent = [...p.sessions].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   el.innerHTML = `<div class="se-box">
     <div class="se-head"><span class="pmono" style="--h:${hue(p.n)}">${esc(initials(p.name))}</span>
       <div><h2>${esc(p.name)}</h2>${pathHtml(p.path, [])}<p class="se-body">${esc(t(online ? "manager.node.on" : "manager.node.offlineBody", { node: n.name || n.id.slice(0, 8) }))}</p></div></div>
@@ -73,7 +72,7 @@ function renderRemoteSpace(el, key) {
       <button class="btn" data-rnew="shell" title="${esc(t("ws.newTerminalTitle"))}">${icon("terminal")}${esc(t("ws.newTerminal"))}</button>
       ${remoteAgents(n).map(a => `<button class="btn" data-rnew="${esc(a)}">${icon(`agent${a}`)}${esc(a)}</button>`).join("")}
     </div>` : ""}
-    ${recent.length ? `<p class="se-label">${esc(t("ws.recent"))}</p>${recent.map(s => `<div class="se-row remote" data-rkey="${esc(sessionKey(s))}">
+    ${recent.length ? `<p class="se-label">${esc(t("ws.sessions"))}</p>${recent.map(s => `<div class="se-row remote" data-rkey="${esc(sessionKey(s))}">
       ${agentMark(s.agent)}<span class="se-title" title="${esc(s.title)}">${esc(s.title)}</span>
       ${getContextChip({ ...s, node: n.id })}
       <span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span>
@@ -92,7 +91,12 @@ async function onRemoteSpaceClick(e, n, p) {
     const s = p.sessions.find(x => sessionKey(x) === resumeBtn.dataset.rresume);
     if (!s) return;
     await window.manager.remoteLaunch(n.id, { kind: "resume", cwd: s.cwd, agent: s.agent, sessionId: s.id });
-  } else return;
+  } else {
+    const row = e.target.closest("[data-rkey]");
+    const s = row && p.sessions.find(x => sessionKey(x) === row.dataset.rkey);
+    if (s && e.detail === 2) await openSession({ ...s, node: n.id, nodeName: n.name });
+    return;
+  }
   toast(t("manager.node.toast.opened", { node: n.name }));
 }
 
