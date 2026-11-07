@@ -105,11 +105,12 @@ const fitShown = () => document.querySelectorAll("#panes .pane[data-term]").forE
 // e.code, so the keys stay where they are on any keyboard layout (a Bulgarian one too).
 const NEW_AGENT_KEYS = { Digit1: "Claude", Digit2: "Codex", Digit3: "OpenCode" };
 // The window's own keys, as in Windows Terminal; everything else goes to the program. Ctrl+C copies a selection.
-// Only chords no program in a terminal needs: Ctrl+Shift or Alt+Shift ones, Ctrl+, and F1 - never a plain Ctrl+letter.
-function getWorkspaceKey(e) {
+// Only chords no program in a terminal needs: Ctrl+Shift or Alt+Shift ones and Ctrl+, - never a plain Ctrl+letter.
+// F1 (the keys popup) only outside a terminal (inTerm false): mc, htop and cmd.exe use it.
+function getWorkspaceKey(e, inTerm = false) {
   const plus = e.code === "Equal" || e.code === "NumpadAdd", minus = e.code === "Minus" || e.code === "NumpadSubtract";
   if (e.ctrlKey && e.shiftKey && NEW_AGENT_KEYS[e.code]) return ["new-agent", { agent: NEW_AGENT_KEYS[e.code], place: e.altKey ? "right" : "tab" }];
-  if (e.key === "F1" && !e.ctrlKey && !e.altKey && !e.shiftKey) return ["keys", {}];
+  if (e.key === "F1" && !inTerm && !e.ctrlKey && !e.altKey && !e.shiftKey) return ["keys", {}];
   if (e.ctrlKey && !e.altKey && !e.shiftKey && e.code === "Comma") return ["window", { button: "settings" }];
   if (e.altKey && e.shiftKey && !e.ctrlKey && plus) return ["split", { dir: "right" }];
   if (e.altKey && e.shiftKey && !e.ctrlKey && minus) return ["split", { dir: "down" }];
@@ -156,7 +157,7 @@ function runWorkspaceKey([cmd, args]) {
 }
 function handleTermKey(term, e) {
   if (e.type !== "keydown") return true;
-  const key = getWorkspaceKey(e);
+  const key = getWorkspaceKey(e, true);
   if (key) {
     e.preventDefault();
     runWorkspaceKey(key);
