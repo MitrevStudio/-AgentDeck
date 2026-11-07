@@ -32,6 +32,16 @@ contextBridge.exposeInMainWorld("voiceSettings", {
     get: () => ipcRenderer.invoke("network:get"),
     save: payload => ipcRenderer.invoke("network:save", payload),
     test: payload => ipcRenderer.invoke("network:test", payload)
+  },
+  // Computers (the mesh): this node, the paired ones and those found on the network; set() applies at once; pair()
+  // and forget() answer {ok} or {ok: false, error}; the whole picture comes again on every change.
+  mesh: {
+    get: () => ipcRenderer.invoke("mesh:get"),
+    set: patch => ipcRenderer.invoke("mesh:set", patch),
+    newCode: () => ipcRenderer.invoke("mesh:new-code"),
+    pair: (address, code) => ipcRenderer.invoke("mesh:pair", address, code),
+    forget: id => ipcRenderer.invoke("mesh:forget", id),
+    onChanged: cb => ipcRenderer.on("mesh:changed", (_e, state) => cb(state))
   }
 });
 // UI language and theme, read before the page renders; i18n.js applies them.

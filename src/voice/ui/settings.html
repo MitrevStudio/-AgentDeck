@@ -22,6 +22,7 @@
     <div class="vs-tabs" id="tabs" role="tablist" aria-orientation="vertical">
       <button type="button" role="tab" id="tabGeneral" data-value="general" aria-controls="general"><span data-icon="window"></span><span data-i18n="settings.general"></span></button>
       <button type="button" role="tab" id="tabNetwork" data-value="network" aria-controls="network"><span data-icon="globe"></span><span data-i18n="settings.network"></span></button>
+      <button type="button" role="tab" id="tabNodes" data-value="nodes" aria-controls="nodes"><span data-icon="nodes"></span><span data-i18n="settings.nodes"></span></button>
       <div class="vs-group" aria-hidden="true" data-i18n="settings.voice"></div>
       <button type="button" role="tab" id="tabDictation" data-value="dictation" aria-controls="dictation"><span data-icon="mic"></span><span data-i18n="voice.settings.dictation"></span></button>
       <button type="button" role="tab" id="tabDictionary" data-value="dictionary" aria-controls="dictionary"><span data-icon="book"></span><span data-i18n="settings.dictionary"></span></button>
@@ -309,6 +310,9 @@
     <!-- Voice commands: applied at once; built by settings-commands.js. -->
     <div class="vs-pane" id="commands" role="tabpanel" aria-labelledby="tabCommands"></div>
 
+    <!-- Computers: the other AgentDecks (the mesh); applied at once, built by settings-nodes.js. -->
+    <div class="vs-pane" id="nodes" role="tabpanel" aria-labelledby="tabNodes"></div>
+
     <!-- Network: the proxy, saved with its own Save/Cancel. Rows with data-show belong to those modes only. -->
     <div class="vs-pane" id="network" role="tabpanel" aria-labelledby="tabNetwork">
       <section class="vs-sec">
@@ -391,6 +395,7 @@
     <div class="vs-err vs-form-err" data-for="network" data-err="net.form"></div>
     <button type="button" class="btn" id="close" data-for="general" data-i18n="common.close"></button>
     <button type="button" class="btn" id="cmdClose" data-for="commands" data-i18n="common.close"></button>
+    <button type="button" class="btn" id="nodesClose" data-for="nodes" data-i18n="common.close"></button>
     <button type="button" class="btn" id="cancel" data-for="voice" data-i18n="common.cancel"></button>
     <button type="submit" class="btn primary" id="save" data-for="voice" data-i18n="voice.settings.save"></button>
     <button type="button" class="btn" id="netCancel" data-for="network" data-i18n="common.cancel"></button>
@@ -401,6 +406,7 @@
 <script src="../../common.js"></script>
 <script src="settings-dictation.js"></script>
 <script src="settings-commands.js"></script>
+<script src="settings-nodes.js"></script>
 <script src="settings.js"></script>
 </body>
 </html>

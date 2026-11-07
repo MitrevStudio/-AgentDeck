@@ -35,7 +35,7 @@ body { user-select: none; }
 .vs-group { margin: 12px 10px 4px; font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
 .vs-pane:not(.on) { display: none; }
 body:not([data-tab="general"]) [data-for="general"], body:not([data-tab="voice"]) [data-for="voice"],
-body:not([data-tab="network"]) [data-for="network"] { display: none; }
+body:not([data-tab="network"]) [data-for="network"], body:not([data-tab="nodes"]) [data-for="nodes"] { display: none; }
 
 /* The edge menu's hotkey: key caps, read-only. */
 .vs-caps { display: flex; align-items: center; gap: 5px; min-height: 34px; }
@@ -101,6 +101,26 @@ body:not([data-tab="network"]) [data-for="network"] { display: none; }
 .vs-toggle:hover { border-color: var(--line-2); }
 .vs-toggle b { font-size: 13.5px; font-weight: 600; }
 .vs-toggle small { margin-left: 6px; font-size: 12px; color: var(--faint); }
+
+/* Computers: this node's pairing code, and the rows of paired and found nodes - name and state, the action at the end. */
+.vs-code { display: flex; align-items: center; gap: 10px; min-height: 34px; }
+.vs-code b { font-family: var(--mono); font-size: 20px; letter-spacing: .12em; user-select: text; }
+.vs-code .btn { margin-left: auto; }
+.vs-nodes { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.vs-node { display: flex; align-items: center; gap: 10px; padding: 7px 10px 7px 12px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--bg); }
+.vs-node .i { width: 16px; height: 16px; flex: none; color: var(--faint); }
+.vs-node .who { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 1px; }
+.vs-node .who b { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vs-node .who small { font-size: 11.5px; color: var(--faint); font-family: var(--mono); }
+.vs-node .tag { flex: none; }
+.vs-node .btn { flex: none; }
+.vs-node .input { width: 110px; height: 30px; font-family: var(--mono); letter-spacing: .08em; }
+.vs-pair { display: flex; gap: 8px; align-items: center; }
+.vs-pair .input { height: 34px; }
+.vs-pair .input.code { width: 120px; flex: none; font-family: var(--mono); letter-spacing: .08em; }
+.vs-pair .btn { flex: none; }
+.vs-hint.ok { color: var(--ok, var(--accent)); }
+.vs-hint.err { color: var(--danger); }
 
 .vs-hint { margin-top: 5px; font-size: 12px; line-height: 1.45; color: var(--faint); }
 .vs-grid > .vs-hint { margin-top: -3px; }
