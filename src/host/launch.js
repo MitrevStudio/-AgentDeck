@@ -95,15 +95,43 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
     const argv = [NEW_SESSION.Claude, "--append-system-prompt-file", file];
     return { command: "& " + argv.map(psQuote).join(" "), argv, meta: { title: `Claude · ${path.basename(cwd)}`, agent: "Claude" }, undo: () => promptLaunch.remove(file) };
   }
+  // A repository cloned into `dir` (its parent is the terminal's folder), `branch` switched to (made from `base`
+  // when it is not there yet), and an agent started in it on `prompt` (or none). The values travel in the
+  // environment (AGENTDECK_*), never on the command line, so nothing in them is read by a shell.
+  function cloneCommand({ url, dir, branch, base, agent, prompt }) {
+    const u = String(url || "").trim(), d = String(dir || "").trim(), b = String(branch || "").trim(), bs = String(base || "").trim();
+    if (!u || !d || /[\r\n]/.test(u + d + b + bs) || !/^[\w./@:+-]+$/.test(u) || (b && !/^[\w./-]+$/.test(b)) || (bs && !/^[\w./-]+$/.test(bs))) fail("invalidData");
+    if (agent) checkAgent(agent);
+    const text = String(prompt ?? "").trim();
+    const env = { AGENTDECK_URL: u, AGENTDECK_DIR: d, AGENTDECK_BRANCH: b, AGENTDECK_BASE: bs, AGENTDECK_PROMPT: text };
+    const exe = agent ? NEW_SESSION[agent] : "";
+    const promptArgs = agent === "OpenCode" ? ["--prompt"] : [];
+    // PowerShell: the clone, the branch, then the agent with the prompt as one argument (an empty one is left out).
+    const ps = [
+      "git clone --progress $env:AGENTDECK_URL $env:AGENTDECK_DIR",
+      "if (-not $?) { exit 1 }",
+      "Set-Location $env:AGENTDECK_DIR",
+      b ? "git switch $env:AGENTDECK_BRANCH 2>$null; if (-not $?) { if ($env:AGENTDECK_BASE) { git switch -c $env:AGENTDECK_BRANCH $env:AGENTDECK_BASE } else { git switch -c $env:AGENTDECK_BRANCH } }" : "",
+      exe ? `& ${psQuote(exe)} ${promptArgs.map(psQuote).join(" ")} $(if ($env:AGENTDECK_PROMPT) { $env:AGENTDECK_PROMPT })` : ""
+    ].filter(Boolean).join("; ");
+    const sh = [
+      'git clone --progress "$AGENTDECK_URL" "$AGENTDECK_DIR" || exit 1',
+      'cd "$AGENTDECK_DIR"',
+      b ? 'git switch "$AGENTDECK_BRANCH" 2>/dev/null || git switch -c "$AGENTDECK_BRANCH" ${AGENTDECK_BASE:+"$AGENTDECK_BASE"}' : "",
+      exe ? `exec ${exe} ${promptArgs.join(" ")} \${AGENTDECK_PROMPT:+"$AGENTDECK_PROMPT"}` : "exec bash -l"
+    ].filter(Boolean).join("; ");
+    return { command: ps, argv: ["bash", "-lc", sh], env, meta: { title: `${agent || "git"} · ${path.basename(d)}`, agent: agent || "" }, undo: none };
+  }
   // The command for a launch described as data (what a peer or the command centre asks for):
-  // kind "shell" | "new" | "resume" | "prompt" | "handoff".
-  function commandFor({ kind, agent, sessionId, prompt, handoff }, cwd) {
+  // kind "shell" | "new" | "resume" | "prompt" | "handoff" | "clone".
+  function commandFor({ kind, agent, sessionId, prompt, handoff, url, dir, branch, base }, cwd) {
     switch (kind) {
       case "shell": return shellCommand();
       case "new": return newCommand(agent, cwd);
       case "resume": return resumeCommand(agent, sessionId, cwd);
       case "prompt": return promptCommand(agent, cwd, prompt);
       case "handoff": return handoffCommand(cwd, handoff);
+      case "clone": return cloneCommand({ url, dir, branch, base, agent, prompt });
       default: return fail("invalidData");
     }
   }
@@ -180,7 +208,7 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
 
   return {
     NEW_SESSION, SESSION_ID, isAgent, checkAgent, checkSessionId, checkResumable, agentCommand, getSessionTitle, isDir,
-    shellCommand, newCommand, resumeCommand, promptCommand, handoffCommand, commandFor,
+    shellCommand, newCommand, resumeCommand, promptCommand, handoffCommand, cloneCommand, commandFor,
     openTerminal, sweepPrompts, takeOverSession, deleteSession
   };
 }

@@ -14,6 +14,7 @@ const { createSessions } = require("./sessions");
 const { createTerminals } = require(process.platform === "win32" ? "./terminals" : "./terminals-pty");
 const { createLaunch } = require("./launch");
 const { createTabLinks } = require("./tab-links");
+const { createSetup } = require("./setup");
 const { liveSessions, findTranscript } = require("./live");
 const sessionPreview = require("./session-preview");
 const gitStatus = require("./git-status");
@@ -67,6 +68,7 @@ function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () 
   });
   const launch = createLaunch({ dataDir, terminals, sessions, liveSessions, findTranscript, log, noLauncher });
   const tabLinks = createTabLinks({ terminals, liveSessions });
+  const setup = createSetup({ agents: () => sessions.agents });
   const preview = (s, opts = {}) => sessionPreview.preview(s, { ...opts, openCodeDb: sessions.OPENCODE_DB });
 
   // The background work: watching the transcripts, the periodic full scan, linking tabs to their sessions, the usage
@@ -92,7 +94,7 @@ function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () 
   }
 
   return Object.assign(host, {
-    dataDir, home, sessions, terminals, launch, liveSessions, findTranscript, preview, search,
+    dataDir, home, sessions, terminals, launch, setup, liveSessions, findTranscript, preview, search,
     git: gitStatus, usage, start, flush, stop
   });
 }

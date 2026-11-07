@@ -40,6 +40,9 @@ contextBridge.exposeInMainWorld("manager", {
   getNodes: () => ipcRenderer.invoke("mesh:nodes"),
   // A terminal on another computer, in a pane here: {cwd, kind: "shell" | "new" | "resume" | "prompt", agent, sessionId, prompt}.
   remoteLaunch: (node, args) => ipcRenderer.invoke("mesh:launch", node, args),
+  // The project's repository cloned on another computer, an agent started in it (clone-ui.js).
+  remoteClone: (node, args) => ipcRenderer.invoke("mesh:clone", node, args),
+  gitInfo: p => ipcRenderer.invoke("project:git-info", p),
   onNodesChanged: cb => ipcRenderer.on("mesh:nodes", (_e, nodes) => cb(nodes)),
   centreStart: () => ipcRenderer.invoke("centre:start"),
   centreSend: text => ipcRenderer.invoke("centre:send", text),

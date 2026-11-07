@@ -53,6 +53,42 @@
       </div>
     </section>`;
 
+  // The readiness of one node, shown under its row: the facts as the node answered them, and the fixes.
+  let setupOpen = "", setupState = null, setupBusy = false;
+  const check = (ok, label, detail = "") => `<div class="vs-check ${ok ? "ok" : "no"}">${icon(ok ? "check" : "alert")}<b>${esc(label)}</b>${detail ? `<span>${esc(detail)}</span>` : ""}</div>`;
+  function setupHtml() {
+    const s = setupState;
+    if (!s) return `<div class="vs-hint">${esc(t("settings.nodes.setupLoading"))}</div>`;
+    if (s.error) return `<div class="vs-hint err">${esc(s.error)}</div>`;
+    const key = s.sshKey;
+    return [
+      check(Boolean(s.git), "git", s.git || t("settings.nodes.setup.noGit")),
+      check(Boolean(key), "SSH", key ? key.file : t("settings.nodes.setup.noKey")),
+      key ? `<div class="vs-keyline"><code>${esc(key.publicKey)}</code><button type="button" class="btn sm" data-setup-copy>${icon("copy")}<span>${esc(t("common.copy"))}</span></button></div><div class="vs-hint">${esc(t("settings.nodes.setup.keyHint"))}</div>`
+        : (s.sshKeygen ? `<div class="vs-pair"><button type="button" class="btn sm primary" data-setup-act="generateKey" ${setupBusy ? "disabled" : ""}>${icon("key")}<span>${esc(t("settings.nodes.setup.makeKey"))}</span></button></div>` : ""),
+      `<div class="vs-pair"><input class="input mono" id="setupHost" placeholder="github.com" spellcheck="false"><button type="button" class="btn sm" data-setup-act="addKnownHost" ${setupBusy ? "disabled" : ""}>${icon("plus")}<span>${esc(t("settings.nodes.setup.trustHost"))}</span></button></div>
+       <div class="vs-hint">${esc(t("settings.nodes.setup.knownHosts", { list: s.knownHosts.length ? s.knownHosts.slice(0, 8).join(", ") : "—" }))}</div>`,
+      check(Boolean(s.gitIdentity.name && s.gitIdentity.email), t("settings.nodes.setup.identity"), s.gitIdentity.name ? `${s.gitIdentity.name} <${s.gitIdentity.email}>` : t("settings.nodes.setup.noIdentity")),
+      `<div class="vs-pair"><input class="input" id="setupName" placeholder="${esc(t("settings.nodes.setup.name"))}" value="${esc(s.gitIdentity.name)}"><input class="input" id="setupEmail" placeholder="email" value="${esc(s.gitIdentity.email)}"><button type="button" class="btn sm" data-setup-act="setGitIdentity" ${setupBusy ? "disabled" : ""}>${icon("check")}<span>${esc(t("settings.nodes.setup.save"))}</span></button></div>`,
+      check(s.agents.length > 0, t("settings.nodes.setup.agents"), s.agents.length ? s.agents.join(", ") : t("settings.nodes.setup.noAgents")),
+      `<div class="vs-hint">${esc(t("settings.nodes.setup.facts", { platform: s.platform, node: s.node, home: s.home }))}</div>`
+    ].join("");
+  }
+  async function loadSetup(id) {
+    setupOpen = id;
+    setupState = null;
+    render();
+    try { setupState = await mesh.setup(id); } catch (e) { setupState = { error: e.message }; }
+    render();
+  }
+  async function setupAct(action, args) {
+    setupBusy = true;
+    render();
+    const r = await mesh.setupAction(setupOpen, action, args);
+    setupBusy = false;
+    if (r?.ok) await loadSetup(setupOpen);
+    else { setupState = { ...setupState, error: r?.error }; render(); }
+  }
   const kindOf = n => t(`settings.nodes.kind.${n.kind === "host" ? "host" : "desktop"}`);
   const since = ms => (ms ? I18N.formatDateTime(ms, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "");
   function nodeRow(n, action) {
@@ -73,7 +109,8 @@
     $("nodeDiscoverable").checked = s.discoverable;
     $("nodeCode").textContent = s.code.length > 8 ? s.code : `${s.code.slice(0, 3)} ${s.code.slice(3)}`;
     $("nodeAddressHint").textContent = t("settings.nodes.addressHint", { port: s.port });
-    const paired = state.nodes.map(n => nodeRow(n, `<button type="button" class="btn sm" data-forget="${esc(n.id)}">${icon("x")}<span>${esc(t("settings.nodes.forget"))}</span></button>`));
+    const paired = state.nodes.map(n => nodeRow(n, `${n.status === "online" ? `<button type="button" class="btn sm" data-setup="${esc(n.id)}">${icon("sliders")}<span>${esc(t("settings.nodes.setup"))}</span></button>` : ""}<button type="button" class="btn sm" data-forget="${esc(n.id)}">${icon("x")}<span>${esc(t("settings.nodes.forget"))}</span></button>`)
+      + (setupOpen === n.id ? `<div class="vs-setup" id="nodeSetup">${setupHtml()}</div>` : ""));
     $("nodesPaired").innerHTML = paired.join("") || `<div class="vs-hint">${esc(t("settings.nodes.pairedEmpty"))}</div>`;
     const known = new Set(state.nodes.map(n => n.id));
     const found = state.discovered.filter(n => !known.has(n.id)).map(n => nodeRow({ ...n, status: "online" },
@@ -107,8 +144,16 @@
   $("nodeDiscoverable").addEventListener("change", async e => apply(await mesh.set({ discoverable: e.target.checked })));
   $("nodeNewCode").addEventListener("click", async () => apply(await mesh.newCode()));
   $("nodesPaired").addEventListener("click", async e => {
+    const open = e.target.closest("[data-setup]")?.dataset.setup;
+    if (open) return setupOpen === open ? (setupOpen = "", render()) : loadSetup(open);
+    if (e.target.closest("[data-setup-copy]")) { await navigator.clipboard.writeText(setupState?.sshKey?.publicKey || ""); return; }
+    const act = e.target.closest("[data-setup-act]")?.dataset.setupAct;
+    if (act === "generateKey") return setupAct(act, {});
+    if (act === "addKnownHost") return setupAct(act, { host: $("setupHost").value.trim() });
+    if (act === "setGitIdentity") return setupAct(act, { name: $("setupName").value.trim(), email: $("setupEmail").value.trim() });
     const id = e.target.closest("[data-forget]")?.dataset.forget;
     if (!id) return;
+    if (setupOpen === id) setupOpen = "";
     const n = state.nodes.find(x => x.id === id);
     if (!confirm(t("settings.nodes.forgetConfirm", { name: n?.name || id.slice(0, 8) }))) return;
     apply(await mesh.forget(id));

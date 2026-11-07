@@ -119,6 +119,15 @@ body:not([data-tab="network"]) [data-for="network"], body:not([data-tab="nodes"]
 .vs-pair .input { height: 34px; }
 .vs-pair .input.code { width: 120px; flex: none; font-family: var(--mono); letter-spacing: .08em; }
 .vs-pair .btn { flex: none; }
+.vs-setup { display: flex; flex-direction: column; gap: 6px; margin: -2px 0 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel-2); }
+.vs-check { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.vs-check .i { width: 14px; height: 14px; flex: none; }
+.vs-check.ok .i { color: var(--ok, var(--accent)); }
+.vs-check.no .i { color: var(--danger); }
+.vs-check span { color: var(--faint); font-family: var(--mono); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vs-keyline { display: flex; align-items: center; gap: 8px; }
+.vs-keyline code { flex: 1; min-width: 0; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
+.vs-setup .vs-pair .input { height: 30px; }
 .vs-hint.ok { color: var(--ok, var(--accent)); }
 .vs-hint.err { color: var(--danger); }
 
