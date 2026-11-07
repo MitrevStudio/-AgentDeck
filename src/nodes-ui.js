@@ -7,28 +7,21 @@
 // fullDate, pathHtml and countLiveGroups from common.js.
 const REMOTE_KEY = "node:"; // a remote project's space key: node:<id>:<project path, normalized>
 let nodes = []; // [{ id, name, kind, status, data, live, git, view: { projects, sessions }, liveMap }]
-// The tab shown above the projects: "" for this computer, else a paired computer's id (kept across restarts).
-const NODE_TAB_KEY = "agentdeck.nodeTab";
-let shownNode = (() => { try { return localStorage.getItem(NODE_TAB_KEY) || ""; } catch { return ""; } })();
-function showNodeTab(id) {
-  shownNode = id;
-  try { localStorage.setItem(NODE_TAB_KEY, id); } catch {}
+// Folded computers: this window's own convenience.
+const NODE_FOLD_KEY = "agentdeck.foldedNodes";
+let foldedNodes = (() => { try { return new Set(JSON.parse(localStorage.getItem(NODE_FOLD_KEY)) || []); } catch { return new Set(); } })();
+function toggleNodeFold(id) {
+  if (!foldedNodes.delete(id)) foldedNodes.add(id);
+  try { localStorage.setItem(NODE_FOLD_KEY, JSON.stringify([...foldedNodes])); } catch {}
   if (typeof render === "function") render();
 }
-const shownNodeId = () => (getNode(shownNode) ? shownNode : "");
-// The tabs: only when a computer is paired. This computer first, then each paired one with its state.
-function nodeTabsHtml() {
-  if (!nodes.length) return "";
-  const shown = shownNodeId();
-  return [`<button class="${shown ? "" : "on"}" data-node-tab="">${icon("window")}<span>${esc(t("manager.nodes.thisComputer"))}</span></button>`,
-    ...nodes.map(n => `<button class="${shown === n.id ? "on" : ""} ${n.status}" data-node-tab="${esc(n.id)}" title="${esc(nodeLabel(n))}">${icon(n.kind === "host" ? "terminal" : "nodes")}<span>${esc(n.name || n.id.slice(0, 8))}</span><span class="dot"></span></button>`)
-  ].join("");
-}
-function renderNodeTabs() {
-  const el = $("nodeTabs");
-  const html = nodeTabsHtml();
+// The Computers section of the sidebar: shown while a computer is paired; each one a block with its projects.
+function renderNodesSection(selected) {
+  $("nodesSec").hidden = !nodes.length;
+  $("nodeCount").textContent = nodes.length;
+  const html = nodesHtml(selected);
+  const el = $("nodesList");
   if (el.dataset.html !== html) { el.dataset.html = html; el.innerHTML = html; }
-  el.hidden = !html;
 }
 
 function setNodes(list) {
@@ -69,12 +62,16 @@ function remoteLive(n, sessions) {
 // ---------- the sidebar ----------
 // Each node: a header with its name and state, then its projects (by activity; a remote project has no menu, no
 // drag and no git here).
-function nodesHtml(selected, only = "") {
-  return nodes.filter(n => !only || n.id === only).map(n => {
+function nodesHtml(selected) {
+  return nodes.map(n => {
     const projects = n.view.projects;
-    const head = `<div class="proj node-head ${n.status}" data-node="${esc(n.id)}" title="${esc(`${n.name}\n${n.address || ""}`)}">
-      <div class="proj-row">${icon(n.kind === "host" ? "terminal" : "nodes")}<span class="proj-name">${esc(nodeLabel(n))}</span>
+    const shut = foldedNodes.has(n.id);
+    const head = `<div class="proj node-head ${n.status}" data-node-fold="${esc(n.id)}" tabindex="0" title="${esc(`${n.name}\n${n.address || ""}${n.status === "online" ? "" : `\n${t("manager.node.offline")}`}`)}">
+      <div class="proj-row"><button class="icon-btn fold" title="${esc(t(shut ? "manager.projectGroup.expand" : "manager.projectGroup.collapse"))}">${icon(shut ? "right" : "down")}</button>
+        ${icon(n.kind === "host" ? "terminal" : "nodes")}<span class="proj-name">${esc(n.name || n.id.slice(0, 8))}</span><span class="dot"></span>
         <span class="count">${projects.length}</span></div></div>`;
+    if (shut) return head;
+    if (!projects.length) return head + `<div class="side-empty">${esc(t("manager.nodes.noProjects"))}</div>`;
     return head + projects.map(p => `
       <div class="proj remote member ${selected === remoteKey(n.id, p.n) ? "active" : ""}" data-node="${esc(n.id)}" data-remote="${esc(p.n)}" tabindex="0" title="${esc(`${p.name}\n${p.path}\n${n.name}`)}">
         <div class="proj-row"><span class="pmono" style="--h:${hue(p.n)}">${esc(initials(p.name))}</span>
@@ -146,9 +143,17 @@ async function onRemoteSpaceClick(e, n, p) {
   toast(t("manager.node.toast.opened", { node: n.name }));
 }
 
-$("nodeTabs").addEventListener("click", e => {
-  const b = e.target.closest("[data-node-tab]");
-  if (b) showNodeTab(b.dataset.nodeTab);
+$("nodesList").addEventListener("click", e => {
+  const head = e.target.closest("[data-node-fold]");
+  if (head) return toggleNodeFold(head.dataset.nodeFold);
+  const card = e.target.closest(".proj[data-remote]");
+  if (card) selectProject(remoteKey(card.dataset.node, card.dataset.remote));
+});
+$("nodesList").addEventListener("keydown", e => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const head = e.target.closest("[data-node-fold]"), card = e.target.closest(".proj[data-remote]");
+  if (head) { e.preventDefault(); toggleNodeFold(head.dataset.nodeFold); }
+  else if (card) { e.preventDefault(); selectProject(remoteKey(card.dataset.node, card.dataset.remote)); }
 });
 window.manager.onNodesChanged(list => {
   setNodes(list);
