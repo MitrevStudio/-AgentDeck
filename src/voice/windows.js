@@ -274,6 +274,8 @@ function createVoiceWindows({ settings, store, queue, listDevices, onReread, onS
   handle("mesh:new-code", settingsOwner, () => mesh?.newCode() ?? null);
   handle("mesh:pair", settingsOwner, (address, code) => mesh?.pair(String(address ?? ""), String(code ?? "")) ?? { ok: false });
   handle("mesh:forget", settingsOwner, id => mesh?.forget(String(id ?? "")) ?? null);
+  handle("mesh:setup", settingsOwner, id => mesh?.setup(String(id ?? "")) ?? null);
+  handle("mesh:setup-action", settingsOwner, (id, action, args) => mesh?.setupAction(String(id ?? ""), String(action ?? ""), args) ?? { ok: false });
   mesh?.on(state => { if (alive(settingsWin)) settingsWin.webContents.send("mesh:changed", state); });
 
   // The page is recording a new combination while one of its hotkey fields has the focus.

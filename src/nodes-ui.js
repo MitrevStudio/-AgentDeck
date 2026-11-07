@@ -16,6 +16,7 @@ function setNodes(list) {
   });
 }
 const getNode = id => nodes.find(n => n.id === id) || null;
+const onlineNodes = () => nodes.filter(n => n.status === "online");
 const remoteKey = (id, n) => `${REMOTE_KEY}${id}:${n}`;
 function parseRemoteKey(key) {
   if (typeof key !== "string" || !key.startsWith(REMOTE_KEY)) return null;

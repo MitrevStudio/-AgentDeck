@@ -588,6 +588,8 @@ function openProjectMenu(btn, path) {
     { label: t("action.copyPath"), icon: "copy", run: async () => { await window.manager.copyText(path); toast(t("toast.copied", { path })); } },
     ...(p.group ? [] : [{ label: t(isPinned(p) ? "action.unpin" : "action.pin"), icon: "pin", run: () => pinProject(path) }]),
     ...getGroupMenuItems(path),
+    // Cloned on another computer, with a branch and an agent (clone-ui.js).
+    ...(onlineNodes().length ? [{ label: t("clone.menu"), icon: "nodes", items: onlineNodes().map(n => ({ label: n.name, icon: n.kind === "host" ? "terminal" : "window", run: () => openCloneDialog(path, n) })) }] : []),
     { label: t("action.rename"), icon: "pencil", run: async () => { ui.renaming = p.n; render(); } },
     { label: t("action.remove"), icon: "trash", run: () => runAction("remove", btn) }
   ]);

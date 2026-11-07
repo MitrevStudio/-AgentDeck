@@ -41,6 +41,9 @@ contextBridge.exposeInMainWorld("voiceSettings", {
     newCode: () => ipcRenderer.invoke("mesh:new-code"),
     pair: (address, code) => ipcRenderer.invoke("mesh:pair", address, code),
     forget: id => ipcRenderer.invoke("mesh:forget", id),
+    // A node's readiness (git, SSH key, agents) and its fixes: generateKey | addKnownHost {host} | setGitIdentity {name, email}.
+    setup: id => ipcRenderer.invoke("mesh:setup", id),
+    setupAction: (id, action, args) => ipcRenderer.invoke("mesh:setup-action", id, action, args),
     onChanged: cb => ipcRenderer.on("mesh:changed", (_e, state) => cb(state))
   }
 });

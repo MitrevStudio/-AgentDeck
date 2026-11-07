@@ -19,7 +19,9 @@ const str = (v, max) => {
 // host: host/index.js; env(): the environment for a terminal opened for a peer (a promise; with the proxy, on a
 // desktop); info(): what host.info adds (the node's own description comes from the links).
 function createServed({ host, env = async () => terminalEnv(process.env), info = () => ({}) }) {
-  const { terminals, launch, sessions, liveSessions, git } = host;
+  const { terminals, launch, sessions, liveSessions, git, setup } = host;
+  const path = require("node:path");
+  const fs = require("node:fs");
   let links = null;
   const watchers = new Map(); // terminal id -> Set of peer ids attached to it
   const peerTabs = peer => terminals.getTabs().filter(x => x.owner === peer);
@@ -54,7 +56,26 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
       return terminals.attach(tab.id);
     },
     "terminals.detach": (p, peer) => { watchers.get(str(p?.id, 64))?.delete(peer.id); return true; },
-    "terminals.close": (p, peer) => terminals.close(ownTerm(str(p?.id, 64), peer.id).id)
+    "terminals.close": (p, peer) => terminals.close(ownTerm(str(p?.id, 64), peer.id).id),
+    // A repository cloned here, a branch, an agent on a prompt: a terminal in the folder above `dir` (made when it
+    // is not there), and the folder listed as a project. -> the tab, with the folder.
+    "repo.clone": async (p, peer) => {
+      const dir = setup.expandHome(str(p?.dir, 4096));
+      const spec = launch.commandFor({ kind: "clone", url: p?.url, dir, branch: p?.branch, base: p?.base, agent: p?.agent || "", prompt: p?.prompt }, dir);
+      const parent = path.dirname(dir);
+      fs.mkdirSync(parent, { recursive: true });
+      const id = await launch.openTerminal(parent, spec.command, { ...spec.meta, owner: peer.id }, { ...(await env()), ...spec.env }, `peer ${peer.name} clone`, spec.argv);
+      const reg = sessions.registry.read();
+      reg.removed = reg.removed.filter(x => x !== sessions.norm(dir));
+      if (!reg.projects.some(x => sessions.norm(x.path) === sessions.norm(dir))) reg.projects.push({ name: path.basename(dir), path: dir });
+      sessions.registry.save(reg);
+      return { ...terminals.getTabs().find(x => x.id === id), dir };
+    },
+    "git.branches": p => setup.branches(str(p?.dir, 4096)),
+    "setup.status": () => setup.status(),
+    "setup.sshKey.generate": () => setup.generateKey(),
+    "setup.knownHosts.add": p => setup.addKnownHost(str(p?.host, 253)),
+    "setup.gitIdentity.set": p => setup.setGitIdentity({ name: p?.name, email: p?.email })
   };
   function api(method, params, peer) {
     if (!Object.hasOwn(METHODS, method)) throw new HostError("unknownMethod");

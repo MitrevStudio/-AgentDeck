@@ -81,6 +81,19 @@ main {
 .proj.remote .proj-name { color: var(--path-parent); }
 .agent.remote { cursor: default; }
 .se-row.remote { cursor: default; }
+/* Clone to… (clone-ui.js): a modal form. */
+.modal { width: min(560px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--line-2); border-radius: var(--r-xl); background: var(--panel); color: var(--text); box-shadow: var(--shadow-dialog); }
+.modal::backdrop { background: rgba(0, 0, 0, .45); }
+.modal-form { display: flex; flex-direction: column; gap: 10px; padding: 18px 20px 16px; }
+.modal-form h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; font-size: 15px; font-weight: 650; }
+.modal-form h2 .i { width: 16px; height: 16px; color: var(--accent); }
+.modal-form label { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; font-size: 12px; color: var(--muted); }
+.modal-form .input, .modal-form .select { height: 32px; }
+.modal-form textarea.input { height: auto; padding: 6px 10px; resize: vertical; font-family: var(--sans); }
+.modal-row { display: flex; gap: 10px; }
+.modal-hint { min-height: 16px; font-size: 12px; color: var(--faint); }
+.modal-hint.err { color: var(--danger); }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 .proj.grp .proj-row { gap: 6px; }
 .proj.grp .fold { width: 22px; height: 22px; padding: 0; margin-left: -4px; }
 .proj.grp .fold .i { width: 14px; height: 14px; }

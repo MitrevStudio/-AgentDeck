@@ -1,5 +1,5 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, Tray, Menu, globalShortcut } = require("electron");
-const { spawn } = require("node:child_process");
+const { spawn, execFile } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
@@ -299,6 +299,23 @@ function closeTerm(id) {
   remoteTermsChanged();
   return true;
 }
+// The project's repository cloned on another computer, in a pane here (mesh/serve.js repo.clone): {url, dir, branch,
+// base, agent, prompt}. The pane goes to the space of the new folder there.
+async function remoteClone(node, args) {
+  if (!links.online(node)) throw new HostError("offline");
+  const tab = await links.call(node, "repo.clone", args, { timeout: 60000 });
+  if (!isObj(tab) || !frames.UUID.test(tab.id)) throw new HostError("invalidData");
+  remoteTerms.set(tab.id, { id: tab.id, node, cwd: tab.cwd, title: tab.title, agent: tab.agent, sessionId: tab.sessionId, exited: false, createdAt: tab.createdAt });
+  await restoring;
+  workspace.addTab(`node:${node}:${normPath(tab.dir || tab.cwd)}`, tab.id);
+  showManager();
+  return tab.id;
+}
+// A local project's origin and current branch, for the clone dialog.
+function gitInfo(dir) {
+  const git = (...a) => new Promise(resolve => execFile("git", ["-C", dir, ...a], { windowsHide: true, timeout: 10000 }, (err, out) => resolve(err ? "" : String(out).trim())));
+  return Promise.all([git("remote", "get-url", "origin"), git("rev-parse", "--abbrev-ref", "HEAD")]).then(([url, branch]) => ({ url, branch }));
+}
 // A terminal on another computer, in a new tab of that project's space here: {cwd, kind, agent, sessionId, prompt}.
 async function remoteLaunch(node, args) {
   if (!links.online(node)) throw new HostError("offline");
@@ -343,8 +360,8 @@ links.on("link", async ({ node, up }) => {
     return nodesChanged();
   }
   try {
-    const [data, live, git, tabs] = await Promise.all([links.call(node, "sessions.list"), links.call(node, "live.list"), links.call(node, "git.status"), links.call(node, "terminals.list")]);
-    remote.set(node, { data, live, git });
+    const [data, live, git, tabs, info] = await Promise.all([links.call(node, "sessions.list"), links.call(node, "live.list"), links.call(node, "git.status"), links.call(node, "terminals.list"), links.call(node, "host.info").catch(() => null)]);
+    remote.set(node, { data, live, git, info });
     nodesChanged();
     reconcileRemote(node, Array.isArray(tabs) ? tabs.filter(x => isObj(x) && frames.UUID.test(x.id)) : []);
     // The output missed while it was away: attaching again brings the scrollback, of which the window writes only
@@ -376,6 +393,18 @@ const meshSettings = {
     }
   },
   forget: id => { links.forget(id); return meshSettings.state(); },
+  // The readiness of a node (git, SSH key, known hosts, git identity, agents) and the fixes: generateKey,
+  // addKnownHost {host}, setGitIdentity {name, email}.
+  setup: id => links.call(id, "setup.status"),
+  setupAction: async (id, action, args) => {
+    const method = { generateKey: "setup.sshKey.generate", addKnownHost: "setup.knownHosts.add", setGitIdentity: "setup.gitIdentity.set" }[action];
+    if (!method) throw new HostError("invalidData");
+    try {
+      return { ok: true, result: await links.call(id, method, isObj(args) ? args : {}) };
+    } catch (e) {
+      return { ok: false, error: translated(e).message };
+    }
+  },
   on: cb => { for (const ev of ["nodes", "self", "discovered"]) links.on(ev, () => cb(meshSettings.state())); }
 };
 function spawnDetached(file, args, opts) {
@@ -923,6 +952,8 @@ function registerIpc() {
   // The other computers (mesh/links.js) with what they show.
   handle("mesh:nodes", () => nodesView());
   handle("mesh:launch", (node, args) => remoteLaunch(text(node, 64), isObj(args) ? args : {}));
+  handle("mesh:clone", (node, args) => remoteClone(text(node, 64), isObj(args) ? args : {}));
+  handle("project:git-info", p => (isDir(p) ? gitInfo(p) : { url: "", branch: "" }));
   handle("centre:send", s => orchestrator.send(text(s, 20000)));
   // Every page, voice ones included, reads the language and theme from its preload before it renders.
   ipcMain.on("prefs:get", e => { e.returnValue = prefs.get(); });
