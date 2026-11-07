@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 contextBridge.exposeInMainWorld("manager", {
   getData: opts => ipcRenderer.invoke("app:get-data", opts),
   addProject: () => ipcRenderer.invoke("project:add"),
@@ -61,6 +61,10 @@ contextBridge.exposeInMainWorld("terminals", {
   move: (agent, id) => ipcRenderer.invoke("terminal:move", agent, id),
   input: (id, data) => ipcRenderer.send("terminal:input", id, data),
   resize: (id, cols, rows) => ipcRenderer.send("terminal:resize", id, cols, rows),
+  // A clipboard picture saved as a PNG (its path, "" when the clipboard holds text or no picture), and a dropped
+  // file's path.
+  saveClipboardImage: () => ipcRenderer.invoke("clipboard:image-file"),
+  getPathForFile: file => webUtils.getPathForFile(file),
   onData: cb => ipcRenderer.on("terminal:data", (_e, d) => cb(d)),
   onWorkspace: cb => ipcRenderer.on("workspace:changed", (_e, w) => cb(w))
 });

@@ -23,8 +23,9 @@ const PROTOCOL = 1;
 const PIPE_PREFIX = "\\\\.\\pipe\\agentdeck-term-";
 const FRAME_INPUT = 0, FRAME_RESIZE = 1, FRAME_KILL = 2, FRAME_SET_META = 3;
 const FRAME_OUTPUT = 0, FRAME_EXITED = 1, FRAME_HELLO = 2;
-// A DockPty just started makes its pipe first thing; one that answers no hello within HELLO_MS is not taken.
-const START_WAIT_MS = 5000, HELLO_MS = 5000;
+// A DockPty just started makes its pipe first thing; one that answers no hello within HELLO_MS is not taken. Starting
+// it gets longer: a busy machine or an antivirus scan of the freshly compiled exe can hold it for seconds.
+const START_WAIT_MS = 5000, HELLO_MS = 5000, LAUNCH_WAIT_MS = 20000;
 const TERMINAL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MODE_SWITCH = /\x1b\[\?([\d;]+)([hl])/g;
 
@@ -270,10 +271,12 @@ function createTerminals({ userDataDir, onData, onExit, onChange }) {
     // before the program starts.
     const pid = await new Promise((resolve, reject) => {
       execFile(exe, ["--pipe", id, String(DEFAULT_COLS), String(DEFAULT_ROWS), cwd, commandLine], {
-        cwd, env: { ...env, AGENTDECK_TERMINAL: id, AGENTDECK_PIPE_TOKEN: token }, windowsHide: true, timeout: START_WAIT_MS
+        cwd, env: { ...env, AGENTDECK_TERMINAL: id, AGENTDECK_PIPE_TOKEN: token }, windowsHide: true, timeout: LAUNCH_WAIT_MS
       }, (err, stdout) => {
         const started = Number(String(stdout).trim());
-        if (err || !Number.isInteger(started) || started <= 0) reject(new Error(`The terminal could not start: ${err?.message || "no process"}`));
+        // The reason, not execFile's message (the whole command line): DockPty's exit code says which step failed.
+        const why = !err ? "no process" : err.killed ? `no answer in ${LAUNCH_WAIT_MS / 1000} s` : `DockPty exit code ${err.code}`;
+        if (err || !Number.isInteger(started) || started <= 0) reject(new Error(`The terminal could not start: ${why}`));
         else resolve(started);
       });
     });
