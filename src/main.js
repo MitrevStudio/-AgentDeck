@@ -111,7 +111,7 @@ function getSavedWorkspace() {
     ...terminals.getTabs().filter(x => !x.owner).map(x => [x.id, { cwd: x.cwd, title: x.title, agent: x.agent, sessionId: x.sessionId }]),
     ...[...remoteTerms.values()].map(x => [x.id, { node: x.node, cwd: x.cwd, title: x.title, agent: x.agent, sessionId: x.sessionId }])
   ]);
-  return JSON.stringify({ version: 1, layout: workspace.exportState(), terms });
+  return JSON.stringify({ version: 1, layout: { ...workspace.exportState(), pathKeyVersion: 2 }, terms });
 }
 function scheduleWorkspaceSave() {
   if (!workspaceSaving || workspaceSaveTimer) return;
@@ -187,7 +187,7 @@ async function restoreWorkspace() {
         ids.set(old, await reopenTerminal(saved.terms[old], env));
       }
     }
-    if (saved) workspace.importState(saved.layout, old => ids.get(old) || "");
+    if (saved) workspace.importState(require("./shared/path-keys").migrateLayout(saved.layout, readRegistry().projects, keyOf), old => ids.get(old) || "");
     restored = true;
     const unplaced = terminals.getTabs().filter(x => !x.owner && !workspace.findTab(x.id));
     unplaced.forEach(x => workspace.addTab(getSpaceFor(x.cwd), x.id));
@@ -345,25 +345,14 @@ function nodesChanged() {
 // pinned, ordered and grouped like its own: added as they appear there, dropped as they go (or the computer is
 // forgotten); one removed here stays out. The name stays as first seen (it can be renamed here).
 function syncRemoteProjects() {
-  const data = readRegistry();
-  const wanted = new Map();
-  for (const n of links.nodes()) {
-    for (const p of remote.get(n.id)?.data?.registry?.projects || []) {
-      if (typeof p?.path === "string" && p.path) wanted.set(keyOf({ node: n.id, path: p.path }), { node: n.id, name: String(p.name || path.basename(p.path)), path: p.path });
-    }
-  }
-  const before = data.projects.length;
-  data.projects = data.projects.filter(p => !p.node || wanted.has(keyOf(p)));
-  let changed = data.projects.length !== before;
-  const have = new Set(data.projects.map(keyOf)), removed = new Set(data.removed);
-  for (const [key, p] of wanted) {
-    if (!have.has(key) && !removed.has(key)) { data.projects.push(p); changed = true; }
-  }
-  if (changed) {
-    unpinEmptyGroups(data);
-    saveRegistry(data);
+  try {
+    const data = readRegistry();
+    if (require("./mesh/projects").mergeProjects(data, links.nodes(), remote)) saveRegistry(data);
+  } catch (e) {
+    meshLog(`Project sync failed: ${e.message}`);
   }
 }
+
 links.on("nodes", nodesChanged);
 links.on("event", ({ node, name, data }) => {
   if (name === "terminals") return reconcileRemote(node, Array.isArray(data) ? data.filter(x => isObj(x) && frames.UUID.test(x.id)) : []);

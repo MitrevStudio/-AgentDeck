@@ -135,7 +135,7 @@ function createTerminals({ userDataDir, onData, onExit, onChange }) {
 
   // ---------- the registry: how to reach each running terminal again ----------
   const getEntryFile = id => path.join(registryDir, `${id}.json`);
-  const getMeta = x => ({ cwd: x.cwd, title: x.title, agent: x.agent, sessionId: x.sessionId, owner: x.owner });
+  const getMeta = x => ({ cwd: x.cwd, title: x.title, agent: x.agent, sessionId: x.sessionId, agentOnly: x.agentOnly, codexLog: x.codexLog, pid: x.pid, owner: x.owner });
   function saveEntry(terminal) {
     const entry = { id: terminal.id, pid: terminal.pid, token: terminal.token, createdAt: terminal.createdAt, meta: getMeta(terminal) };
     atomicFile.write(getEntryFile(terminal.id), JSON.stringify(entry)).catch(e => console.error("Saving a terminal failed:", e.message));
@@ -258,15 +258,15 @@ function createTerminals({ userDataDir, onData, onExit, onChange }) {
     }
   }
   // owner: the id of the peer that opened it (mesh), "" for this computer's own.
-  function createTerminal({ id, pid, token, cwd, title, agent = "", sessionId = "", owner = "", createdAt = Date.now() }) {
+  function createTerminal({ id, pid, token, cwd, title, agent = "", sessionId = "", agentOnly = false, codexLog = "", owner = "", createdAt = Date.now() }) {
     return {
-      id, pid, token, cwd, title, agent, sessionId, owner, createdAt, socket: null, chunks: [], chunkChars: 0, modes: new Map(), end: 0,
+      id, pid, token, cwd, title, agent, sessionId, agentOnly, codexLog, owner, createdAt, socket: null, chunks: [], chunkChars: 0, modes: new Map(), end: 0,
       exitCode: null, lost: false, closed: false, lastInputAt: 0, note: ""
     };
   }
 
   // commandLine: what runs in the pseudo console. env: already prepared by terminal-env.js.
-  async function open({ cwd, commandLine, title, agent = "", sessionId = "", owner = "", env = process.env }) {
+  async function open({ cwd, commandLine, title, agent = "", sessionId = "", agentOnly = false, codexLog = "", owner = "", env = process.env }) {
     const exe = await getBridge();
     const id = crypto.randomUUID(), token = crypto.randomBytes(16).toString("hex");
     // This DockPty only starts the real one - detached, inheriting none of AgentDeck's handles - and prints its process
@@ -283,7 +283,7 @@ function createTerminals({ userDataDir, onData, onExit, onChange }) {
         else resolve(started);
       });
     });
-    const terminal = createTerminal({ id, pid, token, cwd, title, agent, sessionId, owner });
+    const terminal = createTerminal({ id, pid, token, cwd, title, agent, sessionId, agentOnly, codexLog, owner });
     // In the list before attaching: output can come right behind the hello.
     terminals.set(id, terminal);
     try {
@@ -319,7 +319,7 @@ function createTerminals({ userDataDir, onData, onExit, onChange }) {
       const str = v => (typeof v === "string" ? v : "");
       const terminal = createTerminal({
         id: entry.id, pid: entry.pid, token: entry.token, cwd: meta.cwd, title: str(meta.title) || path.basename(meta.cwd),
-        agent: str(meta.agent), sessionId: str(meta.sessionId), owner: str(meta.owner), createdAt: Number(entry.createdAt) || Date.now()
+        agent: str(meta.agent), sessionId: str(meta.sessionId), agentOnly: meta.agentOnly === true, codexLog: str(meta.codexLog), owner: str(meta.owner), createdAt: Number(entry.createdAt) || Date.now()
       });
       terminals.set(entry.id, terminal);
       try {
@@ -429,7 +429,7 @@ function createTerminals({ userDataDir, onData, onExit, onChange }) {
   }
   function getTabs() {
     return [...terminals.values()].map(x => ({
-      id: x.id, cwd: x.cwd, title: x.title, agent: x.agent, sessionId: x.sessionId, owner: x.owner, exited: x.exitCode !== null, lost: x.lost, createdAt: x.createdAt, note: x.note
+      id: x.id, cwd: x.cwd, title: x.title, agent: x.agent, sessionId: x.sessionId, agentOnly: x.agentOnly, codexLog: x.codexLog, pid: x.pid, owner: x.owner, exited: x.exitCode !== null, lost: x.lost, createdAt: x.createdAt, note: x.note
     }));
   }
   // Running tabs not linked to a session yet, with their DockPty's process id.

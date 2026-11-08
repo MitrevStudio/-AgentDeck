@@ -52,4 +52,16 @@ const remove = file => serial(file, () => retry(() => fs.promises.unlink(file)).
 // Settles once everything queued so far has (shutdown).
 const flush = () => Promise.all([...tails.values()]);
 
-module.exports = { write, update, remove, flush, readText };
+// Synchronous registries need read-modify-write to finish before the next caller reads.
+function writeSync(file, contents) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const temp = `${file}.${require("node:crypto").randomUUID()}.tmp`;
+  try {
+    fs.writeFileSync(temp, contents, { encoding: "utf8", flag: "wx" });
+    fs.renameSync(temp, file);
+  } finally {
+    try { fs.unlinkSync(temp); } catch (e) { if (e.code !== "ENOENT") throw e; }
+  }
+}
+
+module.exports = { write, writeSync, update, remove, flush, readText };

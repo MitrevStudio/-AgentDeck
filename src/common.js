@@ -3,7 +3,11 @@
 const { t, tn } = I18N;
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
-const normPath = p => String(p || "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+const normPath = p => {
+  const raw = String(p || "").replace(/\\/g, "/");
+  const value = raw === "/" ? raw : raw.replace(/\/+$/, "");
+  return /^[a-z]:(?:\/|$)/i.test(value) || value.startsWith("//") ? value.toLowerCase() : value;
+};
 const AGENTS = ["Claude", "OpenCode", "Codex"];
 const VOICE_MODES = Object.freeze(["verbatim", "clean", "prompt"]); // the dictation modes, as voice/dictation-options.js has them
 

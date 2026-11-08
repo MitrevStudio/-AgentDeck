@@ -9,6 +9,7 @@ const { HostError } = require("../host/errors");
 const { terminalEnv } = require("../host/terminal-env");
 const frames = require("./frames");
 const { savePaste, MAX_BYTES } = require("../host/paste");
+const { localSnapshot } = require("./projects");
 
 const LIVE_MS = 3000;
 
@@ -52,7 +53,7 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
   }
   const METHODS = {
     "host.info": () => ({ ...(links?.self() || {}), code: undefined, platform: process.platform, home: host.home, agents: sessions.get()?.agents || [], ...info() }),
-    "sessions.list": () => sessions.data(),
+    "sessions.list": async () => localSnapshot(await sessions.data()),
     "live.list": () => liveSessions(),
     "git.status": () => git.get(),
     "usage.get": () => host.usage.get(),
@@ -117,7 +118,7 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
       // Each peer hears of its own terminals here.
       for (const n of links.nodes()) if (n.status === "online") links.notify(n.id, "terminals", tabs.filter(x => x.owner === n.id));
     });
-    host.on("data", data => links.notifyAll("data", data));
+    host.on("data", data => links.notifyAll("data", localSnapshot(data)));
     host.on("git", g => links.notifyAll("git", g));
     host.on("usage", u => links.notifyAll("usage", u));
     host.on("limits", l => links.notifyAll("limits", l));

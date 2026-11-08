@@ -9,7 +9,12 @@ const isObj = v => v !== null && typeof v === "object" && !Array.isArray(v);
 const flat = v => (typeof v === "string" ? v.replace(/\s+/g, " ").trim() : "");
 const fold = v => flat(v).toLocaleLowerCase();
 // A folder as a comparison key - the pages' normPath() (common.js) does the same.
-const normPath = p => String(p || "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+const normPath = p => {
+  const raw = String(p || "").replace(/\\/g, "/");
+  const value = raw === "/" ? raw : raw.replace(/\/+$/, "");
+  // Absolute paths carry their host's syntax, even when viewed from another OS.
+  return /^[a-z]:(?:\/|$)/i.test(value) || value.startsWith("//") ? value.toLowerCase() : value;
+};
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const pad = n => String(n).padStart(2, "0");
 const hhmm = s => { const d = new Date(Date.parse(s) || Date.now()); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };

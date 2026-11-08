@@ -98,7 +98,7 @@
     const where = n.address ? `${n.address}${n.port ? `:${n.port}` : ""}` : "";
     return `<div class="vs-node" data-id="${esc(n.id)}">${icon(n.kind === "host" ? "terminal" : "window")}
       <span class="who"><b title="${esc(n.id)}">${esc(n.name || n.id.slice(0, 8))}</b><small>${esc([kindOf(n), n.version ? `v${n.version}` : "", where].filter(Boolean).join(" · "))}</small></span>
-      ${tag}${action}</div>`;
+      ${n.error ? `<small role="status">${esc(n.error)}</small>` : ""}${tag}${action}</div>`;
   }
   function render() {
     if (!state) return;

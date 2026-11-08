@@ -10,9 +10,22 @@ const MAX_TEXT = 16 * 1024 * 1024;
 
 // ws: an open WebSocket (ws package). onRequest(method, params) -> the result (or throws); onEvent(name, data);
 // onBinary(buffer); onClose(code, reason).
-function createLink(ws, { onRequest = () => { throw new HostError("unknownMethod"); }, onEvent = () => {}, onBinary = () => {}, onClose = () => {} } = {}) {
+function createLink(ws, { onRequest = () => { throw new HostError("unknownMethod"); }, onEvent = () => {}, onBinary = () => {}, onClose = () => {}, heartbeatMs = 15000 } = {}) {
   const pending = new Map(); // id -> { resolve, reject, timer }
   let next = 1, closed = false;
+  let awaitingPong = false, closeReported = false;
+  ws.on("pong", () => { awaitingPong = false; });
+  const heartbeat = setInterval(() => {
+    if (!isOpen()) return;
+    if (awaitingPong) {
+      finish(1006, "heartbeat timeout");
+      ws.terminate();
+      return;
+    }
+    awaitingPong = true;
+    try { ws.ping(); } catch { finish(1006, "heartbeat failed"); ws.terminate(); }
+  }, heartbeatMs);
+  heartbeat.unref?.();
 
   const isOpen = () => !closed && ws.readyState === ws.OPEN;
   function send(obj) {
@@ -27,6 +40,7 @@ function createLink(ws, { onRequest = () => { throw new HostError("unknownMethod
     }
   }
   ws.on("message", (data, isBinary) => {
+    if (closed) return;
     if (isBinary) {
       onBinary(data);
       return;
@@ -55,11 +69,13 @@ function createLink(ws, { onRequest = () => { throw new HostError("unknownMethod
     }
     pending.clear();
   }
-  ws.on("close", (code, reason) => {
+  function finish(code, reason) {
     closed = true;
+    clearInterval(heartbeat);
     settleAll("closed");
-    onClose(code, reason?.toString() || "");
-  });
+    if (!closeReported) { closeReported = true; onClose(code, reason?.toString() || ""); }
+  }
+  ws.on("close", finish);
   ws.on("error", () => {}); // "close" follows
 
   function call(method, params = {}, { timeout = DEFAULT_TIMEOUT_MS } = {}) {
@@ -79,8 +95,7 @@ function createLink(ws, { onRequest = () => { throw new HostError("unknownMethod
     if (isOpen()) ws.send(buffer, { binary: true });
   }
   function close(code = 1000, reason = "") {
-    closed = true;
-    settleAll("closed");
+    finish(code, reason);
     try { ws.close(code, reason); } catch {}
   }
 

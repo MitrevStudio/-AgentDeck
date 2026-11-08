@@ -321,9 +321,9 @@ function createSessions({ dataDir, home, isExcluded = () => false, untitled = (a
   // Auto-index projects that can be reliably resolved from local session metadata.
   function indexProjects(found) {
     const reg = registry.read();
+    let changed = require("../shared/path-keys").migrateRemoved(reg, found.filter(s => s.cwd && path.isAbsolute(s.cwd)).map(s => ({ path: s.cwd })), p => norm(p.path));
     // Folders the user removed from the list stay out until added again.
     const removed = new Set(reg.removed);
-    let changed = false;
     for (const s of found) {
       if (!s.cwd || !path.isAbsolute(s.cwd) || removed.has(norm(s.cwd)) || isExcluded(s.cwd) || !fs.existsSync(s.cwd)) continue;
       try { if (!fs.statSync(s.cwd).isDirectory()) continue; } catch { continue; }

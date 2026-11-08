@@ -19,11 +19,11 @@ function getParentMap() {
 }
 function findTabPid(pid, parents, tabPids) {
   let current = pid;
-  for (let depth = 0; depth < MAX_DEPTH && parents.has(current); depth++) {
-    current = parents.get(current);
+  for (let depth = 0; depth < MAX_DEPTH && current; depth++) {
     if (tabPids.has(current)) {
       return current;
     }
+    current = parents.get(current);
   }
   return 0;
 }
@@ -88,4 +88,4 @@ function createTabLinks({ terminals, liveSessions }) {
   };
 }
 
-module.exports = { createTabLinks };
+module.exports = { createTabLinks, findTabPid };

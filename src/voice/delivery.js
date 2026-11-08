@@ -27,16 +27,20 @@ function deliver(text, target, { useClipboard = true } = {}) {
   return w.exclusive(async () => {
     const focused = await w.focus(target);
     // Ctrl is very often still held from Ctrl+Space; it would turn typing into chords and Ctrl+V into something else.
-    await w.waitModifiersUp();
+    const released = await w.waitModifiersUp();
     if (!focused) return toClipboard(text, "focus-failed");
+    if (!released) return toClipboard(text, "modifiers-held");
+    const stillFocused = () => w.isAlive(target) && w.foregroundHwnd() === BigInt(target.hwnd) && !w.anyModifierDown();
 
     if (useClipboard) {
       if (!(await w.writeClipboardText(text))) return failed("clipboard-blocked");
       await sleep(SETTLE_BEFORE_PASTE_MS);
+      if (!stillFocused()) return clipboardOnly("focus-changed");
       if (!w.sendCtrlV()) return clipboardOnly("paste-failed");
       await sleep(SETTLE_AFTER_PASTE_MS);
       return injected();
     }
+    if (!stillFocused()) return toClipboard(text, "focus-changed");
     if (w.typeUnicode(text)) return injected();
     return toClipboard(text, "typing-failed");
   });

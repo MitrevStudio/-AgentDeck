@@ -12,6 +12,7 @@ const crypto = require("node:crypto");
 const { execFile } = require("node:child_process");
 const promptLaunch = require("./prompt-launch");
 const { fail } = require("./errors");
+const { launchIdentity } = require("./codex-link");
 
 const { psQuote } = promptLaunch;
 const NEW_SESSION = { Claude: "claude", OpenCode: "opencode", Codex: "codex" };
@@ -38,6 +39,7 @@ function agentCommand(agent, id) {
 function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessions, log = () => {}, noLauncher = exe => `${exe} is not installed` }) {
   const PROMPTS_DIR = path.join(dataDir, "prompts");
   const HANDOFFS_DIR = path.join(dataDir, "handoffs");
+  const identity = agent => agent === "Codex" ? launchIdentity(dataDir) : { args: [] };
 
   function getSessionTitle(agent, id) {
     return sessions.get()?.sessions.find(s => s.agent === agent && s.id === id)?.title || `${agent} ${id.slice(0, 8)}`;
@@ -63,7 +65,8 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
   }
   function newCommand(agent, cwd) {
     checkAgent(agent);
-    return { command: "& " + psQuote(NEW_SESSION[agent]), argv: [NEW_SESSION[agent]], meta: { title: `${agent} · ${path.basename(cwd)}`, agent }, undo: none };
+    const link = identity(agent), argv = [NEW_SESSION[agent], ...link.args];
+    return { command: "& " + argv.map(psQuote).join(" "), argv, meta: { title: `${agent} · ${path.basename(cwd)}`, agent, codexLog: link.codexLog }, undo: none };
   }
   function resumeCommand(agent, id, cwd) {
     checkResumable(agent, id, cwd);
@@ -77,11 +80,13 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
     const text = String(prompt ?? "").trim();
     if (!text) fail("invalidData");
     const meta = { title: `${agent} · ${path.basename(cwd)}`, agent };
+    const link = identity(agent);
+    meta.codexLog = link.codexLog;
     // A pseudo terminal takes the prompt as an argument as it is; only PowerShell needs the file.
-    if (process.platform !== "win32") return { command: null, argv: [NEW_SESSION[agent], ...(agent === "OpenCode" ? ["--prompt"] : []), text], meta, undo: none };
+    if (process.platform !== "win32") return { command: null, argv: [NEW_SESSION[agent], ...link.args, ...(agent === "OpenCode" ? ["--prompt"] : []), text], meta, undo: none };
     const file = promptLaunch.writePrompt(PROMPTS_DIR, text);
     return {
-      command: promptLaunch.command(agent, NEW_SESSION[agent], file, noLauncher(NEW_SESSION[agent])), argv: null, meta,
+      command: promptLaunch.command(agent, NEW_SESSION[agent], file, noLauncher(NEW_SESSION[agent]), link.args), argv: null, meta,
       undo: () => { promptLaunch.remove(file); promptLaunch.sweep(PROMPTS_DIR); }
     };
   }
@@ -105,22 +110,25 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
     const text = String(prompt ?? "").trim();
     const env = { AGENTDECK_URL: u, AGENTDECK_DIR: d, AGENTDECK_BRANCH: b, AGENTDECK_BASE: bs, AGENTDECK_PROMPT: text };
     const exe = agent ? NEW_SESSION[agent] : "";
-    const promptArgs = agent === "OpenCode" ? ["--prompt"] : [];
+    const link = identity(agent);
+    const promptArgs = agent === "OpenCode" ? ["--prompt"] : link.args;
     // PowerShell: the clone, the branch, then the agent with the prompt as one argument (an empty one is left out).
     const ps = [
       "git clone --progress $env:AGENTDECK_URL $env:AGENTDECK_DIR",
       "if (-not $?) { exit 1 }",
-      "Set-Location $env:AGENTDECK_DIR",
+      "Set-Location -LiteralPath $env:AGENTDECK_DIR -ErrorAction Stop",
       b ? "git switch $env:AGENTDECK_BRANCH 2>$null; if (-not $?) { if ($env:AGENTDECK_BASE) { git switch -c $env:AGENTDECK_BRANCH $env:AGENTDECK_BASE } else { git switch -c $env:AGENTDECK_BRANCH } }" : "",
+      b ? "if ($LASTEXITCODE -ne 0) { exit 1 }; $actualBranch = git branch --show-current; if ($LASTEXITCODE -ne 0 -or $actualBranch -cne $env:AGENTDECK_BRANCH) { exit 1 }" : "",
       exe ? `& ${psQuote(exe)} ${promptArgs.map(psQuote).join(" ")} $(if ($env:AGENTDECK_PROMPT) { $env:AGENTDECK_PROMPT })` : ""
     ].filter(Boolean).join("; ");
     const sh = [
       'git clone --progress "$AGENTDECK_URL" "$AGENTDECK_DIR" || exit 1',
-      'cd "$AGENTDECK_DIR"',
+      'cd -- "$AGENTDECK_DIR" || exit 1',
       b ? 'git switch "$AGENTDECK_BRANCH" 2>/dev/null || git switch -c "$AGENTDECK_BRANCH" ${AGENTDECK_BASE:+"$AGENTDECK_BASE"}' : "",
-      exe ? `exec ${exe} ${promptArgs.join(" ")} \${AGENTDECK_PROMPT:+"$AGENTDECK_PROMPT"}` : "exec bash -l"
+      b ? 'test "$?" -eq 0 || exit 1; actual_branch=$(git branch --show-current) || exit 1; test "$actual_branch" = "$AGENTDECK_BRANCH" || exit 1' : "",
+      exe ? `exec ${exe} ${promptArgs.map(a => "'" + a.replace(/'/g, "'\\''") + "'").join(" ")} \${AGENTDECK_PROMPT:+"$AGENTDECK_PROMPT"}` : "exec bash -l"
     ].filter(Boolean).join("; ");
-    return { command: ps, argv: ["bash", "-lc", sh], env, meta: { title: `${agent || "git"} · ${path.basename(d)}`, agent: agent || "" }, undo: none };
+    return { command: ps, argv: ["bash", "-lc", sh], env, meta: { title: `${agent || "git"} · ${path.basename(d)}`, agent: agent || "", codexLog: link.codexLog }, undo: none };
   }
   // The command for a launch described as data (what a peer or the command centre asks for):
   // kind "shell" | "new" | "resume" | "prompt" | "handoff" | "clone".
@@ -143,8 +151,9 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
   async function openTerminal(cwd, command, meta, env, how, argv = null) {
     if (!isDir(cwd)) fail("folderMissing");
     const encoded = command ? Buffer.from(command, "utf16le").toString("base64") : "";
-    const commandLine = command ? `powershell.exe -NoLogo -NoExit -EncodedCommand ${encoded}` : "powershell.exe -NoLogo";
-    const id = await terminals.open({ cwd, commandLine, argv, title: meta.title || path.basename(cwd), agent: meta.agent, sessionId: meta.sessionId, owner: meta.owner, env });
+    // Agent terminals must end with their command, never fall back to a shell that could consume a queued prompt.
+    const commandLine = command ? `powershell.exe -NoLogo ${meta.agent ? "" : "-NoExit "}-EncodedCommand ${encoded}` : "powershell.exe -NoLogo";
+    const id = await terminals.open({ cwd, commandLine, argv, title: meta.title || path.basename(cwd), agent: meta.agent, agentOnly: Boolean(meta.agent), sessionId: meta.sessionId, codexLog: meta.codexLog, owner: meta.owner, env });
     log(`agentdeck ${how}`, `cwd="${cwd}" cmd=${command ? `"${command.slice(0, 120)}"` : "-"}`);
     return id;
   }

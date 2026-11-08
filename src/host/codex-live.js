@@ -2,6 +2,7 @@
 // Read appended complete lines only. Never infer completion from a quiet reasoning period.
 const fs = require('node:fs');
 const { lineChunks } = require('./file-chunks');
+const { readIdentity } = require('./codex-link');
 const RECENT_MS = 10 * 60 * 1000;
 
 function applyEvent(state, entry) {
@@ -13,11 +14,16 @@ function applyEvent(state, entry) {
   state.statusAt = Date.parse(entry.timestamp) || 0;
 }
 
-function createCodexLive({ sessions, tabs = () => [], now = Date.now }) {
+function createCodexLive({ sessions, tabs = () => [], now = Date.now, link = () => {}, identify = readIdentity }) {
   const cache = new Map();
   let flight = null;
   async function poll() {
-    const activeTabs = tabs().filter(t => t.agent === 'Codex' && t.sessionId && !t.exited);
+    const activeTabs = tabs().filter(t => t.agent === 'Codex' && !t.exited);
+    for (const tab of activeTabs) {
+      if (tab.sessionId || !tab.codexLog) continue;
+      const id = await identify(tab.codexLog);
+      if (id) { tab.sessionId = id; link(tab.id, 'Codex', id); }
+    }
     const byId = new Map(activeTabs.map(t => [t.sessionId, t]));
     const result = [], retained = new Set();
     for (const s of sessions().filter(s => s.agent === 'Codex' && s.file)) {
@@ -49,7 +55,7 @@ function createCodexLive({ sessions, tabs = () => [], now = Date.now }) {
       if (!state.status || (!tab && state.status !== 'busy')) continue;
       result.push({ agent: 'Codex', id: s.id, cwd: s.cwd || '', pid: tab?.pid || 0,
         status: state.status, statusAt: state.statusAt, activityAt: stat.mtimeMs,
-        startedAt: tab?.startedAt || state.statusAt, subagents: [] });
+        startedAt: tab?.createdAt || state.statusAt, subagents: [] });
     }
     for (const file of cache.keys()) if (!retained.has(file)) cache.delete(file);
     return result;

@@ -59,6 +59,12 @@ function stepTermFont(step) {
 }
 
 // ---------- terminals ----------
+// Agent CLIs can interpret backslashes as escapes when recognizing an attachment path.
+// Windows accepts forward slashes too. Leave POSIX paths alone: a backslash can be part of a filename there.
+function terminalFilePath(file) {
+  const value = /^(?:[a-z]:[\\/]|\\\\)/i.test(file) ? file.replace(/\\/g, "/") : file;
+  return /\s/.test(value) ? `"${value}"` : value;
+}
 // Output that arrived before the scrollback did: only what the scrollback does not hold yet is written.
 function writeAfter(view, data, end) {
   const start = end - data.length;
@@ -90,17 +96,16 @@ function createTermView(id) {
     if (!files.length) return;
     e.preventDefault();
     term.focus();
-    const quote = p => (/\s/.test(p) ? `"${p}"` : p);
     // A terminal on another computer cannot read a path here: the files go there first (up to 10 MB each).
     if (getTerminal(id)?.node) {
       Promise.all(files.map(async f => {
         if (f.size > 10 * 1024 * 1024) { toast(t("term.uploadTooBig", { name: f.name }), true); return ""; }
         return window.terminals.uploadFile(id, f.name, await f.arrayBuffer());
-      })).then(paths => { const list = paths.filter(Boolean); if (list.length) term.paste(list.map(quote).join(" ")); }, err => toast(err.message, true));
+      })).then(paths => { const list = paths.filter(Boolean); if (list.length) term.paste(list.map(terminalFilePath).join(" ")); }, err => toast(err.message, true));
       return;
     }
     const paths = files.map(f => window.terminals.getPathForFile(f)).filter(Boolean);
-    if (paths.length) term.paste(paths.map(quote).join(" "));
+    if (paths.length) term.paste(paths.map(terminalFilePath).join(" "));
   });
   // Clicking into a terminal makes its pane the focused one.
   term.textarea?.addEventListener("focus", () => { if (getShownTab()?.focus !== id) runWorkspace("focus", { term: id }); });
@@ -196,7 +201,7 @@ function handleTermKey(term, e, id) {
   }
   // The browser pastes; xterm picks the text up from the paste event. A picture has no text: its saved file's path goes in.
   if (e.code !== "KeyV") return true;
-  window.terminals.saveClipboardImage(id).then(file => { if (file) term.paste(file); }, err => toast(err.message, true));
+  window.terminals.saveClipboardImage(id).then(file => { if (file) term.paste(terminalFilePath(file)); }, err => toast(err.message, true));
   return false;
 }
 // The same keys when the keyboard is elsewhere in the window (not typing in a field).

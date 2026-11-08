@@ -69,7 +69,7 @@ function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () 
     onExit: (id, code, lost) => host.emit("terminal:exit", { id, code, lost }),
     onChange: tabs => host.emit("terminals", tabs)
   });
-  const codexLive = createCodexLive({ sessions: () => sessions.get()?.sessions || [], tabs: () => terminals.getTabs() });
+  const codexLive = createCodexLive({ sessions: () => sessions.get()?.sessions || [], tabs: () => terminals.getTabs(), link: terminals.link });
   const liveSessions = async () => (await Promise.all([claudeLiveSessions(), codexLive()])).flat();
   const launch = createLaunch({ dataDir, terminals, sessions, liveSessions, findTranscript, log, noLauncher });
   const tabLinks = createTabLinks({ terminals, liveSessions });

@@ -28,6 +28,7 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
   const out = new EventEmitter();
   const links = new Map();   // peer id -> { link, initiatedHere, info, address, port }
   const retries = new Map(); // peer id -> { timer, delay }
+  const incompatible = new Map(); // peer id -> explicit update-required reason
   let identity = null, peers = null, server = null, discovery = null, running = false;
 
   const self = () => (!identity ? null : { id: identity.id, name: identity.settings.name, kind, version, protocol: PROTOCOL, port: server?.port() || identity.settings.port,
@@ -40,7 +41,7 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
     return peers.list().map(p => {
       const l = links.get(p.id);
       return { id: p.id, name: l?.info?.name || p.name, kind: l?.info?.kind || p.kind, version: l?.info?.version || "", address: l?.address || p.address, port: l?.port || p.port,
-        status: l ? "online" : "offline", lastSeen: l ? Date.now() : p.lastSeen, pairedAt: p.pairedAt };
+        status: l ? "online" : "offline", error: incompatible.get(p.id) || "", lastSeen: l ? Date.now() : p.lastSeen, pairedAt: p.pairedAt };
     });
   }
   const changed = () => out.emit("nodes", nodes());
@@ -60,15 +61,27 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
       onRequest: (method, params) => {
         // A node this one trusts that asks to pair again (it forgot this one): no code needed, it is the same node.
         if (method === "pair") return { ok: true, id: identity.id, name: identity.settings.name, kind, version, already: true };
+        if (!info) throw new HostError("handshake", "The protocol handshake has not completed.");
         return api(method, params, { id, name: info?.name || peer.name, kind: info?.kind || peer.kind });
       },
-      onBinary: data => out.emit("binary", { node: id, data }),
+      onBinary: data => { if (info) out.emit("binary", { node: id, data }); },
       onEvent: (name, data) => {
         if (name === "hello") {
-          info = data && typeof data === "object" ? data : {};
+          if (data?.protocol !== PROTOCOL || data?.id !== id) {
+            info = null;
+            incompatible.set(id, "Incompatible mesh protocol. Update AgentDeck on both computers.");
+            clearRetry(id);
+            settleHello(false);
+            changed();
+            link.close(1002, "incompatible protocol");
+            return;
+          }
+          info = data;
+          incompatible.delete(id);
           settleHello(true);
           return;
         }
+        if (!info) return;
         // The other side forgot this node: this one forgets it too, so neither keeps calling.
         if (name === "forget") {
           forget(id, { tell: false });
@@ -77,6 +90,7 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
         out.emit("event", { node: id, name, data });
       },
       onClose: () => {
+        settleHello(false);
         if (links.get(id)?.link === link) {
           links.delete(id);
           log(`link down: ${peer.name || id.slice(0, 8)}`);
@@ -87,8 +101,10 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
       }
     });
     link.notify("hello", hello());
-    const greeted = await Promise.race([helloSeen, new Promise(r => setTimeout(() => r(false), HELLO_TIMEOUT_MS))]);
-    if (!greeted) {
+    const helloTimer = setTimeout(() => settleHello(false), HELLO_TIMEOUT_MS);
+    const greeted = await helloSeen;
+    clearTimeout(helloTimer);
+    if (!greeted || !link.isOpen()) {
       link.close(1002, "no hello");
       return null;
     }
@@ -120,9 +136,9 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
     retries.delete(id);
   }
   function scheduleConnect(id, delay) {
-    if (!running || links.has(id) || !peers.get(id)) return;
+    if (!running || links.has(id) || !peers.get(id) || incompatible.has(id)) return;
     clearRetry(id);
-    const timer = setTimeout(() => { retries.delete(id); connectTo(id).catch(() => {}); }, delay);
+    const timer = setTimeout(() => { connectTo(id).catch(() => {}); }, delay);
     timer.unref?.();
     retries.set(id, { timer, delay });
   }
@@ -174,8 +190,8 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
         peers.regenerate();
         out.emit("self", self());
         log(`paired with ${p.name || id.slice(0, 8)} (it called)`);
-        // The answer goes first; the hello exchange follows on the same socket.
-        setImmediate(() => adopt(ws, id, { initiatedHere: false, address, port: Number(p.port) || 0 }).then(changed).catch(e => console.error("Adopting a link failed:", e.message)));
+        // Pairing has its own parser. Reconnect for hello rather than attaching two parsers/heartbeats to one socket.
+        setImmediate(() => { link.close(1000, "paired"); changed(); });
         return { ok: true, id: identity.id, name: identity.settings.name, kind, version };
       },
       onClose: () => clearTimeout(timer)
@@ -209,6 +225,7 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
   }
   // tell: the other side hears of it (and forgets this node) before the link closes.
   function forget(id, { tell = true } = {}) {
+    incompatible.delete(id);
     const l = links.get(id);
     links.delete(id);
     if (l && tell) l.link.notify("forget", {});

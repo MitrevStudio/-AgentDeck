@@ -424,7 +424,7 @@ function createHotkeys(browserWindow) {
 
 module.exports = {
   foreground, foregroundHwnd, isAlive, focus, className, hwndOf, isTerminalClass, mutexExists,
-  waitModifiersUp, sendCtrlV, sendCopy, typeUnicode, clipboardSeq,
+  waitModifiersUp, anyModifierDown, sendCtrlV, sendCopy, typeUnicode, clipboardSeq,
   withClipboard, listFormats, readFormat, writeFormat, emptyClipboard, decodeText, encodeText,
   readClipboardText, writeClipboardText, watchClipboard, CF,
   createHotkeys, parseAccelerator, keyHeld, exclusive, waitUntil

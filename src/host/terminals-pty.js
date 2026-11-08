@@ -17,7 +17,7 @@ function createTerminals({ onData, onExit, onChange }) {
 
   function getTabs() {
     return [...terminals.values()].map(x => ({
-      id: x.id, cwd: x.cwd, title: x.title, agent: x.agent, sessionId: x.sessionId, owner: x.owner, exited: x.exitCode !== null, lost: false, createdAt: x.createdAt, note: x.note
+      id: x.id, cwd: x.cwd, title: x.title, agent: x.agent, sessionId: x.sessionId, agentOnly: x.agentOnly, codexLog: x.codexLog, pid: x.pid, owner: x.owner, exited: x.exitCode !== null, lost: false, createdAt: x.createdAt, note: x.note
     }));
   }
   function appendScrollback(terminal, data) {
@@ -30,11 +30,11 @@ function createTerminals({ onData, onExit, onChange }) {
     }
   }
   // argv: the program and its arguments (null: a login shell). env: already prepared by terminal-env.js.
-  async function open({ cwd, argv = null, title, agent = "", sessionId = "", owner = "", env = process.env }) {
+  async function open({ cwd, argv = null, title, agent = "", sessionId = "", agentOnly = false, codexLog = "", owner = "", env = process.env }) {
     const [file, ...args] = argv?.length ? argv : [shell(), "-l"];
     const id = crypto.randomUUID();
     const proc = getPty().spawn(file, args, { name: "xterm-256color", cols: DEFAULT_COLS, rows: DEFAULT_ROWS, cwd, env: { ...env, AGENTDECK_TERMINAL: id } });
-    const terminal = { id, proc, pid: proc.pid, cwd, title, agent, sessionId, owner, createdAt: Date.now(), chunks: [], chunkChars: 0, end: 0, exitCode: null, closed: false, lastInputAt: 0, note: "" };
+    const terminal = { id, proc, pid: proc.pid, cwd, title, agent, sessionId, agentOnly, codexLog, owner, createdAt: Date.now(), chunks: [], chunkChars: 0, end: 0, exitCode: null, closed: false, lastInputAt: 0, note: "" };
     terminals.set(id, terminal);
     proc.onData(data => {
       terminal.end += data.length;

@@ -66,13 +66,13 @@ function writePrompt(dir, text) {
 // The PowerShell command (no ";": wt.exe would split there) that starts `exe` (the agent's command name) on the
 // prompt in `file`, and deletes the file once read - whether or not a launcher is found. `missing` is said instead
 // when no usable launcher is on PATH.
-function command(agent, exe, file, missing) {
+function command(agent, exe, file, missing, extraArgs = []) {
   if (!Object.hasOwn(PROMPT_ARGS, agent)) throw new Error(`no prompt syntax for ${agent}`);
   const f = psQuote(file);
   const read = `Get-Content -Raw -Encoding UTF8 -LiteralPath ${f} | ForEach-Object -Process { $_ } -End { Remove-Item -LiteralPath ${f} -Force -ErrorAction Ignore }`;
   const find = `Get-Command -Name ${psQuote(exe)} -CommandType ExternalScript,Application -All -ErrorAction Ignore`
     + ` | Where-Object { $_.Source -match '\\.(ps1|exe|com)$' } | Select-Object -First 1`;
-  const run = ["&", "$c", ...PROMPT_ARGS[agent].map(psQuote), "$p"].join(" ");
+  const run = ["&", "$c", ...extraArgs.map(psQuote), ...PROMPT_ARGS[agent].map(psQuote), "$p"].join(" ");
   return `if (($p = (${read})) -and ($c = (${find}))) { ${run} } else { Write-Warning ${psQuote(missing)} }`;
 }
 

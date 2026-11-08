@@ -115,6 +115,7 @@ function createOrchestrator(deps) {
     fs.writeFileSync(claudeMd, instructions());
   }
   function stop() {
+    answerWatch = null;
     server?.close();
     server = null;
   }
@@ -200,9 +201,12 @@ function createOrchestrator(deps) {
     if (file) return { agent: "Claude", id, cwd: "", file };
     throw new Error(`No session ${id}.`);
   }
-  function typeLine(tabId, text) {
+  async function typeLine(tabId, text) {
+    if (!await isReady(tabId)) throw new Error("The agent is not ready; nothing was sent.");
     deps.terminals.type(tabId, text);
-    setTimeout(() => deps.terminals.type(tabId, "\r"), ENTER_DELAY_MS);
+    await sleep(ENTER_DELAY_MS);
+    if (!await isReady(tabId)) throw new Error("The agent stopped before the message could be submitted.");
+    deps.terminals.type(tabId, "\r");
   }
 
   async function listProjects() {
@@ -248,7 +252,7 @@ function createOrchestrator(deps) {
     if (!line) throw new Error("text is required");
     const tab = tabOf(id);
     if (!tab) throw new Error("That session is not open in an AgentDeck tab, so nothing can be typed into it. Running elsewhere: ask the user to move it here; stopped: start_session with a new prompt.");
-    typeLine(tab.id, line);
+    await typeLine(tab.id, line);
     return { sent: true, sessionId: id, note: "wait_for_session brings the answer." };
   }
   async function readSession({ session, count }) {
@@ -343,10 +347,11 @@ function createOrchestrator(deps) {
   }
   async function isReady(tabId) {
     const tab = deps.terminals.getTabs().find(x => x.id === tabId);
-    if (!tab || tab.exited) return true; // nothing to wait for
+    if (!tab || tab.exited) return false;
+    if (process.platform === "win32" && !tab.agentOnly) throw new Error("Reopen this agent terminal before sending automatically; it was started by an older version.");
     if (!tab.sessionId) return false;
     const l = (await deps.liveSessions()).find(x => x.id === tab.sessionId);
-    return Boolean(l && l.status !== "running");
+    return Boolean(l && ["idle", "waiting"].includes(l.status));
   }
   // What the user said or typed goes into the terminal (started first when it does not run), and the window shows
   // it. Its answer is announced when the window is not in front.
@@ -356,8 +361,8 @@ function createOrchestrator(deps) {
     const started = !getTab();
     const id = await open();
     deps.showTab(id);
-    await waitFor(() => isReady(id), READY_WAIT_MS);
-    typeLine(id, line);
+    if (!await waitFor(() => isReady(id), READY_WAIT_MS)) throw new Error("The command centre did not become ready. Check its terminal and try again.");
+    await typeLine(id, line);
     watchAnswer(id);
     return { ok: true, started };
   }
