@@ -51,6 +51,7 @@ function render() {
   renderCentre();
   renderProjects(v);
   renderAgents(v);
+  window.gitPanel?.render();
   renderTitle(v);
   if (!getShownTab()) renderSpaceEmpty($("spaceEmpty"), ws.activeSpace);
   renderFocusInfo();
@@ -107,11 +108,12 @@ const buildNameHtml = (x, v, label) => (ui.renaming === x.n
 // One line: the project's mark, name, branch, running sessions and count; its folder and last activity in the tooltip.
 // A terminal and Explorer show while the row is pointed at or chosen, the rest is in its menu.
 function buildProjectHtml(p, count, v) {
+  const offline = Boolean(p.node && getNode(p.node)?.status !== "online");
   const member = Boolean(p.group);
   const node = p.node ? getNode(p.node) : null;
   const tip = `${p.name}\n${p.path}${node ? `\n${nodeLabel(node)}` : ""}\n${p.last ? ago(p.last) : t("manager.project.noSessions")}`;
   return `
-    <div class="proj ${member ? "member" : ""} ${ui.selected === p.n ? "active" : ""}" data-path="${esc(refOf(p))}" ${p.node ? `data-node="${esc(p.node)}"` : ""} tabindex="0" ${getDraggableAttr(v, p.n)}>
+    <div class="proj ${offline ? "offline" : ""} ${member ? "member" : ""} ${ui.selected === p.n ? "active" : ""}" data-path="${esc(refOf(p))}" ${p.node ? `data-node="${esc(p.node)}"` : ""} tabindex="0" ${getDraggableAttr(v, p.n)}>
       <div class="proj-row" title="${esc(tip)}"><span class="pmono" style="--h:${hue(p.n)}">${esc(initials(p.name))}</span>
         ${buildNameHtml(p, v, "manager.project.newName")}
         ${isPinned(p) ? buildPinMark() : ""}
@@ -119,7 +121,7 @@ function buildProjectHtml(p, count, v) {
         ${getSpaceTabsHtml(p.n)}
       </div>
       <span class="proj-tools">
-        <button class="icon-btn" data-action="terminal" title="${esc(t("action.terminalHere"))}">${icon("terminal")}</button>
+        <button class="icon-btn" data-action="terminal" ${offline ? "disabled" : ""} title="${esc(t("action.terminalHere"))}">${icon("terminal")}</button>
         ${p.node ? "" : `<button class="icon-btn" data-action="explorer" title="${esc(t("action.explorerTitle"))}">${icon("open")}</button>`}
         <button class="icon-btn" data-action="project-menu" title="${esc(t("manager.project.more"))}" aria-haspopup="menu">${icon("more")}</button>
       </span>
@@ -492,7 +494,7 @@ async function leaveGroup(path) {
   document.querySelector(`.proj.grp[data-group="${CSS.escape(id)}"]`)?.focus();
 }
 async function toggleOrder() {
-  applyRegistry(raw.registry.order === "custom" ? await window.manager.sortProjectsByActivity() : await window.manager.arrangeProjects(order));
+  applyRegistry(raw.registry.order === "custom" ? await window.manager.sortProjectsByActivity() : await window.manager.restoreProjectOrder());
 }
 
 async function runAction(action, btn) {

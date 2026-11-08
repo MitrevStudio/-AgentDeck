@@ -374,7 +374,8 @@ function createSessions({ dataDir, home, isExcluded = () => false, untitled = (a
     scanningFull = full;
     scanning = scanSessions({ openCode: full }).then(async sessions => {
       // Scan first: it auto-indexes projects into the registry, which must be read afterwards.
-      updateCache(sessions, registry.read(), await agents, full);
+      const ready = await agents;
+      updateCache(sessions, registry.read(), ready, full);
       onScanned(sessions, full);
       return cache;
     }).finally(() => {

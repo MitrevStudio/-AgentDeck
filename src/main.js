@@ -225,7 +225,10 @@ const { keyLabel, isObj } = require("./shared/util");
 
 const { norm, findOnPath } = sessions;
 const readRegistry = () => sessions.registry.read();
-const saveRegistry = data => sessions.registry.save(data);
+const saveRegistry = data => {
+  served.layout.capture(readRegistry(), data);
+  return sessions.registry.save(data);
+};
 // The command centre (orchestrator.js): a Claude Code session of AgentDeck's own, in a space of its own, that does
 // what the user says or types with the tools AgentDeck serves it.
 const orchestrator = createOrchestrator({
@@ -335,7 +338,7 @@ served.attach(links);
 // What the other computers show - their last list, live status and git - kept per node and pushed to the manager
 // window with the nodes themselves ("mesh:nodes").
 const remote = new Map(); // node id -> { data, live, git }
-const nodesView = () => links.nodes().map(n => ({ ...n, ...(remote.get(n.id) || {}) }));
+const nodesView = () => links.nodes().filter(n => !served.layout.isRemoved(n.id)).map(n => ({ ...n, ...(remote.get(n.id) || {}) }));
 let nodesTimer = null;
 function nodesChanged() {
   if (nodesTimer) return;
@@ -347,13 +350,17 @@ function nodesChanged() {
 function syncRemoteProjects() {
   try {
     const data = readRegistry();
-    if (require("./mesh/projects").mergeProjects(data, links.nodes(), remote)) saveRegistry(data);
+    const before = JSON.stringify(data);
+    require("./mesh/projects").mergeProjects(data, links.nodes(), remote);
+    served.layout.apply(data);
+    if (JSON.stringify(data) !== before) sessions.registry.save(data);
   } catch (e) {
     meshLog(`Project sync failed: ${e.message}`);
   }
 }
 
 links.on("nodes", nodesChanged);
+links.on("layout", nodesChanged);
 links.on("event", ({ node, name, data }) => {
   if (name === "terminals") return reconcileRemote(node, Array.isArray(data) ? data.filter(x => isObj(x) && frames.UUID.test(x.id)) : []);
   if (!["data", "live", "git", "usage", "limits", "resources"].includes(name)) return;
@@ -400,12 +407,13 @@ const meshSettings = {
     if (!m) return { ok: false, error: t("errors.badAddress") };
     try {
       const r = await links.pair(m[1].replace(/^\[|\]$/g, ""), Number(m[2]) || DEFAULT_PORT, code);
+      served.layout.restoreNode(r.id);
       return { ok: true, node: r };
     } catch (e) {
       return { ok: false, error: translated(e).message };
     }
   },
-  forget: id => { links.forget(id); return meshSettings.state(); },
+  forget: id => { served.layout.removeNode(id); links.forget(id); return meshSettings.state(); },
   // The readiness of a node (git, SSH key, known hosts, git identity, agents) and the fixes: generateKey,
   // addKnownHost {host}, setGitIdentity {name, email}.
   setup: id => links.call(id, "setup.status"),
@@ -820,6 +828,11 @@ function registerIpc() {
     unpinEmptyGroups(data);
     return saveRegistry(data);
   });
+  handle("project:restore-order", () => {
+    const data = readRegistry();
+    data.order = "custom";
+    return saveRegistry(data);
+  });
   handle("project:sort-by-activity", () => {
     const data = readRegistry();
     data.order = "activity";
@@ -948,8 +961,16 @@ function registerIpc() {
     return true;
   });
   // Branch and changes of the projects' and sessions' folders (git-status.js); a refresh is answered by "git:changed".
+  handle("git:diff", (node, root, file) => {
+    const params = { root: text(root), file: text(file) };
+    if (!node) return gitStatus.diff(params);
+    return links.call(text(node, 64), "git.diff", params);
+  });
   handle("git:get", () => gitStatus.get());
-  handle("git:refresh", () => { gitStatus.refresh().catch(err => console.error("Git status failed:", err.message)); return true; });
+  handle("git:refresh", async force => {
+    await Promise.all([gitStatus.refresh({ force: force === true }), ...(force === true ? links.nodes().filter(n => n.status === "online").map(n => links.call(n.id, "git.refresh").then(git => { remote.set(n.id, { ...remote.get(n.id), git }); nodesChanged(); }).catch(() => {})) : [])]);
+    return true;
+  });
   // Brings a running session's own terminal (tab) to the front; pid and folder come from the live registry.
   handle("terminal:focus", (agent, id) => {
     if (!SESSION_ID.test(text(id))) throw new Error(t("errors.invalidSession"));

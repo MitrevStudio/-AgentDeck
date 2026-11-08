@@ -95,7 +95,8 @@
     const online = n.status === "online";
     const tag = online ? `<span class="tag ok">${esc(t("settings.nodes.online"))}</span>`
       : `<span class="tag" title="${esc(n.lastSeen ? t("settings.nodes.offlineSince", { time: since(n.lastSeen) }) : "")}">${esc(t("settings.nodes.offline"))}</span>`;
-    const where = n.address ? `${n.address}${n.port ? `:${n.port}` : ""}` : "";
+    const via = (n.via || []).map(id => [...state.nodes, ...state.discovered].find(x => x.id === id)?.name || id.slice(0, 8));
+    const where = via.length ? t("settings.nodes.via", { route: via.join(" ? ") }) : n.address ? `${n.address}${n.port ? `:${n.port}` : ""}` : "";
     return `<div class="vs-node" data-id="${esc(n.id)}">${icon(n.kind === "host" ? "terminal" : "window")}
       <span class="who"><b title="${esc(n.id)}">${esc(n.name || n.id.slice(0, 8))}</b><small>${esc([kindOf(n), n.version ? `v${n.version}` : "", where].filter(Boolean).join(" · "))}</small></span>
       ${n.error ? `<small role="status">${esc(n.error)}</small>` : ""}${tag}${action}</div>`;
@@ -163,7 +164,7 @@
     if (!id || busy) return;
     const n = state.discovered.find(x => x.id === id);
     const code = pane.querySelector(`[data-code="${CSS.escape(id)}"]`)?.value || "";
-    if (n) pairWith(`${n.address}:${n.port}`, code, $("nodePairResult"), id);
+    if (n) pairWith(n.via?.length ? n.id : `${n.address}:${n.port}`, code, $("nodePairResult"), id);
   });
   $("nodePair").addEventListener("click", () => {
     if (busy) return;

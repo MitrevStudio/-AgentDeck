@@ -11,6 +11,9 @@
   "scripts": {
     "start": "electron .",
     "check": "node scripts/check.js",
+    "test:git": "node scripts/test-git-repositories.js && node scripts/test-git-panel.js && node scripts/test-git-diff-ui.js",
+    "test:layout": "node scripts/test-layout-sync.js",
+    "test:relay": "node scripts/test-relay.js",
     "test:limits": "node scripts/test-limits.js",
     "test:audit": "node scripts/test-audit-regressions.js",
     "dist": "electron-builder --win --publish never",

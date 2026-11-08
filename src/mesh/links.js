@@ -31,9 +31,19 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
   const incompatible = new Map(); // peer id -> explicit update-required reason
   let identity = null, peers = null, server = null, discovery = null, running = false;
 
+  const relay = require("./relay").createRelay({
+    self: () => self(),
+    neighbors: () => new Map([...links].filter(([, n]) => !n.routed && n.info.relay === 1)),
+    changed: () => { out.emit("discovered", discovered()); connectAll(); changed(); }
+  });
+  const discovered = () => {
+    const found = new Map((discovery?.list() || []).map(n => [n.id, n]));
+    for (const r of relay.list()) if (r.path.length > 2 && !found.has(r.id)) found.set(r.id, { ...r, address: r.id, port: 0, via: r.path.slice(1, -1) });
+    return [...found.values()];
+  };
   const self = () => (!identity ? null : { id: identity.id, name: identity.settings.name, kind, version, protocol: PROTOCOL, port: server?.port() || identity.settings.port,
     discoverable: identity.settings.discoverable, code: peers.code() });
-  const hello = () => ({ id: identity.id, name: identity.settings.name, kind, version, protocol: PROTOCOL, port: server?.port() || 0 });
+  const hello = () => ({ id: identity.id, name: identity.settings.name, kind, version, protocol: PROTOCOL, relay: 1, port: server?.port() || 0 });
 
   // ---------- the nodes as listed ----------
   function nodes() {
@@ -41,14 +51,14 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
     return peers.list().map(p => {
       const l = links.get(p.id);
       return { id: p.id, name: l?.info?.name || p.name, kind: l?.info?.kind || p.kind, version: l?.info?.version || "", address: l?.address || p.address, port: l?.port || p.port,
-        status: l ? "online" : "offline", error: incompatible.get(p.id) || "", lastSeen: l ? Date.now() : p.lastSeen, pairedAt: p.pairedAt };
+        via: l?.route?.slice(1, -1) || [], status: l ? "online" : "offline", error: incompatible.get(p.id) || "", lastSeen: l ? Date.now() : p.lastSeen, pairedAt: p.pairedAt };
     });
   }
   const changed = () => out.emit("nodes", nodes());
 
   // ---------- a link, whoever opened it ----------
   // The link is up once both said hello; a peer whose hello does not come is dropped.
-  async function adopt(ws, id, { initiatedHere, address, port }) {
+  async function adopt(ws, id, { initiatedHere, address, port, route }) {
     const peer = peers.get(id);
     if (!peer) {
       ws.close(1008, "unpaired");
@@ -62,6 +72,7 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
         // A node this one trusts that asks to pair again (it forgot this one): no code needed, it is the same node.
         if (method === "pair") return { ok: true, id: identity.id, name: identity.settings.name, kind, version, already: true };
         if (!info) throw new HostError("handshake", "The protocol handshake has not completed.");
+        if (method.startsWith("relay.")) return relay.request(id, method, params);
         return api(method, params, { id, name: info?.name || peer.name, kind: info?.kind || peer.kind });
       },
       onBinary: data => { if (info) out.emit("binary", { node: id, data }); },
@@ -87,12 +98,14 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
           forget(id, { tell: false });
           return;
         }
+        if (relay.event(id, name, data)) return;
         out.emit("event", { node: id, name, data });
       },
       onClose: () => {
         settleHello(false);
         if (links.get(id)?.link === link) {
           links.delete(id);
+          relay.down(id);
           log(`link down: ${peer.name || id.slice(0, 8)}`);
           out.emit("link", { node: id, up: false });
           changed();
@@ -100,7 +113,8 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
         }
       }
     });
-    link.notify("hello", hello());
+    ws.resume?.();
+    link.notify("hello", { ...hello(), routed: Boolean(route), route });
     const helloTimer = setTimeout(() => settleHello(false), HELLO_TIMEOUT_MS);
     const greeted = await helloSeen;
     clearTimeout(helloTimer);
@@ -119,10 +133,12 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
       links.delete(id);
       other.link.close(1000, "duplicate");
     }
-    const entry = { link, initiatedHere, info, address, port: Number(info.port) || port };
+    if (!route && info.routed && Array.isArray(info.route) && info.route[0] === id && info.route.at(-1) === identity.id) route = [...info.route].reverse();
+    const entry = { link, initiatedHere, info, address, route, routed: Boolean(route || info.routed), port: Number(info.port) || port };
     links.set(id, entry);
     clearRetry(id);
-    peers.update(id, { name: info.name || peer.name, kind: info.kind || peer.kind, address, port: entry.port, lastSeen: Date.now() });
+    relay.refresh(); relay.broadcast();
+    peers.update(id, { name: info.name || peer.name, kind: info.kind || peer.kind, address: entry.routed ? peer.address : address, port: entry.routed ? peer.port : entry.port, lastSeen: Date.now() });
     log(`link up: ${info.name || id.slice(0, 8)} at ${address}:${entry.port} (${initiatedHere ? "called" : "answered"})`);
     out.emit("link", { node: id, up: true });
     changed();
@@ -162,6 +178,12 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
         if (e.code === "wrongNode") log(`${c.address}:${c.port} is not ${peer.name || id.slice(0, 8)} any more`);
       }
     }
+    const route = relay.list().find(r => r.id === id && r.path.length > 2)?.path;
+    if (route) try {
+      const socket = await relay.open(route);
+      const { ws } = await connect({ identity, address: "localhost", port: 443, expectId: id, socket });
+      if (await adopt(ws, id, { initiatedHere: true, address: "", port: 0, route })) return;
+    } catch (e) { log(e.message); }
     delay = Math.min(RECONNECT_MAX_MS, delay * 2);
     retries.set(id, { timer: null, delay });
     scheduleConnect(id, delay);
@@ -186,7 +208,7 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
         if (!peers.check(params?.code)) throw new HostError("wrongCode", "The pairing code is wrong.");
         clearTimeout(timer);
         const p = params || {};
-        peers.add({ id, name: String(p.name || "").slice(0, 60), kind: p.kind, address, port: Number(p.port) || 0 });
+        peers.add({ id, name: String(p.name || "").slice(0, 60), kind: p.kind, address: p.routed ? "" : address, port: p.routed ? 0 : Number(p.port) || 0 });
         peers.regenerate();
         out.emit("self", self());
         log(`paired with ${p.name || id.slice(0, 8)} (it called)`);
@@ -202,20 +224,23 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
   // ---------- pairing from here ----------
   // Pairs with the node at address:port, which must show `code` (its own, from its Settings or its installer).
   async function pair(address, port, code) {
-    const { ws, id } = await connect({ identity, address, port });
+    const route = relay.list().find(r => r.id === address && r.path.length > 2)?.path;
+    const socket = route ? await relay.open(route) : undefined;
+    const { ws, id } = await connect({ identity, address: route ? "localhost" : address, port: route ? 443 : port, expectId: route ? address : "", socket });
     if (peers.get(id)) {
       ws.close(1000, "already paired");
       return { id, name: peers.get(id).name, already: true };
     }
     const link = createLink(ws);
+    ws.resume?.();
     let r;
     try {
-      r = await link.call("pair", { code, name: identity.settings.name, kind, version, port: server?.port() || 0 }, { timeout: PAIR_TIMEOUT_MS });
+      r = await link.call("pair", { code, routed: Boolean(route), name: identity.settings.name, kind, version, port: server?.port() || 0 }, { timeout: PAIR_TIMEOUT_MS });
     } catch (e) {
       link.close();
       throw e;
     }
-    peers.add({ id, name: String(r?.name || "").slice(0, 60), kind: r?.kind, address, port });
+    peers.add({ id, name: String(r?.name || "").slice(0, 60), kind: r?.kind, address: route ? "" : address, port: route ? 0 : port });
     log(`paired with ${r?.name || id.slice(0, 8)} at ${address}:${port}`);
     // The socket is handed over whole: its handlers go with the pairing link, so a fresh connection is simplest.
     link.close(1000, "paired");
@@ -228,6 +253,7 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
     incompatible.delete(id);
     const l = links.get(id);
     links.delete(id);
+    relay.down(id);
     if (l && tell) l.link.notify("forget", {});
     l?.link.close(1000, "forgotten");
     clearRetry(id);
@@ -297,6 +323,7 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
   }
   function stop() {
     running = false;
+    relay.stop();
     for (const id of [...retries.keys()]) clearRetry(id);
     for (const l of links.values()) l.link.close(1001, "going away");
     links.clear();
@@ -305,7 +332,7 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
   }
 
   return Object.assign(out, {
-    start, stop, self, setSelf, regenerateCode, nodes, discovered: () => discovery?.list() || [], pair, forget, call, notify, notifyAll, sendBinary, online,
+    start, stop, self, setSelf, regenerateCode, nodes, discovered, pair, forget, call, notify, notifyAll, sendBinary, online,
     peers: () => peers, identity: () => identity
   });
 }

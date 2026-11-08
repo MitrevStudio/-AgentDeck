@@ -218,3 +218,7 @@ main {
 .keys-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 4px 0; font-size: 13px; }
 .keys-keys { display: inline-flex; align-items: center; gap: 3px; flex: none; white-space: nowrap; color: var(--faint); font-size: 12px; }
 .keys-note { margin: 12px 0 0; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+
+/* Keep unavailable projects in their saved position without implying live activity. */
+.proj.offline .proj-row { opacity: .5; }
+.proj.offline .pmono { filter: grayscale(1); }

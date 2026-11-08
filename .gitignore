@@ -5,3 +5,8 @@ out/
 Thumbs.db
 .DS_Store
 .dev-profile/
+.tmp/
+.env
+.env.*
+!.env.example
+!.env.sample

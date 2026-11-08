@@ -16,7 +16,7 @@ const ROOT_TTL_MS = 5 * 60 * 1000;    // where a folder's repository is, or that
 const TIMEOUT_MS = 10 * 1000;
 const PARALLEL = 4;
 const MISSING_RETRY_MS = 5 * 60 * 1000;
-const ARGS = ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain=v2", "--branch", "-z", "--ignore-submodules=dirty"];
+const ARGS = ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all", "--ignore-submodules=dirty"];
 
 // As the pages' normPath(): the keys they look folders up by.
 const { normPath: norm } = require("../shared/util");
@@ -26,6 +26,8 @@ const { normPath: norm } = require("../shared/util");
 // is followed by its original path as a field of its own, which must not be taken for an entry.
 function parseStatus(out) {
   const st = { branch: "", oid: "", detached: false, initial: false, upstream: "", ahead: 0, behind: 0, staged: 0, unstaged: 0, untracked: 0, conflicts: 0 };
+  st.files = [];
+  let fileCount = 0;
   const fields = String(out).split("\0");
   for (let i = 0; i < fields.length; i++) {
     const f = fields[i];
@@ -38,11 +40,42 @@ function parseStatus(out) {
     } else if (f[0] === "1" || f[0] === "2") {
       if (f[2] !== ".") st.staged++;
       if (f[3] !== ".") st.unstaged++;
-      if (f[0] === "2") i++;
-    } else if (f[0] === "u") st.conflicts++;
-    else if (f[0] === "?") st.untracked++;
+      fileCount++;
+      const entry = { status: f.slice(2, 4), path: f.split(" ").slice(f[0] === "2" ? 9 : 8).join(" ") };
+      if (f[0] === "2") entry.original = fields[++i];
+      if (st.files.length < 2000) st.files.push(entry);
+    } else if (f[0] === "u") {
+      st.conflicts++; fileCount++;
+      if (st.files.length < 2000) st.files.push({ status: f.slice(2, 4), path: f.split(" ").slice(10).join(" ") });
+    } else if (f[0] === "?") {
+      st.untracked++; fileCount++;
+      if (st.files.length < 2000) st.files.push({ status: "??", path: f.slice(2) });
+    }
   }
+  st.filesTruncated = fileCount > st.files.length;
   return st;
+}
+
+// Walk project folders, including nested independent repositories and worktrees.
+// Never follow junctions/symlinks or descend into dependency/build caches.
+const SKIP = new Set([".git", "node_modules", ".venv", "venv", "vendor", "dist", "build", ".next", "coverage", "target", "__pycache__"]);
+async function discoverRepositories(dirs, { maxDepth = 5, maxDirs = 3000 } = {}) {
+  const queue = dirs.filter(d => typeof d === "string" && path.isAbsolute(d)).map(dir => ({ dir, depth: 0 }));
+  const seen = new Set(), found = new Set();
+  let count = 0, truncated = false;
+  for (let i = 0; i < queue.length; i++) {
+    const { dir, depth } = queue[i], key = norm(dir);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (++count > maxDirs) { truncated = true; break; }
+    let entries;
+    try { entries = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { continue; }
+    if (entries.some(e => e.name === ".git")) found.add(dir);
+    const children = entries.filter(e => e.isDirectory() && !e.isSymbolicLink() && !SKIP.has(e.name.toLowerCase()));
+    if (depth >= maxDepth) { if (children.length) truncated = true; continue; }
+    for (const e of children) queue.push({ dir: path.join(dir, e.name), depth: depth + 1 });
+  }
+  return { repos: [...found], truncated };
 }
 
 // ---------- state ----------
@@ -50,6 +83,7 @@ let opts = null, timer = null, running = null, again = false;
 let missingAt = 0;                 // when git was last found missing
 const roots = new Map();           // norm(dir) -> { root: absolute path | null, at }
 const repos = new Map();           // norm(root) -> status (with root, at, error?)
+let discovery = { key: "", at: 0, repos: [], truncated: false };
 let snapshot = { at: 0, missing: false, dirs: {}, repos: {} };
 
 async function isDir(p) { try { return (await fs.promises.stat(p)).isDirectory(); } catch { return false; } }
@@ -88,7 +122,7 @@ function runGit(root) {
 // then reports the result through opts.onChange. A refresh asked for while one runs is folded into one more after it.
 function refresh({ force = false } = {}) {
   if (!opts) return Promise.resolve(snapshot);
-  if (running) { again = true; return running; }
+  if (running) { if (force) return running.then(() => refresh({ force: true })); again = true; return running; }
   running = pass(force).finally(() => {
     running = null;
     if (again) { again = false; refresh(); }
@@ -97,10 +131,13 @@ function refresh({ force = false } = {}) {
 }
 async function pass(force) {
   const t0 = Date.now();
-  if (missingAt && t0 - missingAt < MISSING_RETRY_MS) return snapshot;
+  if (!force && missingAt && t0 - missingAt < MISSING_RETRY_MS) return snapshot;
   const dirs = [...new Set((opts.dirs() || []).filter(Boolean))];
+  const projects = opts.projects?.() || dirs;
+  const discoveryKey = JSON.stringify([...projects].sort());
+  if (force || discovery.key !== discoveryKey || t0 - discovery.at > ROOT_TTL_MS) discovery = { ...await discoverRepositories(projects), key: discoveryKey, at: t0 };
   const dirRoot = {};
-  for (const d of dirs) { const r = await rootOf(d, t0); if (r) dirRoot[norm(d)] = r; }
+  for (const d of [...dirs, ...discovery.repos]) { if (force) roots.delete(norm(d)); const r = await rootOf(d, t0); if (r) dirRoot[norm(d)] = r; }
   const todo = [...new Set(Object.values(dirRoot))].filter(r => force || !(t0 - (repos.get(norm(r))?.at || 0) < TTL_MS));
   let missing = false, next = 0;
   const work = async () => {
@@ -117,7 +154,7 @@ async function pass(force) {
   for (const k of repos.keys()) if (!used.has(k)) repos.delete(k);
   const prev = snapshot;
   snapshot = {
-    at: Date.now(), missing, ms: Date.now() - t0, checked: todo.length,
+    at: Date.now(), missing, discoveryTruncated: discovery.truncated, ms: Date.now() - t0, checked: todo.length,
     dirs: Object.fromEntries(Object.entries(dirRoot).map(([d, r]) => [d, norm(r)])),
     repos: Object.fromEntries(repos)
   };
@@ -127,7 +164,7 @@ async function pass(force) {
 // What the pages show: an unchanged status is not sent again just because it was checked again, or because the
 // folders came in another order (the sessions are sorted by their last activity).
 const sorted = o => Object.entries(o || {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-const signature = s => JSON.stringify([s.missing, sorted(s.dirs), sorted(s.repos).map(([k, v]) => [k, { ...v, at: 0 }])]);
+const signature = s => JSON.stringify([s.missing, s.discoveryTruncated, sorted(s.dirs), sorted(s.repos).map(([k, v]) => [k, { ...v, at: 0 }])]);
 
 // dirs(): the folders to report on; onChange(snapshot); active(): whether a window that shows the state is open
 // (the background refresh runs only then).
@@ -138,4 +175,48 @@ function start(o) {
   timer.unref?.();
 }
 
-module.exports = { start, refresh, get: () => snapshot, parseStatus, norm };
+async function diff({ root, file } = {}) {
+  const invalid = () => { throw new Error("Invalid repository or changed file"); };
+  if (typeof root !== "string" || typeof file !== "string" || !file || file.length > 4096 || file.includes("\0") || !snapshot.repos[norm(root)] || path.isAbsolute(file)) return invalid();
+  root = snapshot.repos[norm(root)].root;
+  const relative = path.relative(root, path.resolve(root, file));
+  if (!relative || relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative)) return invalid();
+  const current = await runGit(root);
+  if (current.error || current.missing) throw new Error(current.error || "Git is unavailable");
+  const entry = current.status.files.find(f => f.path === file);
+  if (!entry) return { staged: "", unstaged: "", untracked: "" };
+  const limit = 512 * 1024;
+  if (entry.status === "??") {
+    const target = path.join(root, file), stat = await fs.promises.lstat(target);
+    if (stat.isSymbolicLink()) return { untracked: "+" + await fs.promises.readlink(target), staged: "", unstaged: "" };
+    const realRoot = await fs.promises.realpath(root), realFile = await fs.promises.realpath(target);
+    const rel = path.relative(realRoot, realFile);
+    if (rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel) || !stat.isFile()) return invalid();
+    const handle = await fs.promises.open(realFile, "r");
+    let bytes;
+    try {
+      const buffer = Buffer.alloc(limit + 1);
+      const read = await handle.read(buffer, 0, buffer.length, 0);
+      if (read.bytesRead > limit) return { tooLarge: true };
+      bytes = buffer.subarray(0, read.bytesRead);
+    } finally { await handle.close(); }
+    let text;
+    try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch { return { binary: true }; }
+    if (bytes.includes(0)) return { binary: true };
+    return { staged: "", unstaged: "", untracked: text ? text.replace(/\n$/, "").split("\n").map(line => "+" + line).join("\n") : "", emptyFile: !bytes.length };
+  }
+  const readDiff = cached => new Promise((resolve, reject) => {
+    execFile("git", ["--no-pager", "--no-optional-locks", "--literal-pathspecs", "-C", root, "-c", "core.fsmonitor=false", "diff", ...(cached ? ["--cached"] : []), "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", "--", file, ...(entry.original ? [entry.original] : [])], {
+      windowsHide: true, timeout: TIMEOUT_MS, maxBuffer: limit,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_PAGER: "cat" }
+    }, (err, stdout, stderr) => {
+      if (err?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") return resolve(null);
+      if (err) return reject(new Error(String(stderr).trim().slice(0, 300) || err.message));
+      resolve(stdout);
+    });
+  });
+  const [staged, unstaged] = await Promise.all([readDiff(true), readDiff(false)]);
+  return { staged: staged || "", unstaged: unstaged || "", binary: /(?:^|\n)Binary files .* differ/.test((staged || "") + (unstaged || "")), tooLarge: staged === null || unstaged === null };
+}
+
+module.exports = { start, refresh, get: () => snapshot, parseStatus, norm, discoverRepositories, diff };

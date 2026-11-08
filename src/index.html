@@ -29,9 +29,14 @@
         <button id="keysBtn" class="icon-btn" data-i18n-title="keys.open"><span data-icon="keyboard"></span></button>
       </span>
     </div>
+    <nav class="side-tabs" role="tablist" aria-label="Sidebar">
+      <button role="tab" id="sideTabProjects" aria-controls="sideOverview" data-side-tab="projects" data-i18n="manager.projects"></button>
+      <button role="tab" id="sideTabGit" aria-controls="sideGit" data-side-tab="git">Git</button>
+    </nav>
     <div class="side-body">
+      <div id="sideOverview" class="side-overview" role="tabpanel" aria-labelledby="sideTabProjects">
       <section class="side-sec centre-sec"><div id="centre"></div></section>
-      <section class="side-sec projects-sec">
+      <section class="side-sec projects-sec" id="sideProjects">
         <div class="side-sec-head"><h2 data-i18n="manager.projects"></h2><span class="count" id="projectCount">0</span>
           <span class="side-tools">
             <button class="icon-btn" id="projectOrder" hidden></button>
@@ -40,9 +45,14 @@
           </span></div>
         <div class="side-list" id="projects"></div>
       </section>
-      <section class="side-sec agents-sec">
+      <section class="side-sec agents-sec" id="sideAgents">
         <div class="side-sec-head"><h2 data-i18n="manager.agents.title"></h2><span class="count" id="agentCount">0</span></div>
         <div class="side-list" id="agents"></div>
+      </section>
+      </div>
+      <section class="side-sec git-sec" id="sideGit" role="tabpanel" aria-labelledby="sideTabGit" hidden>
+        <div class="side-sec-head"><h2 data-i18n="git.panel.title"></h2><span class="count" id="gitRepoCount">0</span><span class="side-tools"><button class="icon-btn" id="gitPanelRefresh" data-i18n-title="git.panel.refresh"><span data-icon="refresh"></span></button></span></div>
+        <div class="side-list" id="gitRepositories"></div>
       </section>
     </div>
   </aside>
@@ -76,6 +86,10 @@
   <div id="limits"></div>
 </footer>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
+<dialog id="gitDiffDialog" class="git-diff-dialog" aria-labelledby="gitDiffTitle">
+  <header><div><h2 id="gitDiffTitle"></h2><small id="gitDiffLocation"></small></div><button id="gitDiffClose" class="btn" autofocus data-i18n="common.close"></button></header>
+  <div id="gitDiffBody" tabindex="0" aria-live="polite"></div>
+</dialog>
 <script src="common.js"></script>
 <script src="usage-ui.js"></script>
 <script src="git-ui.js"></script>
@@ -86,6 +100,8 @@
 <script src="nodes-ui.js"></script>
 <script src="clone-ui.js"></script>
 <script src="renderer.js"></script>
+<script src="git-panel.js"></script>
+<script src="git-diff-ui.js"></script>
 <script src="palette-ui.js"></script>
 <script src="limits-ui.js"></script>
 <script src="usage-view.js"></script>

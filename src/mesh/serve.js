@@ -24,7 +24,7 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
   const { terminals, launch, sessions, liveSessions, git, setup } = host;
   const path = require("node:path");
   const fs = require("node:fs");
-  let links = null;
+  let links = null, layout = null;
   const watchers = new Map(); // terminal id -> Set of peer ids attached to it
   const peerTabs = peer => terminals.getTabs().filter(x => x.owner === peer);
   function ownTerm(id, peer) {
@@ -55,7 +55,9 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
     "host.info": () => ({ ...(links?.self() || {}), code: undefined, platform: process.platform, home: host.home, agents: sessions.get()?.agents || [], ...info() }),
     "sessions.list": async () => localSnapshot(await sessions.data()),
     "live.list": () => liveSessions(),
+    "git.diff": p => git.diff(p),
     "git.status": () => git.get(),
+    "git.refresh": () => git.refresh({ force: true }),
     "usage.get": () => host.usage.get(),
     "limits.get": () => { host.limits.refresh().catch(() => {}); return host.limits.get(); },
     "resources.get": () => host.resources.get() || host.resources.refresh(),
@@ -109,6 +111,8 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
 
   function attach(l) {
     links = l;
+    layout = require("./layout").createLayout({ links, registry: sessions.registry });
+    host.on("data", () => layout.reconcile());
     host.on("terminal:data", ({ id, data, end }) => {
       const peers = watchers.get(id);
       if (peers) for (const peer of peers) links.sendBinary(peer, frames.encodeOutput(id, data, end));
@@ -148,7 +152,7 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
     });
   }
 
-  return { api, attach };
+  return { api, attach, get layout() { return layout; } };
 }
 
 module.exports = { createServed };

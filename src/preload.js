@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld("manager", {
   renameGroup: (id, name) => ipcRenderer.invoke("group:rename", id, name),
   pinGroup: (id, slot) => ipcRenderer.invoke("group:pin", id, slot),
   deleteGroup: id => ipcRenderer.invoke("group:delete", id),
+  restoreProjectOrder: () => ipcRenderer.invoke("project:restore-order"),
   sortProjectsByActivity: () => ipcRenderer.invoke("project:sort-by-activity"),
   pinProject: (p, slot) => ipcRenderer.invoke("project:pin", p, slot),
   // place (optional, AgentDeck's own terminals): "tab" (default), "right" or "down" of the focused pane.
@@ -33,8 +34,9 @@ contextBridge.exposeInMainWorld("manager", {
   refreshUsage: () => ipcRenderer.invoke("usage:refresh"),
   onUsageChanged: cb => ipcRenderer.on("usage:changed", (_e, u) => cb(u)),
   getPreview: (agent, id) => ipcRenderer.invoke("session:preview", agent, id),
+  getGitDiff: (node, root, file) => ipcRenderer.invoke("git:diff", node, root, file),
   getGit: () => ipcRenderer.invoke("git:get"),
-  refreshGit: () => ipcRenderer.invoke("git:refresh"),
+  refreshGit: (force = false) => ipcRenderer.invoke("git:refresh", force),
   onGitChanged: cb => ipcRenderer.on("git:changed", (_e, g) => cb(g)),
   focusTerminal: (agent, id) => ipcRenderer.invoke("terminal:focus", agent, id),
   // The command centre (orchestrator.js): its terminal, and a typed command for it.

@@ -755,3 +755,19 @@ Copyright © 2026 Mitrev Studio.
 [Download AgentDeck](https://github.com/MitrevStudio/-AgentDeck/releases/latest) · [Browse the source](src/) · [Back to top](#meet-agentdeck)
 
 </div>
+
+### Connections through other computers
+
+Updated AgentDeck nodes advertise reachable computers through their paired neighbors. In Settings ? Computers, a reachable computer can be paired using that computer?s own code; ?Via? shows the intermediate computers. Pairing with a neighbor does not grant access to its other peers.
+
+Relayed connections carry an end-to-end TLS WebSocket, retaining certificate identity and terminal ownership. Routes contain at most eight nodes, reject loops, and reconnect through an alternative available route after a failure. Requests interrupted by a failure are not replayed automatically. All intermediaries must support relaying; older nodes retain direct connections.
+
+Run `npm run test:relay` for the four-node loopback integration test (pairing, wrong-code rejection, identity, RPC, events, binary transport, alternate-route reconnection, and forgetting). Physical-computer and interactive-terminal acceptance testing is still recommended before release.
+
+Project presentation is shared between paired nodes: names, groups, pins, saved manual order and hidden projects. Offline projects keep their position and appear dimmed; stale live indicators are cleared. Switching from activity order back to manual order restores the saved list. Removing a computer publishes a durable project-removal marker to the network (including offline peers on reconnect); it does not delete files. Explicit pairing restores that computer?s projects.
+
+Presentation edits use persisted Lamport versions. Edits to different projects merge independently; conflicting edits to the same project, group list or order choose one deterministic version (counter, then node identity). Files and session contents remain on their owning computers. `npm run test:layout` checks convergence, offline removal, restart persistence and restoring manual order.
+
+The sidebar keeps Projects and AI agents together in one tab, with a separate Git tab. Git shows only repositories belonging to projects with currently open workspace tabs or attached terminals, including all nested repositories of each such project. Closing the last tab/terminal removes that project from the Git overview. Local and remote computers are matched separately. Git provides a read-only overview of branches, changed paths and status codes. Project folders are searched for nested repositories (including `.git` worktree files), with dependency/build directories skipped and symlinks not traversed. Discovery is bounded to five directory levels and 3,000 visited folders; the panel reports when this limit is reached. Add deeper folders as projects to include them explicitly. Each repository lists up to 2,000 changed files. Refresh rechecks discovery and status; no fetch or commit runs. `npm run test:git` exercises real nested repositories and the sidebar controller.
+
+Click a changed file in Git to open a read-only unified diff with line numbers and added/removed line highlighting. Staged and unstaged changes have separate sections; new text files are shown as additions. Remote diffs are requested from the owning computer over the existing authenticated mesh. Offline files cannot be opened. Binary files and previews over 512 KB show an explanatory message. Diff commands disable external diff tools and text conversion, use literal pathspecs, and only accept changed paths in known repositories.
