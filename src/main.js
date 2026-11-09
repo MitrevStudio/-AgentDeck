@@ -364,7 +364,7 @@ links.on("layout", nodesChanged);
 links.on("event", ({ node, name, data }) => {
   if (name === "terminals") return reconcileRemote(node, Array.isArray(data) ? data.filter(x => isObj(x) && frames.UUID.test(x.id)) : []);
   if (!["data", "live", "git", "usage", "limits", "resources"].includes(name)) return;
-  remote.set(node, { ...remote.get(node), [name]: data });
+  remote.set(node, { ...remote.get(node), [name]: data, ...(name === 'git' ? { gitError: '' } : {}) });
   nodesChanged();
 });
 // Output of this computer's terminals on other computers, to the window (keystrokes for a peer's terminals here are
@@ -967,8 +967,29 @@ function registerIpc() {
     return links.call(text(node, 64), "git.diff", params);
   });
   handle("git:get", () => gitStatus.get());
+  handle('git:query', (node, params) => {
+    if (!isObj(params)) throw new Error('Invalid Git request');
+    return node ? links.call(text(node, 64), 'git.query', params, { timeout: 130000 }) : gitStatus.query(params);
+  });
+  handle('git:execute', (node, params) => {
+    if (!isObj(params)) throw new Error('Invalid Git request');
+    return node ? links.call(text(node, 64), 'git.execute', params, { timeout: 130000 }) : gitStatus.execute(params);
+  });
+  handle('git:open-file', async (node, root, file) => {
+    if (node) throw new Error('Open a terminal on the owning computer to edit remote files.');
+    await gitStatus.diff({ root, file }); // Validate a known repo and changed path.
+    const target = path.resolve(root, file);
+    const realRoot = await fs.promises.realpath(root), realFile = await fs.promises.realpath(target);
+    const relative = path.relative(realRoot, realFile);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('File is outside the repository');
+    // An editor URI opens text in VS Code, never executes the file's default association.
+    await shell.openExternal('vscode://file/' + realFile.replaceAll('\\', '/').split('/').map(encodeURIComponent).join('/'));
+    return true;
+  });
   handle("git:refresh", async force => {
-    await Promise.all([gitStatus.refresh({ force: force === true }), ...(force === true ? links.nodes().filter(n => n.status === "online").map(n => links.call(n.id, "git.refresh").then(git => { remote.set(n.id, { ...remote.get(n.id), git }); nodesChanged(); }).catch(() => {})) : [])]);
+    const errors = [];
+    await Promise.all([gitStatus.refresh({ force: force === true }), ...(force === true ? links.nodes().filter(n => n.status === "online").map(n => links.call(n.id, "git.refresh").then(git => { remote.set(n.id, { ...remote.get(n.id), git, gitError: '' }); nodesChanged(); }).catch(e => { errors.push(`${n.name}: ${e.message}`); remote.set(n.id, { ...remote.get(n.id), gitError: e.message }); nodesChanged(); })) : [])]);
+    if (errors.length) throw new Error(errors.join('\n'));
     return true;
   });
   // Brings a running session's own terminal (tab) to the front; pid and folder come from the live registry.

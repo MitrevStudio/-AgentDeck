@@ -53,6 +53,7 @@ function parseStatus(out) {
     }
   }
   st.filesTruncated = fileCount > st.files.length;
+  st.fileCount = fileCount;
   return st;
 }
 
@@ -85,6 +86,29 @@ const roots = new Map();           // norm(dir) -> { root: absolute path | null,
 const repos = new Map();           // norm(root) -> status (with root, at, error?)
 let discovery = { key: "", at: 0, repos: [], truncated: false };
 let snapshot = { at: 0, missing: false, dirs: {}, repos: {} };
+const watchers = new Map();
+let watchTimer = null;
+function syncWatchers() {
+  const wanted = new Set(Object.values(snapshot.repos).map(r => r.root));
+  for (const [root, watcher] of watchers) if (!wanted.has(root)) { watcher.close(); watchers.delete(root); }
+  for (const root of wanted) {
+    if (watchers.has(root) || watchers.size >= 32) continue;
+    try {
+      const watcher = fs.watch(root, { recursive: true, persistent: false }, (_event, filename) => {
+        const name = String(filename || '').replaceAll('\\', '/');
+        if (/(^|\/)(node_modules|dist|build|\.next|vendor)(\/|$)/.test(name) || /\.git\/(objects|logs)\//.test(name) || name.endsWith('.lock')) return;
+        if (!opts?.active?.()) return;
+        clearTimeout(watchTimer);
+        const cached = repos.get(norm(root));
+        if (cached) cached.at = 0;
+        watchTimer = setTimeout(() => refresh().catch(() => {}), 1200);
+        watchTimer.unref?.();
+      });
+      watcher.on('error', () => { watcher.close(); watchers.delete(root); });
+      watchers.set(root, watcher);
+    } catch { /* Periodic refresh covers platforms without recursive watching. */ }
+  }
+}
 
 async function isDir(p) { try { return (await fs.promises.stat(p)).isDirectory(); } catch { return false; } }
 async function findRoot(dir) {
@@ -158,7 +182,8 @@ async function pass(force) {
     dirs: Object.fromEntries(Object.entries(dirRoot).map(([d, r]) => [d, norm(r)])),
     repos: Object.fromEntries(repos)
   };
-  if (signature(snapshot) !== signature(prev)) opts.onChange?.(snapshot);
+  syncWatchers();
+  if (signature(snapshot) !== signature(prev) || todo.length) opts.onChange?.(snapshot);
   return snapshot;
 }
 // What the pages show: an unchanged status is not sent again just because it was checked again, or because the
@@ -219,4 +244,8 @@ async function diff({ root, file } = {}) {
   return { staged: staged || "", unstaged: unstaged || "", binary: /(?:^|\n)Binary files .* differ/.test((staged || "") + (unstaged || "")), tooLarge: staged === null || unstaged === null };
 }
 
-module.exports = { start, refresh, get: () => snapshot, parseStatus, norm, discoverRepositories, diff };
+let actionContext = () => ({});
+const actions = require('./git-actions').createGitActions({ status: () => snapshot, refresh, parseStatus, context: () => actionContext() });
+function stop() { clearInterval(timer); clearTimeout(watchTimer); for (const w of watchers.values()) w.close(); watchers.clear(); }
+module.exports = { start, stop, refresh, get: () => snapshot, parseStatus, norm, discoverRepositories, diff,
+  query: actions.query, execute: actions.execute, configure: context => { actionContext = context; } };

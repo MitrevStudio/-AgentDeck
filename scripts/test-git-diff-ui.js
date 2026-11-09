@@ -8,7 +8,7 @@ const el = id => {
   return elements.get(id);
 };
 const ctx = {
-  $: el, t: s => s, nodeNameOf: () => 'REMOTE',
+  $: el, t: s => s, gitText: s => s, nodeNameOf: () => 'REMOTE', icon: () => '',
   esc: s => String(s).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;'),
   window: { manager: { getGitDiff: (...args) => new Promise(resolve => requests.push({ args, resolve })) } },
 };
@@ -19,6 +19,9 @@ async function main() {
   assert.match(rendered, /diff-line remove/);
   assert.match(rendered, /diff-line add/);
   assert.match(rendered, /diff-number">2/);
+  const split = ctx.renderGitSplit('@@ -2,2 +2,2 @@\n-old\n+<script>bad</script>\n same');
+  assert.match(split, /git-split/); assert.doesNotMatch(split, /<script>/);
+  assert.match(split, /class="remove"/); assert.match(split, /class="add"/);
   const button = { dataset: { diffNode: 'remote', diffRoot: '/repo', diffFile: 'file.txt' } };
   const click = () => el('gitRepositories').listeners.click({ target: { closest: () => button } });
   const first = click();

@@ -1,78 +1,248 @@
-// Read-only source-control overview; repository identity includes its computer.
+// Compact source control: the owning computer is part of every repository identity.
 (() => {
-  const list = $("gitRepositories"), expanded = new Map();
-  const buttons = [...document.querySelectorAll("[data-side-tab]")];
-  const panels = { projects: $("sideOverview"), git: $("sideGit") };
-  let selected = "projects", last = "";
-  try { selected = localStorage.getItem("agentdeck.sidebarTab") || selected; } catch {}
+  const list = $('gitRepositories'), footer = $('gitFooter'), expanded = new Map(), drafts = new Map(), busy = new Set(), errors = new Map(), repositories = new Map();
+  const buttons = [...document.querySelectorAll('[data-side-tab]')], panels = { projects: $('sideOverview'), git: $('sideGit') };
+  let selected = 'projects', last = '', filter = '', tree = false, activeKey = '', sortMode = 'path';
+  try { selected = localStorage.getItem('agentdeck.sidebarTab') || selected; } catch {}
+  try { sortMode = localStorage.getItem('agentdeck.gitSort') || sortMode; } catch {}
   function select(name) {
-    selected = Object.hasOwn(panels, name) ? name : "projects";
+    selected = Object.hasOwn(panels, name) ? name : 'projects';
     for (const [id, panel] of Object.entries(panels)) panel.hidden = id !== selected;
-    for (const b of buttons) { const active = b.dataset.sideTab === selected; b.setAttribute("aria-selected", active); b.tabIndex = active ? 0 : -1; }
-    try { localStorage.setItem("agentdeck.sidebarTab", selected); } catch {}
-    if (selected === "git") render();
+    for (const b of buttons) { const active = b.dataset.sideTab === selected; b.setAttribute('aria-selected', active); b.tabIndex = active ? 0 : -1; }
+    try { localStorage.setItem('agentdeck.sidebarTab', selected); } catch {}
+    if (selected === 'git') render();
   }
   buttons.forEach(b => {
     b.onclick = () => select(b.dataset.sideTab);
     b.onkeydown = e => {
-      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
       e.preventDefault();
-      const i = e.key === "Home" ? 0 : e.key === "End" ? buttons.length - 1 : (buttons.indexOf(b) + (e.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length;
+      const i = e.key === 'Home' ? 0 : e.key === 'End' ? buttons.length - 1 : (buttons.indexOf(b) + (e.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length;
       select(buttons[i].dataset.sideTab); buttons[i].focus();
     };
   });
-  function fileRow(f, source, repo) {
-    const filename = f.path.split(/[\\/]/).at(-1), folder = f.path.slice(0, f.path.length - filename.length);
-    return `<button type="button" class="git-file" data-diff-node="${esc(source.id === "local" ? "" : source.id)}" data-diff-root="${esc(repo.root)}" data-diff-file="${esc(f.path)}" ${source.status !== "online" ? "disabled" : ""} title="${esc(f.original ? `${f.original} → ${f.path}` : f.path)}"><span class="git-file-name">${esc(filename)}</span><small>${esc(folder)}</small><code>${esc(f.status === "??" ? "U" : f.status.replaceAll(".", " ").trim())}</code></button>`;
-  }
-  const within = (child, parent) => child === parent || child.startsWith(parent.endsWith("/") ? parent : parent + "/");
+  const within = (child, parent) => child === parent || child.startsWith(parent.endsWith('/') ? parent : parent + '/');
   function openProjects() {
-    const projects = data.projects || [];
-    const open = projects.filter(p => ws.spaces[p.n]?.tabs.some(id => ws.tabs[id]));
-    const terminalIds = new Set();
+    const projects = data.projects || [], open = projects.filter(p => ws.spaces[p.n]?.tabs.some(id => ws.tabs[id])), terminalIds = new Set();
     const visit = pane => { if (!pane) return; if (pane.term) terminalIds.add(pane.term); else { visit(pane.a); visit(pane.b); } };
     for (const tab of Object.values(ws.tabs)) visit(tab.root);
     for (const term of ws.terminals || []) {
       if (!terminalIds.has(term.id) || !term.cwd) continue;
-      const candidates = projects.filter(p => (p.node || "") === (term.node || "") && within(normPath(term.cwd), normPath(p.path)));
+      const candidates = projects.filter(p => (p.node || '') === (term.node || '') && within(normPath(term.cwd), normPath(p.path)));
       candidates.sort((a, b) => b.path.length - a.path.length);
       open.push(candidates[0] || { node: term.node, path: term.cwd });
     }
     return open;
   }
+  const conflict = f => /U|AA|DD/.test(f.status);
+  const accepts = (group, f) => group === 'conflicts' ? conflict(f) : group === 'staged'
+    ? f.status !== '??' && !conflict(f) && f.status[0] !== '.'
+    : !conflict(f) && (f.status === '??' || f.status[1] !== '.');
+  const statusKey = f => conflict(f) ? '!' : f.status === '??' ? 'U' : f.status[1] || f.status[0] || '';
+  const base = f => f.path.split(/[\\/]/).at(-1).toLocaleLowerCase();
+  function sortFiles(files) {
+    if (sortMode === 'name') return files.sort((a, b) => base(a).localeCompare(base(b)) || a.path.localeCompare(b.path));
+    if (sortMode === 'status') return files.sort((a, b) => statusKey(a).localeCompare(statusKey(b)) || a.path.localeCompare(b.path));
+    return files.sort((a, b) => a.path.localeCompare(b.path));
+  }
+  const more = (attributes, disabled = false) => `<button class="git-more" type="button" ${attributes} title="${esc(gitText('manage'))}" aria-label="${esc(gitText('manage'))}" aria-haspopup="menu" ${disabled ? 'disabled' : ''}>${icon('more')}</button>`;
+  const quick = (action, glyph, label, disabled = false) => `<button type="button" class="git-quick" data-quick="${action}" title="${esc(gitText(label))}" aria-label="${esc(gitText(label))}" ${disabled ? 'disabled' : ''}>${icon(glyph)}</button>`;
+  function fileRow(f, node, group, disabled) {
+    const filename = f.path.split(/[\\/]/).at(-1), folder = f.path.slice(0, f.path.length - filename.length).replace(/[\\/]$/, '');
+    const extension = filename.split('.').at(-1).toLowerCase(), known = /^(js|ts|json|css|md|html|yml|yaml|py)$/.test(extension);
+    const glyph = { js: 'JS', ts: 'TS', json: '{}', css: '#', md: '≡', html: '◇', yml: '!', yaml: '!', py: 'Py' }[extension] || '·';
+    const status = conflict(f) ? '!' : f.status === '??' ? 'U' : f.status[group === 'staged' ? 0 : 1];
+    return `<div class="git-file-row" data-file="${esc(f.path)}" data-group="${group}"><button type="button" class="git-file" data-diff-node="${esc(node.node)}" data-diff-root="${esc(node.repo.root)}" data-diff-file="${esc(f.path)}" ${disabled ? 'disabled' : ''} title="${esc(f.original ? `${f.original} → ${f.path}` : f.path)}"><span class="git-file-icon ext-${known ? extension : 'file'}" aria-hidden="true">${glyph}</span><span class="git-file-name">${esc(filename)}</span><small>${esc(folder)}</small></button>${more('data-file-menu', disabled)}<code class="git-file-status status-${status === '!' ? 'conflict' : status}">${esc(status)}</code></div>`;
+  }
+  function grouped(node, disabled) {
+    return ['conflicts', 'staged', 'changes'].map(group => {
+      const files = sortFiles((node.repo.files || []).filter(f => accepts(group, f) && f.path.toLocaleLowerCase().includes(filter)));
+      if (!files.length) return '';
+      const renderTree = (items, depth = 0) => {
+        const folders = new Map(), leaves = [];
+        for (const f of items) { const parts = f.path.split('/'); if (parts.length <= depth + 1) leaves.push(f); else { const folder = parts[depth]; if (!folders.has(folder)) folders.set(folder, []); folders.get(folder).push(f); } }
+        return [...folders].map(([folder, children]) => `<details class="git-folder" open><summary>${esc(folder)}</summary>${renderTree(children, depth + 1)}</details>`).join('') + leaves.map(f => fileRow(f, node, group, disabled)).join('');
+      };
+      const id = JSON.stringify([node.key, group]);
+      return `<details class="git-file-group" data-expand="${esc(id)}" data-group="${group}" ${expanded.get(id) !== false ? 'open' : ''}><summary><span class="git-chevron">${icon('right')}</span><span>${esc(gitText(group))}</span><span class="grow"></span><span class="git-hover-actions">${quick('review', 'eye', 'reviewChanges', disabled)}${quick(group === 'staged' ? 'unstage' : 'stage', group === 'staged' ? 'undo' : 'plus', group === 'staged' ? 'unstageAll' : 'stageAll', disabled)}${more('data-group-menu', disabled)}</span><span class="git-count">${files.length}</span></summary>${tree ? renderTree(files) : files.map(f => fileRow(f, node, group, disabled)).join('')}</details>`;
+    }).join('');
+  }
   function render() {
-    if (selected !== "git") return;
-    const sources = [{ id: "local", name: t("git.panel.local"), status: "online", git }, ...nodes];
-    const rows = [], open = openProjects();
-    let count = 0;
+    if (selected !== 'git') return;
+    const sources = [{ id: 'local', name: t('git.panel.local'), status: 'online', git }, ...nodes], rows = [], open = openProjects();
+    repositories.clear();
     for (const source of sources) {
-      const paths = open.filter(p => (p.node || "local") === source.id).map(p => normPath(p.path));
+      const paths = open.filter(p => (p.node || 'local') === source.id).map(p => normPath(p.path));
       if (!paths.length) continue;
       for (const repo of Object.values(source.git?.repos || {}).sort((a, b) => a.root.localeCompare(b.root))) {
         const root = normPath(repo.root);
         if (!paths.some(p => within(root, p) || within(p, root))) continue;
-        count++;
-        const key = `${source.id}:${repo.root}`, files = repo.files || [], offline = source.status !== "online";
-        rows.push(`<details class="git-repository ${offline ? "offline" : ""}" data-repo="${esc(key)}" ${expanded.get(key) !== false ? "open" : ""}>
-          <summary title="${esc(repo.root)}"><strong>${esc(repo.root.split(/[\\/]/).at(-1))}</strong><span class="git-repo-branch">${icon("branch")}${esc(repo.error ? "" : gitHead(repo))}</span><span class="count">${files.length}</span></summary>
-          <div class="git-repo-location">${esc(source.name)}${offline ? ` · ${esc(t("manager.node.offline"))}` : ""}<br>${esc(repo.root)}</div>
-          ${repo.error ? `<p class="git-panel-note">${esc(repo.error)}</p>` : `<div class="git-repo-counts">${esc(gitCounts(repo).map(([, label]) => label).join(" · ") || t("git.clean"))}${gitAb(repo)}</div>${files.map(f => fileRow(f, source, repo)).join("")}`}
-          ${repo.filesTruncated ? `<p class="git-panel-note">${esc(t("git.panel.truncated"))}</p>` : ""}
-        </details>`);
+        const key = JSON.stringify([source.id, repo.root]), node = { key, node: source.id === 'local' ? '' : source.id, repo, offline: source.status !== 'online', source: source.name, error: errors.get(key) || source.gitError || repo.error };
+        repositories.set(key, node);
+        const offline = source.status !== 'online', disabled = offline || busy.has(key), files = repo.files || [], staged = files.some(f => accepts('staged', f));
+        const tip = `${source.name}\n${repo.root}\n${gitText('checked')}: ${repo.at ? new Date(repo.at).toLocaleTimeString() : '—'}${offline || Date.now() - (repo.at || 0) > 150000 ? '\n' + gitText('stale') : ''}`;
+        rows.push(`<details class="git-repository ${offline ? 'offline' : ''}" data-repo="${esc(key)}" data-expand="${esc(key)}" ${expanded.get(key) !== false ? 'open' : ''}>
+          <summary title="${esc(tip)}"><span class="git-chevron">${icon('right')}</span><strong>${esc(repo.root.split(/[\\/]/).at(-1))}</strong><span class="git-repo-branch">${icon('branch')}${esc(repo.error ? '' : gitHead(repo))}</span>${gitAb(repo)}${offline ? `<span class="git-offline">${icon('alert')}</span>` : ''}<span class="grow"></span><span class="git-hover-actions">${quick('preview', 'eye', 'commit', disabled)}${quick('commit', 'check', 'commit', disabled || !staged || !(drafts.get(key) || '').trim())}${quick('branches', 'branch', 'branches', disabled)}${quick('refresh', 'refresh', 'refresh', disabled)}${more('data-repo-menu', disabled)}</span><span class="git-count">${repo.fileCount ?? files.length}</span></summary>
+          <div class="git-commit-box"><textarea data-commit-message="${esc(key)}" rows="1" spellcheck="false" aria-label="${esc(gitText('message'))}" placeholder="${esc(gitText('commitHint'))}" ${disabled ? 'disabled' : ''}>${esc(drafts.get(key) || '')}</textarea><div class="git-commit-split"><button class="git-commit-button" data-repo-action="commit" ${disabled || !staged || !(drafts.get(key) || '').trim() ? 'disabled' : ''}>${icon('check')}<span>${busy.has(key) ? esc(gitText('loading')) : 'Commit'}</span></button><button type="button" class="git-commit-options" data-commit-menu aria-label="${esc(gitText('commitOptions'))}" title="${esc(gitText('commitOptions'))}" aria-haspopup="menu" ${disabled ? 'disabled' : ''}>${icon('down')}</button></div></div>
+          ${errors.has(key) || repo.error || source.gitError ? `<p class="git-panel-error" role="status">${esc(errors.get(key) || repo.error || source.gitError)}</p>` : ''}
+          ${grouped(node, disabled)}${!files.length && !repo.error ? `<p class="git-clean">${esc(gitText('empty'))}</p>` : filter && !files.some(f => f.path.toLocaleLowerCase().includes(filter)) ? `<p class="git-clean">${esc(gitText('noMatches'))}</p>` : ''}
+          ${repo.filesTruncated ? `<p class="git-panel-note">${esc(t('git.panel.truncated'))}</p>` : ''}</details>`);
       }
-      if (source.git?.missing) rows.push(`<p class="git-panel-note">${esc(source.name)}: ${esc(t("git.panel.missing"))}</p>`);
-      if (source.git?.discoveryTruncated) rows.push(`<p class="git-panel-note">${esc(source.name)}: ${esc(t("git.panel.scanLimit"))}</p>`);
+      if (source.git?.missing) rows.push(`<p class="git-panel-note">${esc(source.name)}: ${esc(t('git.panel.missing'))}</p>`);
+      if (source.git?.discoveryTruncated) rows.push(`<p class="git-panel-note">${esc(source.name)}: ${esc(t('git.panel.scanLimit'))}</p>`);
     }
-    $("gitRepoCount").textContent = count;
-    const html = rows.join("") || `<p class="git-panel-note">${esc(t("git.panel.empty"))}</p>`;
-    if (html !== last) { list.innerHTML = html; last = html; }
+    $('gitRepoCount').textContent = repositories.size;
+    if (!repositories.has(activeKey)) activeKey = repositories.keys().next().value || '';
+    window.gitFooter?.render();
+    const html = rows.join('') || `<p class="git-panel-note">${esc(t('git.panel.empty'))}</p>`;
+    if (html !== last) {
+      const active = document.activeElement, focused = active?.dataset, scroll = list.scrollTop, selection = focused?.commitMessage ? [active.selectionStart, active.selectionEnd] : null;
+      list.innerHTML = html; last = html; list.scrollTop = scroll;
+      if (focused?.commitMessage) {
+        const input = [...list.querySelectorAll('[data-commit-message]')].find(b => b.dataset.commitMessage === focused.commitMessage);
+        input?.focus({ preventScroll: true }); if (input && selection) input.setSelectionRange(...selection);
+      } else if (focused?.diffFile) [...list.querySelectorAll('[data-diff-file]')].find(b => b.dataset.diffFile === focused.diffFile && b.dataset.diffRoot === focused.diffRoot && b.dataset.diffNode === focused.diffNode)?.focus({ preventScroll: true });
+    }
   }
-  list.addEventListener("toggle", e => { if (e.target.matches("details[data-repo]")) expanded.set(e.target.dataset.repo, e.target.open); }, true);
-  $("gitPanelRefresh").onclick = async () => {
-    const button = $("gitPanelRefresh"); button.disabled = true;
-    try { await window.manager.refreshGit(true); git = await window.manager.getGit(); render(); }
+  function renderFooter() {
+    const node = repositories.get(activeKey);
+    if (!node) { footer.hidden = true; footer.innerHTML = ''; return; }
+    footer.hidden = false;
+    const repo = node.repo, disabled = node.offline || busy.has(node.key), branch = repo.error ? '' : gitHead(repo);
+    footer.innerHTML = `<button type="button" class="git-footer-branch" data-footer-action="branches" title="${esc(gitText('branches'))}" ${disabled ? 'disabled' : ''}>${icon('branch')}<span class="git-footer-name">${esc(branch || '—')}</span>${gitAb(repo)}</button><span class="grow"></span><button type="button" class="git-footer-sync" data-footer-action="sync" title="${esc(gitText('sync'))}" aria-label="${esc(gitText('sync'))}" ${disabled ? 'disabled' : ''}>${icon('refresh')}</button><button type="button" class="git-footer-graph" data-footer-action="graph" title="${esc(gitText('graph'))}" ${disabled ? 'disabled' : ''}>${icon('history')}<span>${esc(gitText('graph'))}</span></button>`;
+  }
+  footer.addEventListener('click', e => {
+    const button = e.target.closest('[data-footer-action]');
+    if (!button || button.disabled) return;
+    const node = repositories.get(activeKey); if (!node) return;
+    e.preventDefault(); e.stopPropagation();
+    window.gitWorkflow.open(node.node, node.repo.root, button.dataset.footerAction === 'graph' ? 'history' : button.dataset.footerAction, drafts.get(node.key) || '');
+  });
+  async function mutate(node, action, files) {
+    if (busy.has(node.key) || (files && !files.length)) return;
+    if (action === 'push' && !node.repo.upstream) return window.gitWorkflow.open(node.node, node.repo.root, 'sync');
+    busy.add(node.key); errors.delete(node.key); render();
+    try {
+      const args = { root: node.repo.root, action };
+      if (action === 'commit') {
+        const message = (drafts.get(node.key) || '').trim(); if (!message) return;
+        const review = await window.manager.gitQuery(node.node, { root: node.repo.root, kind: 'preview' });
+        Object.assign(args, { message, token: review.token });
+      } else if (files) args.files = files;
+      const response = await window.manager.gitExecute(node.node, args);
+      window.gitWorkflow.recordOutput?.(node.node, node.repo.root, response);
+      if (action === 'commit') { drafts.delete(node.key); window.gitWorkflow.rememberDraft?.(node.node, node.repo.root, ''); }
+      git = await window.manager.getGit();
+    } catch (error) { errors.set(node.key, error.message); }
+    finally { busy.delete(node.key); render(); }
+  }
+  const item = (label, glyph, run, extra = {}) => ({ label: gitText(label), icon: glyph, run: async () => run(), ...extra });
+  const sep = () => ({ separator: true });
+  function setSort(mode) { sortMode = mode; try { localStorage.setItem('agentdeck.gitSort', mode); } catch {} render(); }
+  const openFor = (node, view) => () => window.gitWorkflow.open(node.node, node.repo.root, view, drafts.get(node.key) || '');
+  // The repository's actions, grouped the way Source Control does it.
+  function repoMenuItems(node) {
+    const disabled = node.offline || busy.has(node.key);
+    const changes = () => (node.repo.files || []).filter(f => accepts('changes', f) || conflict(f)).map(f => f.path);
+    const staged = () => (node.repo.files || []).filter(f => accepts('staged', f)).map(f => f.path);
+    const sync = item('sync', 'refresh', openFor(node, 'sync'), { disabled });
+    const pull = item('pull', 'download', () => mutate(node, 'pull'), { disabled });
+    const push = item('push', 'upload', () => mutate(node, 'push'), { disabled });
+    const fetch = item('fetch', 'download', () => mutate(node, 'fetch'), { disabled });
+    const stage = item('stageAll', 'plus', () => mutate(node, 'stage', changes()), { disabled: disabled || !changes().length });
+    const unstage = item('unstageAll', 'undo', () => mutate(node, 'unstage', staged()), { disabled: disabled || !staged().length });
+    return [
+      pull, push, item('checkout', 'branch', openFor(node, 'branches'), { disabled }), fetch,
+      sep(),
+      { label: gitText('commitMenu'), icon: 'check', items: [item('commit', 'eye', openFor(node, 'commit'), { disabled }), stage, unstage] },
+      { label: gitText('changes'), icon: 'history', items: [stage, unstage, item('refresh', 'refresh', () => $('gitPanelRefresh').onclick())] },
+      { label: gitText('pullPush'), icon: 'refresh', items: [sync, pull, push] },
+      { label: gitText('branchMenu'), icon: 'branch', items: [item('branches', 'branch', openFor(node, 'branches'), { disabled }), item('create', 'plus', openFor(node, 'branches'), { disabled }), item('compare', 'splitRight', openFor(node, 'compare'), { disabled }), item('history', 'history', openFor(node, 'history'), { disabled })] },
+      { label: gitText('remote'), icon: 'globe', items: [fetch, push, sync] },
+      sep(),
+      item('worktrees', 'layers', openFor(node, 'worktrees'), { disabled }),
+      item('showOutput', 'terminal', () => window.gitWorkflow.openOutput(node.node, node.repo.root), { disabled })
+    ];
+  }
+  function panelMenuItems() {
+    const node = repositories.get(activeKey);
+    const toggleTree = () => { tree = !tree; $('gitTreeToggle').setAttribute('aria-pressed', String(tree)); render(); };
+    const view = [
+      item('asTree', 'folder', toggleTree, { checked: tree }),
+      { label: gitText('viewSort'), icon: 'sliders', items: [
+        item('sortPath', 'history', () => setSort('path'), { checked: sortMode === 'path' }),
+        item('sortName', 'terminal', () => setSort('name'), { checked: sortMode === 'name' }),
+        item('sortStatus', 'alert', () => setSort('status'), { checked: sortMode === 'status' }),
+        sep(),
+        item('filter', 'search', () => { $('gitFilterBar').hidden = !$('gitFilterBar').hidden; if (!$('gitFilterBar').hidden) $('gitFilter').focus(); })
+      ] },
+      sep()
+    ];
+    return node ? [...view, ...repoMenuItems(node), sep(), item('refresh', 'refresh', () => $('gitPanelRefresh').onclick())]
+      : [...view, item('refresh', 'refresh', () => $('gitPanelRefresh').onclick())];
+  }
+  function menu(button, node, group, file) {
+    if (!file && !group) {
+      openGroupMenu(button, node.repo.root, repoMenuItems(node));
+      groupMenu.classList.add('git-context-menu'); return;
+    }
+    const files = group ? (node.repo.files || []).filter(f => accepts(group, f) && f.path.toLocaleLowerCase().includes(filter)).map(f => f.path) : [];
+    const items = [item(file ? (group === 'staged' ? 'unstageFile' : 'stageFile') : (group === 'staged' ? 'unstageAll' : 'stageAll'), group === 'staged' ? 'undo' : 'plus', () => mutate(node, group === 'staged' ? 'unstage' : 'stage', file ? [file] : files))];
+    if (file && !node.node) items.push(item('editor', 'open', () => window.manager.gitOpenFile(node.node, node.repo.root, file)));
+    openGroupMenu(button, node.repo.root, items);
+    groupMenu.classList.add('git-context-menu');
+  }
+  list.addEventListener('toggle', e => { if (e.target.dataset.expand) expanded.set(e.target.dataset.expand, e.target.open); }, true);
+  list.addEventListener('input', e => {
+    const key = e.target.dataset.commitMessage; if (!key) return;
+    drafts.set(key, e.target.value);
+    const node = repositories.get(key), commit = e.target.parentElement.querySelector('[data-repo-action="commit"]');
+    if (node) window.gitWorkflow.rememberDraft?.(node.node, node.repo.root, e.target.value);
+    commit.disabled = !e.target.value.trim() || busy.has(key) || !(node?.repo.files || []).some(f => accepts('staged', f));
+    const headerCommit = e.target.closest('[data-repo]').querySelector('[data-quick="commit"]');
+    if (headerCommit) headerCommit.disabled = commit.disabled;
+  });
+  list.addEventListener('keydown', e => {
+    if (e.target.dataset.commitMessage && (e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault(); const button = e.target.parentElement.querySelector('[data-repo-action="commit"]'); if (!button.disabled) button.click();
+    }
+  });
+  list.addEventListener('focusin', e => { const repo = e.target.closest('[data-repo]'); if (repo) { activeKey = repo.dataset.repo; window.gitFooter?.render(); } });
+  list.addEventListener('click', e => {
+    const clickedRepo = e.target.closest('[data-repo]');
+    if (clickedRepo) { activeKey = clickedRepo.dataset.repo; window.gitFooter?.render(); }
+    const button = e.target.closest('[data-repo-menu], [data-group-menu], [data-file-menu], [data-repo-action], [data-quick], [data-commit-menu]');
+    if (!button || button.disabled) return;
+    e.preventDefault(); e.stopPropagation();
+    const node = repositories.get(button.closest('[data-repo]').dataset.repo); if (!node) return;
+    if (button.dataset.commitMenu !== undefined) {
+      openGroupMenu(button, node.repo.root, [item('commit', 'eye', () => window.gitWorkflow.open(node.node, node.repo.root, 'commit', drafts.get(node.key) || '')), item('stageAll', 'plus', () => mutate(node, 'stage', (node.repo.files || []).filter(f => accepts('changes', f)).map(f => f.path)))]);
+      groupMenu.classList.add('git-context-menu'); return;
+    }
+    if (button.dataset.quick) {
+      const action = button.dataset.quick, group = button.closest('[data-group]');
+      if (action === 'refresh') return $('gitPanelRefresh').onclick();
+      if (action === 'preview' || action === 'branches') return window.gitWorkflow.open(node.node, node.repo.root, action === 'preview' ? 'commit' : 'branches', drafts.get(node.key) || '');
+      if (action === 'review') return group?.querySelector('[data-diff-file]')?.click();
+      const files = (node.repo.files || []).filter(f => accepts(group?.dataset.group || 'changes', f) && f.path.toLocaleLowerCase().includes(filter)).map(f => f.path);
+      return mutate(node, action, action === 'commit' ? undefined : files);
+    }
+    if (button.dataset.repoAction) return mutate(node, button.dataset.repoAction);
+    const file = button.closest('[data-file]'), group = button.closest('[data-group]');
+    menu(button, node, group?.dataset.group, file?.dataset.file);
+  });
+  $('gitFilter').placeholder = gitText('search');
+  $('gitFilter').setAttribute('aria-label', gitText('filter'));
+  $('gitTreeToggle').title = gitText('tree');
+  $('gitFilter').oninput = e => { filter = e.target.value.toLocaleLowerCase(); render(); };
+  $('gitTreeToggle').onclick = () => { tree = !tree; $('gitTreeToggle').setAttribute('aria-pressed', String(tree)); render(); };
+  $('gitPanelMenu').onclick = () => { openGroupMenu($('gitPanelMenu'), '', panelMenuItems()); groupMenu.classList.add('git-context-menu'); };
+  $('gitPanelRefresh').onclick = async () => {
+    const button = $('gitPanelRefresh'); button.disabled = true;
+    try { await window.manager.refreshGit(true); git = await window.manager.getGit(); errors.clear(); render(); }
     catch (e) { toast(e.message, true); } finally { button.disabled = false; }
   };
-  window.gitPanel = { render };
+  window.gitFooter = { render: renderFooter };
+  window.gitPanel = { render, setDraft: (node, root, message) => { const key = JSON.stringify([node || 'local', root]); if (message) drafts.set(key, message); else drafts.delete(key); render(); }, getActive: () => repositories.get(activeKey), getRepos: () => [...repositories.values()], setActive: key => { if (repositories.has(key)) { activeKey = key; window.gitFooter?.render(); } } };
   select(selected);
 })();

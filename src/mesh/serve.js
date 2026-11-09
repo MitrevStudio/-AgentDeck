@@ -56,6 +56,8 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
     "sessions.list": async () => localSnapshot(await sessions.data()),
     "live.list": () => liveSessions(),
     "git.diff": p => git.diff(p),
+    "git.query": p => git.query(p),
+    "git.execute": p => git.execute(p),
     "git.status": () => git.get(),
     "git.refresh": () => git.refresh({ force: true }),
     "usage.get": () => host.usage.get(),

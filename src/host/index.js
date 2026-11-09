@@ -74,6 +74,22 @@ function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () 
   const launch = createLaunch({ dataDir, terminals, sessions, liveSessions, findTranscript, log, noLauncher });
   const tabLinks = createTabLinks({ terminals, liveSessions });
   const setup = createSetup({ agents: () => sessions.agents });
+  gitStatus.configure(async () => ({
+    sessions: sessions.get()?.sessions || [], terminals: terminals.getTabs(), live: await liveSessions(),
+    register: async dir => {
+      const reg = sessions.registry.read();
+      reg.removed = reg.removed.filter(x => x !== sessions.norm(dir));
+      if (!reg.projects.some(p => !p.node && sessions.norm(p.path) === sessions.norm(dir))) reg.projects.push({ name: path.basename(dir), path: dir });
+      sessions.registry.save(reg);
+      await sessions.scan();
+    },
+    unregister: async dir => {
+      const reg = sessions.registry.read();
+      reg.projects = reg.projects.filter(p => p.node || sessions.norm(p.path) !== sessions.norm(dir));
+      sessions.registry.save(reg);
+      await sessions.scan();
+    }
+  }));
   const preview = (s, opts = {}) => sessionPreview.preview(s, { ...opts, openCodeDb: sessions.OPENCODE_DB });
 
   // The background work: watching the transcripts, the periodic full scan, linking tabs to their sessions, the usage
@@ -98,6 +114,7 @@ function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () 
   // or stop.
   const flush = () => usage.flush();
   function stop() {
+    gitStatus.stop();
     limits.stop();
     resources.stop();
     sessions.stop();

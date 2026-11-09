@@ -10,6 +10,7 @@ function element(id) {
 const buttons = ['projects', 'git'].map(name => Object.assign(element(name), { dataset: { sideTab: name } }));
 const state = { repos: { one: { root: 'C:/app/backend', branch: 'main', files: [{ path: 'src/<script>.js', status: '.M' }] }, two: { root: 'C:/app/frontend', branch: 'feature', files: [] } } };
 let refreshed = false;
+let menuItems = [], executed = [], opened = [];
 const ctx = {
   $: element, document: { querySelectorAll: () => buttons },
   localStorage: { getItem: () => 'git', setItem() {} },
@@ -17,15 +18,34 @@ const ctx = {
   data: { projects: [{ n: 'c:/app', path: 'C:/app' }, { n: 'node:remote:c:/app', path: 'C:/app', node: 'remote' }] },
   ws: { spaces: { 'c:/app': { tabs: ['local-tab'] }, 'node:remote:c:/app': { tabs: ['remote-tab'] } }, tabs: { 'local-tab': {}, 'remote-tab': {} }, terminals: [] },
   git: state, nodes: [{ id: 'remote', name: 'REMOTE', status: 'offline', git: state }],
-  t: k => k, esc: s => String(s).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;'),
+  t: k => k, gitText: k => k, esc: s => String(s).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;'),
   icon: () => '', gitHead: r => r.branch, gitCounts: () => [], gitAb: () => '', toast: e => { throw new Error(e); },
-  window: { manager: { refreshGit: async force => { refreshed = force; }, getGit: async () => state } },
+  groupMenu: { classList: { add() {} } }, openGroupMenu: (_button, _path, items) => { menuItems = items; },
+  window: { gitWorkflow: { open: (...args) => { opened.push(args); } }, manager: { refreshGit: async force => { refreshed = force; }, getGit: async () => state, gitExecute: async (node, args) => { executed.push({ node, ...args }); } } },
 };
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/git-panel.js'), 'utf8'), ctx);
 assert.equal(element('gitRepoCount').textContent, 4, 'same paths on different computers stay separate');
 assert.match(element('gitRepositories').innerHTML, /backend/);
 assert.match(element('gitRepositories').innerHTML, /frontend/);
 assert.match(element('gitRepositories').innerHTML, /REMOTE/);
+assert.match(element('gitRepositories').innerHTML, /git-file-group/);
+assert.match(element('gitRepositories').innerHTML, /data-repo-action="commit"/);
+assert.match(element('gitRepositories').innerHTML, /data-repo-menu/);
+assert.match(element('gitRepositories').innerHTML, /data-file-menu/);
+assert.doesNotMatch(element('gitRepositories').innerHTML, /type="checkbox"|data-repo-action="manage"|git-repo-location/);
+const repoKey = JSON.stringify(['local', 'C:/app/backend']);
+const fileButton = { dataset: {}, closest: selector => selector === '[data-repo]' ? { dataset: { repo: repoKey } } : selector === '[data-file]' ? { dataset: { file: 'src/<script>.js' } } : { dataset: { group: 'changes' } } };
+element('gitRepositories').listeners.click({ target: { closest: () => fileButton }, preventDefault() {}, stopPropagation() {} });
+assert.equal(menuItems[0].label, 'stageFile');
+assert.equal(menuItems[1].label, 'editor');
+state.repos.one.fileCount = 2500; state.repos.one.filesTruncated = true;
+ctx.window.gitPanel.render();
+assert.match(element('gitRepositories').innerHTML, />2500<\/span>/);
+element('gitFilter').oninput({ target: { value: 'not-present' } });
+assert.doesNotMatch(element('gitRepositories').innerHTML, /data-diff-file/);
+element('gitFilter').oninput({ target: { value: '' } });
+element('gitTreeToggle').onclick();
+assert.match(element('gitRepositories').innerHTML, /git-folder/);
 assert.match(element('gitRepositories').innerHTML, /git-repository offline/);
 assert.doesNotMatch(element('gitRepositories').innerHTML, /<script>/);
 assert.equal(element('sideOverview').hidden, true);
@@ -51,8 +71,16 @@ assert.equal(element('gitRepoCount').textContent, 0, 'path prefix must end at di
 ctx.ws.tabs = {};
 ctx.window.gitPanel.render();
 assert.equal(element('gitRepoCount').textContent, 0, 'unattached terminal does not keep a repository visible');
-element('gitPanelRefresh').onclick().then(() => {
+element('gitPanelRefresh').onclick().then(async () => {
   assert.equal(refreshed, true);
   assert.equal(element('gitPanelRefresh').disabled, false);
+  ctx.ws.spaces['c:/app'].tabs = ['local-tab']; ctx.ws.tabs = { 'local-tab': {} };
+  ctx.window.gitPanel.render(); element('gitPanelMenu').onclick();
+  await menuItems.find(item => item.label === 'push').run();
+  assert.deepEqual(opened.at(-1), ['', 'C:/app/backend', 'sync']);
+  assert.equal(executed.length, 0, 'unpublished branches ask for the remote before pushing');
+  state.repos.one.upstream = 'origin/main'; ctx.window.gitPanel.render(); element('gitPanelMenu').onclick();
+  await menuItems.find(item => item.label === 'push').run();
+  assert.equal(executed.at(-1).action, 'push', 'tracked branches still push directly');
   console.log('Git sidebar tabs, local/remote identity, offline state, filename escaping and refresh passed');
 }).catch(e => { console.error(e); process.exitCode = 1; });

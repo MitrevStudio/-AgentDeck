@@ -51,6 +51,8 @@ main {
 }
 .proj:hover { --row-bg: var(--panel-2); }
 .proj.active { --row-bg: color-mix(in srgb, var(--accent) 13%, var(--panel)); }
+/* The row whose menu is open, so the menu's place in the list is never in doubt. */
+.proj.menu-open { --row-bg: var(--panel-2); box-shadow: inset 0 0 0 1px var(--line-3); }
 .proj-row { display: flex; align-items: center; gap: 8px; min-height: 26px; }
 .proj-row > .i { color: var(--muted); width: 16px; height: 16px; }
 .proj-name { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -116,6 +118,7 @@ main {
 .head-btn:hover { background: var(--panel-2); color: var(--text); }
 .menu {
   position: fixed; z-index: 50; min-width: 180px; max-width: 280px; padding: 4px; display: flex; flex-direction: column;
+  max-height: calc(100vh - 16px); overflow-y: auto;
   border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--panel); box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
 }
 .menu button {
@@ -127,6 +130,15 @@ main {
 /* An agent's glyph keeps its own colour (theme.css). */
 .menu button .i:not([class*="glyph-"]) { color: var(--muted); }
 .menu button:hover, .menu button:focus { background: var(--panel-2); outline: none; }
+.menu button:disabled { opacity: .45; cursor: default; }
+.menu button:disabled:hover { background: transparent; }
+.menu button .menu-check { flex: none; display: inline-grid; place-items: center; color: var(--accent); }
+.menu button.danger { color: var(--danger); }
+.menu button.danger .i { color: var(--danger); }
+.menu button.danger:hover, .menu button.danger:focus { background: var(--danger-bg); }
+.menu-sep { height: 1px; margin: 4px 6px; background: var(--line); }
+.menu-sub { animation: menu-in .09s ease-out; }
+@keyframes menu-in { from { opacity: 0; transform: translateX(-4px); } to { opacity: 1; transform: none; } }
 .rename {
   flex: 1; min-width: 0; height: 26px; padding: 0 8px; border-radius: var(--r-sm); outline: none;
   border: 1px solid var(--accent); background: var(--bg); font-weight: 600;
@@ -138,6 +150,7 @@ main {
 .agroup:first-child { padding-top: 0; }
 .agent { position: relative; display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 3px 8px; border-radius: var(--r-sm); cursor: pointer; }
 .agent:hover { background: var(--panel-2); }
+.agent.menu-open { background: var(--panel-2); }
 .agent.here { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
 .agent-main { flex: 1; min-width: 0; }
 .agent-title { font-size: 13px; font-weight: 550; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }

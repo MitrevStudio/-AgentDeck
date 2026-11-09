@@ -2,7 +2,6 @@
 // edge menu, loaded after common.js. Main sends { dirs: { normPath(folder): repo }, repos: { repo: status } }; a
 // folder inside a repository shows the repository's state.
 let git = { dirs: {}, repos: {} };
-ICONS.branch = '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="7" r="2"/><path d="M6 7v10"/><path d="M18 9c0 4-3 6-7 6H6"/>';
 
 const gitOf = (dir, state = git) => { const repo = dir && state?.dirs?.[normPath(dir)]; return (repo && state?.repos?.[repo]) || null; };
 const gitHead = g => (g.detached ? g.oid.slice(0, 7) : g.branch);

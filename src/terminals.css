@@ -25,6 +25,8 @@
 .wtab.drop-before { box-shadow: inset 2px 0 0 var(--accent); }
 .wtab.drop-after { box-shadow: inset -2px 0 0 var(--accent); }
 .wtab-new { width: 28px; height: 28px; border-radius: 50%; }
+.wtab-reset { margin-left: auto; color: var(--faint); }
+.wtab-reset:hover { color: var(--text); }
 .tabbar.drop-new { box-shadow: inset 0 0 0 1px var(--accent); border-radius: var(--r-md); }
 
 /* ---------- panes ---------- */

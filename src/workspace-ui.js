@@ -280,7 +280,7 @@ function renderTabbar() {
       ${l ? statusMark(l, false) : ""}<span class="wtab-name">${esc(label)}</span>
       <button class="wtab-close wtab-rename-btn" data-ws="rename-tab" title="${esc(t("action.rename"))}" aria-label="${esc(t("action.rename"))}">${icon("pencil")}</button>
       <button class="wtab-close" data-ws="close-tab" title="${esc(t("ws.closeTab"))}">${icon("x")}</button></div>`;
-  }).join("") + `<button class="icon-btn wtab-new ${!space.active ? "active" : ""}" data-ws="sessions" title="${esc(t("ws.sessions"))}" aria-label="${esc(t("ws.sessions"))}">${icon("plus")}</button>`;
+  }).join("") + `<button class="icon-btn wtab-new ${!space.active ? "active" : ""}" data-ws="sessions" title="${esc(t("ws.sessions"))}" aria-label="${esc(t("ws.sessions"))}">${icon("plus")}</button>` + `<button class="icon-btn wtab-new wtab-reset" data-ws="reset-tabs" title="${esc(t("ws.resetTabs"))}" aria-label="${esc(t("ws.resetTabs"))}">${icon("equal")}</button>`;
   // Rebuilt only when something shows differently, and not while a tab is dragged: a click or a drag in progress is
   // not lost.
   const bar = $("tabbar");
@@ -353,6 +353,18 @@ function applyRatios(el, node) {
   const inA = applyRatios(a, node.a), inB = applyRatios(b, node.b);
   return here || inA || inB;
 }
+// Every split back to half - one tab's, or all of them. Uses the per-split command main already has, so it works even
+// when the layout changed under a page that predates a reset command.
+function resetRatios(tabId = "") {
+  const jobs = [];
+  const visit = (tab, node, path) => {
+    if (!node || node.term) return;
+    if (node.ratio !== 0.5) jobs.push(runWorkspace("ratio", { tab: tab.id, path, ratio: 0.5 }));
+    visit(tab, node.a, path + "a"); visit(tab, node.b, path + "b");
+  };
+  for (const tab of tabId ? [ws.tabs[tabId]] : Object.values(ws.tabs)) if (tab) visit(tab, tab.root, "");
+  return Promise.all(jobs);
+}
 // Each pane's header: the agent, what runs, its context, its state, and the pane's buttons.
 function renderPaneHeads(tab) {
   if (draggedPane) return; // the header being dragged stays the same element until it is let go
@@ -367,6 +379,7 @@ function renderPaneHeads(tab) {
       <span class="pane-tools">
         <button class="icon-btn" data-ws="split-right" title="${esc(t("ws.splitRight"))}">${icon("splitRight")}</button>
         <button class="icon-btn" data-ws="split-down" title="${esc(t("ws.splitDown"))}">${icon("splitDown")}</button>
+        ${many ? `<button class="icon-btn" data-ws="reset-panes" title="${esc(t("ws.resetPanes"))}" aria-label="${esc(t("ws.resetPanes"))}">${icon("equal")}</button>` : ""}
         ${many ? `<button class="icon-btn ${tab.zoom ? "on" : ""}" data-ws="zoom" title="${esc(t(tab.zoom ? "ws.unzoom" : "ws.zoom"))}">${icon("maximize")}</button>` : ""}
         <button class="icon-btn" data-ws="close-pane" title="${esc(t("ws.closePane"))}">${icon("x")}</button>
       </span>`;
@@ -411,6 +424,7 @@ $("tabbar").addEventListener("click", e => {
   if (btn?.dataset.ws === "close-tab") { e.stopPropagation(); return closeTab(tabEl.dataset.tab); }
   if (btn?.dataset.ws === "rename-tab") { e.stopPropagation(); return renameWorkspaceTab(tabEl); }
   if (btn?.dataset.ws === "sessions") return runWorkspace("sessions");
+  if (btn?.dataset.ws === "reset-tabs") return resetRatios();
   if (tabEl) { focusAfterRender = true; runWorkspace("tab", { tab: tabEl.dataset.tab }); }
 });
 $("tabbar").addEventListener("auxclick", e => {
@@ -458,6 +472,7 @@ $("panes").addEventListener("click", e => {
   const run = () => {
     if (btn.dataset.ws === "split-right") return runWorkspace("split", { dir: "right" });
     if (btn.dataset.ws === "split-down") return runWorkspace("split", { dir: "down" });
+    if (btn.dataset.ws === "reset-panes") return resetRatios(tab.id);
     if (btn.dataset.ws === "zoom") return runWorkspace("zoom", { tab: tab.id });
     if (btn.dataset.ws === "close-pane") return closePane(term);
   };

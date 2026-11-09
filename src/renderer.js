@@ -6,8 +6,8 @@ let data = { projects: [], sessions: [], groups: [] };
 let order = [];
 // Each project's group id ("" for none), by its path as listed, hidden ones too.
 let groupOfPath = new Map();
-// The open Groups menu of a project card.
-let groupMenu = null;
+// The open Groups menu of a project card. menuLayers: the root menu and its flyout submenus, deepest last.
+let groupMenu = null, menuLayers = [];
 const getGroupOf = path => groupOfPath.get(path) || "";
 // selected: the shown space (workspace-ui.js decides it; a project's normalized path).
 const ui = { selected: "", renaming: "", loading: false, loaded: false };
@@ -284,15 +284,10 @@ function renderSpaceEmpty(el, key) {
 // A menu for starting a terminal or agent in the shown space.
 function openNewMenu(btn) {
   if (!getSpaceFolder(ws.activeSpace)) return;
-  closeGroupMenu();
-  groupMenu = document.createElement("div");
-  groupMenu.className = "menu";
-  groupMenu.setAttribute("role", "menu");
-  document.body.append(groupMenu);
-  showMenuItems([
+  openMenu(btn, "", [
     { label: t("ws.newTerminal"), icon: "terminal", run: () => openInSpace("terminal") },
     ...getInstalledAgents().map(a => ({ label: a, icon: `agent${a}`, run: () => openInSpace(a) }))
-  ], btn);
+  ]);
 }
 // The status bar's left end: the focused pane's folder and branch, and its session's context.
 function renderFocusInfo() {
@@ -593,39 +588,46 @@ $("newGroup").addEventListener("click", () => createGroup().catch(err => toast(e
 
 // ---------- projects: the group menu ----------
 // Moves a project into another group (Move to a group, then the group), a new one, or out of its own.
-function openGroupMenu(btn, path, items = getGroupMenuItems(path)) {
+function openMenu(btn, path, items) {
   closeGroupMenu();
-  groupMenu = document.createElement("div");
-  groupMenu.dataset.path = path;
-  groupMenu.className = "menu";
-  groupMenu.setAttribute("role", "menu");
-  document.body.append(groupMenu);
-  showMenuItems(items, btn);
+  btn?.closest?.(".proj, .agent")?.classList.add("menu-open");
+  const root = document.createElement("div");
+  root.className = "menu";
+  root.dataset.path = path;
+  root.returnFocus = btn;
+  root.setAttribute("role", "menu");
+  document.body.append(root);
+  groupMenu = root;
+  menuLayers = [root];
+  root.__root = root;
+  renderMenuLayer(root, items);
+  placeGroupMenu(btn);
+  focusFirst(root);
 }
+function openGroupMenu(btn, path, items = getGroupMenuItems(path)) { openMenu(btn, path, items); }
 // A project's menu: its folder, its place in the list and its group, its name; removing it. Also on a right-click.
 function openProjectMenu(btn, path) {
   const p = data.projects.find(x => refOf(x) === path);
   if (!p) return;
+  const pinned = isPinned(p);
   openGroupMenu(btn, path, [
     { label: t("action.copyPath"), icon: "copy", run: async () => { await window.manager.copyText(p.path); toast(t("toast.copied", { path: p.path })); } },
-    ...(p.group ? [] : [{ label: t(isPinned(p) ? "action.unpin" : "action.pin"), icon: "pin", run: () => pinProject(path) }]),
+    ...(p.group ? [] : [{ label: t("action.pin"), icon: "pin", checked: pinned, run: () => pinProject(path) }]),
+    { separator: true },
     ...getGroupMenuItems(path),
     // Cloned on another computer, with a branch and an agent (clone-ui.js); a project of another computer stays there.
     ...(!p.node && onlineNodes().length ? [{ label: t("clone.menu"), icon: "nodes", items: onlineNodes().map(n => ({ label: n.name, icon: n.kind === "host" ? "terminal" : "window", run: () => openCloneDialog(path, n) })) }] : []),
+    { separator: true },
     { label: t("action.rename"), icon: "pencil", run: async () => { ui.renaming = p.n; render(); } },
-    { label: t("action.remove"), icon: "trash", run: () => runAction("remove", btn) }
+    { separator: true },
+    { label: t("action.remove"), icon: "trash", danger: true, run: () => runAction("remove", btn) }
   ]);
 }
 // A running session's menu (the agents list, on a right-click): bring it up or move it here, its id and folder.
 function openRowMenu(btn, s) {
   if (!s) return;
-  closeGroupMenu();
-  groupMenu = document.createElement("div");
-  groupMenu.className = "menu";
-  groupMenu.setAttribute("role", "menu");
-  document.body.append(groupMenu);
   const copy = (text, msg) => async () => { await window.manager.copyText(text); toast(msg); };
-  showMenuItems([
+  openMenu(btn, "", [
     { label: t("term.show"), icon: "raise", run: () => showTerminal(s) },
     ...(!s.node && liveOf(s) && isMoveHereOffered(s) ? [{ label: t("term.moveHere"), icon: "download", run: () => moveSessionHere(s) }] : []),
     { label: t("manager.session.copyId"), icon: "copy", run: copy(s.id, t("manager.toast.copiedId", { id: s.id })) },
@@ -634,30 +636,59 @@ function openRowMenu(btn, s) {
       { label: t("action.terminalHere"), icon: "terminal", run: async () => { await window.manager.launchFolder(s.cwd); toast(t("manager.toast.terminal", { path: s.cwd })); } },
       { label: t("action.explorerTitle"), icon: "open", run: async () => { const err = await window.manager.openPath(s.cwd); if (err) throw new Error(err); } }
     ] : [])
-  ], btn);
+  ]);
 }
 function getGroupMenuItems(path) {
   const own = getGroupOf(path);
   const targets = data.groups.filter(g => g.id !== own).map(g => ({ label: g.name, icon: "stack", run: () => moveToGroup(path, g.id) }));
   return [
     ...(targets.length ? [{ label: t("manager.projectGroup.move"), icon: "stack", items: targets }] : []),
-    { label: t("manager.projectGroup.create"), icon: "plus", run: () => createGroup(path) },
+    { label: t("manager.projectGroup.create"), icon: "groupAdd", run: () => createGroup(path) },
     ...(own ? [{ label: t("manager.projectGroup.leave"), icon: "x", run: () => leaveGroup(path) }] : [])
   ];
 }
-// A submenu opens in place of the menu, with Back to return.
-function showMenuItems(items, btn) {
-  groupMenu.innerHTML = items.map((x, i) => `<button role="menuitem" data-i="${i}" ${x.items ? 'aria-haspopup="menu"' : ""}>
-    ${icon(x.icon)}<span>${esc(x.label)}</span>${x.items && !x.back ? icon("right") : ""}</button>`).join("");
-  groupMenu.onclick = e => {
-    const item = items[e.target.closest("[data-i]")?.dataset.i];
-    if (item?.items) return showMenuItems(item.back ? item.items : [{ label: t("manager.projectGroup.back"), icon: "left", items, back: true }, ...item.items], btn);
-    if (!item) return;
+// One menu layer. An item with `items` opens a flyout beside the menu on hover (and on click), as Source Control does.
+function renderMenuLayer(menu, items) {
+  menu.__items = items;
+  menu.innerHTML = items.map((x, i) => x.separator
+    ? '<div class="menu-sep" role="separator"></div>'
+    : `<button role="${x.checked !== undefined ? "menuitemcheckbox" : "menuitem"}" data-i="${i}" ${x.danger ? 'class="danger"' : ""} ${x.items ? 'aria-haspopup="menu"' : ""} ${x.checked ? 'aria-checked="true"' : ""} ${x.disabled ? "disabled" : ""}>
+    ${icon(x.icon)}<span>${esc(x.label)}</span>${x.checked ? `<span class="menu-check">${icon("check")}</span>` : ""}${x.items ? icon("right") : ""}</button>`).join("");
+  menu.onclick = e => {
+    const button = e.target.closest("[data-i]");
+    if (!button) return;
+    const x = items[Number(button.dataset.i)];
+    if (!x || x.disabled) return;
+    if (x.items) return openSubMenu(menu, button, x.items, true);
     closeGroupMenu();
-    item.run().catch(err => toast(err.message, true));
+    Promise.resolve().then(() => x.run()).catch(err => toast(err.message, true));
   };
-  placeGroupMenu(btn);
-  groupMenu.querySelector("button").focus();
+  // Each item opens its flyout as the pointer reaches it, as Source Control does.
+  for (const button of menu.querySelectorAll("button[data-i]")) {
+    button.addEventListener("mouseenter", () => {
+      const x = items[Number(button.dataset.i)];
+      if (!x || x.disabled) return;
+      if (!x.items) return closeDescendants(menu);
+      if (menu.__sub?.__anchor === button) return;
+      openSubMenu(menu, button, x.items);
+    });
+  }
+}
+function openSubMenu(parent, button, items, shouldFocus = false) {
+  closeDescendants(parent);
+  const sub = document.createElement("div");
+  sub.className = "menu menu-sub";
+  if (parent.__root.classList.contains("git-context-menu")) sub.classList.add("git-context-menu");
+  sub.setAttribute("role", "menu");
+  sub.__root = parent.__root;
+  sub.__parent = parent;
+  sub.__anchor = button;
+  parent.__sub = sub;
+  document.body.append(sub);
+  menuLayers.push(sub);
+  renderMenuLayer(sub, items);
+  placeSubMenu(sub, parent, button);
+  if (shouldFocus) focusFirst(sub);
 }
 function placeGroupMenu(btn) {
   const r = btn.getBoundingClientRect();
@@ -665,27 +696,75 @@ function placeGroupMenu(btn) {
   groupMenu.style.top = (below ? r.bottom + 4 : r.top - groupMenu.offsetHeight - 4) + "px";
   groupMenu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - groupMenu.offsetWidth - 8)) + "px";
 }
+function placeSubMenu(sub, parent, button) {
+  const p = parent.getBoundingClientRect(), r = button.getBoundingClientRect(), gap = 2;
+  const width = sub.offsetWidth, height = sub.offsetHeight;
+  const left = p.right + gap + width <= window.innerWidth - 8 ? p.right + gap : p.left - width - gap;
+  const top = Math.max(8, Math.min(r.top - 4, window.innerHeight - height - 8));
+  sub.style.top = top + "px";
+  sub.style.left = Math.max(8, left) + "px";
+}
+function focusFirst(menu) { menu.querySelector("button:not(:disabled)")?.focus(); }
+function closeLayer(menu) {
+  if (menu.__parent?.__sub === menu) menu.__parent.__sub = null;
+  if (menu.__sub) { const sub = menu.__sub; menu.__sub = null; closeLayer(sub); }
+  const i = menuLayers.indexOf(menu);
+  if (i >= 0) menuLayers.splice(i, 1);
+  menu.remove();
+}
+function closeDescendants(menu) {
+  if (!menu.__sub) return;
+  const sub = menu.__sub; menu.__sub = null; closeLayer(sub);
+}
 function closeGroupMenu() {
-  groupMenu?.remove();
+  for (const layer of menuLayers) layer.remove();
+  menuLayers = [];
   groupMenu = null;
+  for (const el of document.querySelectorAll(".menu-open")) el.classList.remove("menu-open");
 }
 document.addEventListener("mousedown", e => {
-  if (groupMenu && !groupMenu.contains(e.target)) closeGroupMenu();
+  if (groupMenu && !menuLayers.some(menu => menu.contains(e.target))) closeGroupMenu();
 }, true);
 document.addEventListener("keydown", e => {
   if (!groupMenu) return;
+  let layer = groupMenu;
+  for (const menu of menuLayers) if (menu.contains(document.activeElement)) layer = menu;
   if (e.key === "Escape") {
     e.stopPropagation();
+    if (menuLayers.length > 1) {
+      const deepest = menuLayers[menuLayers.length - 1], anchor = deepest.__anchor;
+      closeLayer(deepest);
+      anchor?.focus();
+      return;
+    }
     const path = groupMenu.dataset.path;
+    const returnFocus = groupMenu.returnFocus;
     closeGroupMenu();
-    [...document.querySelectorAll(".proj[data-path]")].find(el => el.dataset.path === path)?.querySelector("[data-action=project-menu]")?.focus();
+    if (returnFocus?.isConnected) returnFocus.focus();
+    else [...document.querySelectorAll(".proj[data-path]")].find(el => el.dataset.path === path)?.querySelector("[data-action=project-menu]")?.focus();
+    return;
   }
   if (e.key === "ArrowDown" || e.key === "ArrowUp") {
     e.preventDefault();
     e.stopPropagation();
-    const all = [...groupMenu.querySelectorAll("button")];
+    const all = [...layer.querySelectorAll("button:not(:disabled)")];
+    if (!all.length) return;
     const i = all.indexOf(document.activeElement) + (e.key === "ArrowDown" ? 1 : -1);
-    all[(i + all.length) % all.length].focus();
+    all[(i + all.length) % all.length]?.focus();
+    return;
+  }
+  if (e.key === "ArrowRight") {
+    const button = document.activeElement?.closest?.("[data-i]");
+    const x = button && layer.__items?.[Number(button.dataset.i)];
+    if (x?.items) { e.preventDefault(); e.stopPropagation(); openSubMenu(layer, button, x.items, true); }
+    return;
+  }
+  if (e.key === "ArrowLeft" && menuLayers.length > 1) {
+    e.preventDefault();
+    e.stopPropagation();
+    const deepest = menuLayers[menuLayers.length - 1], anchor = deepest.__anchor;
+    closeLayer(deepest);
+    anchor?.focus();
   }
 }, true);
 
@@ -831,6 +910,7 @@ $("splitter").addEventListener("pointerdown", e => {
   el.addEventListener("lostpointercapture", () => el.removeEventListener("pointermove", move), { once: true });
 });
 $("splitter").addEventListener("dblclick", resetProjectsWidth);
+$("resetSidebar").onclick = resetProjectsWidth;
 $("splitter").addEventListener("keydown", e => {
   const step = { ArrowLeft: -SPLITTER_STEP_PX, ArrowRight: SPLITTER_STEP_PX }[e.key];
   if (step) {
