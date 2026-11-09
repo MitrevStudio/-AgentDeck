@@ -13,6 +13,7 @@ const { loadIdentity } = require("./identity");
 const { createPeers } = require("./peers");
 const { createServer } = require("./server");
 const { connect } = require("./client");
+const { connectViaProxy } = require("./proxy");
 const { createDiscovery } = require("./discovery");
 const { createLink, PROTOCOL } = require("./protocol");
 const { HostError } = require("../host/errors");
@@ -42,7 +43,7 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
     return [...found.values()];
   };
   const self = () => (!identity ? null : { id: identity.id, name: identity.settings.name, kind, version, protocol: PROTOCOL, port: server?.port() || identity.settings.port,
-    discoverable: identity.settings.discoverable, code: peers.code() });
+    discoverable: identity.settings.discoverable, proxy: identity.settings.proxy, code: peers.code() });
   const hello = () => ({ id: identity.id, name: identity.settings.name, kind, version, protocol: PROTOCOL, relay: 1, port: server?.port() || 0 });
 
   // ---------- the nodes as listed ----------
@@ -172,7 +173,8 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
     let delay = retries.get(id)?.delay || RECONNECT_MIN_MS;
     for (const c of candidates(peer)) {
       try {
-        const { ws } = await connect({ identity, address: c.address, port: c.port, expectId: id });
+        const socket = identity.settings.proxy ? await connectViaProxy({ proxy: identity.settings.proxy, host: c.address, port: c.port }) : undefined;
+        const { ws } = await connect({ identity, address: c.address, port: c.port, expectId: id, socket });
         if (await adopt(ws, id, { initiatedHere: true, address: c.address, port: c.port })) return;
       } catch (e) {
         if (e.code === "wrongNode") log(`${c.address}:${c.port} is not ${peer.name || id.slice(0, 8)} any more`);
@@ -225,7 +227,9 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
   // Pairs with the node at address:port, which must show `code` (its own, from its Settings or its installer).
   async function pair(address, port, code) {
     const route = relay.list().find(r => r.id === address && r.path.length > 2)?.path;
-    const socket = route ? await relay.open(route) : undefined;
+    const socket = route ? await relay.open(route)
+      : identity.settings.proxy ? await connectViaProxy({ proxy: identity.settings.proxy, host: address, port })
+      : undefined;
     const { ws, id } = await connect({ identity, address: route ? "localhost" : address, port: route ? 443 : port, expectId: route ? address : "", socket });
     if (peers.get(id)) {
       ws.close(1000, "already paired");

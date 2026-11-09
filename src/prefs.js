@@ -16,8 +16,10 @@ const { isObj } = require("./shared/util");
 const LANGUAGES = Object.keys(i18n.LANGUAGES);
 const THEMES = ["system", "dark", "light"];
 const SESSIONS_IN = ["windows", "tabs"];
-// Context sizes from which a session in an AgentDeck tab is remembered and compacted (autopilot.js).
-const AUTO_COMPACT_TOKENS = [100000, 150000, 200000, 300000];
+// Context sizes from which a session in an AgentDeck tab is remembered and compacted (autopilot.js). The largest
+// value is effectively "max": the session keeps its full context and only Claude Code's own compaction steps in.
+const AUTO_COMPACT_TOKENS = [100000, 150000, 200000, 300000, 500000, 1000000];
+const AUTO_COMPACT_MAX = 1000000;
 // The text of AgentDeck's own terminals, px before the window's scale; the manager window's scale (its zoom). The
 // defaults: 16 px text at 100%.
 const TERMINAL_FONT_SIZES = [11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24];
@@ -26,7 +28,7 @@ const UI_SCALES = [0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5];
 const BACKGROUND = { dark: "#0d1015", light: "#f2f4f8" };
 
 const prefs = new EventEmitter();
-const state = { language: "bg", theme: "dark", edgeHandle: true, autoUpdate: true, newWindow: true, sessionsIn: "tabs", autoCompact: true, autoCompactTokens: 150000, dayView: false, notify: null, terminalFontSize: 16, uiScale: 1 };
+const state = { language: "bg", theme: "dark", edgeHandle: true, autoUpdate: true, newWindow: true, sessionsIn: "tabs", autoCompact: true, autoCompactTokens: AUTO_COMPACT_MAX, dayView: false, notify: null, terminalFontSize: 16, uiScale: 1 };
 let sessionsInChosen = false; // the user picked where sessions open (settings or the tray menu)
 let handleX = 0.5; // the edge handle's centre, as a fraction of the display width
 let handleDisplay = null; // the id of the display it is on (null: the primary one)

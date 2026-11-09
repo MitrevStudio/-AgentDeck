@@ -678,7 +678,7 @@ function buildTrayMenu() {
       label: t("tray.autoCompact"), submenu: [
         { label: t("tray.autoCompact.on"), type: "checkbox", checked: p.autoCompact, click: item => prefs.set({ autoCompact: item.checked }) },
         { type: "separator" },
-        ...radio("autoCompactTokens", prefs.AUTO_COMPACT_TOKENS, n => t("tray.autoCompact.from", { n: `${n / 1000}k` }))
+        ...radio("autoCompactTokens", prefs.AUTO_COMPACT_TOKENS, n => n >= 1000000 ? t("tray.autoCompact.max") : t("tray.autoCompact.from", { n: `${n / 1000}k` }))
       ]
     },
     { label: t("tray.settings"), enabled: Boolean(voice), click: () => voice?.openSettings() },

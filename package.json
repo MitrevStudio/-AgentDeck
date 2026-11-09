@@ -15,6 +15,8 @@
     "test:git-ui": "node scripts/test-git-ui-electron.cjs",
     "test:layout": "node scripts/test-layout-sync.js",
     "test:relay": "node scripts/test-relay.js",
+    "test:mesh": "node scripts/test-mesh.js",
+    "test:mesh-proxy": "node scripts/test-mesh-proxy.js",
     "test:limits": "node scripts/test-limits.js",
     "test:audit": "node scripts/test-audit-regressions.js",
     "dist": "electron-builder --win --publish never",

@@ -49,7 +49,10 @@ async function loadIdentity(dir, { defaultName }) {
     port: Number.isInteger(saved.port) && saved.port >= 0 && saved.port <= 65535 ? saved.port : DEFAULT_PORT,
     discoverable: saved.discoverable !== false,
     // The network interface's address to announce on (empty: all of them).
-    interface: typeof saved.interface === "string" ? saved.interface : ""
+    interface: typeof saved.interface === "string" ? saved.interface : "",
+    // An HTTP CONNECT proxy for outbound links ("http://host:port"); empty: connect directly. Lets a node behind a
+    // corporate proxy reach a hub node it otherwise could not (proxy.js).
+    proxy: typeof saved.proxy === "string" ? saved.proxy.trim() : ""
   };
   const save = () => fs.writeFileSync(file, JSON.stringify(settings, null, 2));
   // Unknown or invalid values are ignored; answers what changed.
@@ -59,6 +62,7 @@ async function loadIdentity(dir, { defaultName }) {
     if (typeof patch.name === "string" && patch.name.trim() && patch.name.trim().slice(0, 60) !== settings.name) { settings.name = patch.name.trim().slice(0, 60); keys.push("name"); }
     if (Number.isInteger(patch.port) && patch.port >= 0 && patch.port <= 65535 && patch.port !== settings.port) { settings.port = patch.port; keys.push("port"); }
     if (typeof patch.discoverable === "boolean" && patch.discoverable !== settings.discoverable) { settings.discoverable = patch.discoverable; keys.push("discoverable"); }
+    if (typeof patch.proxy === "string" && patch.proxy.trim() !== settings.proxy) { settings.proxy = patch.proxy.trim(); keys.push("proxy"); }
     if (keys.length) save();
     return keys;
   }
