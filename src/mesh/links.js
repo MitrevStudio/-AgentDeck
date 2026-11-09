@@ -24,8 +24,9 @@ const PAIR_TIMEOUT_MS = 20000;
 
 // dir: where the identity and the peers are kept; defaultName; kind: "desktop" | "host"; version;
 // api(method, params, peer) -> the answer to a peer's request; log(line); discover: announce and look for nodes
-// on the local network (off in tests).
-function createLinks({ dir, defaultName, kind, version, api, log = () => {}, discover = true, relayOnly = false }) {
+// on the local network (off in tests); relayOnly: serve no api, only pair and relay; listen: the address the mesh
+// server binds ("" or omitted: all; "127.0.0.1": a node reached only through a relay on the same machine).
+function createLinks({ dir, defaultName, kind, version, api, log = () => {}, discover = true, relayOnly = false, listen = "" }) {
   const out = new EventEmitter();
   const links = new Map();   // peer id -> { link, initiatedHere, info, address, port }
   const retries = new Map(); // peer id -> { timer, delay }
@@ -309,7 +310,7 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
   async function restartServer() {
     server?.stop();
     server = createServer({ identity, onConnection });
-    await server.start(identity.settings.port);
+    await server.start(identity.settings.port, listen || undefined);
     announce();
   }
   function regenerateCode() {

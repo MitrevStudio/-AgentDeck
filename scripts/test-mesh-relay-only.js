@@ -12,6 +12,7 @@
 //   * a host peer may never control a desktop (host -> desktop is refused), and a kind change can't grant it.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
 const { createLinks } = require("../src/mesh/links");
@@ -19,13 +20,20 @@ const { createLinks } = require("../src/mesh/links");
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "agentdeck-relayonly-"));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const wait = async (f, ms = 15000) => { for (let i = 0; i < ms / 50; i++) { if (f()) return; await sleep(50); } throw new Error("condition timeout"); };
+// Whether a TCP connection to host:port is accepted.
+const tcp = (host, port) => new Promise(resolve => {
+  const s = net.connect(port, host);
+  s.once("connect", () => { s.destroy(); resolve(true); });
+  s.once("error", () => resolve(false));
+  s.setTimeout(3000, () => { s.destroy(); resolve(false); });
+});
 
-const node = (name, { kind = "desktop", relayOnly = false } = {}) => {
+const node = (name, { kind = "desktop", relayOnly = false, listen } = {}) => {
   fs.mkdirSync(path.join(root, name), { recursive: true });
   fs.writeFileSync(path.join(root, name, "node.json"), JSON.stringify({ port: 0 }));
   const calls = [];
   const api = (method, _params, peer) => { calls.push(method); return { answered: `${name}:${method}`, from: peer.name }; };
-  const links = createLinks({ dir: path.join(root, name), defaultName: name, kind, version: "test", api, relayOnly, discover: false, log: () => {} });
+  const links = createLinks({ dir: path.join(root, name), defaultName: name, kind, version: "test", api, relayOnly, listen, discover: false, log: () => {} });
   links.calls = calls;
   return links;
 };
@@ -33,8 +41,14 @@ const node = (name, { kind = "desktop", relayOnly = false } = {}) => {
 (async () => {
   const a = node("A", { kind: "desktop" });                   // a laptop/desktop
   const r = node("R", { kind: "host", relayOnly: true });     // the VPS, installed relay-only
-  const v = node("V", { kind: "host" });                      // a VM, installed with --with-api
+  // A resource host as a second service beside the relay (install.sh AGENTDECK_INSTANCE): listens on loopback only.
+  const v = node("V", { kind: "host", listen: "127.0.0.1" });
   const selfA = await a.start(), selfR = await r.start(), selfV = await v.start();
+
+  // V is reachable on 127.0.0.1 (the relay beside it dials there) but not on the machine's network address.
+  assert.equal(await tcp("127.0.0.1", selfV.port), true, "the resource host answers on loopback");
+  const ext = Object.values(os.networkInterfaces()).flat().find(x => x && x.family === "IPv4" && !x.internal)?.address;
+  if (ext) assert.equal(await tcp(ext, selfV.port), false, `the resource host does not answer on ${ext}`);
 
   // Pair A<->R and V<->R, so R is the hub both sides route through. R regenerates its code after each pairing, so it is
   // read fresh each time.
