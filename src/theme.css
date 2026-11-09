@@ -1,6 +1,7 @@
 /* AgentDeck's theme. Linked first by every page (manager, edge menu, voice panel, voice history, settings); a page's
    own stylesheet keeps only its layout and, where a page is denser, its sizes - and uses these tokens for colour.
-   :root holds the dark theme; :root[data-theme="light"] the light one, under the same names. i18n.js sets the
+   :root holds the dark theme; :root[data-theme="light"] the light one, under the same names. The other themes
+   (Black and those adapted from VS Code) are in themes.css, linked right after this file. i18n.js sets the
    attribute from the user's choice before the first paint. */
 :root {
   color-scheme: dark;

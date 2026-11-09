@@ -472,7 +472,7 @@ Agent-launch shortcuts require the corresponding CLI. In the search palette, arr
 
 | Area | What you can change |
 | --- | --- |
-| **General** | English/Bulgarian, dark/light/system theme, interface scale, startup and updates |
+| **General** | English/Bulgarian, colour theme, interface scale, startup and updates |
 | **Terminals** | Built-in tabs or Windows Terminal, external window behavior, font size and automatic compaction |
 | **Dictation** | Provider, model, language, microphone, recording length, delivery, text mode and push-to-talk |
 | **Dictionary** | Recognition terms, replacement rules and project vocabulary |
@@ -480,6 +480,8 @@ Agent-launch shortcuts require the corresponding CLI. In the search palette, arr
 | **Commands** | Enable/disable spoken commands and choose their trigger |
 | **Network** | System/PAC/manual/direct proxy modes, credentials and connection testing |
 | **Computers** | Node identity, discovery, pairing, peers and host setup |
+
+**Themes:** System (follows Windows), Dark, Light and Black (true black for OLED screens), plus ten adapted from popular VS Code themes: One Dark Pro, Dracula, GitHub Dark, Tokyo Night, Catppuccin Mocha, Night Owl, Nord, Ayu Mirage, Gruvbox Dark and Solarized Dark. A theme recolours every window and the built-in terminals at once. The VS Code themes are MIT licensed; their authors and licences are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 The tray also provides quick language/theme switches, terminal destination controls, voice actions and app lifecycle controls. Closing the manager leaves AgentDeck available in the tray.
 
@@ -585,6 +587,7 @@ node scripts/test-resources.js
 node scripts/test-codex-live.js
 node scripts/test-project-sessions.js
 npm run test:limits
+npm run test:themes
 ```
 
 Additional focused checks live in `scripts/`, including workspace and mesh tests. Inspect a script's prerequisites before running integration checks; some need runtime capabilities beyond syntax checking.
@@ -747,7 +750,7 @@ For a useful bug report, include the AgentDeck version, Windows or host platform
 When changing the application:
 
 1. Keep user-visible strings in `src/i18n.js` with English and Bulgarian translations.
-2. Use the shared theme tokens in `src/theme.css` for interface colors.
+2. Use the shared theme tokens in `src/theme.css` for interface colors. A new token needs a value in every theme block of `src/themes.css` too (`npm run test:themes` checks).
 3. Keep reusable host behavior independent of Electron and the DOM.
 4. Run relevant checks and explain what you validated in the pull request.
 5. Use Conventional Commits so release automation can classify the change.
@@ -757,6 +760,8 @@ When changing the application:
 AgentDeck is available under the [MIT License](LICENSE).
 
 Copyright © 2026 Mitrev Studio.
+
+The colour themes adapted from VS Code themes keep their authors' MIT licences; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ---
 

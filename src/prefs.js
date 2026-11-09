@@ -12,9 +12,10 @@ const { EventEmitter } = require("node:events");
 const settings = require("./voice/settings");
 const i18n = require("./i18n");
 const { isObj } = require("./shared/util");
+const themes = require("./shared/themes");
 
 const LANGUAGES = Object.keys(i18n.LANGUAGES);
-const THEMES = ["system", "dark", "light"];
+const THEMES = themes.THEMES; // "system", then every theme in shared/themes.js
 const SESSIONS_IN = ["windows", "tabs"];
 // Context sizes from which a session in an AgentDeck tab is remembered and compacted (autopilot.js).
 const AUTO_COMPACT_TOKENS = [100000, 150000, 200000, 300000];
@@ -22,21 +23,29 @@ const AUTO_COMPACT_TOKENS = [100000, 150000, 200000, 300000];
 // defaults: 16 px text at 100%.
 const TERMINAL_FONT_SIZES = [11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24];
 const UI_SCALES = [0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5];
-// --bg of theme.css, for windows until their page paints.
-const BACKGROUND = { dark: "#0d1015", light: "#f2f4f8" };
 
 const prefs = new EventEmitter();
-const state = { language: "bg", theme: "dark", edgeHandle: true, autoUpdate: true, newWindow: true, sessionsIn: "tabs", autoCompact: true, autoCompactTokens: 150000, dayView: false, notify: null, terminalFontSize: 16, uiScale: 1 };
+const state = { language: "bg", theme: themes.DEFAULT, edgeHandle: true, autoUpdate: true, newWindow: true, sessionsIn: "tabs", autoCompact: true, autoCompactTokens: 150000, dayView: false, notify: null, terminalFontSize: 16, uiScale: 1 };
 let sessionsInChosen = false; // the user picked where sessions open (settings or the tray menu)
 let handleX = 0.5; // the edge handle's centre, as a fraction of the display width
 let handleDisplay = null; // the id of the display it is on (null: the primary one)
 const fraction = v => (typeof v === "number" && v >= 0 && v <= 1 ? v : null);
 
-// themeSource also gives native title bars and dialogs the chosen look; "system" follows Windows.
+// themeSource also gives native title bars and dialogs the chosen look: the theme's base (dark or light), or
+// "system", which follows Windows. It takes nothing else.
+const themeSource = theme => themes.baseOf(theme) || "system";
+// resolvedTheme: dark or light, the base in effect. themeId: the theme the pages draw (<html data-theme>) - the one
+// chosen, or for "system" dark or light as Windows has it.
 const resolvedTheme = () => (nativeTheme.shouldUseDarkColors ? "dark" : "light");
+const themeId = () => (themes.get(state.theme) ? state.theme : resolvedTheme());
 // With the choices the pages offer (the lists above), so none keeps a copy of them.
-const get = () => ({ ...state, resolvedTheme: resolvedTheme(), dev: !app.isPackaged, terminalFontSizes: TERMINAL_FONT_SIZES, uiScales: UI_SCALES });
-const background = () => BACKGROUND[resolvedTheme()];
+const get = () => ({
+  ...state, resolvedTheme: resolvedTheme(), themeId: themeId(), dev: !app.isPackaged,
+  themes: THEMES.map(id => ({ id, group: themes.get(id)?.group ?? "app" })),
+  terminalFontSizes: TERMINAL_FONT_SIZES, uiScales: UI_SCALES
+});
+// The theme's --bg, for windows until their page paints.
+const background = () => (themes.get(themeId()) || themes.get(themes.DEFAULT)).bg;
 
 function load() {
   let root = {};
@@ -67,7 +76,7 @@ function load() {
   // null: not saved here yet (main carries the earlier choice over).
   state.notify = isObj(root.notify) && typeof root.notify.on === "boolean" ? root.notify.on : null;
   i18n.setLanguage(state.language, { dev: !app.isPackaged });
-  nativeTheme.themeSource = state.theme;
+  nativeTheme.themeSource = themeSource(state.theme);
   // Windows switched between light and dark while the theme follows it.
   nativeTheme.on("updated", () => prefs.emit("changed", get(), ["theme"]));
 }
@@ -83,7 +92,7 @@ async function set(patch) {
   }
   if (THEMES.includes(patch.theme) && patch.theme !== state.theme) {
     state.theme = patch.theme;
-    nativeTheme.themeSource = state.theme;
+    nativeTheme.themeSource = themeSource(state.theme);
     keys.push("theme");
   }
   if (typeof patch.edgeHandle === "boolean" && patch.edgeHandle !== state.edgeHandle) {

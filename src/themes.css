@@ -1,0 +1,1341 @@
+/* More themes, beside theme.css's dark and light. Linked right after theme.css by every page; i18n.js puts the
+   chosen theme on <html data-theme="...">, and each block below swaps the same tokens theme.css defines (every colour
+   token of its :root block - type, radii and motion are shared). The list, each theme's base (dark or light, for
+   native title bars and dialogs) and its window colour (= --bg here) are in shared/themes.js;
+   scripts/test-themes.js checks the three agree and that body text stays at 4.5:1 or more.
+
+   The VS Code themes are adaptations: the colours come from each theme's published palette (editor, sidebar,
+   widgets, borders, foreground, accent, terminal.ansi*), placed on AgentDeck's surfaces. Where a theme's own colour
+   would fall under 4.5:1 for text, or a terminal colour would vanish into the background, the change is noted at
+   its block. All are MIT licensed (see THIRD_PARTY_NOTICES.md):
+
+   One Dark Pro      Binaryify (Binaryify/OneDark-Pro), MIT
+                     https://github.com/Binaryify/OneDark-Pro
+   Dracula           Dracula Theme, Zeno Rocha (dracula/visual-studio-code), MIT
+                     https://github.com/dracula/visual-studio-code
+   GitHub Dark       GitHub, Primer (primer/github-vscode-theme), MIT
+                     https://github.com/primer/github-vscode-theme
+   Tokyo Night       Enkia (enkia/tokyo-night-vscode-theme), MIT
+                     https://github.com/enkia/tokyo-night-vscode-theme
+   Catppuccin Mocha  Catppuccin (catppuccin/vscode, palette from catppuccin/palette), MIT
+                     https://github.com/catppuccin/vscode
+   Night Owl         Sarah Drasner (sdras/night-owl-vscode-theme), MIT
+                     https://github.com/sdras/night-owl-vscode-theme
+   Nord              Sven Greb (nordtheme/visual-studio-code), MIT
+                     https://github.com/nordtheme/visual-studio-code
+   Ayu Mirage        Ike Kurghinyan (ayu-theme/vscode-ayu), MIT
+                     https://github.com/ayu-theme/vscode-ayu
+   Gruvbox Dark      JD (jdinhify/vscode-theme-gruvbox), after Pavel Pertsev's gruvbox; MIT
+                     https://github.com/jdinhify/vscode-theme-gruvbox
+   Solarized Dark    Ethan Schoonover (altercation/solarized), as shipped in VS Code (microsoft/vscode); MIT
+                     https://github.com/microsoft/vscode/tree/main/extensions/theme-solarized-dark
+*/
+
+/* Black. AgentDeck's own: a true-black (OLED) variant of the dark theme with neutral greys and the app's blue accent. */
+:root[data-theme="black"] {
+  color-scheme: dark;
+
+  /* surfaces */
+  --bg: #000000;
+  --panel: #0a0a0a;
+  --panel-2: #161616;
+  --panel-3: #191919;
+  --card: #0e0e0e;
+  --card-hover: #121212;
+  --raised: #1f1f1f;
+  --line: #1f1f1f;
+  --line-2: #2e2e2e;
+  --line-3: #404040;
+  --hairline: rgba(255, 255, 255, .07);
+  --hairline-2: rgba(255, 255, 255, .13);
+  --glass: rgba(10, 10, 10, .98);
+  --glass-top: rgba(27, 27, 27, .97);
+  --btn-hover: #1a1a1a;
+  --scroll-thumb: #272727;
+  --scroll-thumb-hover: #404040;
+  --switch-off: var(--line-2);
+  --seg-on: var(--panel-2);
+  --seg-on-shadow: inset 0 0 0 1px var(--line-2);
+  --knob: #d4d4d4;
+  --knob-shadow: 0 1px 3px rgba(0, 0, 0, .4);
+  --backdrop: rgba(0, 0, 0, .55);
+
+  /* text */
+  --text: #ededed;
+  --muted: #a3a3a3;
+  --faint: #6e6e6e;
+
+  /* accent */
+  --accent: #7aa7ff;
+  --accent-strong: #9dbdff;
+  --accent-deep: #3b5fa9;
+  --accent-weak: rgba(122, 167, 255, .14);
+  --prompt-fg: var(--text);
+  --accent-line: rgba(122, 167, 255, .5);
+  --accent-glow: rgba(122, 167, 255, .35);
+  --on-accent: #000000;
+  --on-solid: #ffffff;
+  --grad-accent: linear-gradient(135deg, #3b5fa9, #7aa7ff);
+
+  /* terminal */
+  --term-bg: #000000;
+  --term-fg: #e5e5e5;
+  --term-cursor: #7aa7ff;
+  --term-selection: rgba(122, 167, 255, .3);
+  --term-ansi-black: #262626;
+  --term-ansi-red: #ff8a8a;
+  --term-ansi-green: #5ee0a0;
+  --term-ansi-yellow: #f2b55f;
+  --term-ansi-blue: #7aa7ff;
+  --term-ansi-magenta: #d7a6ff;
+  --term-ansi-cyan: #6fd6e8;
+  --term-ansi-white: #d4d4d4;
+  --term-ansi-bright-black: #737373;
+  --term-ansi-bright-red: #ffb0b0;
+  --term-ansi-bright-green: #8ff0c0;
+  --term-ansi-bright-yellow: #ffd08a;
+  --term-ansi-bright-blue: #a8c6ff;
+  --term-ansi-bright-magenta: #e6c6ff;
+  --term-ansi-bright-cyan: #9be6f2;
+  --term-ansi-bright-white: #ffffff;
+
+  /* status */
+  --busy: #5ee0a0;
+  --busy-bg: rgba(94, 224, 160, .13);
+  --wait: #f2b55f;
+  --wait-bg: rgba(242, 181, 95, .14);
+  --attn: #ff7eb0;
+  --attn-bg: rgba(255, 126, 176, .14);
+  --ready: var(--busy);
+  --ready-bg: var(--busy-bg);
+  --working: #ff9f43;
+  --working-bg: rgba(255, 159, 67, .14);
+  --needs: #ff5c5c;
+  --needs-bg: rgba(255, 92, 92, .14);
+  --warn: #f2b55f;
+  --danger: #ff8a8a;
+  --danger-bg: rgba(255, 138, 138, .12);
+  --danger-line: rgba(255, 138, 138, .4);
+  --danger-text: #ffd0d0;
+  --danger-solid: #c74848;
+  --danger-solid-hover: #cd5a5a;
+  --read: #c3a6ff;
+  --read-bg: rgba(195, 166, 255, .13);
+
+  /* agents */
+  --claude: #f0a77a;
+  --claude-bg: rgba(240, 167, 122, .14);
+  --opencode: #8fb3ff;
+  --opencode-bg: rgba(143, 179, 255, .14);
+  --codex: #74d6a6;
+  --codex-bg: rgba(116, 214, 166, .14);
+
+  /* paths & search hits */
+  --path-bg: #040404;
+  --path-parent: #bdbdbd;
+  --path-leaf: #ffffff;
+  --mark: rgba(242, 181, 95, .28);
+  --mark-text: #f9deb7;
+  --path-mark: #fcf0df;
+
+  /* tiles, select arrow, depth */
+  --tile-bg: 42% 25%;
+  --tile-fg: 90% 84%;
+  --tile-ring: 50% 38% / .6;
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a3a3a3' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, .45);
+  --shadow-float: 0 16px 44px rgba(0, 0, 0, .55);
+  --shadow-dialog: 0 18px 50px rgba(0, 0, 0, .55);
+}
+
+/* One Dark Pro - Binaryify (Binaryify/OneDark-Pro), MIT.
+   Page #21252b and panels #282c34 as the sidebar and editor; borders lifted from #181a1f so they show on the panels. */
+:root[data-theme="one-dark-pro"] {
+  color-scheme: dark;
+
+  /* surfaces */
+  --bg: #21252b;
+  --panel: #282c34;
+  --panel-2: #2f343e;
+  --panel-3: #323842;
+  --card: #2a2f38;
+  --card-hover: #2d323b;
+  --raised: #3a404b;
+  --line: #3e4452;
+  --line-2: #4b5263;
+  --line-3: #5c6370;
+  --hairline: rgba(255, 255, 255, .07);
+  --hairline-2: rgba(255, 255, 255, .13);
+  --glass: rgba(40, 44, 52, .98);
+  --glass-top: rgba(53, 58, 69, .97);
+  --btn-hover: #343944;
+  --scroll-thumb: #454b5b;
+  --scroll-thumb-hover: #5c6370;
+  --switch-off: var(--line-2);
+  --seg-on: var(--panel-2);
+  --seg-on-shadow: inset 0 0 0 1px var(--line-2);
+  --knob: #c2c5cb;
+  --knob-shadow: 0 1px 3px rgba(0, 0, 0, .4);
+  --backdrop: rgba(13, 15, 17, .55);
+
+  /* text */
+  --text: #d7dae0;
+  --muted: #abb2bf;
+  --faint: #7f848e;
+
+  /* accent */
+  --accent: #61afef;
+  --accent-strong: #8cc6f7;
+  --accent-deep: #4d78cc;
+  --accent-weak: rgba(97, 175, 239, .14);
+  --prompt-fg: var(--text);
+  --accent-line: rgba(97, 175, 239, .5);
+  --accent-glow: rgba(97, 175, 239, .35);
+  --on-accent: #1d2026;
+  --on-solid: #ffffff;
+  --grad-accent: linear-gradient(135deg, #4d78cc, #61afef);
+
+  /* terminal */
+  --term-bg: #282c34;
+  --term-fg: #abb2bf;
+  --term-cursor: #528bff;
+  --term-selection: #67769660;
+  --term-ansi-black: #3f4451;
+  --term-ansi-red: #e05561;
+  --term-ansi-green: #8cc265;
+  --term-ansi-yellow: #d18f52;
+  --term-ansi-blue: #4aa5f0;
+  --term-ansi-magenta: #c162de;
+  --term-ansi-cyan: #42b3c2;
+  --term-ansi-white: #d7dae0;
+  --term-ansi-bright-black: #4f5666;
+  --term-ansi-bright-red: #ff616e;
+  --term-ansi-bright-green: #a5e075;
+  --term-ansi-bright-yellow: #f0a45d;
+  --term-ansi-bright-blue: #4dc4ff;
+  --term-ansi-bright-magenta: #de73ff;
+  --term-ansi-bright-cyan: #4cd1e0;
+  --term-ansi-bright-white: #e6e6e6;
+
+  /* status */
+  --busy: #98c379;
+  --busy-bg: rgba(152, 195, 121, .13);
+  --wait: #e5c07b;
+  --wait-bg: rgba(229, 192, 123, .14);
+  --attn: #c678dd;
+  --attn-bg: rgba(198, 120, 221, .14);
+  --ready: var(--busy);
+  --ready-bg: var(--busy-bg);
+  --working: #d19a66;
+  --working-bg: rgba(209, 154, 102, .14);
+  --needs: #e06c75;
+  --needs-bg: rgba(224, 108, 117, .14);
+  --warn: #e5c07b;
+  --danger: #e06c75;
+  --danger-bg: rgba(224, 108, 117, .12);
+  --danger-line: rgba(224, 108, 117, .4);
+  --danger-text: #f3c4c8;
+  --danger-solid: #af545b;
+  --danger-solid-hover: #b7656b;
+  --read: #c678dd;
+  --read-bg: rgba(198, 120, 221, .13);
+
+  /* agents */
+  --claude: #d19a66;
+  --claude-bg: rgba(209, 154, 102, .14);
+  --opencode: #61afef;
+  --opencode-bg: rgba(97, 175, 239, .14);
+  --codex: #56b6c2;
+  --codex-bg: rgba(86, 182, 194, .14);
+
+  /* paths & search hits */
+  --path-bg: #23272e;
+  --path-parent: #bac0cb;
+  --path-leaf: #ebedf0;
+  --mark: rgba(229, 192, 123, .28);
+  --mark-text: #f3e3c4;
+  --path-mark: #faf2e5;
+
+  /* tiles, select arrow, depth */
+  --tile-bg: 42% 25%;
+  --tile-fg: 90% 84%;
+  --tile-ring: 50% 38% / .6;
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23abb2bf' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, .45);
+  --shadow-float: 0 16px 44px rgba(0, 0, 0, .55);
+  --shadow-dialog: 0 18px 50px rgba(0, 0, 0, .55);
+}
+
+/* Dracula - Dracula Theme, Zeno Rocha (dracula/visual-studio-code), MIT.
+   Surfaces from Dracula's BGDarker..BGLighter ramp; --muted mixed from foreground and comment, since the comment
+   colour #6272a4 is below 4.5:1. */
+:root[data-theme="dracula"] {
+  color-scheme: dark;
+
+  /* surfaces */
+  --bg: #21222c;
+  --panel: #282a36;
+  --panel-2: #343746;
+  --panel-3: #383b49;
+  --card: #2c2f3c;
+  --card-hover: #303341;
+  --raised: #424450;
+  --line: #44475a;
+  --line-2: #535670;
+  --line-3: #6272a4;
+  --hairline: rgba(255, 255, 255, .07);
+  --hairline-2: rgba(255, 255, 255, .13);
+  --glass: rgba(40, 42, 54, .98);
+  --glass-top: rgba(59, 62, 75, .97);
+  --btn-hover: #3a3d4b;
+  --scroll-thumb: #4c4f65;
+  --scroll-thumb-hover: #6272a4;
+  --switch-off: var(--line-2);
+  --seg-on: var(--panel-2);
+  --seg-on-shadow: inset 0 0 0 1px var(--line-2);
+  --knob: #dfdfdb;
+  --knob-shadow: 0 1px 3px rgba(0, 0, 0, .4);
+  --backdrop: rgba(13, 14, 18, .55);
+
+  /* text */
+  --text: #f8f8f2;
+  --muted: #b9bbcf;
+  --faint: #7b86b8;
+
+  /* accent */
+  --accent: #bd93f9;
+  --accent-strong: #d6acff;
+  --accent-deep: #7c5cc4;
+  --accent-weak: rgba(189, 147, 249, .14);
+  --prompt-fg: var(--text);
+  --accent-line: rgba(189, 147, 249, .5);
+  --accent-glow: rgba(189, 147, 249, .35);
+  --on-accent: #21222c;
+  --on-solid: #ffffff;
+  --grad-accent: linear-gradient(135deg, #7c5cc4, #bd93f9);
+
+  /* terminal */
+  --term-bg: #282a36;
+  --term-fg: #f8f8f2;
+  --term-cursor: #f8f8f2;
+  --term-selection: #44475acc;
+  --term-ansi-black: #21222c;
+  --term-ansi-red: #ff5555;
+  --term-ansi-green: #50fa7b;
+  --term-ansi-yellow: #f1fa8c;
+  --term-ansi-blue: #bd93f9;
+  --term-ansi-magenta: #ff79c6;
+  --term-ansi-cyan: #8be9fd;
+  --term-ansi-white: #f8f8f2;
+  --term-ansi-bright-black: #6272a4;
+  --term-ansi-bright-red: #ff6e6e;
+  --term-ansi-bright-green: #69ff94;
+  --term-ansi-bright-yellow: #ffffa5;
+  --term-ansi-bright-blue: #d6acff;
+  --term-ansi-bright-magenta: #ff92df;
+  --term-ansi-bright-cyan: #a4ffff;
+  --term-ansi-bright-white: #ffffff;
+
+  /* status */
+  --busy: #50fa7b;
+  --busy-bg: rgba(80, 250, 123, .13);
+  --wait: #f1fa8c;
+  --wait-bg: rgba(241, 250, 140, .14);
+  --attn: #ff79c6;
+  --attn-bg: rgba(255, 121, 198, .14);
+  --ready: var(--busy);
+  --ready-bg: var(--busy-bg);
+  --working: #ffb86c;
+  --working-bg: rgba(255, 184, 108, .14);
+  --needs: #ff5555;
+  --needs-bg: rgba(255, 85, 85, .14);
+  --warn: #f1fa8c;
+  --danger: #ff6e6e;
+  --danger-bg: rgba(255, 110, 110, .12);
+  --danger-line: rgba(255, 110, 110, .4);
+  --danger-text: #ffc5c5;
+  --danger-solid: #c74242;
+  --danger-solid-hover: #cd5555;
+  --read: #bd93f9;
+  --read-bg: rgba(189, 147, 249, .13);
+
+  /* agents */
+  --claude: #ffb86c;
+  --claude-bg: rgba(255, 184, 108, .14);
+  --opencode: #8be9fd;
+  --opencode-bg: rgba(139, 233, 253, .14);
+  --codex: #50fa7b;
+  --codex-bg: rgba(80, 250, 123, .14);
+
+  /* paths & search hits */
+  --path-bg: #232530;
+  --path-parent: #cfd0db;
+  --path-leaf: #ffffff;
+  --mark: rgba(241, 250, 140, .28);
+  --mark-text: #f9fdcb;
+  --path-mark: #fcfee8;
+
+  /* tiles, select arrow, depth */
+  --tile-bg: 42% 25%;
+  --tile-fg: 90% 84%;
+  --tile-ring: 50% 38% / .6;
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23b9bbcf' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, .45);
+  --shadow-float: 0 16px 44px rgba(0, 0, 0, .55);
+  --shadow-dialog: 0 18px 50px rgba(0, 0, 0, .55);
+}
+
+/* GitHub Dark - GitHub, Primer (primer/github-vscode-theme), MIT.
+   GitHub Dark Default: page #010409, panels #0d1117, overlays #161b22, borders #30363d; accent fg.accent #58a6ff. */
+:root[data-theme="github-dark"] {
+  color-scheme: dark;
+
+  /* surfaces */
+  --bg: #010409;
+  --panel: #0d1117;
+  --panel-2: #161b22;
+  --panel-3: #191e25;
+  --card: #10151b;
+  --card-hover: #13181f;
+  --raised: #21262d;
+  --line: #21262d;
+  --line-2: #30363d;
+  --line-3: #484f58;
+  --hairline: rgba(255, 255, 255, .07);
+  --hairline-2: rgba(255, 255, 255, .13);
+  --glass: rgba(13, 17, 23, .98);
+  --glass-top: rgba(28, 33, 40, .97);
+  --btn-hover: #1b2027;
+  --scroll-thumb: #292e35;
+  --scroll-thumb-hover: #484f58;
+  --switch-off: var(--line-2);
+  --seg-on: var(--panel-2);
+  --seg-on-shadow: inset 0 0 0 1px var(--line-2);
+  --knob: #ccd3d9;
+  --knob-shadow: 0 1px 3px rgba(0, 0, 0, .4);
+  --backdrop: rgba(0, 2, 4, .55);
+
+  /* text */
+  --text: #e6edf3;
+  --muted: #8d96a0;
+  --faint: #6e7681;
+
+  /* accent */
+  --accent: #58a6ff;
+  --accent-strong: #79c0ff;
+  --accent-deep: #1f6feb;
+  --accent-weak: rgba(88, 166, 255, .14);
+  --prompt-fg: var(--text);
+  --accent-line: rgba(88, 166, 255, .5);
+  --accent-glow: rgba(88, 166, 255, .35);
+  --on-accent: #0d1117;
+  --on-solid: #ffffff;
+  --grad-accent: linear-gradient(135deg, #1f6feb, #58a6ff);
+
+  /* terminal */
+  --term-bg: #0d1117;
+  --term-fg: #e6edf3;
+  --term-cursor: #2f81f7;
+  --term-selection: #388bfd4d;
+  --term-ansi-black: #484f58;
+  --term-ansi-red: #ff7b72;
+  --term-ansi-green: #3fb950;
+  --term-ansi-yellow: #d29922;
+  --term-ansi-blue: #58a6ff;
+  --term-ansi-magenta: #bc8cff;
+  --term-ansi-cyan: #39c5cf;
+  --term-ansi-white: #b1bac4;
+  --term-ansi-bright-black: #6e7681;
+  --term-ansi-bright-red: #ffa198;
+  --term-ansi-bright-green: #56d364;
+  --term-ansi-bright-yellow: #e3b341;
+  --term-ansi-bright-blue: #79c0ff;
+  --term-ansi-bright-magenta: #d2a8ff;
+  --term-ansi-bright-cyan: #56d4dd;
+  --term-ansi-bright-white: #ffffff;
+
+  /* status */
+  --busy: #3fb950;
+  --busy-bg: rgba(63, 185, 80, .13);
+  --wait: #d29922;
+  --wait-bg: rgba(210, 153, 34, .14);
+  --attn: #db61a2;
+  --attn-bg: rgba(219, 97, 162, .14);
+  --ready: var(--busy);
+  --ready-bg: var(--busy-bg);
+  --working: #db6d28;
+  --working-bg: rgba(219, 109, 40, .14);
+  --needs: #f85149;
+  --needs-bg: rgba(248, 81, 73, .14);
+  --warn: #d29922;
+  --danger: #ff7b72;
+  --danger-bg: rgba(255, 123, 114, .12);
+  --danger-line: rgba(255, 123, 114, .4);
+  --danger-text: #ffcac7;
+  --danger-solid: #c13f39;
+  --danger-solid-hover: #c7524d;
+  --read: #bc8cff;
+  --read-bg: rgba(188, 140, 255, .13);
+
+  /* agents */
+  --claude: #db6d28;
+  --claude-bg: rgba(219, 109, 40, .14);
+  --opencode: #58a6ff;
+  --opencode-bg: rgba(88, 166, 255, .14);
+  --codex: #3fb950;
+  --codex-bg: rgba(63, 185, 80, .14);
+
+  /* paths & search hits */
+  --path-bg: #05090e;
+  --path-parent: #acb4bd;
+  --path-leaf: #ffffff;
+  --mark: rgba(210, 153, 34, .28);
+  --mark-text: #ebd19c;
+  --path-mark: #f6ebd3;
+
+  /* tiles, select arrow, depth */
+  --tile-bg: 42% 25%;
+  --tile-fg: 90% 84%;
+  --tile-ring: 50% 38% / .6;
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238d96a0' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, .45);
+  --shadow-float: 0 16px 44px rgba(0, 0, 0, .55);
+  --shadow-dialog: 0 18px 50px rgba(0, 0, 0, .55);
+}
+
+/* Tokyo Night - Enkia (enkia/tokyo-night-vscode-theme), MIT.
+   --faint is the palette's #737aa2 (the comment colour #565f89 is too dim on the panels). Terminal text uses the
+   editor foreground #a9b1d6 (the terminal's own #787c99 is under 4.5:1); bright black lifted from #363b54 (same as
+   black) to the comment colour #565f89. */
+:root[data-theme="tokyo-night"] {
+  color-scheme: dark;
+
+  /* surfaces */
+  --bg: #16161e;
+  --panel: #1a1b26;
+  --panel-2: #24283b;
+  --panel-3: #262a3d;
+  --card: #1e202d;
+  --card-hover: #212435;
+  --raised: #292e42;
+  --line: #292e42;
+  --line-2: #3b4261;
+  --line-3: #545c7e;
+  --hairline: rgba(255, 255, 255, .07);
+  --hairline-2: rgba(255, 255, 255, .13);
+  --glass: rgba(26, 27, 38, .98);
+  --glass-top: rgba(39, 43, 63, .97);
+  --btn-hover: #262b3e;
+  --scroll-thumb: #323852;
+  --scroll-thumb-hover: #545c7e;
+  --switch-off: var(--line-2);
+  --seg-on: var(--panel-2);
+  --seg-on-shadow: inset 0 0 0 1px var(--line-2);
+  --knob: #acb5dc;
+  --knob-shadow: 0 1px 3px rgba(0, 0, 0, .4);
+  --backdrop: rgba(9, 9, 12, .55);
+
+  /* text */
+  --text: #c0caf5;
+  --muted: #9aa5ce;
+  --faint: #737aa2;
+
+  /* accent */
+  --accent: #7aa2f7;
+  --accent-strong: #a3bffa;
+  --accent-deep: #3d59a1;
+  --accent-weak: rgba(122, 162, 247, .14);
+  --prompt-fg: var(--text);
+  --accent-line: rgba(122, 162, 247, .5);
+  --accent-glow: rgba(122, 162, 247, .35);
+  --on-accent: #16161e;
+  --on-solid: #ffffff;
+  --grad-accent: linear-gradient(135deg, #3d59a1, #7aa2f7);
+
+  /* terminal */
+  --term-bg: #16161e;
+  --term-fg: #a9b1d6;
+  --term-cursor: #c0caf5;
+  --term-selection: #515c7e4d;
+  --term-ansi-black: #363b54;
+  --term-ansi-red: #f7768e;
+  --term-ansi-green: #73daca;
+  --term-ansi-yellow: #e0af68;
+  --term-ansi-blue: #7aa2f7;
+  --term-ansi-magenta: #bb9af7;
+  --term-ansi-cyan: #7dcfff;
+  --term-ansi-white: #787c99;
+  --term-ansi-bright-black: #565f89;
+  --term-ansi-bright-red: #f7768e;
+  --term-ansi-bright-green: #73daca;
+  --term-ansi-bright-yellow: #e0af68;
+  --term-ansi-bright-blue: #7aa2f7;
+  --term-ansi-bright-magenta: #bb9af7;
+  --term-ansi-bright-cyan: #7dcfff;
+  --term-ansi-bright-white: #acb0d0;
+
+  /* status */
+  --busy: #9ece6a;
+  --busy-bg: rgba(158, 206, 106, .13);
+  --wait: #e0af68;
+  --wait-bg: rgba(224, 175, 104, .14);
+  --attn: #bb9af7;
+  --attn-bg: rgba(187, 154, 247, .14);
+  --ready: var(--busy);
+  --ready-bg: var(--busy-bg);
+  --working: #ff9e64;
+  --working-bg: rgba(255, 158, 100, .14);
+  --needs: #f7768e;
+  --needs-bg: rgba(247, 118, 142, .14);
+  --warn: #e0af68;
+  --danger: #f7768e;
+  --danger-bg: rgba(247, 118, 142, .12);
+  --danger-line: rgba(247, 118, 142, .4);
+  --danger-text: #fcc8d2;
+  --danger-solid: #b75769;
+  --danger-solid-hover: #be6878;
+  --read: #bb9af7;
+  --read-bg: rgba(187, 154, 247, .13);
+
+  /* agents */
+  --claude: #ff9e64;
+  --claude-bg: rgba(255, 158, 100, .14);
+  --opencode: #7dcfff;
+  --opencode-bg: rgba(125, 207, 255, .14);
+  --codex: #73daca;
+  --codex-bg: rgba(115, 218, 202, .14);
+
+  /* paths & search hits */
+  --path-bg: #171821;
+  --path-parent: #a7b2dc;
+  --path-leaf: #e0e5fa;
+  --mark: rgba(224, 175, 104, .28);
+  --mark-text: #f1dbbb;
+  --path-mark: #f9efe1;
+
+  /* tiles, select arrow, depth */
+  --tile-bg: 42% 25%;
+  --tile-fg: 90% 84%;
+  --tile-ring: 50% 38% / .6;
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239aa5ce' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, .45);
+  --shadow-float: 0 16px 44px rgba(0, 0, 0, .55);
+  --shadow-dialog: 0 18px 50px rgba(0, 0, 0, .55);
+}
+
+/* Catppuccin Mocha - Catppuccin (catppuccin/vscode, palette from catppuccin/palette), MIT.
+   Mantle #181825 page, Base #1e1e2e panels, Surface 0-2 for raised surfaces and lines; Mauve accent (the theme's
+   default). */
+:root[data-theme="catppuccin-mocha"] {
+  color-scheme: dark;
+
+  /* surfaces */
+  --bg: #181825;
+  --panel: #1e1e2e;
+  --panel-2: #313244;
+  --panel-3: #37384b;
+  --card: #252536;
+  --card-hover: #2b2c3d;
+  --raised: #45475a;
+  --line: #313244;
+  --line-2: #45475a;
+  --line-3: #585b70;
+  --hairline: rgba(255, 255, 255, .07);
+  --hairline-2: rgba(255, 255, 255, .13);
+  --glass: rgba(30, 30, 46, .98);
+  --glass-top: rgba(59, 61, 79, .97);
+  --btn-hover: #3a3b4e;
+  --scroll-thumb: #3b3d4f;
+  --scroll-thumb-hover: #585b70;
+  --switch-off: var(--line-2);
+  --seg-on: var(--panel-2);
+  --seg-on-shadow: inset 0 0 0 1px var(--line-2);
+  --knob: #b8c0dc;
+  --knob-shadow: 0 1px 3px rgba(0, 0, 0, .4);
+  --backdrop: rgba(10, 10, 15, .55);
+
+  /* text */
+  --text: #cdd6f4;
+  --muted: #a6adc8;
+  --faint: #7f849c;
+
+  /* accent */
+  --accent: #cba6f7;
+  --accent-strong: #dcc3fa;
+  --accent-deep: #8a6bbf;
+  --accent-weak: rgba(203, 166, 247, .14);
+  --prompt-fg: var(--text);
+  --accent-line: rgba(203, 166, 247, .5);
+  --accent-glow: rgba(203, 166, 247, .35);
+  --on-accent: #11111b;
+  --on-solid: #ffffff;
+  --grad-accent: linear-gradient(135deg, #8a6bbf, #cba6f7);
+
+  /* terminal */
+  --term-bg: #1e1e2e;
+  --term-fg: #cdd6f4;
+  --term-cursor: #f5e0dc;
+  --term-selection: #585b7080;
+  --term-ansi-black: #45475a;
+  --term-ansi-red: #f38ba8;
+  --term-ansi-green: #a6e3a1;
+  --term-ansi-yellow: #f9e2af;
+  --term-ansi-blue: #89b4fa;
+  --term-ansi-magenta: #f5c2e7;
+  --term-ansi-cyan: #94e2d5;
+  --term-ansi-white: #a6adc8;
+  --term-ansi-bright-black: #585b70;
+  --term-ansi-bright-red: #f37799;
+  --term-ansi-bright-green: #89d88b;
+  --term-ansi-bright-yellow: #ebd391;
+  --term-ansi-bright-blue: #74a8fc;
+  --term-ansi-bright-magenta: #f2aede;
+  --term-ansi-bright-cyan: #6bd7ca;
+  --term-ansi-bright-white: #bac2de;
+
+  /* status */
+  --busy: #a6e3a1;
+  --busy-bg: rgba(166, 227, 161, .13);
+  --wait: #f9e2af;
+  --wait-bg: rgba(249, 226, 175, .14);
+  --attn: #f5c2e7;
+  --attn-bg: rgba(245, 194, 231, .14);
+  --ready: var(--busy);
+  --ready-bg: var(--busy-bg);
+  --working: #fab387;
+  --working-bg: rgba(250, 179, 135, .14);
+  --needs: #f38ba8;
+  --needs-bg: rgba(243, 139, 168, .14);
+  --warn: #f9e2af;
+  --danger: #f38ba8;
+  --danger-bg: rgba(243, 139, 168, .12);
+  --danger-line: rgba(243, 139, 168, .4);
+  --danger-text: #fad1dc;
+  --danger-solid: #a35d70;
+  --danger-solid-hover: #ac6d7e;
+  --read: #b4befe;
+  --read-bg: rgba(180, 190, 254, .13);
+
+  /* agents */
+  --claude: #fab387;
+  --claude-bg: rgba(250, 179, 135, .14);
+  --opencode: #89b4fa;
+  --opencode-bg: rgba(137, 180, 250, .14);
+  --codex: #94e2d5;
+  --codex-bg: rgba(148, 226, 213, .14);
+
+  /* paths & search hits */
+  --path-bg: #1a1a28;
+  --path-parent: #b4bbd7;
+  --path-leaf: #e6ebfa;
+  --mark: rgba(249, 226, 175, .28);
+  --mark-text: #fcf2db;
+  --path-mark: #fef9ef;
+
+  /* tiles, select arrow, depth */
+  --tile-bg: 42% 25%;
+  --tile-fg: 90% 84%;
+  --tile-ring: 50% 38% / .6;
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a6adc8' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, .45);
+  --shadow-float: 0 16px 44px rgba(0, 0, 0, .55);
+  --shadow-dialog: 0 18px 50px rgba(0, 0, 0, .55);
+}
+
+/* Night Owl - Sarah Drasner (sdras/night-owl-vscode-theme), MIT.
+   --muted lifted from the UI grey #5f7e97 (under 4.5:1) towards the foreground; terminal black lifted from #011627
+   (the background itself) to the selection blue #1d3b53, bright black from #575656 to the comment grey #637777. */
+:root[data-theme="night-owl"] {
+  color-scheme: dark;
+
+  /* surfaces */
+  --bg: #010e1a;
+  --panel: #011627;
+  --panel-2: #0b253a;
+  --panel-3: #102c42;
+  --card: #051b2e;
+  --card-hover: #082134;
+  --raised: #1d3b53;
+  --line: #122d42;
+  --line-2: #1d3b53;
+  --line-3: #2f5577;
+  --hairline: rgba(255, 255, 255, .07);
+  --hairline-2: rgba(255, 255, 255, .13);
+  --glass: rgba(1, 22, 39, .98);
+  --glass-top: rgba(20, 48, 71, .97);
+  --btn-hover: #132f45;
+  --scroll-thumb: #18344b;
+  --scroll-thumb-hover: #2f5577;
+  --switch-off: var(--line-2);
+  --seg-on: var(--panel-2);
+  --seg-on-shadow: inset 0 0 0 1px var(--line-2);
+  --knob: #bcc6d3;
+  --knob-shadow: 0 1px 3px rgba(0, 0, 0, .4);
+  --backdrop: rgba(0, 6, 10, .55);
+
+  /* text */
+  --text: #d6deeb;
+  --muted: #93aac0;
+  --faint: #5f7e97;
+
+  /* accent */
+  --accent: #82aaff;
+  --accent-strong: #a9c4ff;
+  --accent-deep: #7e57c2;
+  --accent-weak: rgba(130, 170, 255, .14);
+  --prompt-fg: var(--text);
+  --accent-line: rgba(130, 170, 255, .5);
+  --accent-glow: rgba(130, 170, 255, .35);
+  --on-accent: #011627;
+  --on-solid: #ffffff;
+  --grad-accent: linear-gradient(135deg, #7e57c2, #82aaff);
+
+  /* terminal */
+  --term-bg: #011627;
+  --term-fg: #d6deeb;
+  --term-cursor: #80a4c2;
+  --term-selection: #1b90dd4d;
+  --term-ansi-black: #1d3b53;
+  --term-ansi-red: #ef5350;
+  --term-ansi-green: #22da6e;
+  --term-ansi-yellow: #c5e478;
+  --term-ansi-blue: #82aaff;
+  --term-ansi-magenta: #c792ea;
+  --term-ansi-cyan: #21c7a8;
+  --term-ansi-white: #ffffff;
+  --term-ansi-bright-black: #637777;
+  --term-ansi-bright-red: #ef5350;
+  --term-ansi-bright-green: #22da6e;
+  --term-ansi-bright-yellow: #ffeb95;
+  --term-ansi-bright-blue: #82aaff;
+  --term-ansi-bright-magenta: #c792ea;
+  --term-ansi-bright-cyan: #7fdbca;
+  --term-ansi-bright-white: #ffffff;
+
+  /* status */
+  --busy: #addb67;
+  --busy-bg: rgba(173, 219, 103, .13);
+  --wait: #ecc48d;
+  --wait-bg: rgba(236, 196, 141, .14);
+  --attn: #c792ea;
+  --attn-bg: rgba(199, 146, 234, .14);
+  --ready: var(--busy);
+  --ready-bg: var(--busy-bg);
+  --working: #f78c6c;
+  --working-bg: rgba(247, 140, 108, .14);
+  --needs: #ef5350;
+  --needs-bg: rgba(239, 83, 80, .14);
+  --warn: #ecc48d;
+  --danger: #ff6e6c;
+  --danger-bg: rgba(255, 110, 108, .12);
+  --danger-line: rgba(255, 110, 108, .4);
+  --danger-text: #ffc5c4;
+  --danger-solid: #ba413e;
+  --danger-solid-hover: #c15451;
+  --read: #7fdbca;
+  --read-bg: rgba(127, 219, 202, .13);
+
+  /* agents */
+  --claude: #f78c6c;
+  --claude-bg: rgba(247, 140, 108, .14);
+  --opencode: #82aaff;
+  --opencode-bg: rgba(130, 170, 255, .14);
+  --codex: #7fdbca;
+  --codex-bg: rgba(127, 219, 202, .14);
+
+  /* paths & search hits */
+  --path-bg: #01111f;
+  --path-parent: #aabccf;
+  --path-leaf: #ebeff5;
+  --mark: rgba(236, 196, 141, .28);
+  --mark-text: #f6e4cc;
+  --path-mark: #fbf3e8;
+
+  /* tiles, select arrow, depth */
+  --tile-bg: 42% 25%;
+  --tile-fg: 90% 84%;
+  --tile-ring: 50% 38% / .6;
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2393aac0' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, .45);
+  --shadow-float: 0 16px 44px rgba(0, 0, 0, .55);
+  --shadow-dialog: 0 18px 50px rgba(0, 0, 0, .55);
+}
+
+/* Nord - Sven Greb (nordtheme/visual-studio-code), MIT.
+   Polar Night nord0-nord3 for surfaces and lines, Snow Storm for text, Frost nord8 accent; --muted mixed between
+   nord4 and nord3 so it stays over 4.5:1; --danger and --needs lifted from Aurora nord11 #bf616a, which is dim as
+   text on the panels. */
+:root[data-theme="nord"] {
+  color-scheme: dark;
+
+  /* surfaces */
+  --bg: #2e3440;
+  --panel: #333a47;
+  --panel-2: #3b4252;
+  --panel-3: #3d4556;
+  --card: #363d4b;
+  --card-hover: #39404f;
+  --raised: #434c5e;
+  --line: #3b4252;
+  --line-2: #4c566a;
+  --line-3: #616e88;
+  --hairline: rgba(255, 255, 255, .07);
+  --hairline-2: rgba(255, 255, 255, .13);
+  --glass: rgba(51, 58, 71, .98);
+  --glass-top: rgba(63, 71, 88, .97);
+  --btn-hover: #3f4757;
+  --scroll-thumb: #444c5e;
+  --scroll-thumb-hover: #616e88;
+  --switch-off: var(--line-2);
+  --seg-on: var(--panel-2);
+  --seg-on-shadow: inset 0 0 0 1px var(--line-2);
+  --knob: #d6d9df;
+  --knob-shadow: 0 1px 3px rgba(0, 0, 0, .4);
+  --backdrop: rgba(18, 21, 26, .55);
+
+  /* text */
+  --text: #eceff4;
+  --muted: #b4bccb;
+  --faint: #7b88a1;
+
+  /* accent */
+  --accent: #88c0d0;
+  --accent-strong: #a9d3df;
+  --accent-deep: #5e81ac;
+  --accent-weak: rgba(136, 192, 208, .14);
+  --prompt-fg: var(--text);
+  --accent-line: rgba(136, 192, 208, .5);
+  --accent-glow: rgba(136, 192, 208, .35);
+  --on-accent: #2e3440;
+  --on-solid: #ffffff;
+  --grad-accent: linear-gradient(135deg, #5e81ac, #88c0d0);
+
+  /* terminal */
+  --term-bg: #2e3440;
+  --term-fg: #d8dee9;
+  --term-cursor: #d8dee9;
+  --term-selection: #434c5ecc;
+  --term-ansi-black: #3b4252;
+  --term-ansi-red: #bf616a;
+  --term-ansi-green: #a3be8c;
+  --term-ansi-yellow: #ebcb8b;
+  --term-ansi-blue: #81a1c1;
+  --term-ansi-magenta: #b48ead;
+  --term-ansi-cyan: #88c0d0;
+  --term-ansi-white: #e5e9f0;
+  --term-ansi-bright-black: #4c566a;
+  --term-ansi-bright-red: #bf616a;
+  --term-ansi-bright-green: #a3be8c;
+  --term-ansi-bright-yellow: #ebcb8b;
+  --term-ansi-bright-blue: #81a1c1;
+  --term-ansi-bright-magenta: #b48ead;
+  --term-ansi-bright-cyan: #8fbcbb;
+  --term-ansi-bright-white: #eceff4;
+
+  /* status */
+  --busy: #a3be8c;
+  --busy-bg: rgba(163, 190, 140, .13);
+  --wait: #ebcb8b;
+  --wait-bg: rgba(235, 203, 139, .14);
+  --attn: #b48ead;
+  --attn-bg: rgba(180, 142, 173, .14);
+  --ready: var(--busy);
+  --ready-bg: var(--busy-bg);
+  --working: #d08770;
+  --working-bg: rgba(208, 135, 112, .14);
+  --needs: #d57780;
+  --needs-bg: rgba(213, 119, 128, .14);
+  --warn: #ebcb8b;
+  --danger: #e0959b;
+  --danger-bg: rgba(224, 149, 155, .12);
+  --danger-line: rgba(224, 149, 155, .4);
+  --danger-text: #f3d5d7;
+  --danger-solid: #954c53;
+  --danger-solid-hover: #a05e64;
+  --read: #b48ead;
+  --read-bg: rgba(180, 142, 173, .13);
+
+  /* agents */
+  --claude: #d08770;
+  --claude-bg: rgba(208, 135, 112, .14);
+  --opencode: #81a1c1;
+  --opencode-bg: rgba(129, 161, 193, .14);
+  --codex: #8fbcbb;
+  --codex-bg: rgba(143, 188, 187, .14);
+
+  /* paths & search hits */
+  --path-bg: #303642;
+  --path-parent: #c8ced9;
+  --path-leaf: #ffffff;
+  --mark: rgba(235, 203, 139, .28);
+  --mark-text: #f6e8cb;
+  --path-mark: #fbf5e8;
+
+  /* tiles, select arrow, depth */
+  --tile-bg: 42% 25%;
+  --tile-fg: 90% 84%;
+  --tile-ring: 50% 38% / .6;
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23b4bccb' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, .45);
+  --shadow-float: 0 16px 44px rgba(0, 0, 0, .55);
+  --shadow-dialog: 0 18px 50px rgba(0, 0, 0, .55);
+}
+
+/* Ayu Mirage - Ike Kurghinyan (ayu-theme/vscode-ayu), MIT.
+   Ayu Mirage rather than Ayu Dark, which sits too close to Black and GitHub Dark. Translucent foregrounds
+   (#fefaecc4, #d3e3fc73) flattened onto the panels; --muted lifted to stay over 4.5:1. */
+:root[data-theme="ayu-mirage"] {
+  color-scheme: dark;
+
+  /* surfaces */
+  --bg: #1f2430;
+  --panel: #242936;
+  --panel-2: #2d3342;
+  --panel-3: #2f3545;
+  --card: #272d3a;
+  --card-hover: #2a303e;
+  --raised: #343b4c;
+  --line: #33394a;
+  --line-2: #424a5e;
+  --line-3: #566075;
+  --hairline: rgba(255, 255, 255, .07);
+  --hairline-2: rgba(255, 255, 255, .13);
+  --glass: rgba(36, 41, 54, .98);
+  --glass-top: rgba(49, 55, 71, .97);
+  --btn-hover: #303747;
+  --scroll-thumb: #3b4254;
+  --scroll-thumb-hover: #566075;
+  --switch-off: var(--line-2);
+  --seg-on: var(--panel-2);
+  --seg-on-shadow: inset 0 0 0 1px var(--line-2);
+  --knob: #b8b7b1;
+  --knob-shadow: 0 1px 3px rgba(0, 0, 0, .4);
+  --backdrop: rgba(12, 14, 19, .55);
+
+  /* text */
+  --text: #cccac2;
+  --muted: #9aa3b2;
+  --faint: #707a8c;
+
+  /* accent */
+  --accent: #ffcc66;
+  --accent-strong: #ffd88f;
+  --accent-deep: #c28f2c;
+  --accent-weak: rgba(255, 204, 102, .14);
+  --prompt-fg: var(--text);
+  --accent-line: rgba(255, 204, 102, .5);
+  --accent-glow: rgba(255, 204, 102, .35);
+  --on-accent: #1f2430;
+  --on-solid: #ffffff;
+  --grad-accent: linear-gradient(135deg, #c28f2c, #ffcc66);
+
+  /* terminal */
+  --term-bg: #1f2430;
+  --term-fg: #cac8c1;
+  --term-cursor: #ffcc66;
+  --term-selection: #409fff40;
+  --term-ansi-black: #171b24;
+  --term-ansi-red: #f28273;
+  --term-ansi-green: #87d96c;
+  --term-ansi-yellow: #fcca60;
+  --term-ansi-blue: #6acdff;
+  --term-ansi-magenta: #ddbbff;
+  --term-ansi-cyan: #93e2c8;
+  --term-ansi-white: #c7c7c7;
+  --term-ansi-bright-black: #686868;
+  --term-ansi-bright-red: #f28779;
+  --term-ansi-bright-green: #d5ff80;
+  --term-ansi-bright-yellow: #ffcd66;
+  --term-ansi-bright-blue: #73d0ff;
+  --term-ansi-bright-magenta: #dfbfff;
+  --term-ansi-bright-cyan: #95e6cb;
+  --term-ansi-bright-white: #ffffff;
+
+  /* status */
+  --busy: #87d96c;
+  --busy-bg: rgba(135, 217, 108, .13);
+  --wait: #ffd173;
+  --wait-bg: rgba(255, 209, 115, .14);
+  --attn: #dfbfff;
+  --attn-bg: rgba(223, 191, 255, .14);
+  --ready: var(--busy);
+  --ready-bg: var(--busy-bg);
+  --working: #ffad66;
+  --working-bg: rgba(255, 173, 102, .14);
+  --needs: #ff6666;
+  --needs-bg: rgba(255, 102, 102, .14);
+  --warn: #ffd173;
+  --danger: #f28779;
+  --danger-bg: rgba(242, 135, 121, .12);
+  --danger-line: rgba(242, 135, 121, .4);
+  --danger-text: #facfc9;
+  --danger-solid: #bd4c4c;
+  --danger-solid-hover: #c45e5e;
+  --read: #95e6cb;
+  --read-bg: rgba(149, 230, 203, .13);
+
+  /* agents */
+  --claude: #ffad66;
+  --claude-bg: rgba(255, 173, 102, .14);
+  --opencode: #73d0ff;
+  --opencode-bg: rgba(115, 208, 255, .14);
+  --codex: #95e6cb;
+  --codex-bg: rgba(149, 230, 203, .14);
+
+  /* paths & search hits */
+  --path-bg: #212632;
+  --path-parent: #acb1b8;
+  --path-leaf: #e6e5e1;
+  --mark: rgba(255, 209, 115, .28);
+  --mark-text: #ffeac0;
+  --path-mark: #fff6e3;
+
+  /* tiles, select arrow, depth */
+  --tile-bg: 42% 25%;
+  --tile-fg: 90% 84%;
+  --tile-ring: 50% 38% / .6;
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239aa3b2' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, .45);
+  --shadow-float: 0 16px 44px rgba(0, 0, 0, .55);
+  --shadow-dialog: 0 18px 50px rgba(0, 0, 0, .55);
+}
+
+/* Gruvbox Dark - JD (jdinhify/vscode-theme-gruvbox), after Pavel Pertsev's gruvbox; MIT.
+   Gruvbox Dark Medium: bg0_h page, bg0 panels, bg1-bg3 raised surfaces and lines, fg1 text, fg3 muted, gray faint;
+   the theme's link blue #83a598 as accent. */
+:root[data-theme="gruvbox-dark"] {
+  color-scheme: dark;
+
+  /* surfaces */
+  --bg: #1d2021;
+  --panel: #282828;
+  --panel-2: #32302f;
+  --panel-3: #353231;
+  --card: #2c2b2a;
+  --card-hover: #2f2e2d;
+  --raised: #3c3836;
+  --line: #3c3836;
+  --line-2: #504945;
+  --line-3: #665c54;
+  --hairline: rgba(255, 255, 255, .07);
+  --hairline-2: rgba(255, 255, 255, .13);
+  --glass: rgba(40, 40, 40, .98);
+  --glass-top: rgba(55, 52, 51, .97);
+  --btn-hover: #373432;
+  --scroll-thumb: #46413e;
+  --scroll-thumb-hover: #665c54;
+  --switch-off: var(--line-2);
+  --seg-on: var(--panel-2);
+  --seg-on-shadow: inset 0 0 0 1px var(--line-2);
+  --knob: #d4c6a1;
+  --knob-shadow: 0 1px 3px rgba(0, 0, 0, .4);
+  --backdrop: rgba(12, 13, 13, .55);
+
+  /* text */
+  --text: #ebdbb2;
+  --muted: #bdae93;
+  --faint: #928374;
+
+  /* accent */
+  --accent: #83a598;
+  --accent-strong: #a3bfb5;
+  --accent-deep: #458588;
+  --accent-weak: rgba(131, 165, 152, .14);
+  --prompt-fg: var(--text);
+  --accent-line: rgba(131, 165, 152, .5);
+  --accent-glow: rgba(131, 165, 152, .35);
+  --on-accent: #1d2021;
+  --on-solid: #ffffff;
+  --grad-accent: linear-gradient(135deg, #458588, #83a598);
+
+  /* terminal */
+  --term-bg: #282828;
+  --term-fg: #ebdbb2;
+  --term-cursor: #ebdbb2;
+  --term-selection: #689d6a40;
+  --term-ansi-black: #3c3836;
+  --term-ansi-red: #cc241d;
+  --term-ansi-green: #98971a;
+  --term-ansi-yellow: #d79921;
+  --term-ansi-blue: #458588;
+  --term-ansi-magenta: #b16286;
+  --term-ansi-cyan: #689d6a;
+  --term-ansi-white: #a89984;
+  --term-ansi-bright-black: #928374;
+  --term-ansi-bright-red: #fb4934;
+  --term-ansi-bright-green: #b8bb26;
+  --term-ansi-bright-yellow: #fabd2f;
+  --term-ansi-bright-blue: #83a598;
+  --term-ansi-bright-magenta: #d3869b;
+  --term-ansi-bright-cyan: #8ec07c;
+  --term-ansi-bright-white: #ebdbb2;
+
+  /* status */
+  --busy: #b8bb26;
+  --busy-bg: rgba(184, 187, 38, .13);
+  --wait: #fabd2f;
+  --wait-bg: rgba(250, 189, 47, .14);
+  --attn: #d3869b;
+  --attn-bg: rgba(211, 134, 155, .14);
+  --ready: var(--busy);
+  --ready-bg: var(--busy-bg);
+  --working: #fe8019;
+  --working-bg: rgba(254, 128, 25, .14);
+  --needs: #fb4934;
+  --needs-bg: rgba(251, 73, 52, .14);
+  --warn: #fabd2f;
+  --danger: #fb4934;
+  --danger-bg: rgba(251, 73, 52, .12);
+  --danger-line: rgba(251, 73, 52, .4);
+  --danger-text: #fdb6ae;
+  --danger-solid: #c43929;
+  --danger-solid-hover: #ca4d3e;
+  --read: #d3869b;
+  --read-bg: rgba(211, 134, 155, .13);
+
+  /* agents */
+  --claude: #fe8019;
+  --claude-bg: rgba(254, 128, 25, .14);
+  --opencode: #83a598;
+  --opencode-bg: rgba(131, 165, 152, .14);
+  --codex: #8ec07c;
+  --codex-bg: rgba(142, 192, 124, .14);
+
+  /* paths & search hits */
+  --path-bg: #212323;
+  --path-parent: #cdbe9e;
+  --path-leaf: #fbf1c7;
+  --mark: rgba(250, 189, 47, .28);
+  --mark-text: #fde1a1;
+  --path-mark: #fef2d5;
+
+  /* tiles, select arrow, depth */
+  --tile-bg: 42% 25%;
+  --tile-fg: 90% 84%;
+  --tile-ring: 50% 38% / .6;
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23bdae93' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, .45);
+  --shadow-float: 0 16px 44px rgba(0, 0, 0, .55);
+  --shadow-dialog: 0 18px 50px rgba(0, 0, 0, .55);
+}
+
+/* Solarized Dark - Ethan Schoonover (altercation/solarized), as shipped in VS Code (microsoft/vscode,
+   extensions/theme-solarized-dark); MIT.
+   base03 panels on the sidebar's #00212b, base02 raised; base1 for UI text and base0 for muted (base0 is only
+   4.75:1); cyan accent as in VS Code. Terminal bright black lifted from #002b36 (the background itself) to base01
+   #586e75. */
+:root[data-theme="solarized-dark"] {
+  color-scheme: dark;
+
+  /* surfaces */
+  --bg: #00212b;
+  --panel: #002b36;
+  --panel-2: #04303c;
+  --panel-3: #05323e;
+  --card: #012d38;
+  --card-hover: #032f3a;
+  --raised: #073642;
+  --line: #073642;
+  --line-2: #0d4a59;
+  --line-3: #586e75;
+  --hairline: rgba(255, 255, 255, .07);
+  --hairline-2: rgba(255, 255, 255, .13);
+  --glass: rgba(0, 43, 54, .98);
+  --glass-top: rgba(6, 51, 63, .97);
+  --btn-hover: #05333f;
+  --scroll-thumb: #0a404e;
+  --scroll-thumb-hover: #586e75;
+  --switch-off: var(--line-2);
+  --seg-on: var(--panel-2);
+  --seg-on-shadow: inset 0 0 0 1px var(--line-2);
+  --knob: #819394;
+  --knob-shadow: 0 1px 3px rgba(0, 0, 0, .4);
+  --backdrop: rgba(0, 13, 17, .55);
+
+  /* text */
+  --text: #93a1a1;
+  --muted: #839496;
+  --faint: #657b83;
+
+  /* accent */
+  --accent: #2aa198;
+  --accent-strong: #3cc3b9;
+  --accent-deep: #1b6f69;
+  --accent-weak: rgba(42, 161, 152, .14);
+  --prompt-fg: var(--text);
+  --accent-line: rgba(42, 161, 152, .5);
+  --accent-glow: rgba(42, 161, 152, .35);
+  --on-accent: #002b36;
+  --on-solid: #ffffff;
+  --grad-accent: linear-gradient(135deg, #1b6f69, #2aa198);
+
+  /* terminal */
+  --term-bg: #002b36;
+  --term-fg: #839496;
+  --term-cursor: #d30102;
+  --term-selection: #274642;
+  --term-ansi-black: #073642;
+  --term-ansi-red: #dc322f;
+  --term-ansi-green: #859900;
+  --term-ansi-yellow: #b58900;
+  --term-ansi-blue: #268bd2;
+  --term-ansi-magenta: #d33682;
+  --term-ansi-cyan: #2aa198;
+  --term-ansi-white: #eee8d5;
+  --term-ansi-bright-black: #586e75;
+  --term-ansi-bright-red: #cb4b16;
+  --term-ansi-bright-green: #586e75;
+  --term-ansi-bright-yellow: #657b83;
+  --term-ansi-bright-blue: #839496;
+  --term-ansi-bright-magenta: #6c71c4;
+  --term-ansi-bright-cyan: #93a1a1;
+  --term-ansi-bright-white: #fdf6e3;
+
+  /* status */
+  --busy: #859900;
+  --busy-bg: rgba(133, 153, 0, .13);
+  --wait: #b58900;
+  --wait-bg: rgba(181, 137, 0, .14);
+  --attn: #d33682;
+  --attn-bg: rgba(211, 54, 130, .14);
+  --ready: var(--busy);
+  --ready-bg: var(--busy-bg);
+  --working: #cb4b16;
+  --working-bg: rgba(203, 75, 22, .14);
+  --needs: #dc322f;
+  --needs-bg: rgba(220, 50, 47, .14);
+  --warn: #b58900;
+  --danger: #ec5f5c;
+  --danger-bg: rgba(236, 95, 92, .12);
+  --danger-line: rgba(236, 95, 92, .4);
+  --danger-text: #f7bfbe;
+  --danger-solid: #ac2725;
+  --danger-solid-hover: #b43d3b;
+  --read: #6c71c4;
+  --read-bg: rgba(108, 113, 196, .13);
+
+  /* agents */
+  --claude: #cb4b16;
+  --claude-bg: rgba(203, 75, 22, .14);
+  --opencode: #268bd2;
+  --opencode-bg: rgba(38, 139, 210, .14);
+  --codex: #859900;
+  --codex-bg: rgba(133, 153, 0, .14);
+
+  /* paths & search hits */
+  --path-bg: #00252f;
+  --path-parent: #89999a;
+  --path-leaf: #eee8d5;
+  --mark: rgba(181, 137, 0, .28);
+  --mark-text: #deca8c;
+  --path-mark: #f0e7cc;
+
+  /* tiles, select arrow, depth */
+  --tile-bg: 42% 25%;
+  --tile-fg: 90% 84%;
+  --tile-ring: 50% 38% / .6;
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23839496' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, .45);
+  --shadow-float: 0 16px 44px rgba(0, 0, 0, .55);
+  --shadow-dialog: 0 18px 50px rgba(0, 0, 0, .55);
+}

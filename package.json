@@ -19,6 +19,7 @@
     "test:live": "node scripts/test-live-jobs.js",
     "test:context": "node scripts/test-session-context.js && node scripts/test-opencode-sessions.js",
     "test:audit": "node scripts/test-audit-regressions.js",
+    "test:themes": "node scripts/test-themes.js",
     "dist": "electron-builder --win --publish never",
     "dist:dir": "electron-builder --win --dir --publish never"
   },
@@ -34,6 +35,7 @@
       "src/**",
       "native/**",
       "package.json",
+      "THIRD_PARTY_NOTICES.md",
       "!node_modules/soundtouchjs/{public,scripts}/**"
     ],
     "asarUnpack": [

@@ -23,6 +23,7 @@ jobs:
       - run: node scripts/test-codex-live.js
       - run: node scripts/test-project-sessions.js
       - run: npm run test:limits
+      - run: npm run test:themes
       - name: Package (unpacked, no installer)
         run: npx electron-builder --win --dir --publish never
         env:

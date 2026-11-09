@@ -67,10 +67,10 @@ function nextTab(step) {
 }
 
 // ---------- General ----------
-const THEMES = ["system", "dark", "light"];
 const SESSIONS_IN = ["windows", "tabs"];
-// prefs.js: TERMINAL_FONT_SIZES and UI_SCALES, as the prefs snapshot brings them.
-const { terminalFontSizes: TERM_FONT_SIZES, uiScales: UI_SCALES } = window.prefs;
+// prefs.js: the themes ({id, group}, "system" first), TERMINAL_FONT_SIZES and UI_SCALES, as the prefs snapshot
+// brings them.
+const { themes: THEMES = [], terminalFontSizes: TERM_FONT_SIZES, uiScales: UI_SCALES } = window.prefs;
 let general = { ...window.prefs };
 const dirty = new Set(); // tabs with unsaved edits: a language switch reloads the window
 function setDirty(tab, on) {
@@ -87,7 +87,7 @@ function segHtml(options, value) {
 function renderGeneral() {
   const focused = document.activeElement?.closest(".seg")?.id; // re-rendering replaces the buttons
   $("uiLanguage").innerHTML = segHtml(Object.entries(I18N.LANGUAGES), general.language);
-  $("uiTheme").innerHTML = segHtml(THEMES.map(th => [th, t(`theme.${th}`)]), general.theme);
+  renderThemes(general.theme);
   $("edgeHandle").checked = general.edgeHandle;
   $("autoUpdate").checked = general.autoUpdate;
   $("sessionsIn").innerHTML = segHtml(SESSIONS_IN.map(m => [m, t(`tray.sessionsIn.${m}`)]), general.sessionsIn || "tabs");
@@ -98,7 +98,18 @@ function renderGeneral() {
   $("newWindow").disabled = general.sessionsIn === "tabs";
   $("dayView").checked = general.dayView === true;
   $("notify").checked = general.notify !== false;
-  if (["uiLanguage", "uiTheme", "sessionsIn"].includes(focused)) $(focused).querySelector(".on")?.focus();
+  if (["uiLanguage", "sessionsIn"].includes(focused)) $(focused).querySelector(".on")?.focus();
+}
+// Too many themes for a segmented control: a select, AgentDeck's own first, then those from VS Code. Built once (a
+// language change reloads the page); the arrow keys on it switch the theme at once, so one can step through them.
+function renderThemes(value) {
+  const sel = $("uiTheme");
+  if (!sel.options.length) {
+    const groups = [...new Set(THEMES.map(th => th.group))];
+    sel.innerHTML = groups.map(g => `<optgroup label="${esc(t(`theme.group.${g}`))}">${THEMES.filter(th => th.group === g)
+      .map(th => `<option value="${esc(th.id)}">${esc(t(`theme.${th.id}`))}</option>`).join("")}</optgroup>`).join("");
+  }
+  sel.value = value;
 }
 async function setPref(key, value) {
   if (value === undefined || value === general[key]) return;
@@ -127,7 +138,8 @@ function segKey(e, choose) {
   e.preventDefault();
   choose(values[(to + values.length) % values.length]);
 }
-for (const [id, key] of [["uiLanguage", "language"], ["uiTheme", "theme"], ["sessionsIn", "sessionsIn"]]) {
+$("uiTheme").addEventListener("change", e => setPref("theme", e.target.value));
+for (const [id, key] of [["uiLanguage", "language"], ["sessionsIn", "sessionsIn"]]) {
   $(id).addEventListener("click", e => setPref(key, e.target.closest("[data-value]")?.dataset.value));
   $(id).addEventListener("keydown", e => segKey(e, v => setPref(key, v)));
 }
