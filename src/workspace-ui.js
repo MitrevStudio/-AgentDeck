@@ -87,6 +87,18 @@ function createTermView(id) {
   term.open(host);
   term.attachCustomKeyEventHandler(e => handleTermKey(term, e, id));
   term.onData(d => window.terminals.input(id, d));
+  // OSC 52: a program sets the clipboard. Agents (Claude Code, Codex, OpenCode) turn mouse reporting on, so a drag is
+  // theirs, not xterm's: they select themselves and send the text this way ("copied to clipboard"). Only writes - a
+  // query ("?") is not answered, so a program cannot read the clipboard.
+  term.parser.registerOscHandler(52, data => {
+    const payload = data.slice(data.indexOf(";") + 1);
+    if (!payload || payload === "?" || payload.length > 1_400_000) return true;
+    try {
+      const bytes = Uint8Array.from(atob(payload), c => c.charCodeAt(0));
+      window.manager.copyText(new TextDecoder().decode(bytes));
+    } catch {}
+    return true;
+  });
   // As Windows Terminal: text selected with the mouse is copied at once - the agent's redraws and any keystroke clear a
   // selection (xterm), and a Ctrl+C that finds none goes to the agent -, and the right button copies a selection or pastes.
   host.addEventListener("mouseup", () => { if (term.hasSelection()) window.manager.copyText(term.getSelection()); });
