@@ -82,21 +82,33 @@ function renderCentre() {
 }
 function renderProjects(v) {
   const total = data.projects.length;
-  $("projectCount").textContent = v.toks.length ? `${v.projects.length} / ${total}` : total;
+  // By device (device-view.js): a section per computer, only the chosen ones when the filter is on.
+  const devices = listDevices(data.projects, nodes);
+  const filter = byDevice() ? activeFilter(deviceView.filter, devices) : [];
+  $("projectCount").textContent = v.toks.length ? `${v.projects.length} / ${total}`
+    : filter.length ? `${countInSections(data.projects, devices, filter)} / ${total}` : total;
   renderOrderToggle();
+  renderDeviceToggle(devices);
+  renderDeviceChips(devices, filter);
   let html = "";
   // Empty groups (just made) at the top, the newest first.
   if (!v.toks.length) html += data.groups.filter(g => !g.size).reverse().map(g => buildGroupHtml(getEmptyUnit(g), v, false)).join("");
   const counts = new Map(v.projects.map(x => [x.p, x.count]));
-  html += getUnits(v.projects.map(x => x.p), data.groups).map(u => {
+  const listed = v.projects.map(x => x.p);
+  html += byDevice() ? buildSections(listed, devices, filter).map(s => buildDeviceHtml(s, v, counts)).join("") : buildUnitsHtml(listed, v, counts);
+  if (!total && ui.loaded) html += `<div class="empty small">${esc(t("manager.projects.empty"))}</div>`;
+  $("projects").innerHTML = html;
+}
+// Projects as listed, each group (folded or open) where its first project is.
+function buildUnitsHtml(projects, v, counts) {
+  return getUnits(projects, data.groups).map(u => {
     if (!u.group) return buildProjectHtml(u.project, counts.get(u.project), v);
     const shut = isCollapsed(u.group.id) && !v.toks.length;
     return buildGroupHtml(u, v, shut) + (shut ? "" : u.members.map(p => buildProjectHtml(p, counts.get(p), v)).join(""));
   }).join("");
-  if (!total && ui.loaded) html += `<div class="empty small">${esc(t("manager.projects.empty"))}</div>`;
-  $("projects").innerHTML = html;
 }
-const getDraggableAttr = (v, n) => (v.toks.length || ui.renaming === n ? "" : 'draggable="true"');
+// In the device view the rows are not in the list's own order, so nothing is dragged there (as while searching).
+const getDraggableAttr = (v, n) => (v.toks.length || byDevice() || ui.renaming === n ? "" : 'draggable="true"');
 const buildPinMark = () => `<span class="pin-mark" title="${esc(t("manager.project.pinned"))}">${icon("pin")}</span>`;
 const buildPinButton = x => `<button class="icon-btn ${isPinned(x) ? "on" : ""}" data-action="pin" title="${esc(t(isPinned(x) ? "action.unpin" : "action.pin"))}">${icon("pin")}</button>`;
 const buildCountHtml = (count, v) =>
@@ -117,7 +129,7 @@ function buildProjectHtml(p, count, v) {
       <div class="proj-row" title="${esc(tip)}"><span class="pmono" style="--h:${hue(p.n)}">${esc(initials(p.name))}</span>
         ${buildNameHtml(p, v, "manager.project.newName")}
         ${isPinned(p) ? buildPinMark() : ""}
-        ${node ? `<span class="proj-node ${node.status}" title="${esc(nodeLabel(node))}">${icon(node.kind === "host" ? "terminal" : "nodes")}${esc(node.name)}</span>${gitChip(p.path, node.git || {})}` : gitChip(p.path)}${projectLive(p.sessions)}
+        ${node ? `${byDevice() ? "" : `<span class="proj-node ${node.status}" title="${esc(nodeLabel(node))}">${icon(node.kind === "host" ? "terminal" : "nodes")}${esc(node.name)}</span>`}${gitChip(p.path, node.git || {})}` : gitChip(p.path)}${projectLive(p.sessions)}
         ${getSpaceTabsHtml(p.n)}
       </div>
       <span class="proj-tools">
@@ -171,6 +183,81 @@ function toggleCollapsed(id) {
     localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsed]));
   } catch {}
   render();
+}
+
+// ---------- projects by device (device-view.js) ----------
+// Group: None / By device, the chosen devices and the folded device sections: a view of this window only, kept in its
+// localStorage like the folded groups. It never calls main, so the registry and the layout shared
+// with the other computers (mesh/layout.js) stay as they are.
+const DEVICE_VIEW_KEY = "agentdeck.deviceView";
+function readDeviceView() {
+  try {
+    return normalizeDeviceView(JSON.parse(localStorage.getItem(DEVICE_VIEW_KEY)));
+  } catch {
+    return normalizeDeviceView(null);
+  }
+}
+let deviceView = readDeviceView();
+const byDevice = () => deviceView.mode === "device";
+function setDeviceView(change) {
+  deviceView = normalizeDeviceView({ ...deviceView, ...change });
+  try {
+    localStorage.setItem(DEVICE_VIEW_KEY, JSON.stringify(deviceView));
+  } catch {}
+  render();
+}
+const toggleDeviceMode = () => setDeviceView({ mode: byDevice() ? "none" : "device" });
+const toggleDeviceFold = id => setDeviceView({ collapsed: toggleCollapsedDevice(deviceView.collapsed, id) });
+// A chip adds its device to the filter or takes it out; "All" clears it. Devices no longer known drop out on a change.
+function chooseDevice(id) {
+  const known = activeFilter(deviceView.filter, listDevices(data.projects, nodes));
+  setDeviceView({ filter: id ? toggleFilter(known, id) : [] });
+}
+const deviceName = d => (d.local ? t("manager.devices.local") : d.name);
+const deviceIcon = d => (d.local ? "window" : d.kind === "host" ? "terminal" : "nodes");
+// "offline · seen 3 hours ago" (or only "offline" when it was never seen).
+const deviceState = d => (d.status === "online" ? "" : d.lastSeen ? t("manager.devices.offlineSince", { time: ago(d.lastSeen) }) : t("manager.node.offline"));
+const deviceTip = d => [deviceName(d), t(d.local ? "manager.devices.thisOne" : d.kind === "host" ? "manager.devices.host" : "manager.devices.desktop"),
+  deviceState(d) || t("manager.devices.online"), tn("manager.projectGroup.projects", d.count)].join("\n");
+
+function renderDeviceToggle(devices) {
+  const on = byDevice(), el = $("projectView");
+  el.innerHTML = icon("nodes");
+  el.classList.toggle("on", on);
+  el.setAttribute("aria-pressed", String(on));
+  el.title = `${t("manager.devices.group")}: ${t(on ? "manager.devices.byDevice" : "manager.devices.none")}\n${t(on ? "manager.devices.byDeviceTitle" : "manager.devices.noneTitle")}`;
+  // Only worth having with another computer paired (or to turn it off again).
+  el.hidden = !data.projects.length || (devices.length < 2 && !on);
+}
+// The filter: "All" and a chip per device, shown in the device view when there is more than this computer.
+function renderDeviceChips(devices, filter) {
+  const el = $("deviceChips");
+  const show = byDevice() && devices.length > 1;
+  const chosen = new Set(filter);
+  const chip = (id, on, label, tip, extra = "") =>
+    `<button class="dev-chip ${on ? "on" : ""} ${extra}" data-device-filter="${esc(id)}" aria-pressed="${on}" title="${esc(tip)}">${label}</button>`;
+  const html = !show ? "" : chip("", !chosen.size, esc(t("manager.devices.all")), t("manager.devices.allTitle"))
+    + devices.map(d => chip(d.id, chosen.has(d.id), `<span class="dev-dot"></span>${icon(deviceIcon(d))}<span>${esc(deviceName(d))}</span>`,
+      `${deviceTip(d)}\n${t("manager.devices.filterTitle", { device: deviceName(d) })}`, d.status)).join("");
+  el.hidden = !show;
+  if (el.dataset.html !== html) { el.dataset.html = html; el.innerHTML = html; }
+}
+// A device's section: its header (folds the section; offline with when it was last seen), then its projects with
+// the user's groups inside, in the list's own order.
+function buildDeviceHtml({ device: d, projects }, v, counts) {
+  const shut = deviceView.collapsed.includes(d.id);
+  const state = deviceState(d);
+  const head = `
+    <div class="proj dev ${d.status}" data-device="${esc(d.id)}" tabindex="0" aria-expanded="${!shut}">
+      <div class="proj-row" title="${esc(deviceTip(d))}">
+        <button class="icon-btn fold" data-action="fold-device" title="${esc(t(shut ? "manager.projectGroup.expand" : "manager.projectGroup.collapse"))}">${icon(shut ? "right" : "down")}</button>
+        <span class="dev-icon">${icon(deviceIcon(d))}</span><span class="proj-name">${esc(deviceName(d))}</span>
+        ${state ? `<span class="dev-state">${esc(state)}</span>` : ""}
+        <span class="count">${projects.length}</span>
+      </div>
+    </div>`;
+  if (shut) return head;
+  return head + (projects.length ? buildUnitsHtml(projects, v, counts) : `<div class="dev-empty">${esc(t("manager.devices.noProjects"))}</div>`);
 }
 
 function renderOrderToggle() {
@@ -515,6 +602,7 @@ async function runAction(action, btn) {
     case "project-menu": return openProjectMenu(btn, path);
     case "ungroup": return applyRegistry(await window.manager.deleteGroup(groupId));
     case "fold": return toggleCollapsed(groupId);
+    case "fold-device": return toggleDeviceFold(btn.closest("[data-device]").dataset.device);
     case "remove":
       if (!confirm(t("manager.confirm.remove", { path: folder }))) return;
       return applyRegistry(await window.manager.removeProject(path));
@@ -544,6 +632,7 @@ $("add").addEventListener("click", async () => {
 $("projects").addEventListener("click", async e => {
   if (e.target.classList.contains("rename") || await onAction(e)) return;
   const card = e.target.closest(".proj");
+  if (card?.dataset.device) return toggleDeviceFold(card.dataset.device);
   if (card) selectProject(getCardKey(card));
 });
 $("projects").addEventListener("contextmenu", e => {
@@ -560,7 +649,8 @@ $("projects").addEventListener("keydown", e => {
   }
   if ((e.key === "Enter" || e.key === " ") && e.target.classList.contains("proj")) {
     e.preventDefault();
-    selectProject(getCardKey(e.target));
+    if (e.target.dataset.device) toggleDeviceFold(e.target.dataset.device);
+    else selectProject(getCardKey(e.target));
   }
   if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown") && e.target.matches(".proj[draggable]")) {
     e.preventDefault();
@@ -585,6 +675,11 @@ async function moveByKey(card, down) {
 }
 $("projectOrder").addEventListener("click", () => toggleOrder().catch(err => toast(err.message, true)));
 $("newGroup").addEventListener("click", () => createGroup().catch(err => toast(err.message, true)));
+$("projectView").addEventListener("click", toggleDeviceMode);
+$("deviceChips").addEventListener("click", e => {
+  const chip = e.target.closest("[data-device-filter]");
+  if (chip) chooseDevice(chip.dataset.deviceFilter);
+});
 
 // ---------- projects: the group menu ----------
 // Moves a project into another group (Move to a group, then the group), a new one, or out of its own.
