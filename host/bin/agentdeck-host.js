@@ -4,7 +4,8 @@
 // sessions on it and see them in their panes. Data in --data-dir (default ~/.agentdeck/host): the identity and the
 // paired computers in node/, the registry of projects, the caches and the logs.
 //
-//   agentdeck-host [run] [--data-dir DIR] [--port N] [--name NAME] [--pair-token TOKEN] [--no-discovery] [--interface ADDR]
+// Relay only by default (just routes mesh traffic); --with-api also serves this machine as a resource.
+//   agentdeck-host [run] [--with-api] [--data-dir DIR] [--port N] [--name NAME] [--pair-token TOKEN] [--no-discovery] [--interface ADDR]
 //   agentdeck-host pair      the pairing code (to enter on a desktop AgentDeck)
 //   agentdeck-host status | logs | update | uninstall   (the systemd service, install.sh)
 const fs = require("node:fs");
@@ -83,25 +84,32 @@ switch (command) {
 }
 
 async function run() {
-  const { createHost } = require(path.join(ROOT, "src", "host"));
   const { createLinks } = require(path.join(ROOT, "src", "mesh", "links"));
-  const { createServed } = require(path.join(ROOT, "src", "mesh", "serve"));
   const log = makeLog("host.log"), meshLog = makeLog("mesh.log");
   fs.mkdirSync(dataDir, { recursive: true });
 
-  const host = createHost({
-    dataDir, home: os.homedir(), isExcluded: () => false,
-    untitled: (agent, id) => `${agent} session ${id}`, noLauncher: exe => `${exe} is not installed on this host`,
-    log: (...parts) => log(parts.join(" ")), gitActive: () => true
-  });
-  // A program that ends takes its terminal with it, as on a desktop.
-  host.on("terminal:exit", ({ id, lost }) => { if (!lost) host.terminals.close(id); });
-
-  const served = createServed({ host, info: () => ({ headless: true, dataDir }) });
+  // Relay only by default (install.sh): this machine routes mesh traffic between paired computers but runs no sessions
+  // of its own - a pure, untrusted pipe (the tunnels are end-to-end TLS, so it cannot read or act on what it carries).
+  // --with-api turns it into a resource too: projects, sessions, terminals and agents served to paired computers.
+  const withApi = has("with-api");
+  let host = null, served = null;
+  if (withApi) {
+    const { createHost } = require(path.join(ROOT, "src", "host"));
+    const { createServed } = require(path.join(ROOT, "src", "mesh", "serve"));
+    host = createHost({
+      dataDir, home: os.homedir(), isExcluded: () => false,
+      untitled: (agent, id) => `${agent} session ${id}`, noLauncher: exe => `${exe} is not installed on this host`,
+      log: (...parts) => log(parts.join(" ")), gitActive: () => true
+    });
+    // A program that ends takes its terminal with it, as on a desktop.
+    host.on("terminal:exit", ({ id, lost }) => { if (!lost) host.terminals.close(id); });
+    served = createServed({ host, info: () => ({ headless: true, dataDir }) });
+  }
   const links = createLinks({
-    dir: nodeDir, defaultName: opt("name", os.hostname()), kind: "host", version: pkg.version, api: served.api, log: meshLog, discover: !has("no-discovery")
+    dir: nodeDir, defaultName: opt("name", os.hostname()), kind: "host", version: pkg.version,
+    api: served ? served.api : () => {}, relayOnly: !withApi, log: meshLog, discover: !has("no-discovery")
   });
-  served.attach(links);
+  served?.attach(links);
   // Before the first start: the settings given on the command line.
   const patch = {};
   if (opt("port")) patch.port = Number(opt("port"));
@@ -114,18 +122,18 @@ async function run() {
     fs.writeFileSync(nodeFile, JSON.stringify({ ...saved, ...patch, ...(opt("interface") ? { interface: opt("interface") } : {}) }, null, 2));
   }
 
-  host.start();
+  host?.start();
   const self = await links.start();
   if (opt("pair-token")) links.peers().setCode(opt("pair-token"));
-  log(`agentdeck-host ${pkg.version} on ${process.platform}, node ${process.version}: ${self.name} (${self.id.slice(0, 8)}), port ${self.port}, data ${dataDir}`);
-  console.log(`\nPairing code: ${links.peers().code()}\nAddress: ${firstAddress()}:${self.port}\n`);
+  log(`agentdeck-host ${pkg.version}${withApi ? "" : " (relay only)"} on ${process.platform}, node ${process.version}: ${self.name} (${self.id.slice(0, 8)}), port ${self.port}, data ${dataDir}`);
+  console.log(`\n${withApi ? "Resource host" : "Relay only"}\nPairing code: ${links.peers().code()}\nAddress: ${firstAddress()}:${self.port}\n`);
   links.on("self", () => console.log(`Pairing code now: ${links.peers().code()}`));
 
   const stop = () => {
     log("stopping");
     links.stop();
-    host.stop();
-    host.terminals.stopAll();
+    host?.stop();
+    host?.terminals.stopAll();
     process.exit(0);
   };
   process.on("SIGTERM", stop);

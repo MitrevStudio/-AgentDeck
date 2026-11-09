@@ -113,7 +113,7 @@
     if (document.activeElement !== $("nodeProxy")) $("nodeProxy").value = s.proxy || "";
     $("nodeCode").textContent = s.code.length > 8 ? s.code : `${s.code.slice(0, 3)} ${s.code.slice(3)}`;
     $("nodeAddressHint").textContent = t("settings.nodes.addressHint", { port: s.port });
-    const paired = state.nodes.map(n => nodeRow(n, `${n.status === "online" ? `<button type="button" class="btn sm" data-setup="${esc(n.id)}">${icon("sliders")}<span>${esc(t("settings.nodes.setup"))}</span></button>` : ""}<button type="button" class="btn sm" data-forget="${esc(n.id)}">${icon("x")}<span>${esc(t("settings.nodes.forget"))}</span></button>`)
+    const paired = state.nodes.map(n => nodeRow(n, `${n.relayOnly ? `<span class="tag" title="${esc(t("settings.nodes.relayHint"))}">${esc(t("settings.nodes.relay"))}</span>` : n.status === "online" ? `<button type="button" class="btn sm" data-setup="${esc(n.id)}">${icon("sliders")}<span>${esc(t("settings.nodes.setup"))}</span></button>` : ""}<button type="button" class="btn sm" data-forget="${esc(n.id)}">${icon("x")}<span>${esc(t("settings.nodes.forget"))}</span></button>`)
       + (setupOpen === n.id ? `<div class="vs-setup" id="nodeSetup">${setupHtml()}</div>` : ""));
     $("nodesPaired").innerHTML = paired.join("") || `<div class="vs-hint">${esc(t("settings.nodes.pairedEmpty"))}</div>`;
     const known = new Set(state.nodes.map(n => n.id));

@@ -25,7 +25,7 @@ const PAIR_TIMEOUT_MS = 20000;
 // dir: where the identity and the peers are kept; defaultName; kind: "desktop" | "host"; version;
 // api(method, params, peer) -> the answer to a peer's request; log(line); discover: announce and look for nodes
 // on the local network (off in tests).
-function createLinks({ dir, defaultName, kind, version, api, log = () => {}, discover = true }) {
+function createLinks({ dir, defaultName, kind, version, api, log = () => {}, discover = true, relayOnly = false }) {
   const out = new EventEmitter();
   const links = new Map();   // peer id -> { link, initiatedHere, info, address, port }
   const retries = new Map(); // peer id -> { timer, delay }
@@ -44,7 +44,8 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
   };
   const self = () => (!identity ? null : { id: identity.id, name: identity.settings.name, kind, version, protocol: PROTOCOL, port: server?.port() || identity.settings.port,
     discoverable: identity.settings.discoverable, proxy: identity.settings.proxy, code: peers.code() });
-  const hello = () => ({ id: identity.id, name: identity.settings.name, kind, version, protocol: PROTOCOL, relay: 1, port: server?.port() || 0 });
+  // relayOnly: this node serves no api (its installer set none); peers use it to skip resource fetches and to label it.
+  const hello = () => ({ id: identity.id, name: identity.settings.name, kind, version, protocol: PROTOCOL, relay: 1, relayOnly, port: server?.port() || 0 });
 
   // ---------- the nodes as listed ----------
   function nodes() {
@@ -52,7 +53,7 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
     return peers.list().map(p => {
       const l = links.get(p.id);
       return { id: p.id, name: l?.info?.name || p.name, kind: l?.info?.kind || p.kind, version: l?.info?.version || "", address: l?.address || p.address, port: l?.port || p.port,
-        via: l?.route?.slice(1, -1) || [], status: l ? "online" : "offline", error: incompatible.get(p.id) || "", lastSeen: l ? Date.now() : p.lastSeen, pairedAt: p.pairedAt };
+        via: l?.route?.slice(1, -1) || [], status: l ? "online" : "offline", error: incompatible.get(p.id) || "", relayOnly: Boolean(l?.info?.relayOnly), lastSeen: l ? Date.now() : p.lastSeen, pairedAt: p.pairedAt };
     });
   }
   const changed = () => out.emit("nodes", nodes());
@@ -74,6 +75,12 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
         if (method === "pair") return { ok: true, id: identity.id, name: identity.settings.name, kind, version, already: true };
         if (!info) throw new HostError("handshake", "The protocol handshake has not completed.");
         if (method.startsWith("relay.")) return relay.request(id, method, params);
+        // This computer is a relay only (its installer set no api): it routes traffic but runs no sessions of its own.
+        if (relayOnly) throw new HostError("relayOnly", "This computer is a relay only; it runs no sessions or terminals.");
+        // A host peer (a VPS/relay, or a resource host) may route traffic and be used as a resource, but not act on this
+        // computer; a desktop peer may. Set from the peer's kind when pairing (peers.js), so a broken or hostile relay
+        // cannot reach into the computers it connects. Relaying and using a host as a resource are never affected.
+        if (peers.get(id)?.control === false) throw new HostError("relayOnly", "This node may relay but not control this computer.");
         return api(method, params, { id, name: info?.name || peer.name, kind: info?.kind || peer.kind });
       },
       onBinary: data => { if (info) out.emit("binary", { node: id, data }); },
@@ -310,7 +317,6 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
     out.emit("self", self());
     return peers.code();
   }
-
   async function start() {
     identity = await loadIdentity(dir, { defaultName });
     peers = createPeers(dir);

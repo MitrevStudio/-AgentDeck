@@ -17,6 +17,7 @@
     "test:relay": "node scripts/test-relay.js",
     "test:mesh": "node scripts/test-mesh.js",
     "test:mesh-proxy": "node scripts/test-mesh-proxy.js",
+    "test:mesh-relay-only": "node scripts/test-mesh-relay-only.js",
     "test:limits": "node scripts/test-limits.js",
     "test:audit": "node scripts/test-audit-regressions.js",
     "dist": "electron-builder --win --publish never",

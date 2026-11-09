@@ -30,6 +30,7 @@ const BACKGROUND = { dark: "#0d1015", light: "#f2f4f8" };
 const prefs = new EventEmitter();
 const state = { language: "bg", theme: "dark", edgeHandle: true, autoUpdate: true, newWindow: true, sessionsIn: "tabs", autoCompact: true, autoCompactTokens: AUTO_COMPACT_MAX, dayView: false, notify: null, terminalFontSize: 16, uiScale: 1 };
 let sessionsInChosen = false; // the user picked where sessions open (settings or the tray menu)
+let autoCompactTokensChosen = false; // the user picked a compaction threshold, so a stale old default is ignored
 let handleX = 0.5; // the edge handle's centre, as a fraction of the display width
 let handleDisplay = null; // the id of the display it is on (null: the primary one)
 const fraction = v => (typeof v === "number" && v >= 0 && v <= 1 ? v : null);
@@ -62,7 +63,12 @@ function load() {
   }
   const auto = isObj(root.terminal) && isObj(root.terminal.autoCompact) ? root.terminal.autoCompact : {};
   state.autoCompact = auto.on !== false;
-  if (AUTO_COMPACT_TOKENS.includes(auto.tokens)) state.autoCompactTokens = auto.tokens;
+  // A stored threshold counts only once the user has picked one (chosen). An older AgentDeck wrote 150000 as the
+  // default into settings.json; without this, that stale value keeps overriding the current default (the max).
+  if (auto.chosen === true && AUTO_COMPACT_TOKENS.includes(auto.tokens)) {
+    state.autoCompactTokens = auto.tokens;
+    autoCompactTokensChosen = true;
+  }
   if (TERMINAL_FONT_SIZES.includes(term.fontSize)) state.terminalFontSize = term.fontSize;
   if (UI_SCALES.includes(ui.scale)) state.uiScale = ui.scale;
   state.dayView = isObj(root.dayView) && root.dayView.show === true;
@@ -111,6 +117,7 @@ async function set(patch) {
   }
   if (AUTO_COMPACT_TOKENS.includes(patch.autoCompactTokens) && patch.autoCompactTokens !== state.autoCompactTokens) {
     state.autoCompactTokens = patch.autoCompactTokens;
+    autoCompactTokensChosen = true;
     keys.push("autoCompactTokens");
   }
   if (TERMINAL_FONT_SIZES.includes(patch.terminalFontSize) && patch.terminalFontSize !== state.terminalFontSize) {
@@ -157,7 +164,7 @@ function save() {
       sessionsIn: state.sessionsIn,
       sessionsInChosen: sessionsInChosen || undefined,
       fontSize: state.terminalFontSize,
-      autoCompact: { on: state.autoCompact, tokens: state.autoCompactTokens }
+      autoCompact: { on: state.autoCompact, tokens: state.autoCompactTokens, chosen: autoCompactTokensChosen || undefined }
     },
     dayView: { show: state.dayView },
     notify: { on: state.notify !== false },
