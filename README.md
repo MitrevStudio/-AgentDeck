@@ -601,6 +601,19 @@ npm run dist:dir
 
 Outputs are written under `dist/`. The installer is `AgentDeck-Setup-<version>.exe`; the unpacked executable is `dist/win-unpacked/AgentDeck.exe`. Build configuration lives in `package.json`.
 
+### Linux desktop (experimental)
+
+The desktop also runs on Linux x64 (tested on Wayland/Hyprland). Terminals use `node-pty`, built for Electron's ABI:
+
+```bash
+npm ci
+npm run setup:linux   # downloads Electron and rebuilds node-pty for it
+npm start             # add --ozone-platform=wayland on Wayland
+npm run dist:linux    # AppImage and dist/linux-unpacked/
+```
+
+On Linux every session opens in AgentDeck's own terminals (there is no Windows Terminal). Voice, focusing external terminal windows, full-screen detection, start at login and automatic updates are Windows only; the edge handle is off by default because a Wayland compositor places its window itself. Agents must be on the app's `PATH`: start it from a shell, or make sure the launcher's environment includes them.
+
 The repository version is intentionally `0.0.0-development`. Release automation injects the version associated with the Git tag into the build.
 
 ### Environment variables

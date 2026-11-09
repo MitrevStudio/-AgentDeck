@@ -26,7 +26,7 @@ const UI_SCALES = [0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5];
 const BACKGROUND = { dark: "#0d1015", light: "#f2f4f8" };
 
 const prefs = new EventEmitter();
-const state = { language: "bg", theme: "dark", edgeHandle: true, autoUpdate: true, newWindow: true, sessionsIn: "tabs", autoCompact: true, autoCompactTokens: 150000, dayView: false, notify: null, terminalFontSize: 16, uiScale: 1 };
+const state = { language: "bg", theme: "dark", edgeHandle: process.platform === "win32", autoUpdate: true, newWindow: true, sessionsIn: "tabs", autoCompact: true, autoCompactTokens: 150000, dayView: false, notify: null, terminalFontSize: 16, uiScale: 1 };
 let sessionsInChosen = false; // the user picked where sessions open (settings or the tray menu)
 let handleX = 0.5; // the edge handle's centre, as a fraction of the display width
 let handleDisplay = null; // the id of the display it is on (null: the primary one)
@@ -46,7 +46,8 @@ function load() {
   if (THEMES.includes(ui.theme)) state.theme = ui.theme;
   // Before the handle, `hoverEdge` switched the invisible hover zone it replaces; its choice carries over.
   const handle = isObj(root.edgeHandle) ? root.edgeHandle : {};
-  state.edgeHandle = typeof handle.show === "boolean" ? handle.show : root.hoverEdge !== false;
+  // Off by default outside Windows: a Wayland compositor places the handle's window itself (mid-screen), not at the edge.
+  state.edgeHandle = typeof handle.show === "boolean" ? handle.show : process.platform === "win32" && root.hoverEdge !== false;
   handleX = fraction(handle.x) ?? handleX;
   handleDisplay = Number.isInteger(handle.display) ? handle.display : null;
   state.autoUpdate = ui.autoUpdate !== false;
