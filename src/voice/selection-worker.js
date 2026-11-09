@@ -2,7 +2,7 @@
 // one at a time.
 const { parentPort } = require("node:worker_threads");
 const { captureHere } = require("./selection");
-const { readClipboardText } = require("./win32");
+const { readClipboardText } = require("./native");
 
 parentPort.on("message", async ({ id, hwnd, op, max }) => {
   let result;

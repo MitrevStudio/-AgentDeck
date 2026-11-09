@@ -612,7 +612,9 @@ npm start             # add --ozone-platform=wayland on Wayland
 npm run dist:linux    # AppImage and dist/linux-unpacked/
 ```
 
-On Linux every session opens in AgentDeck's own terminals (there is no Windows Terminal). Voice, focusing external terminal windows, full-screen detection, start at login and automatic updates are Windows only; the edge handle is off by default because a Wayland compositor places its window itself. Agents must be on the app's `PATH`: start it from a shell, or make sure the launcher's environment includes them.
+On Linux every session opens in AgentDeck's own terminals (there is no Windows Terminal). Focusing external terminal windows, full-screen detection, start at login and automatic updates are Windows only; the edge handle is off by default because a Wayland compositor places its window itself.
+
+Voice runs under **Hyprland** (0.5x, Lua config) and needs `wtype` and `wl-clipboard`. Wayland lets no application grab keys or type into others, so AgentDeck asks Hyprland: its hotkeys are Hyprland bindings added at run time (press and release, so push-to-talk works) and removed at quit, read-aloud and voice edits read the primary selection, and dictation pastes with `wtype` (Ctrl+Shift+V in terminals). A combination Hyprland already binds counts as taken, as on Windows: on Omarchy, Ctrl+Space (the terminal multiplexer prefix) is, so choose another dictation key in Voice settings. Agents must be on the app's `PATH`: start it from a shell, or make sure the launcher's environment includes them.
 
 The repository version is intentionally `0.0.0-development`. Release automation injects the version associated with the Git tag into the build.
 

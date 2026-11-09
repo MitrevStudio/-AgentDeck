@@ -151,7 +151,7 @@ test('6 dictation: modifier timeout and late focus change fall back to clipboard
   const w = { exclusive: fn => fn(), focus: async () => true, waitModifiersUp: async () => released,
     writeClipboardText: async () => true, sendCtrlV: () => { pasted++; return true; }, typeUnicode: () => { typed++; return true; },
     isAlive: () => focused, foregroundHwnd: () => stolen ? 2n : 1n, anyModifierDown: () => false };
-  const { deliver } = load('voice/delivery.js', { './win32': w, '../shared/util': { sleep: async () => { stolen = true; } } });
+  const { deliver } = load('voice/delivery.js', { './native': w, '../shared/util': { sleep: async () => { stolen = true; } } });
   const target = { hwnd: 1n };
   assert.equal((await deliver('text', target)).outcome, 'ClipboardOnly');
   released = true;

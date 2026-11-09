@@ -1,7 +1,7 @@
 // Where a transcript goes. Port of VoiceTray's TextDeliveryService: into the window that was in front when the
 // recording started, or onto the clipboard when that window cannot be brought back (better there than typed into
 // whatever happens to be in front). The clipboard is deliberately not restored afterwards.
-const w = require("./win32");
+const w = require("./native");
 const { sleep } = require("../shared/util");
 
 const SETTLE_BEFORE_PASTE_MS = 80;
@@ -30,18 +30,19 @@ function deliver(text, target, { useClipboard = true } = {}) {
     const released = await w.waitModifiersUp();
     if (!focused) return toClipboard(text, "focus-failed");
     if (!released) return toClipboard(text, "modifiers-held");
-    const stillFocused = () => w.isAlive(target) && w.foregroundHwnd() === BigInt(target.hwnd) && !w.anyModifierDown();
+    // Awaited: on Wayland the window queries are asynchronous (wayland.js).
+    const stillFocused = async () => (await w.isAlive(target)) && (await w.foregroundHwnd()) === BigInt(target.hwnd) && !w.anyModifierDown();
 
     if (useClipboard) {
       if (!(await w.writeClipboardText(text))) return failed("clipboard-blocked");
       await sleep(SETTLE_BEFORE_PASTE_MS);
-      if (!stillFocused()) return clipboardOnly("focus-changed");
-      if (!w.sendCtrlV()) return clipboardOnly("paste-failed");
+      if (!(await stillFocused())) return clipboardOnly("focus-changed");
+      if (!(await w.sendCtrlV())) return clipboardOnly("paste-failed");
       await sleep(SETTLE_AFTER_PASTE_MS);
       return injected();
     }
-    if (!stillFocused()) return toClipboard(text, "focus-changed");
-    if (w.typeUnicode(text)) return injected();
+    if (!(await stillFocused())) return toClipboard(text, "focus-changed");
+    if (await w.typeUnicode(text)) return injected();
     return toClipboard(text, "typing-failed");
   });
 }

@@ -1103,8 +1103,9 @@ if (!app.requestSingleInstanceLock()) {
     voiceContext.start();
     // Started once the windows are up: the first run copies VoiceTray's history first, and a voice part that cannot
     // start (native module, broken data) must not take the session manager down with it.
-    // Voice drives Win32 (hotkeys, focus, synthetic keys, the clipboard; voice/win32.js): Windows only for now.
-    voiceStarting = process.platform !== "win32" ? Promise.resolve() : Promise.resolve()
+    // Voice needs the platform's hotkeys, focus, synthetic keys and clipboard (voice/native.js): Windows, or Linux
+    // under Hyprland.
+    voiceStarting = !require("./voice/native").supported() ? Promise.resolve() : Promise.resolve()
       .then(() => require("./voice/controller").initVoice({
         balloon, onTrayChanged: buildTrayMenu, icon: makeIcon(64), prefs, showAnswer: a => answerPopup?.show(a),
         // The dictionary may include the projects' names.

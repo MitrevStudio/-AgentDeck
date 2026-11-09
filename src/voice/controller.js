@@ -5,7 +5,7 @@ const { BrowserWindow, powerMonitor } = require("electron");
 const fs = require("node:fs");
 const settings = require("./settings");
 const store = require("./job-store");
-const win32 = require("./win32");
+const win32 = require("./native"); // win32.js or wayland.js
 const selection = require("./selection");
 const delivery = require("./delivery");
 const { importIfNeeded } = require("./import-voicetray");
@@ -607,7 +607,7 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
     commands.dispose();
     edge?.keys.release();
     clearTimeout(trayTimer);
-    hotkeys.unregisterAll();
+    if (hotkeys.dispose) await hotkeys.dispose(); else hotkeys.unregisterAll();
     clip.dispose();
     offer = null;
     capturing = null;
@@ -630,6 +630,7 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
   prefs?.on("changed", onPrefsChanged);
 
   // ---------- start ----------
+  await hotkeys.ready?.(); // Hyprland: its bindings read, any an earlier run left behind dropped
   const taken = Object.keys(registerHotkeys());
   if (taken.length) balloon(hotkeyWarning(taken), { iconType: "warning" });
   else if (waiting) balloon(tn("voice.balloon.waiting", waiting), { iconType: "warning" });
