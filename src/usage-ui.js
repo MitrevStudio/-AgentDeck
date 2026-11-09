@@ -2,9 +2,7 @@
 // after common.js. Main sends one summary (usage.js): sessions, models and rows of
 // [session, "YYYY-MM-DD", model, input, output, cacheWrite, cacheRead, usd|null, replies].
 let usage = null, usageBySession = new Map(), contextBySession = new Map();
-// From this size a cold session is marked as expensive to continue.
-const LARGE_CONTEXT = 150000;
-// From this share of its window a context is drawn as nearly full: the agent compacts it (or stops) soon.
+// A visual high-usage marker, not a prediction of the agent's compaction threshold.
 const FULL_CONTEXT = 0.8;
 const CONTEXT_REFRESH_MS = 30000;
 
@@ -38,7 +36,7 @@ const emptyUsage = () => ({ input: 0, output: 0, write: 0, read: 0, tokens: 0, c
 function setUsage(u) {
   usage = u;
   usageBySession = u ? sumUsage(u.rows, r => u.sessions[r[0]]?.key) : new Map();
-  contextBySession = new Map((u?.sessions || []).filter(x => x.context?.tokens).map(x => [x.key, x.context]));
+  contextBySession = new Map((u?.sessions || []).filter(x => x.context).map(x => [x.key, x.context]));
 }
 const usageOf = s => usageBySession.get(sessionKey(s)) || null;
 // Several sessions together (a project's), or null when none of them used anything.
@@ -78,28 +76,30 @@ function usageCost(s) {
   const a = usageOf(s);
   return a ? `<span class="rusage" title="${esc(usageTitle(a))}">${esc(a.cost == null ? tokensText(a.tokens) : fmtUsd(a.cost))}</span>` : "";
 }
-// What continuing a session costs: the context its next reply re-reads, green while the cache is warm, yellow once
-// it went cold, red when it is cold and large. Both pages; refreshContextChips() turns them cold on time.
+// Context occupancy and provider cache state are independent.
 function getContextState(c) {
-  if (Date.now() < c.warmUntil) {
-    return "warm";
-  }
-  return c.tokens >= LARGE_CONTEXT ? "large" : "cold";
+  if (c.status === "pending" || c.tokens == null) return "empty";
+  return getContextFill(c) >= FULL_CONTEXT ? "large" : "neutral";
 }
 // The share of the model's context window in use (0..1), or null when the window is not known (OpenCode, a model
 // usage-prices.js does not list).
 function getContextFill(c) {
-  return c.window > 0 ? Math.min(1, c.tokens / c.window) : null;
+  if (c.status === "pending" || c.tokens == null) return null;
+  if (Number.isFinite(c.percent)) return Math.max(0, c.percent / 100);
+  return c.window > 0 ? c.tokens / c.window : null;
 }
 // "52%", or "≈52%" when the window is the model's usual one rather than what the agent reported.
 function getFillText(c) {
   const pct = I18N.formatNumber(getContextFill(c), { style: "percent", maximumFractionDigits: 0 });
   return c.exact ? pct : `≈${pct}`;
 }
-function getContextTitle(c, state) {
+function getContextTitle(c) {
+  if (c.status === "pending" || c.tokens == null) return t("context.pending");
   const n = I18N.formatNumber(c.tokens);
-  const lines = [state === "warm" ? t("context.tip.warm", { n, until: I18N.formatTime(c.warmUntil) })
-    : t(state === "large" ? "context.tip.large" : "context.tip.cold", { n })];
+  const lines = [t("context.reported", { n, at: I18N.formatTime(c.at) })];
+  if (c.model) lines.push(t("context.model", { model: [c.provider, c.model].filter(Boolean).join('/') }));
+  if (c.limitSource === 'opencode-current-config') lines.push(t("context.currentLimits"));
+  if (c.cache) lines.push(t(c.cache.warm && Date.now() < c.cache.expiresAt ? "context.cacheWarm" : "context.cacheCold"));
   const fill = getContextFill(c);
   if (fill != null) {
     lines.push(t(c.exact ? "context.tip.window" : "context.tip.windowApprox", { pct: getFillText(c), window: I18N.formatNumber(c.window) }));
@@ -111,23 +111,18 @@ function getContextClass(c) {
   const fill = getContextFill(c);
   return `ctx-chip ${getContextState(c)}${fill != null && fill >= FULL_CONTEXT ? " full" : ""}`;
 }
-// The usage scan has read the session's transcript as it is now.
-function isUsageCurrent(s) {
-  const summary = s.node ? getNode(s.node)?.usage : usage;
-  return Boolean(summary) && summary.at >= s.updatedAt;
-}
 function getContextChip(s) {
   const c = s.node ? getNode(s.node)?.usage?.sessions?.find(x => x.key === `${s.agent}:${s.id}`)?.context : contextBySession.get(sessionKey(s));
-  // A Claude session that never reached the model (only commands such as /clear) has nothing to re-read.
   if (!c) {
-    return s.agent === "Claude" && isUsageCurrent(s) ? `<span class="ctx-chip empty" title="${esc(t("context.tip.empty"))}">${esc(t("context.label", { n: 0 }))}</span>` : "";
+    return "";
   }
+  if (c.status === "pending" || c.tokens == null) return `<span class="ctx-chip empty" title="${esc(t("context.pending"))}">${esc(t("context.pending"))}</span>`;
   const n = fmtTokens(c.tokens).replace(/\.$/, "");
   const fill = getContextFill(c);
   // The share in use also fills the chip from the left, as a thin line along its bottom.
   const label = fill == null ? t("context.label", { n }) : t("context.labelFill", { n, pct: getFillText(c) });
-  const style = fill == null ? "" : ` style="--fill: ${Math.round(fill * 1000) / 10}%"`;
-  return `<span class="${getContextClass(c)}" data-ctx="${esc(`${s.agent}:${s.id}`)}"${s.node ? ` data-ctx-node="${esc(s.node)}"` : ""}${style} title="${esc(getContextTitle(c, getContextState(c)))}">${esc(label)}</span>`;
+  const style = fill == null ? "" : ` style="--fill: ${Math.min(100, Math.round(fill * 1000) / 10)}%"`;
+  return `<span class="${getContextClass(c)}" data-ctx="${esc(`${s.agent}:${s.id}`)}"${s.node ? ` data-ctx-node="${esc(s.node)}"` : ""}${style} title="${esc(getContextTitle(c))}">${esc(label)}</span>`;
 }
 function refreshContextChips() {
   document.querySelectorAll("[data-ctx]").forEach(el => {
@@ -136,7 +131,7 @@ function refreshContextChips() {
       return;
     }
     el.className = getContextClass(c);
-    el.title = getContextTitle(c, getContextState(c));
+    el.title = getContextTitle(c);
   });
 }
 setInterval(refreshContextChips, CONTEXT_REFRESH_MS);

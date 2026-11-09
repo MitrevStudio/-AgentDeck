@@ -9,6 +9,11 @@
 // Its subagents (<transcript>/subagents/agent-*.jsonl, described by the .meta.json beside each) come along as
 // `subagents`, newest first; one written to within SUBAGENT_ACTIVE_MS counts as working.
 //
+// A turn sent to the background (ctrl+b, Claude Code 2.1.3xx) runs in a "bg" process of its own: a fork of the session
+// (--fork-session --resume <parent>: a transcript and sessionId of its own, `jobId`) that the interactive parent names in
+// `parkedJobId`; a spare bg process (`spare`, no transcript) is kept ready beside it. The parent is the session the
+// user sees, so a job's state and activity count for its parent and spares are left out (foldJobs).
+//
 // Codex's rollout lifecycle is read separately by codex-live.js and merged in host/index.js.
 // OpenCode has no live status source here.
 const { execFile } = require("node:child_process");
@@ -114,6 +119,27 @@ function getActivity(id) {
   return { at: Math.max(mtime(file), ...subagents.map(a => a.at)), subagents };
 }
 
+// Registry entries as the user sees them: spares gone, each background job folded into its parent (`jobs` on the
+// parent); a job whose parent is gone stays on its own.
+function foldJobs(entries) {
+  const byJob = new Map(entries.filter(x => x.kind !== "bg" && x.parkedJobId).map(x => [x.parkedJobId, x]));
+  const kept = [], jobs = new Map();
+  for (const x of entries) {
+    if (x.spare) continue;
+    const parent = x.kind === "bg" && x.jobId ? byJob.get(x.jobId) : null;
+    if (parent && parent !== x) {
+      if (!jobs.has(parent.sessionId)) jobs.set(parent.sessionId, []);
+      jobs.get(parent.sessionId).push(x);
+    } else kept.push(x);
+  }
+  return kept.map(x => ({ ...x, jobs: jobs.get(x.sessionId) || [] }));
+}
+// The state shown for a session with background jobs: whatever needs the user first, else whatever works.
+const STATUS_RANK = { waiting: 0, busy: 1, shell: 1 };
+function leadingEntry(x) {
+  return [x, ...(x.jobs || [])].reduce((best, e) => (STATUS_RANK[e.status] ?? 2) < (STATUS_RANK[best.status] ?? 2) ? e : best);
+}
+
 async function claudeLive() {
   let files;
   try { files = fs.readdirSync(REGISTRY_DIR).filter(f => /^\d+\.json$/.test(f)); } catch { return []; }
@@ -124,17 +150,17 @@ async function claudeLive() {
     if (x.sessionId && Number.isInteger(x.pid) && pidAlive(x.pid)) entries.push(x);
   }
   await verifyStarts(entries);
-  return entries
-    .filter(x => !x.procStart || startVerified.get(`${x.pid}:${x.procStart}`) !== false)
-    .map(x => ({ x, activity: getActivity(x.sessionId) }))
-    .map(({ x, activity }) => ({
+  return foldJobs(entries.filter(x => !x.procStart || startVerified.get(`${x.pid}:${x.procStart}`) !== false))
+    .map(x => ({ x, lead: leadingEntry(x), activities: [x, ...x.jobs].map(e => getActivity(e.sessionId)) }))
+    .map(({ x, lead, activities }) => ({
       agent: "Claude", id: x.sessionId, pid: x.pid, procStart: String(x.procStart || ""), cwd: x.cwd || "", name: x.name || "",
-      status: x.status === "shell" ? "busy" : x.status || "running",
-      waitingFor: x.waitingFor || "",
-      statusAt: x.statusUpdatedAt || x.updatedAt || x.startedAt || 0,
+      status: lead.status === "shell" ? "busy" : lead.status || "running",
+      waitingFor: lead.waitingFor || "",
+      statusAt: lead.statusUpdatedAt || lead.updatedAt || lead.startedAt || 0,
       startedAt: x.startedAt || 0,
-      activityAt: activity.at,
-      subagents: activity.subagents
+      activityAt: Math.max(...activities.map(a => a.at)),
+      subagents: activities.flatMap(a => a.subagents).sort((a, b) => b.at - a.at),
+      jobs: x.jobs.map(j => ({ id: j.sessionId, pid: j.pid, status: j.status === "shell" ? "busy" : j.status || "running" }))
     }));
 }
 
@@ -142,4 +168,4 @@ async function liveSessions() {
   return claudeLive();
 }
 
-module.exports = { liveSessions, findTranscript };
+module.exports = { liveSessions, findTranscript, foldJobs, leadingEntry };

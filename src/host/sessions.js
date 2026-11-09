@@ -1,8 +1,8 @@
 // The host's sessions: the Claude Code and Codex transcripts and OpenCode's sessions on this computer, read into
 // one list (newest first) with the project each belongs to, and the registry of projects (registry.js) that the
 // scan fills in by itself from the folders sessions ran in. Kept as `cache` and pushed through onChange when it
-// changed; a full scan (start, Refresh, every FULL_SCAN_MS) asks OpenCode's CLI too, a light rescan (transcripts
-// changed) reads only the lines appended since the last one.
+// changed; OpenCode 2 is read from its database. Light rescans read appended
+// transcript lines and refresh the OpenCode metadata.
 const fs = require("node:fs");
 const path = require("node:path");
 const { execFile } = require("node:child_process");
@@ -10,6 +10,7 @@ const { promisify } = require("node:util");
 const { createRegistry, norm } = require("./registry");
 const { NOISE_PROMPT, contentText } = require("./session-preview");
 const { readCodexTitles } = require("./codex-titles");
+const { databasePath, readSessions: readOpenCodeSessions } = require("./opencode-sessions");
 
 const execFileAsync = promisify(execFile);
 const RECAP_CHARS = 220;
@@ -109,6 +110,7 @@ async function findOnPath(name) {
   return "";
 }
 function openCodeSession(s, cwd, projectName, untitled) {
+  if (s.parentID || s.parent_id) return null;
   const id = s.id || s.sessionID;
   if (!id) return null;
   return {
@@ -134,7 +136,7 @@ function createSessions({ dataDir, home, isExcluded = () => false, untitled = (a
   const registry = createRegistry(path.join(dataDir, "registry.json"));
   const CLAUDE_DIR = path.join(home, ".claude", "projects");
   const CODEX_DIR = path.join(home, ".codex", "sessions");
-  const OPENCODE_DB = path.join(process.env.XDG_DATA_HOME || path.join(home, ".local", "share"), "opencode", "opencode.db");
+  const OPENCODE_DB = databasePath(home);
 
   // ---------- Claude Code ----------
   // Transcripts only ever grow, so each is read once and then only from where the last scan stopped (a file that
@@ -255,38 +257,7 @@ function createSessions({ dataDir, home, isExcluded = () => false, untitled = (a
     // /s: the outer quotes go, the rest is taken as typed (args are fixed words).
     return execFileAsync(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", `""${exe}" ${args.join(" ")}"`], { ...opts, windowsVerbatimArguments: true });
   }
-  // OpenCode's sessions come from its CLI, which takes seconds: a rescan started by a changed transcript keeps the
-  // last answer, the Refresh button and the first scan ask it again.
-  let lastOpenCode = [];
-  async function scanOpenCode(reg) {
-    const found = [];
-    // Query globally first, then use registered projects as a fallback.
-    let openCodeFound = false, openCodeInstalled = false;
-    try {
-      const { stdout } = await runOpenCode(["session", "list", "--format", "json", "--max-count", "300"], home, 12000);
-      openCodeInstalled = true;
-      let arr; try { arr = JSON.parse(stdout); } catch { arr = []; }
-      if (!Array.isArray(arr)) arr = arr.sessions || arr.data || [];
-      for (const raw of arr) {
-        const s = openCodeSession(raw, raw.directory || raw.cwd || raw.path || "", undefined, untitled);
-        if (s) { found.push(s); openCodeFound = true; }
-      }
-    } catch { /* CLI not installed, or CLI version differs */ }
-    if (openCodeInstalled && !openCodeFound) {
-      for (const project of reg.projects) {
-        try {
-          const { stdout } = await runOpenCode(["session", "list", "--format", "json", "--max-count", "200"], project.path, 10000);
-          let arr; try { arr = JSON.parse(stdout); } catch { arr = []; }
-          if (!Array.isArray(arr)) arr = arr.sessions || arr.data || [];
-          for (const raw of arr) {
-            const s = openCodeSession(raw, project.path, project.name, untitled);
-            if (s) found.push(s);
-          }
-        } catch { /* project not available */ }
-      }
-    }
-    return found;
-  }
+  let lastOpenCode = [], openCodeWarning = "";
 
   // ---------- the scan ----------
   function scanTranscripts(reg, found) {
@@ -343,9 +314,14 @@ function createSessions({ dataDir, home, isExcluded = () => false, untitled = (a
       seen.add(key); return true;
     }).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 1000);
   }
-  async function scanSessions({ openCode = true } = {}) {
+  async function scanSessions() {
     const reg = registry.read();
-    if (openCode) lastOpenCode = await scanOpenCode(reg);
+    let rows = null;
+    try { rows = readOpenCodeSessions(OPENCODE_DB) || []; }
+    catch (err) { if (err.message !== openCodeWarning) console.warn("OpenCode database scan failed:", openCodeWarning = err.message); }
+    if (rows !== null) {
+      lastOpenCode = rows.map(raw => openCodeSession(raw, raw.directory || "", undefined, untitled)).filter(Boolean);
+    }
     const found = lastOpenCode.map(s => ({ ...s }));
     scanTranscripts(reg, found);
     return indexProjects(found);
@@ -365,14 +341,14 @@ function createSessions({ dataDir, home, isExcluded = () => false, untitled = (a
     cache = { registry: reg, sessions, agents: ready, at: Date.now() };
     onChange(cache);
   }
-  // full: OpenCode's CLI and the git status are asked too (first scan, Refresh); a rescan after changed transcripts
-  // skips both. A full scan asked for while a lighter one runs follows it.
+  // Full scans refresh watchers and git status. A full scan requested while a lighter
+  // one runs follows it. OpenCode 2 metadata is read on both paths.
   function scan({ full = true } = {}) {
     if (scanning && full && !scanningFull) return scanning.catch(() => {}).then(() => scan({ full }));
     if (scanning) return scanning;
     if (full) watchTranscripts();
     scanningFull = full;
-    scanning = scanSessions({ openCode: full }).then(async sessions => {
+    scanning = scanSessions().then(async sessions => {
       // Scan first: it auto-indexes projects into the registry, which must be read afterwards.
       const ready = await agents;
       updateCache(sessions, registry.read(), ready, full);
@@ -414,8 +390,25 @@ function createSessions({ dataDir, home, isExcluded = () => false, untitled = (a
         if (err.code !== "ENOENT") console.error(`Could not watch ${dir}:`, err.message);
       }
     }
+    const dir = path.dirname(OPENCODE_DB);
+    if (OPENCODE_DB !== ":memory:" && !watchers.has(dir)) {
+      try {
+        const names = new Set([path.basename(OPENCODE_DB), path.basename(OPENCODE_DB) + "-wal"]);
+        const watcher = fs.watch(dir, (_event, name) => {
+          if (!name || names.has(String(name))) scheduleRescan();
+        });
+        watcher.on("error", err => {
+          console.error("Watching OpenCode failed:", err.message);
+          watcher.close();
+          watchers.delete(dir);
+        });
+        watchers.set(dir, watcher);
+      } catch (err) {
+        if (err.code !== "ENOENT") console.error("Watching OpenCode failed:", err.message);
+      }
+    }
   }
-  // OpenCode sessions and git branches are not watched.
+  // Periodic full scans also discover stores created after startup and refresh git branches.
   let periodic = null;
   function scanPeriodically() {
     periodic ||= setInterval(() => scan().catch(err => console.error("Full scan failed:", err.message)), FULL_SCAN_MS);

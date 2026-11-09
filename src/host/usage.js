@@ -3,14 +3,28 @@
 // process only passes messages: a refresh asked for while one runs is folded into one more pass afterwards.
 // Each summary carries a version that changes only with its figures; onChange hears of new figures only.
 const path = require("node:path");
+const fs = require("node:fs");
 const { Worker } = require("node:worker_threads");
 
 let config = null, worker = null, current = null, running = null, again = false, settle = null, flushed = null;
+let contextWatcher = null, contextTimer = null;
 
 // claudeDir/codexDir: where main looks for sessions; openCodeDb: OpenCode's database; userData: for the cache;
 // onChange(summary) after a pass that changed the figures.
 function start(opts) {
   config = opts;
+  contextWatcher?.close();
+  const dir = path.join(config.userData, 'claude-context', 'sessions');
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    require('./claude-context').prune(config.userData);
+    contextWatcher = fs.watch(dir, (_event, name) => {
+      if (name && !String(name).endsWith('.json')) return;
+      clearTimeout(contextTimer);
+      contextTimer = setTimeout(() => refresh().catch(err => console.error('Context refresh failed:', err.message)), 300);
+    });
+    contextWatcher.on('error', err => { console.warn('Context watcher failed:', err.message); contextWatcher?.close(); contextWatcher = null; });
+  } catch (err) { console.warn('Context watcher unavailable:', err.message); }
   return refresh();
 }
 
@@ -55,6 +69,8 @@ function refresh() {
 
 // Quitting: what the worker has not written yet (it batches small passes) goes to disk first.
 function flush() {
+  clearTimeout(contextTimer);
+  contextWatcher?.close(); contextWatcher = null;
   if (!worker) return Promise.resolve();
   return new Promise(resolve => {
     flushed = () => { flushed = null; resolve(); };

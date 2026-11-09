@@ -59,23 +59,24 @@ function getHandoff(s, d) {
 function getSessionContext(s) {
   return typeof contextBySession !== "undefined" ? contextBySession.get(sessionKey(s)) || null : null;
 }
-// Continue fresh pays off only when resuming would re-read a large context at full price (the red context chip). It
-// starts Claude Code (--append-system-prompt-file), so only Claude sessions get it.
+// Continue fresh pays off only when resuming would carry on a nearly full context (the red context chip, usage-ui.js
+// FULL_CONTEXT). It starts Claude Code (--append-system-prompt-file), so only Claude sessions get it.
 function isFreshOffered(s, c) {
   return s.agent === "Claude" && Boolean(c) && getContextState(c) === "large";
 }
-// Why Continue fresh is left out for a session; nothing while the usage scan has not reached it yet.
+// Why Continue fresh is left out for a session.
 function getFreshMissingReason(s, c) {
   if (s.agent !== "Claude") {
     return t("preview.fresh.none.agent");
   }
-  if (!c) {
-    return isUsageCurrent(s) ? t("preview.fresh.none.empty") : "";
+  if (!c || c.status === "pending" || c.tokens == null) {
+    return t("preview.fresh.none.empty");
   }
-  if (getContextState(c) === "warm") {
-    return t("preview.fresh.none.warm", { until: I18N.formatTime(c.warmUntil) });
+  const n = I18N.formatNumber(c.tokens);
+  if (getContextFill(c) == null) {
+    return t("preview.fresh.none.unknown", { n });
   }
-  return t("preview.fresh.none.small", { n: I18N.formatNumber(c.tokens), limit: I18N.formatNumber(LARGE_CONTEXT) });
+  return t("preview.fresh.none.small", { n, pct: getFillText(c), limit: `${Math.round(FULL_CONTEXT * 100)}%` });
 }
 // Resume and Continue fresh on a past session's card (renderer.js): the cheaper one is blue, and Resume's tooltip says
 // why Continue fresh is missing.

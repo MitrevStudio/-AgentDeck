@@ -249,45 +249,43 @@ async function fromTranscript(agentName, id, file, textMax) {
 }
 
 // ---------- OpenCode ----------
-// Messages are rows of `message` (role, model, times in data) with their text in `part` rows; a reply is counted per
-// finished turn (finish "stop"), since every tool step of a turn is a message of its own.
+// OpenCode 2 stores user text and assistant content in session_message JSON.
 function fromOpenCode(id, dbFile, textMax) {
   let DatabaseSync;
   try { ({ DatabaseSync } = require("node:sqlite")); } catch { return null; }
   if (!fs.existsSync(dbFile)) return null;
   const db = new DatabaseSync(dbFile, { readOnly: true });
   try {
-    const s = db.prepare("SELECT time_created AS created, time_updated AS updated FROM session WHERE id = ?").get(id);
+    db.exec('PRAGMA busy_timeout = 1000');
+    const s = db.prepare("SELECT time_created AS created, time_updated AS updated FROM session_v2 WHERE id = ?").get(id);
     if (!s) return null;
-    const key = `OpenCode:${id}`, e = cache.get(key);
-    if (e && e.updated === s.updated && e.textMax === textMax) return e.result;
-    const recent = db.prepare("SELECT id, time_created AS at, data FROM message WHERE session_id = ? ORDER BY time_created DESC, id DESC LIMIT 40").all(id);
-    const first = db.prepare("SELECT id, time_created AS at, data FROM message WHERE session_id = ? AND json_extract(data, '$.role') = 'user' ORDER BY time_created, id LIMIT 1").all(id);
+    const key = `OpenCode:${dbFile}:${id}`, e = cache.get(key);
+    const stamp = ['', '-wal'].map(suffix => { try { const st = fs.statSync(dbFile + suffix); return `${st.size}:${st.mtimeMs}`; } catch { return '-'; } }).join('|');
+    if (e && e.stamp === stamp && e.textMax === textMax) return e.result;
+    const recent = db.prepare("SELECT id, type, time_created AS at, data FROM session_message WHERE session_id = ? AND type IN ('user', 'assistant') ORDER BY seq DESC LIMIT 40").all(id);
+    const first = db.prepare("SELECT id, type, time_created AS at, data FROM session_message WHERE session_id = ? AND type = 'user' ORDER BY seq LIMIT 1").all(id);
     const rows = [...recent, ...first];
     const texts = new Map();
-    if (rows.length) {
-      const parts = db.prepare(`SELECT message_id AS m, data FROM part WHERE message_id IN (${rows.map(() => "?").join(",")}) AND json_extract(data, '$.type') = 'text' ORDER BY message_id, id`).all(...rows.map(r => r.id));
-      for (const p of parts) {
-        const d = parse(p.data);
-        if (!d?.text?.trim() || d.synthetic || d.ignored) continue;
-        texts.set(p.m, [texts.get(p.m), d.text.trim()].filter(Boolean).join("\n\n"));
-      }
+    for (const row of rows) {
+      const d = parse(row.data);
+      const text = row.type === 'user' ? d?.text : contentText(d?.content?.filter(p => !p.synthetic && !p.ignored));
+      if (typeof text === 'string' && text.trim()) texts.set(row.id, text.trim());
     }
     const tail = { lastAt: Number(s.updated) || 0, model: "", more: false, messages: [] };
     for (const r of recent) {
       const d = parse(r.data);
-      if (!tail.model && d?.role === "assistant" && d.modelID) tail.model = String(d.modelID);
+      if (!tail.model && r.type === "assistant" && d?.model?.id) tail.model = String(d.model.id);
       const text = texts.get(r.id);
-      if (!text || (d?.role !== "user" && d?.role !== "assistant")) continue;
+      if (!text) continue;
       if (tail.messages.length === SHOW) { tail.more = true; break; }
-      tail.messages.push({ role: d.role, text, at: Number(d.time?.created) || Number(r.at) || 0 });
+      tail.messages.push({ role: r.type, text, at: Number(d?.time?.created) || Number(r.at) || 0 });
     }
-    const c = db.prepare(`SELECT sum(json_extract(data, '$.role') = 'user') AS prompts,
-      sum(json_extract(data, '$.role') = 'assistant' AND json_extract(data, '$.finish') = 'stop') AS replies FROM message WHERE session_id = ?`).get(id);
-    const subagents = db.prepare("SELECT count(*) AS n FROM session WHERE parent_id = ?").get(id).n;
+    const c = db.prepare(`SELECT sum(type = 'user') AS prompts,
+      sum(type = 'assistant' AND json_extract(data, '$.finish') = 'stop') AS replies FROM session_message WHERE session_id = ?`).get(id);
+    const subagents = db.prepare("SELECT count(*) AS n FROM session_v2 WHERE parent_id = ?").get(id).n;
     const head = { startedAt: Number(s.created) || 0, firstPrompt: first[0] ? texts.get(first[0].id) || "" : "" };
     const res = result("OpenCode", id, { head, counts: { prompts: Number(c.prompts) || 0, replies: Number(c.replies) || 0 }, tail, subagents: Number(subagents) || 0 }, textMax);
-    remember(key, { updated: s.updated, result: res, textMax });
+    remember(key, { stamp, result: res, textMax });
     return res;
   } finally { db.close(); }
 }

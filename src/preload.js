@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld("manager", {
   launchFresh: (cwd, handoff, place) => ipcRenderer.invoke("launch:fresh", cwd, handoff, place),
   openPath: p => ipcRenderer.invoke("open:path", p),
   copyText: text => ipcRenderer.invoke("clipboard:write", text),
+  readClipboardText: () => ipcRenderer.invoke("clipboard:read"),
   getLive: () => ipcRenderer.invoke("live:get"),
   getUsage: () => ipcRenderer.invoke("usage:get"),
   getShortcuts: () => ipcRenderer.invoke("app:shortcuts"),

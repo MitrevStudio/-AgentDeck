@@ -6,10 +6,10 @@
 // - key dedupes: Claude Code writes one line per content block of a reply, all carrying the reply's usage (output
 //   still growing while it streams), and a resumed or forked session copies earlier replies into its new file.
 const prices = require("./usage-prices");
+const context = require("./session-context");
 
 const K = 0, TIME = 1, MODEL = 2, IN = 3, OUT = 4, W5 = 5, W1 = 6, READ = 7, FLAGS = 8, REPORTED = 9;
 const FAST = 1, GEO_US = 2, SIDE = 4; // SIDE: a subagent's reply, not the session's own conversation
-const CACHE_5M = 5 * 60 * 1000, CACHE_1H = 60 * 60 * 1000;
 const n = v => (Number.isFinite(v) && v > 0 ? v : 0);
 
 // Complete lines only: a line still being written stays for the next pass. Calls fn(line) for each line containing
@@ -18,14 +18,15 @@ function eachLine(buf, needles, within, fn) {
   const end = buf.lastIndexOf(10) + 1;
   if (within === Infinity) {
     // Jump from match to match: most of a transcript's bytes are tool output that never needs decoding.
-    const needle = needles[0];
+    const next = needles.map(needle => buf.indexOf(needle));
     for (let pos = 0; pos < end;) {
-      const at = buf.indexOf(needle, pos);
-      if (at < 0 || at >= end) break;
+      const at = Math.min(...next.filter(i => i >= pos));
+      if (!Number.isFinite(at) || at >= end) break;
       const start = buf.lastIndexOf(10, at) + 1;
       const stop = buf.indexOf(10, at);
       fn(buf.toString("utf8", Math.max(start, pos), stop));
       pos = stop + 1;
+      for (let i = 0; i < next.length; i++) if (next[i] >= 0 && next[i] < pos) next[i] = buf.indexOf(needles[i], pos);
     }
     return end;
   }
@@ -64,12 +65,13 @@ function claudeRecord(x) {
 }
 // state: { msgs: Map, cwd } - updated in place; returns the bytes consumed.
 function readClaude(buf, state) {
-  return eachLine(buf, [Buffer.from('"usage":{')], Infinity, line => {
+  return eachLine(buf, ['"usage"', '"compact_boundary"'], Infinity, line => {
     const x = parse(line);
     if (!x) return;
     if (!state.cwd && typeof x.cwd === "string") state.cwd = x.cwd;
     const rec = claudeRecord(x);
     if (rec) put(state.msgs, rec);
+    state.context = context.latest(state.context, context.claude(x));
   });
 }
 
@@ -79,14 +81,21 @@ function readClaude(buf, state) {
 // model's context window as Codex reports it (model_context_window).
 const CODEX_TOTAL = ["input_tokens", "cached_input_tokens", "output_tokens"];
 function readCodex(buf, state) {
-  return eachLine(buf, ['"session_meta"', '"turn_context"', '"token_count"'], 160, line => {
+  return eachLine(buf, ['"session_meta"', '"turn_context"', '"token_count"', '"compacted"', '"context_compacted"'], 400, line => {
     const x = parse(line), p = x?.payload;
     if (!p) return;
     if (x.type === "session_meta") { state.id ||= p.id || ""; state.cwd ||= p.cwd || ""; }
-    if (x.type === "turn_context") { if (p.model) state.model = String(p.model); state.cwd ||= p.cwd || ""; }
+    const at = Date.parse(x.timestamp) || 0;
+    if (x.type === "compacted" || p.type === "context_compacted") state.context = context.pending(at, state.model, 'codex-transcript');
+    if (x.type === "turn_context") {
+      if (p.model && state.model && state.model !== p.model) state.context = context.pending(at, String(p.model), 'codex-transcript');
+      if (p.model) state.model = String(p.model);
+      state.cwd ||= p.cwd || "";
+    }
     if (x.type !== "event_msg" || p.type !== "token_count" || !p.info) return;
     if (n(p.info.model_context_window)) state.window = n(p.info.model_context_window);
     const total = p.info.total_token_usage, last = p.info.last_token_usage;
+    state.context = context.latest(state.context, context.codex(p.info, at, state.model));
     let d = null;
     if (total) {
       const prev = state.total;
@@ -103,12 +112,12 @@ function readCodex(buf, state) {
 }
 
 // ---------- OpenCode ----------
-// A row of its `message` table (data: JSON). Tokens there already exclude the cache; reasoning is reported apart.
+// OpenCode 2 session_message: role is in the type column, model in data.model.
 function openCodeRecord(row) {
   const d = parse(row.data);
-  if (!d || d.role !== "assistant" || !d.tokens) return null;
+  if (!d || row.type !== "assistant" || !d.tokens) return null;
   const t = d.tokens;
-  const rec = [row.id, n(d.time?.created) || n(row.time_created), String(d.modelID || ""), n(t.input),
+  const rec = [row.id, n(d.time?.created) || n(row.time_created), String(d.model?.id || ""), n(t.input),
     n(t.output) + n(t.reasoning), n(t.cache?.write), 0, n(t.cache?.read), 0, n(d.cost)];
   return rec[IN] + rec[OUT] + rec[W5] + rec[READ] > 0 ? rec : null;
 }
@@ -126,44 +135,7 @@ function localDay(ms) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-// What the session's next reply re-reads - its own last reply's prompt, cache and answer - and until when the cache
-// it left stays warm: an hour when its latest cache write went to the 1-hour cache, five minutes otherwise (a reply
-// that only read the cache keeps what the write before it chose). The model of that last reply sets the window.
-function updateContext(contexts, session, rec) {
-  if (rec[FLAGS] & SIDE) {
-    return;
-  }
-  let c = contexts.get(session);
-  if (!c) {
-    contexts.set(session, c = { tokens: 0, at: 0, oneHour: false, writtenAt: 0, model: "" });
-  }
-  if (rec[W5] + rec[W1] > 0 && rec[TIME] >= c.writtenAt) {
-    c.writtenAt = rec[TIME];
-    c.oneHour = rec[W1] > 0;
-  }
-  if (rec[TIME] >= c.at) {
-    c.at = rec[TIME];
-    c.tokens = rec[IN] + rec[OUT] + rec[W5] + rec[W1] + rec[READ];
-    c.model = rec[MODEL];
-  }
-}
-// How full the context is: `reported` is the window the agent wrote down itself (Codex), exact; otherwise the model's
-// (usage-prices.js), and a Claude context already past it ran on the model's 1M variant. window 0: unknown.
-function getContextWindow(c, reported) {
-  if (reported > 0) {
-    return { window: reported, exact: true };
-  }
-  const known = prices.contextWindow(c.model);
-  return { window: known && c.tokens > known ? prices.MILLION : known, exact: false };
-}
-function getContextSummary(c, reported = 0) {
-  if (!c) {
-    return null;
-  }
-  return { tokens: c.tokens, at: c.at, warmUntil: c.at + (c.oneHour ? CACHE_1H : CACHE_5M), ...getContextWindow(c, reported) };
-}
-
-// sources: [{ key: "Claude:<id>", cwd, title, msgs: iterable of records, window? }], in priority order - a record seen again
+// sources: [{ key: "Claude:<id>", cwd, title, msgs: iterable of records, context?, sub? }], in priority order - a record seen again
 // later (a copied reply) only completes the first one. Returns the summary the windows receive.
 function aggregate(sources) {
   const seen = new Map(), owner = new Map();
@@ -177,9 +149,8 @@ function aggregate(sources) {
     }
   }
   const sessions = [], sIndex = new Map(), models = [], mIndex = new Map(), rows = new Map(), contexts = new Map();
-  const windows = new Map(); // session key -> the context window its agent reported
   for (const src of sources) {
-    if (src.window > 0) windows.set(src.key, src.window);
+    if (!src.sub && src.context) contexts.set(src.key, context.latest(contexts.get(src.key), src.context));
     if (sIndex.has(src.key)) { const s = sessions[sIndex.get(src.key)]; s.cwd ||= src.cwd || ""; s.title ||= src.title || ""; continue; }
     sIndex.set(src.key, sessions.length);
     sessions.push({ key: src.key, cwd: src.cwd || "", title: src.title || "" });
@@ -195,14 +166,13 @@ function aggregate(sources) {
     const usd = recordCost(rec);
     if (usd != null) row[7] = (row[7] || 0) + usd;
     row[8]++;
-    updateContext(contexts, s, rec);
   }
-  // Sessions without a single record are left out.
-  const used = [...new Set([...rows.values()].map(r => r[0]))].sort((a, b) => a - b);
+  // A context-only session still matters, including after compaction or a fork.
+  const used = [...new Set([...rows.values()].map(r => r[0]).concat([...contexts.keys()].map(key => sIndex.get(key))))].sort((a, b) => a - b);
   const remap = new Map(used.map((i, j) => [i, j]));
   return {
     models,
-    sessions: used.map(i => ({ ...sessions[i], context: getContextSummary(contexts.get(i), windows.get(sessions[i].key)) })),
+    sessions: used.map(i => ({ ...sessions[i], context: contexts.get(sessions[i].key) || null })),
     // [session, "YYYY-MM-DD" (local), model, input, output, cacheWrite, cacheRead, usd|null, replies]
     rows: [...rows.values()].map(r => [remap.get(r[0]), ...r.slice(1)]),
     prices: { asOf: prices.AS_OF, sources: prices.SOURCES }

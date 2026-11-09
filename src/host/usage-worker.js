@@ -6,20 +6,22 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const scan = require("./usage-scan");
+const context = require("./session-context");
+const modelLimits = require("./opencode-models").createModelLimits();
 const atomic = require("../shared/atomic-file");
 const { readAt, lineChunks } = require("./file-chunks");
 
-const VERSION = 3;          // of the cache layout and of what the parsers extract (3: Codex's context window)
+const VERSION = 5;          // Separate context snapshots; OpenCode 2 storage only.
 const MARK = 64;            // bytes compared to tell a rewritten file from one that only grew
 const PARALLEL = 4;         // files read at once
 const SAVE_AFTER_MS = 90 * 1000;
 const { cacheFile, claudeDir, codexDir, openCodeDb } = workerData;
 
-let cache = null, dirty = false, saveTimer = null;
+let cache = null, dirty = false, saveTimer = null, openCodeWarning = "";
 
 // ---------- cache ----------
 const recMap = list => new Map((list || []).map(r => [r[0], r]));
-function emptyCache() { return { files: new Map(), openCode: { stamp: "", since: 0, sessions: [], msgs: new Map() } }; }
+function emptyCache() { return { files: new Map(), openCode: { stamp: "", since: 0, sessions: [], contexts: {}, msgs: new Map() } }; }
 function load() {
   try {
     const raw = JSON.parse(fs.readFileSync(cacheFile, "utf8"));
@@ -27,7 +29,7 @@ function load() {
     const oc = raw.openCode || {};
     return {
       files: new Map(Object.entries(raw.files || {}).map(([f, e]) => [f, { ...e, msgs: recMap(e.msgs) }])),
-      openCode: { stamp: oc.stamp || "", since: oc.since || 0, sessions: oc.sessions || [], msgs: recMap(oc.msgs) }
+      openCode: { stamp: oc.stamp || "", since: oc.since || 0, sessions: oc.sessions || [], contexts: oc.contexts || {}, msgs: recMap(oc.msgs) }
     };
   } catch { return emptyCache(); }
 }
@@ -118,16 +120,34 @@ function updateOpenCode(stats) {
   try { ({ DatabaseSync } = require("node:sqlite")); } catch { return; }
   const db = new DatabaseSync(openCodeDb, { readOnly: true });
   try {
-    oc.sessions = db.prepare("SELECT id, parent_id AS parent, directory AS dir, title FROM session").all().map(s => ({ ...s }));
-    const rows = db.prepare("SELECT id, session_id, time_created, time_updated, data FROM message WHERE time_updated >= ? AND json_extract(data, '$.role') = 'assistant'").all(oc.since);
+    db.exec('PRAGMA busy_timeout = 1000');
+    oc.sessions = db.prepare("SELECT id, parent_id AS parent, directory AS dir, title FROM session_v2").all().map(s => ({ ...s }));
+    const rows = db.prepare("SELECT id, session_id, type, time_created, time_updated, data FROM session_message WHERE time_updated >= ? AND type = 'assistant'").all(oc.since);
     for (const row of rows) {
       oc.since = Math.max(oc.since, Number(row.time_updated) || 0);
       const rec = scan.openCodeRecord(row);
       if (rec) oc.msgs.set(rec[0], [...rec, row.session_id]);
     }
+    // Re-read each root's latest usable observation, so removals/reverts cannot leave
+    // a newer, deleted message in the context cache. Child usage remains in the ledger.
+    oc.contexts = {};
+    const latest = db.prepare(`SELECT type, time_created, time_updated, data FROM session_message
+      WHERE session_id = ? AND type IN ('assistant', 'compaction', 'model-switched')
+      AND json_extract(data, '$.error') IS NULL
+      AND (type != 'compaction' OR json_extract(data, '$.status') = 'completed')
+      AND (json_extract(data, '$.tokens.total') > 0 OR json_extract(data, '$.tokens.input') > 0
+        OR json_extract(data, '$.tokens.cache.read') > 0 OR json_extract(data, '$.tokens.cache.write') > 0
+        OR json_extract(data, '$.tokens.output') > 0 OR json_extract(data, '$.tokens.reasoning') > 0
+        OR type IN ('compaction', 'model-switched'))
+      ORDER BY seq DESC LIMIT 1`);
+    for (const s of oc.sessions.filter(s => !s.parent)) {
+      const row = latest.get(s.id);
+      if (row) oc.contexts[s.id] = context.openCode(row);
+    }
     stats.openCodeRows = rows.length;
     const live = new Set(oc.sessions.map(s => s.id));
-    for (const [id, rec] of oc.msgs) if (!live.has(rec[10])) oc.msgs.delete(id); // deleted sessions
+    const messages = new Set(db.prepare("SELECT id FROM session_message WHERE type = 'assistant'").all().map(r => r.id));
+    for (const [id, rec] of oc.msgs) if (!live.has(rec[10]) || !messages.has(id)) oc.msgs.delete(id);
     oc.stamp = stamp;
     dirty = true;
   } finally { db.close(); }
@@ -137,6 +157,7 @@ function updateOpenCode(stats) {
 // Earliest session first, so a reply copied into a later (resumed or forked) session counts for the original.
 function sources() {
   const bySession = new Map();
+  const snapshots = require('./claude-context').readSnapshots(path.dirname(cacheFile));
   for (const [file, e] of cache.files) {
     const key = `${e.agent}:${e.agent === "Codex" ? e.id || e.sid : e.sid}`;
     let first = Infinity;
@@ -144,7 +165,8 @@ function sources() {
     if (!bySession.has(key)) bySession.set(key, { first, list: [] });
     const s = bySession.get(key);
     s.first = Math.min(s.first, first);
-    s.list.push({ key, cwd: e.cwd, msgs: e.msgs.values(), sub: e.sub, file, window: e.window || 0 });
+    s.list.push({ key, cwd: e.cwd, msgs: e.msgs.values(), sub: e.sub, file,
+      context: e.sub ? null : context.latest(e.context, snapshots.get(key)) });
   }
   const ordered = [...bySession.values()].sort((a, b) => a.first - b.first)
     .flatMap(s => s.list.sort((a, b) => a.sub - b.sub || (a.file < b.file ? -1 : 1)));
@@ -152,6 +174,8 @@ function sources() {
   const oc = cache.openCode, byId = new Map(oc.sessions.map(s => [s.id, s]));
   const top = id => { let s = byId.get(id); for (let i = 0; s?.parent && byId.has(s.parent) && i < 50; i++) s = byId.get(s.parent); return s; };
   const groups = new Map();
+  for (const s of oc.sessions.filter(s => !s.parent)) groups.set(s.id,
+    { key: `OpenCode:${s.id}`, cwd: s.dir, title: s.title, msgs: [], context: oc.contexts[s.id] });
   for (const rec of oc.msgs.values()) {
     const root = top(rec[10]), id = root?.id || rec[10];
     if (!groups.has(id)) groups.set(id, { key: `OpenCode:${id}`, cwd: root?.dir || "", title: root?.title || "", msgs: [] });
@@ -166,8 +190,8 @@ async function run() {
   const full = cache.files.size === 0;
   const stats = { files: 0, bytes: 0, openCodeRows: 0 };
   await updateTranscripts(stats);
-  try { updateOpenCode(stats); } catch (e) { console.error("Usage: could not read the OpenCode database:", e.message); }
-  const summary = scan.aggregate(sources());
+  try { updateOpenCode(stats); } catch (e) { if (e.message !== openCodeWarning) console.error("Usage: could not read the OpenCode database:", openCodeWarning = e.message); }
+  const summary = scan.aggregate(await modelLimits.enrich(sources()));
   stats.ms = Math.round(performance.now() - t0);
   stats.full = full;
   // A big pass is worth keeping at once; small ones (a running session's last replies) are batched.

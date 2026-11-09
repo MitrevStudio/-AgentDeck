@@ -39,7 +39,8 @@ function agentCommand(agent, id) {
 function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessions, log = () => {}, noLauncher = exe => `${exe} is not installed` }) {
   const PROMPTS_DIR = path.join(dataDir, "prompts");
   const HANDOFFS_DIR = path.join(dataDir, "handoffs");
-  const identity = agent => agent === "Codex" ? launchIdentity(dataDir) : { args: [] };
+  const identity = (agent, cwd) => agent === "Codex" ? launchIdentity(dataDir)
+    : { args: agent === "Claude" ? require('./claude-context').launchSettings(dataDir, cwd) : [] };
 
   function getSessionTitle(agent, id) {
     return sessions.get()?.sessions.find(s => s.agent === agent && s.id === id)?.title || `${agent} ${id.slice(0, 8)}`;
@@ -65,12 +66,13 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
   }
   function newCommand(agent, cwd) {
     checkAgent(agent);
-    const link = identity(agent), argv = [NEW_SESSION[agent], ...link.args];
+    const link = identity(agent, cwd), argv = [NEW_SESSION[agent], ...link.args];
     return { command: "& " + argv.map(psQuote).join(" "), argv, meta: { title: `${agent} · ${path.basename(cwd)}`, agent, codexLog: link.codexLog }, undo: none };
   }
   function resumeCommand(agent, id, cwd) {
     checkResumable(agent, id, cwd);
     const argv = agentCommand(agent, id);
+    if (agent === "Claude") argv.push(...identity(agent, cwd).args);
     return { command: "& " + argv.map(psQuote).join(" "), argv, meta: { title: getSessionTitle(agent, id), agent, sessionId: id }, undo: none };
   }
   // A new session that starts on a prompt (voice commands, the command centre, a peer): the prompt travels in a file,
@@ -80,7 +82,7 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
     const text = String(prompt ?? "").trim();
     if (!text) fail("invalidData");
     const meta = { title: `${agent} · ${path.basename(cwd)}`, agent };
-    const link = identity(agent);
+    const link = identity(agent, cwd);
     meta.codexLog = link.codexLog;
     // A pseudo terminal takes the prompt as an argument as it is; only PowerShell needs the file.
     if (process.platform !== "win32") return { command: null, argv: [NEW_SESSION[agent], ...link.args, ...(agent === "OpenCode" ? ["--prompt"] : []), text], meta, undo: none };
@@ -97,20 +99,20 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
     fs.mkdirSync(HANDOFFS_DIR, { recursive: true });
     const file = path.join(HANDOFFS_DIR, `prompt-${crypto.randomBytes(8).toString("hex")}.txt`);
     fs.writeFileSync(file, handoff);
-    const argv = [NEW_SESSION.Claude, "--append-system-prompt-file", file];
+    const argv = [NEW_SESSION.Claude, ...identity('Claude', cwd).args, "--append-system-prompt-file", file];
     return { command: "& " + argv.map(psQuote).join(" "), argv, meta: { title: `Claude · ${path.basename(cwd)}`, agent: "Claude" }, undo: () => promptLaunch.remove(file) };
   }
   // A repository cloned into `dir` (its parent is the terminal's folder), `branch` switched to (made from `base`
   // when it is not there yet), and an agent started in it on `prompt` (or none). The values travel in the
   // environment (AGENTDECK_*), never on the command line, so nothing in them is read by a shell.
-  function cloneCommand({ url, dir, branch, base, agent, prompt }) {
+  function cloneCommand({ url, dir, branch, base, agent, prompt }, cwd = "") {
     const u = String(url || "").trim(), d = String(dir || "").trim(), b = String(branch || "").trim(), bs = String(base || "").trim();
     if (!u || !d || /[\r\n]/.test(u + d + b + bs) || !/^[\w./@:+-]+$/.test(u) || (b && !/^[\w./-]+$/.test(b)) || (bs && !/^[\w./-]+$/.test(bs))) fail("invalidData");
     if (agent) checkAgent(agent);
     const text = String(prompt ?? "").trim();
     const env = { AGENTDECK_URL: u, AGENTDECK_DIR: d, AGENTDECK_BRANCH: b, AGENTDECK_BASE: bs, AGENTDECK_PROMPT: text };
     const exe = agent ? NEW_SESSION[agent] : "";
-    const link = identity(agent);
+    const link = identity(agent, path.resolve(cwd || process.cwd(), d));
     const promptArgs = agent === "OpenCode" ? ["--prompt"] : link.args;
     // PowerShell: the clone, the branch, then the agent with the prompt as one argument (an empty one is left out).
     const ps = [
@@ -139,7 +141,7 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
       case "resume": return resumeCommand(agent, sessionId, cwd);
       case "prompt": return promptCommand(agent, cwd, prompt);
       case "handoff": return handoffCommand(cwd, handoff);
-      case "clone": return cloneCommand({ url, dir, branch, base, agent, prompt });
+      case "clone": return cloneCommand({ url, dir, branch, base, agent, prompt }, cwd);
       default: return fail("invalidData");
     }
   }

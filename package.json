@@ -16,6 +16,8 @@
     "test:layout": "node scripts/test-layout-sync.js",
     "test:relay": "node scripts/test-relay.js",
     "test:limits": "node scripts/test-limits.js",
+    "test:live": "node scripts/test-live-jobs.js",
+    "test:context": "node scripts/test-session-context.js && node scripts/test-opencode-sessions.js",
     "test:audit": "node scripts/test-audit-regressions.js",
     "dist": "electron-builder --win --publish never",
     "dist:dir": "electron-builder --win --dir --publish never"

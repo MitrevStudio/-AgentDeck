@@ -892,6 +892,7 @@ function registerIpc() {
   // Folders only: shell.openPath() on a file runs it.
   handle("open:path", p => (isDir(p) ? shell.openPath(p) : t("errors.folderMissing")));
   handle("clipboard:write", async value => { await clipboard.writeText(text(value, 1_000_000)); return true; });
+  handle("clipboard:read", () => clipboard.readText());
   handle("clipboard:image-file", id => saveClipboardImage(text(id, 64)));
   // A file dropped on a pane of a terminal on another computer: sent there, its path there answered.
   handle("terminal:upload", (id, name, bytes) => putFile(text(id, 64), text(name, 200), Buffer.from(bytes)));

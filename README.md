@@ -86,7 +86,19 @@ The installer targets **Windows x64**, installs for the current user and lets yo
 
 The installer is currently unsigned. If Windows SmartScreen shows a warning, verify that you downloaded it from this repository's Releases page before choosing **More info → Run anyway**.
 
-### What you need
+### Supported agent versions
+
+AgentDeck supports **only the latest stable releases** of **Claude Code**, **Codex CLI**, and **OpenCode 2.x**. Keep the agents up to date on every connected machine. Older releases and OpenCode 1.x are not supported; we do not maintain legacy storage readers or API compatibility fallbacks.
+
+OpenCode integration uses the v2 `session_v2` and `session_message` SQLite tables and the v2 `model.list` API. Upgrade and let OpenCode migrate its own data before using AgentDeck. Legacy tables left behind by migration are ignored; AgentDeck never migrates or writes to the agent's database.
+
+Context indicators show the last reported context separately from accumulated usage and cost. Claude Code launches from AgentDeck collect status-line metadata while preserving the existing display command; Codex uses its last token-usage report; OpenCode 2 reads its main-session messages and current configured model limits. Approximate limits are marked with `≈`, and compaction or a model change can temporarily show “awaiting update”. Historical sessions do not necessarily have a recorded context limit. A cache is marked warm only when the agent reports it.
+
+Local verification baseline (2026-11-09): Claude Code **2.1.282**, Codex CLI **0.163.0**, OpenCode **2.2.6**. These are tested versions, not permanent version pins or a promise of support for older releases.
+
+Run `npm run test:context` to check context accounting, compaction, subagent isolation, status-line preservation, model limits, and OpenCode 2 session discovery. Existing Claude terminals need to be resumed through AgentDeck to receive the status-line collector; transcript-based estimates remain available meanwhile.
+
+### Other requirements
 
 | Component | Needed for |
 | --- | --- |
@@ -150,7 +162,7 @@ AgentDeck combines sessions from three sources:
 | --- | --- | --- |
 | **Claude Code** | Local transcripts under `~/.claude/projects/` | `claude --resume <id>` |
 | **Codex CLI** | Local rollouts under `~/.codex/sessions/` | `codex resume <id>` |
-| **OpenCode** | CLI session listing; local database for supported previews and usage | `opencode --session <id>` |
+| **OpenCode 2** | Read-only v2 database for sessions, previews and usage; v2 API for model limits | `opencode --session <id>` |
 
 The catalog refreshes as local session files change. AgentDeck derives titles and project associations from the metadata it can read, including a session's current working directory when it changes into a worktree.
 

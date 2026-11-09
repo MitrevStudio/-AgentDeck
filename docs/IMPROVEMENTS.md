@@ -8,7 +8,7 @@ its own branch; `local/all-features` combines them with the fixes below and is t
 | Feature | Where you see it | Branch |
 |---|---|---|
 | **"Needs you" state**: a Claude session blocked on a permission or a question is shown in rose, sorted first, and notified at once | Session cards, edge menu, project badges, the window title `(1!)` | `feature/needs-you-status` |
-| **Context chip**: what continuing costs. Green = cache warm (about a tenth of the price), yellow = cold, red = cold and 150k+ tokens | Every session card and edge-menu row; the tooltip says until when the cache is warm | `feature/context-chip` |
+| **Context chip**: the context the agent last reported (tokens and share of the model's window, `≈` when the window is estimated), red once nearly full; "awaiting update" right after compaction or a model change | Every session card and edge-menu row; the tooltip names the model, the time of the report and the cache state when the agent reports it | `feature/context-chip` |
 | **Recap**: where each session ended (its last answer, shortened) | "Край: …" line on session cards; also searchable | `feature/session-recap` |
 | **Resume / Continue fresh**: Continue fresh opens a new session and puts a short handoff (task + where it ended) on the clipboard to paste, edit and send | Session preview (hover a card in the manager, or the edge menu's side pane) | `feature/continue-fresh` |
 | **Terminals inside AgentDeck** (optional) and **Move here** for sessions running in Windows Terminal | Tray menu → *Open sessions in* → *AgentDeck tabs*. Default stays Windows Terminal; with no tabs open the window looks as before | `feature/terminal-tabs` |
@@ -21,7 +21,7 @@ its own branch; `local/all-features` combines them with the fixes below and is t
   manager's search now also finds text inside the conversations (before, only the edge menu did).
 - **Performance.** A rescan used to read every transcript in full (here 222 MB, about 1 s, blocking the app); now
   it reads only the lines added since the last scan (about 1 ms when nothing changed). Codex transcripts are read
-  only at their head and cached; OpenCode's slow CLI and the git status run only on full scans (start, Refresh);
+  only at their head and cached; OpenCode 2 sessions are read from SQLite, with model limits cached separately; git status runs on full scans (start, Refresh);
   unchanged results are not re-sent to the windows; the search index updates at once for new sessions and at
   most every minute for growing ones.
 - **Independent code review, fixed:** AgentDeck tabs no longer drop your own `CLAUDE_CODE_*` settings; Move here

@@ -87,6 +87,14 @@ function createTermView(id) {
   term.open(host);
   term.attachCustomKeyEventHandler(e => handleTermKey(term, e, id));
   term.onData(d => window.terminals.input(id, d));
+  // As Windows Terminal: text selected with the mouse is copied at once - the agent's redraws and any keystroke clear a
+  // selection (xterm), and a Ctrl+C that finds none goes to the agent -, and the right button copies a selection or pastes.
+  host.addEventListener("mouseup", () => { if (term.hasSelection()) window.manager.copyText(term.getSelection()); });
+  host.addEventListener("contextmenu", e => {
+    e.preventDefault();
+    if (term.hasSelection()) { window.manager.copyText(term.getSelection()); term.clearSelection(); return; }
+    pasteClipboard(term, id);
+  });
   // Files dropped on a terminal: their paths typed in, quoted when they have spaces (as Windows Terminal does).
   host.addEventListener("dragover", e => {
     if (e.dataTransfer?.types.includes("Files")) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }
@@ -201,8 +209,16 @@ function handleTermKey(term, e, id) {
   }
   // The browser pastes; xterm picks the text up from the paste event. A picture has no text: its saved file's path goes in.
   if (e.code !== "KeyV") return true;
-  window.terminals.saveClipboardImage(id).then(file => { if (file) term.paste(terminalFilePath(file)); }, err => toast(err.message, true));
+  pasteImage(term, id);
   return false;
+}
+function pasteImage(term, id) {
+  window.terminals.saveClipboardImage(id).then(file => { if (file) term.paste(terminalFilePath(file)); }, err => toast(err.message, true));
+}
+// The clipboard's text typed in (xterm wraps it for bracketed paste), or a picture's saved file.
+function pasteClipboard(term, id) {
+  term.focus();
+  window.manager.readClipboardText().then(text => (text ? term.paste(text) : pasteImage(term, id)), err => toast(err.message, true));
 }
 // The same keys when the keyboard is elsewhere in the window (not typing in a field).
 document.addEventListener("keydown", e => {

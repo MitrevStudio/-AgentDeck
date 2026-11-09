@@ -87,9 +87,8 @@ function priceOf(model) {
 }
 
 // Context windows (input tokens) of the Claude models, as Anthropic's model overview lists them on AS_OF. Claude Code's
-// transcripts do not record the window a session ran with, so a session's fill is worked out from here; Codex writes
-// its own (model_context_window) and needs no table. Older Claude models have 200K, or 1M as an opt-in variant
-// ("[1m]"), which usage-scan.js infers once a session's context grows past 200K.
+// transcripts do not record the window. This is an estimate only when no statusLine measurement is available.
+// Codex supplies model_context_window; OpenCode 2 uses its configured model catalog.
 const MILLION = 1_000_000, CLAUDE_DEFAULT_WINDOW = 200_000;
 const MILLION_WINDOW = new Set([
   "claude-fable-5-1", "claude-mythos-5-1", "claude-fable-5", "claude-mythos-5",
