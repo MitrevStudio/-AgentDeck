@@ -53,6 +53,13 @@ function normalizeDeviceView(raw) {
   return { mode: DEVICE_MODES.includes(s.mode) ? s.mode : "none", filter: ids(s.filter), collapsed: ids(s.collapsed) };
 }
 
+// What the list shows. The toggle opens the chips (mode "device"); a chosen device filters the list, and the filter stays
+// when the chips are closed - the toggle stays lit - until "All" clears it. Sections show while either is on.
+function deviceViewState(view, devices) {
+  const filter = activeFilter(view.filter, devices), picker = view.mode === "device";
+  return { filter, picker, filtered: filter.length > 0, grouped: picker || filter.length > 0 };
+}
+
 if (typeof module === "object" && module.exports) {
-  module.exports = { LOCAL_DEVICE, deviceOf, listDevices, activeFilter, toggleFilter, toggleCollapsedDevice, buildSections, countInSections, normalizeDeviceView };
+  module.exports = { LOCAL_DEVICE, deviceOf, listDevices, activeFilter, toggleFilter, toggleCollapsedDevice, buildSections, countInSections, normalizeDeviceView, deviceViewState };
 }

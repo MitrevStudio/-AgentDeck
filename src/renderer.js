@@ -84,12 +84,13 @@ function renderProjects(v) {
   const total = data.projects.length;
   // By device (device-view.js): a section per computer, only the chosen ones when the filter is on.
   const devices = listDevices(data.projects, nodes);
-  const filter = byDevice() ? activeFilter(deviceView.filter, devices) : [];
+  const view = deviceViewState(deviceView, devices), filter = view.filter;
+  grouped = view.grouped;
   $("projectCount").textContent = v.toks.length ? `${v.projects.length} / ${total}`
     : filter.length ? `${countInSections(data.projects, devices, filter)} / ${total}` : total;
   renderOrderToggle();
-  renderDeviceToggle(devices);
-  renderDeviceChips(devices, filter);
+  renderDeviceToggle(devices, view);
+  renderDeviceChips(devices, view);
   let html = "";
   // Empty groups (just made) at the top, the newest first.
   if (!v.toks.length) html += data.groups.filter(g => !g.size).reverse().map(g => buildGroupHtml(getEmptyUnit(g), v, false)).join("");
@@ -198,7 +199,10 @@ function readDeviceView() {
   }
 }
 let deviceView = readDeviceView();
-const byDevice = () => deviceView.mode === "device";
+// In sections (the chips open, or a device filter on): set by renderProjects, read while it builds the rows.
+let grouped = false;
+const byDevice = () => grouped;
+const pickerOpen = () => deviceView.mode === "device";
 function setDeviceView(change) {
   deviceView = normalizeDeviceView({ ...deviceView, ...change });
   try {
@@ -206,7 +210,8 @@ function setDeviceView(change) {
   } catch {}
   render();
 }
-const toggleDeviceMode = () => setDeviceView({ mode: byDevice() ? "none" : "device" });
+// The toggle opens or closes the chips; a chosen filter stays either way.
+const toggleDeviceMode = () => setDeviceView({ mode: pickerOpen() ? "none" : "device" });
 const toggleDeviceFold = id => setDeviceView({ collapsed: toggleCollapsedDevice(deviceView.collapsed, id) });
 // A chip adds its device to the filter or takes it out; "All" clears it. Devices no longer known drop out on a change.
 function chooseDevice(id) {
@@ -220,20 +225,25 @@ const deviceState = d => (d.status === "online" ? "" : d.lastSeen ? t("manager.d
 const deviceTip = d => [deviceName(d), t(d.local ? "manager.devices.thisOne" : d.kind === "host" ? "manager.devices.host" : "manager.devices.desktop"),
   deviceState(d) || t("manager.devices.online"), tn("manager.projectGroup.projects", d.count)].join("\n");
 
-function renderDeviceToggle(devices) {
-  const on = byDevice(), el = $("projectView");
+// Lit while a device filter is on (the chips open or not); "All" clears the filter and puts it out.
+function renderDeviceToggle(devices, view) {
+  const el = $("projectView");
   el.innerHTML = icon("nodes");
-  el.classList.toggle("on", on);
-  el.setAttribute("aria-pressed", String(on));
-  el.title = `${t("manager.devices.group")}: ${t(on ? "manager.devices.byDevice" : "manager.devices.none")}\n${t(on ? "manager.devices.byDeviceTitle" : "manager.devices.noneTitle")}`;
+  el.classList.toggle("on", view.filtered);
+  el.classList.toggle("open", view.picker);
+  el.setAttribute("aria-pressed", String(view.filtered));
+  el.setAttribute("aria-expanded", String(view.picker));
+  const names = devices.filter(d => view.filter.includes(d.id)).map(deviceName).join(", ");
+  el.title = view.filtered ? `${t("manager.devices.filter")}: ${names}\n${t("manager.devices.byDeviceTitle")}`
+    : `${t("manager.devices.group")}: ${t(view.grouped ? "manager.devices.byDevice" : "manager.devices.none")}\n${t(view.grouped ? "manager.devices.byDeviceTitle" : "manager.devices.noneTitle")}`;
   // Only worth having with another computer paired (or to turn it off again).
-  el.hidden = !data.projects.length || (devices.length < 2 && !on);
+  el.hidden = !data.projects.length || (devices.length < 2 && !view.grouped);
 }
-// The filter: "All" and a chip per device, shown in the device view when there is more than this computer.
-function renderDeviceChips(devices, filter) {
+// The filter: "All" and a chip per device, shown while the toggle has them open and there is more than this computer.
+function renderDeviceChips(devices, view) {
   const el = $("deviceChips");
-  const show = byDevice() && devices.length > 1;
-  const chosen = new Set(filter);
+  const show = view.picker && devices.length > 1;
+  const chosen = new Set(view.filter);
   const chip = (id, on, label, tip, extra = "") =>
     `<button class="dev-chip ${on ? "on" : ""} ${extra}" data-device-filter="${esc(id)}" aria-pressed="${on}" title="${esc(tip)}">${label}</button>`;
   const html = !show ? "" : chip("", !chosen.size, esc(t("manager.devices.all")), t("manager.devices.allTitle"))

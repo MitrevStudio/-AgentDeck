@@ -68,6 +68,18 @@ assert.deepEqual(dv.normalizeDeviceView(null), { mode: 'none', filter: [], colla
 assert.deepEqual(dv.normalizeDeviceView('garbage'), { mode: 'none', filter: [], collapsed: [] });
 assert.deepEqual(dv.normalizeDeviceView({ mode: 'device', filter: [H, 7, H, ''], collapsed: [B, null] }), { mode: 'device', filter: [H], collapsed: [B] });
 assert.deepEqual(dv.normalizeDeviceView({ mode: 'weird' }).mode, 'none');
+
+// The toggle opens and closes the chips; the filter outlives a closed picker (the toggle stays lit and the list stays
+// in sections) until "All" clears it.
+{
+  const devices = dv.listDevices(projects, nodes);
+  const state = view => dv.deviceViewState(dv.normalizeDeviceView(view), devices);
+  assert.deepEqual(state({}), { filter: [], picker: false, filtered: false, grouped: false });
+  assert.deepEqual(state({ mode: 'device' }), { filter: [], picker: true, filtered: false, grouped: true });
+  assert.deepEqual(state({ mode: 'device', filter: [B] }), { filter: [B], picker: true, filtered: true, grouped: true });
+  assert.deepEqual(state({ mode: 'none', filter: [B] }), { filter: [B], picker: false, filtered: true, grouped: true }, 'closing the picker keeps the filter');
+  assert.deepEqual(state({ mode: 'none', filter: ['e'.repeat(64)] }), { filter: [], picker: false, filtered: false, grouped: false }, 'a device no longer known filters nothing');
+}
 assert.deepEqual(dv.toggleCollapsedDevice([B], B), []);
 assert.deepEqual(dv.toggleCollapsedDevice([], B), [B]);
 
