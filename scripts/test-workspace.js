@@ -129,4 +129,29 @@ assert.deepEqual(d.tabs.u, { id: "u", space: "e:/x", name: "", root: { term: "c"
 bad.importState(null, x => x);
 assert.deepEqual(bad.snapshot(), { activeSpace: "", spaces: {}, tabs: {} });
 
+// A tab mixing projects: a terminal of another project put beside a pane of this one, on each side; it stays in that
+// tab (and its space) through focus and a save and restore.
+const mix = createWorkspace();
+const apiTab = mix.addTab("e:/api", "a1");
+mix.addTab("e:/web", "w0");
+assert.equal(mix.placeTerm("w1", "a1", "right"), true, "into the tab of the pane, though another space is shown");
+let m = mix.snapshot();
+assert.equal(m.activeSpace, "e:/api");
+assert.deepEqual(m.tabs[apiTab].root, { dir: "right", ratio: 0.5, a: { term: "a1" }, b: { term: "w1" } });
+assert.equal(m.tabs[apiTab].focus, "w1");
+mix.placeTerm("w2", "w1", "up");
+mix.placeTerm("x1", "a1", "left");
+assert.deepEqual(getPanes(mix.snapshot().tabs[apiTab].root), ["x1", "a1", "w2", "w1"]);
+mix.placeTerm("x2", "a1", "down");
+assert.deepEqual(getPanes(mix.snapshot().tabs[apiTab].root), ["x1", "a1", "x2", "w2", "w1"]);
+assert.equal(mix.placeTerm("w3", "gone", "right"), false, "no pane to go beside");
+assert.equal(mix.placeTerm("w1", "a1", "right"), false, "a terminal already placed is not placed twice");
+assert.equal(mix.placeTerm("w4", "a1", "sideways"), false);
+mix.activateSpace("e:/web");
+assert.equal(mix.focus("w2"), true);
+assert.equal(mix.snapshot().activeSpace, "e:/api", "focusing a pane of web in api's tab shows api's space");
+const mixed = createWorkspace();
+mixed.importState(mix.exportState(), x => x);
+assert.deepEqual(mixed.snapshot().tabs[apiTab].root, mix.snapshot().tabs[apiTab].root);
+
 console.log("workspace: all checks passed");

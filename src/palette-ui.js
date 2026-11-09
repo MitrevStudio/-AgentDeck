@@ -82,7 +82,8 @@
     if (!item) return;
     close();
     try {
-      if (item.p) return selectProject(item.p.n);
+      // Alt+Enter: the project beside the focused pane (a terminal or agent of it, chosen from a menu).
+      if (item.p) return beside && openProjectBeside(item.p) ? undefined : selectProject(item.p.n);
       const s = item.s;
       if (liveOf(s)) return await showTerminal(s);
       await resume(s, beside ? "right" : "tab");

@@ -320,14 +320,15 @@ function gitInfo(dir) {
   const git = (...a) => new Promise(resolve => execFile("git", ["-C", dir, ...a], { windowsHide: true, timeout: 10000 }, (err, out) => resolve(err ? "" : String(out).trim())));
   return Promise.all([git("remote", "get-url", "origin"), git("rev-parse", "--abbrev-ref", "HEAD")]).then(([url, branch]) => ({ url, branch }));
 }
-// A terminal on another computer, in a new tab of that project's space here: {cwd, kind, agent, sessionId, prompt}.
-async function remoteLaunch(node, args) {
+// A terminal on another computer, in a new tab of that project's space here (or beside a pane: placeOf): {cwd, kind,
+// agent, sessionId, prompt}.
+async function remoteLaunch(node, args, place = "tab") {
   if (!links.online(node)) throw new HostError("offline");
   const tab = await links.call(node, "terminals.open", args);
   if (!isObj(tab) || !frames.UUID.test(tab.id)) throw new HostError("invalidData");
   remoteTerms.set(tab.id, { id: tab.id, node, cwd: tab.cwd, title: tab.title, agent: tab.agent, sessionId: tab.sessionId, exited: false, createdAt: tab.createdAt });
   await restoring;
-  workspace.addTab(`node:${node}:${normPath(args.cwd)}`, tab.id);
+  if (!placeBesidePane(tab.id, placeOf(place))) workspace.addTab(`node:${node}:${normPath(args.cwd)}`, tab.id);
   showManager();
   return tab.id;
 }
@@ -449,16 +450,25 @@ function getSpaceFor(cwd) {
   }
   return n;
 }
-// The places a terminal can open: a tab of its own in its space, or beside the shown tab's focused pane.
+// The places a terminal can open: a tab of its own in its space, beside the shown tab's focused pane, or { side, at }:
+// on that side of the pane of terminal `at`, in whichever tab and space that is (a project dropped onto a pane: a tab
+// may mix projects).
 const PLACES = ["tab", "right", "down"];
+const PANE_SIDES = ["left", "right", "up", "down"];
+const placeOf = p => (PLACES.includes(p) ? p
+  : isObj(p) && PANE_SIDES.includes(p.side) && typeof p.at === "string" && p.at.length <= 64 ? { side: p.side, at: p.at } : "tab");
+// A terminal put on its side of the pane `place` names; false when the place is not one beside a pane (or that pane
+// is gone), for the caller to give it a tab.
+const placeBesidePane = (id, place) => isObj(place) && workspace.placeTerm(id, place.at, place.side);
 // A terminal of AgentDeck's own: the command reaches PowerShell encoded, so no quoting of it can break the command
 // line. It opens in a new tab of its project's space, or split off the focused pane (place "right" / "down").
 async function openTab(cwd, command, meta, env, place = "tab") {
   // A layout still being restored would replace a tab opened meanwhile.
   await restoring;
-  const id = await launch.openTerminal(cwd, command, meta, env, place);
+  const id = await launch.openTerminal(cwd, command, meta, env, isObj(place) ? place.side : place);
   const shown = workspace.getActiveTab();
-  if (place !== "tab" && shown) workspace.split(shown.id, id, place);
+  if (placeBesidePane(id, place)) { /* placed */ }
+  else if (typeof place === "string" && place !== "tab" && shown) workspace.split(shown.id, id, place);
   else workspace.addTab(getSpaceFor(cwd), id);
   showManager();
 }
@@ -478,7 +488,7 @@ function focusSessionAnywhere(opts) {
 // here", a split); place: where in the window (PLACES).
 async function launchTerminal(cwd, command = null, meta = {}, inTab = false, place = "tab") {
   if (!cwd || !fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) throw new Error(t("errors.folderMissing"));
-  if (!PLACES.includes(place)) place = "tab";
+  place = placeOf(place);
   if (inTab || place !== "tab" || prefs.get().sessionsIn === "tabs") {
     const proxy = await network.terminalProxy().catch(() => null);
     return openTab(cwd, command, meta, terminalEnv(process.env, proxy), place);
@@ -880,8 +890,7 @@ function registerIpc() {
     }
     return saveRegistry(data);
   });
-  // place (optional): "tab", "right" or "down" - where in AgentDeck's window (PLACES).
-  const placeOf = p => (PLACES.includes(p) ? p : "tab");
+  // place (optional): "tab", "right", "down" or { side, at } - where in AgentDeck's window (placeOf).
   handle("launch:folder", async (p, place) => { await launchTerminal(text(p), null, {}, false, placeOf(place)); return true; });
   handle("launch:agent", async (agent, id, cwd, place) => { await launchAgent(text(agent), text(id), text(cwd), false, placeOf(place)); return true; });
   handle("launch:new", async (agent, cwd, place) => { await launchNew(text(agent), text(cwd), placeOf(place)); return true; });
@@ -1010,7 +1019,7 @@ function registerIpc() {
   handle("centre:start", async () => { showTab(await orchestrator.open()); return true; });
   // The other computers (mesh/links.js) with what they show.
   handle("mesh:nodes", () => nodesView());
-  handle("mesh:launch", (node, args) => remoteLaunch(text(node, 64), isObj(args) ? args : {}));
+  handle("mesh:launch", (node, args, place) => remoteLaunch(text(node, 64), isObj(args) ? args : {}, place));
   handle("mesh:clone", (node, args) => remoteClone(text(node, 64), isObj(args) ? args : {}));
   handle("project:git-info", p => (isDir(p) ? gitInfo(p) : { url: "", branch: "" }));
   handle("centre:send", s => orchestrator.send(text(s, 20000)));

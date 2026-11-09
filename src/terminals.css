@@ -70,6 +70,13 @@
 .pane-tools .icon-btn { width: 24px; height: 24px; border-radius: 6px; }
 .pane-tools .icon-btn .i { width: 14px; height: 14px; }
 .pane-tools .icon-btn.on { color: var(--accent); }
+.pane-project {
+  --h: 215; flex: none; max-width: 30%; padding: 0 6px; border-radius: var(--r-pill); overflow: hidden; white-space: nowrap;
+  text-overflow: ellipsis; font-size: 11px; font-weight: 650; background: hsl(var(--h) var(--tile-bg)); color: hsl(var(--h) var(--tile-fg));
+}
+.wtab-mixed { display: inline-flex; color: var(--muted); }
+.wtab-mixed .i { width: 13px; height: 13px; }
+.se-gap { height: 22px; }
 .pane-head .ctx-chip { height: 20px; line-height: 18px; font-size: 11px; }
 .pane-body { position: relative; flex: 1; min-height: 0; }
 .term-host { position: absolute; inset: 0; padding: 6px 4px 4px 10px; }

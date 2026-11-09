@@ -166,6 +166,12 @@ function createWorkspace({ onChange = () => {} } = {}) {
     closeTabOnly(tabId);
     return placeBeside(intoId, target, side, tab.root, tab.focus);
   }
+  // A new terminal on `side` of the pane of `target`, in whichever tab that is - also one of another project's space
+  // (a tab may mix projects: dropping a project onto a pane).
+  function placeTerm(term, target, side) {
+    const tab = findTab(target);
+    return Boolean(tab) && !findTab(term) && placeBeside(tab.id, target, side, { term }, term);
+  }
   // A pane beside another one, of its own tab or of another; its tab goes once empty.
   function movePane(term, intoId, target, side) {
     const into = tabs.get(intoId);
@@ -327,7 +333,7 @@ function createWorkspace({ onChange = () => {} } = {}) {
   }
 
   return {
-    addTab, split, removeTerm, mergeTab, movePane, detachPane, getTabTerms, focus, focusDirection, setRatio, toggleZoom,
+    addTab, split, placeTerm, removeTerm, mergeTab, movePane, detachPane, getTabTerms, focus, focusDirection, setRatio, toggleZoom,
     activateSpace, activateTab, showSessions, renameTab, reorderTabs, getActiveTab, findTab, snapshot, exportState, importState
   };
 }

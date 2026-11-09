@@ -275,11 +275,24 @@ function renderSpaceEmpty(el, key) {
       <button class="btn" data-new="terminal" title="${esc(t("ws.newTerminalTitle"))}">${icon("terminal")}${esc(t("ws.newTerminal"))}</button>
       ${getInstalledAgents().map(a => `<button class="btn" data-new="${esc(a)}" title="${esc(t("ws.newAgentTitle", { agent: a, key: getNewAgentKey(a) }))}">${icon(`agent${a}`)}${esc(a)}</button>`).join("")}
     </div>
+    ${getElsewhereHtml(p.n)}
     ${recent.length ? `<p class="se-label">${esc(t("ws.sessions"))}</p>${recent.map(s => `<div class="se-row" data-key="${esc(sessionKey(s))}">
       ${agentMark(s.agent)}<span class="se-title" title="${esc(s.title)}">${esc(s.title)}</span>${getContextChip(s)}
       <span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span>
       <span class="se-acts">${liveOf(s) ? `<button class="btn sm" data-action="show-terminal">${icon("raise")}${esc(t("term.show"))}</button>` : getSessionActions(s)}</span></div>`).join("")}` : ""}
   </div>`;
+}
+// The project's terminals that are in another project's tab (a tab may mix projects), each with a way there.
+function getElsewhereHtml(key) {
+  const rows = getTermsElsewhere(key);
+  if (!rows.length) return "";
+  return `<p class="se-label">${esc(t("ws.elsewhere"))}</p>${rows.map(({ term, space }) => {
+    const x = getTerminal(term), owner = data.projects.find(p => p.n === space);
+    return `<div class="se-row" data-term="${esc(term)}">
+      ${x?.agent ? agentMark(x.agent) : `<span class="agent-mark">${icon("terminal")}</span>`}<span class="se-title">${esc(getTermTitle(x))}</span>
+      <span class="when">${esc(t("ws.inTabOf", { project: owner?.name || space }))}</span>
+      <span class="se-acts"><button class="btn sm" data-show-term="${esc(term)}">${icon("raise")}${esc(t("term.show"))}</button></span></div>`;
+  }).join("")}<div class="se-gap"></div>`;
 }
 // A menu for starting a terminal or agent in the shown space.
 function openNewMenu(btn) {
@@ -795,6 +808,8 @@ $("projects").addEventListener("dragstart", e => {
   const card = e.target.closest?.(".proj[draggable]");
   if (!card) return;
   drag = getSource(card);
+  // A project may also go onto a pane of the shown tab (workspace-ui.js), beside it.
+  draggedProject = drag.path ? data.projects.find(p => refOf(p) === drag.path) || null : null;
   e.dataTransfer.effectAllowed = "move";
   e.dataTransfer.setData("text/plain", card.dataset.path || card.dataset.group);
   card.classList.add("dragging");
@@ -819,6 +834,7 @@ $("projects").addEventListener("drop", e => {
 });
 $("projects").addEventListener("dragend", () => {
   drag = null;
+  draggedProject = null;
   clearDropMarks();
 });
 $("projects").addEventListener("focusout", e => {
@@ -841,6 +857,8 @@ $("spaceEmpty").addEventListener("click", async e => {
   const make = e.target.closest("[data-new]");
   if (make?.dataset.new === "centre") return window.manager.centreStart().catch(err => toast(err.message, true));
   if (make) return openInSpace(make.dataset.new === "terminal" ? "terminal" : make.dataset.new);
+  const show = e.target.closest("[data-show-term]");
+  if (show) { focusAfterRender = true; return runWorkspace("focus", { term: show.dataset.showTerm }); }
   if (await onAction(e)) return;
   const row = e.target.closest(".se-row");
   if (row && e.detail === 2) openSession(sessionByKey(row.dataset.key)).catch(err => toast(err.message, true));

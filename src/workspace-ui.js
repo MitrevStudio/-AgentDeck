@@ -251,6 +251,34 @@ async function openInSpace(what, place = "tab") {
   } catch (e) { toast(e.message, true); }
 }
 
+// What to start for project `p` at `place` ({ side, at }: beside a pane, of whichever project): a terminal or a new
+// agent session, chosen from a menu at `point` (the drop) or under the focused pane's header.
+function openBesideMenu(p, place, point = null) {
+  const anchor = point
+    ? { getBoundingClientRect: () => new DOMRect(point.x, point.y, 0, 0) }
+    : document.querySelector(`#panes .pane[data-term="${CSS.escape(place.at)}"] .pane-head`);
+  const run = async what => {
+    try {
+      if (p.node) await window.manager.remoteLaunch(p.node, what === "terminal" ? { kind: "shell", cwd: p.path } : { kind: "new", cwd: p.path, agent: what }, place);
+      else if (what === "terminal") await window.manager.launchFolder(p.path, place);
+      else await window.manager.launchNew(what, p.path, place);
+    } catch (e) { toast(e.message, true); }
+  };
+  openMenu(anchor, "", [
+    { label: t("ws.besideTitle", { project: p.name }), icon: "folder", disabled: true },
+    { separator: true },
+    { label: t("ws.newTerminal"), icon: "terminal", run: () => run("terminal") },
+    ...(p.node ? AGENTS : getInstalledAgents()).map(a => ({ label: a, icon: `agent${a}`, run: () => run(a) }))
+  ]);
+}
+// The palette's Alt+Enter on a project: beside the shown tab's focused pane, to the right.
+function openProjectBeside(p) {
+  const tab = getShownTab();
+  if (!tab) return false;
+  openBesideMenu(p, { side: "right", at: tab.focus });
+  return true;
+}
+
 // ---------- sessions <-> terminals (main links a new session's terminal: tab-links.js) ----------
 function findSessionTab(s) {
   return ws.terminals.find(x => x.agent === s.agent && x.sessionId === s.id && (x.node || "") === (s.node || "") && !x.exited) || null;
@@ -275,6 +303,31 @@ async function moveSessionHere(s) {
 function getTermSession(x) {
   return x?.sessionId ? data.sessions.find(s => s.agent === x.agent && s.id === x.sessionId && (s.node || "") === (x.node || "")) || null : null;
 }
+// The listed project a terminal runs in (the deepest one holding its folder), or null.
+function getTermProject(x) {
+  if (!x?.cwd) return null;
+  const n = x.node ? `node:${x.node}:${normPath(x.cwd)}` : normPath(x.cwd);
+  return data.projects.filter(p => n === p.n || n.startsWith(p.n.replace(/\/$/, "") + "/"))
+    .sort((a, b) => b.n.length - a.n.length)[0] || null;
+}
+// The projects of a tab's panes, in pane order, when there are several (a mixed tab); [] otherwise.
+function getTabProjects(tab) {
+  const seen = new Map();
+  for (const term of getPanesOf(tab?.root)) {
+    const p = getTermProject(getTerminal(term));
+    if (p && !seen.has(p.n)) seen.set(p.n, p);
+  }
+  return seen.size > 1 ? [...seen.values()] : [];
+}
+// Terminals of project `key` shown in a tab of another project's space, as { term, tab, space }.
+function getTermsElsewhere(key) {
+  const out = [];
+  for (const tab of Object.values(ws.tabs)) {
+    if (tab.space === key) continue;
+    for (const term of getPanesOf(tab.root)) if (getTermProject(getTerminal(term))?.n === key) out.push({ term, tab, space: tab.space });
+  }
+  return out;
+}
 const getTermTitle = x => getTermSession(x)?.title || x?.title || "";
 function getTermLive(x) {
   return x?.sessionId ? allLive.get(sessionKey({ agent: x.agent, id: x.sessionId, node: x.node })) || null : null;
@@ -292,8 +345,11 @@ function renderTabbar() {
   const html = tabs.map((tab, i) => {
     const l = getTabLive(tab);
     const label = tab.name || getTermTitle(getTerminal(tab.focus)) || String(i + 1);
-    return `<div class="wtab ${tab.id === space.active ? "active" : ""}" data-tab="${esc(tab.id)}" role="tab" draggable="true" title="${esc(label)}">
-      ${l ? statusMark(l, false) : ""}<span class="wtab-name">${esc(label)}</span>
+    const mixed = getTabProjects(tab);
+    const title = mixed.length ? `${label}
+${t("ws.mixedTab", { projects: mixed.map(p => p.name).join(", ") })}` : label;
+    return `<div class="wtab ${tab.id === space.active ? "active" : ""}" data-tab="${esc(tab.id)}" role="tab" draggable="true" title="${esc(title)}">
+      ${l ? statusMark(l, false) : ""}${mixed.length ? `<span class="wtab-mixed">${icon("splitRight")}</span>` : ""}<span class="wtab-name">${esc(label)}</span>
       <button class="wtab-close wtab-rename-btn" data-ws="rename-tab" title="${esc(t("action.rename"))}" aria-label="${esc(t("action.rename"))}">${icon("pencil")}</button>
       <button class="wtab-close" data-ws="close-tab" title="${esc(t("ws.closeTab"))}">${icon("x")}</button></div>`;
   }).join("") + `<button class="icon-btn wtab-new ${!space.active ? "active" : ""}" data-ws="sessions" title="${esc(t("ws.sessions"))}" aria-label="${esc(t("ws.sessions"))}">${icon("plus")}</button>` + `<button class="icon-btn wtab-new wtab-reset" data-ws="reset-tabs" title="${esc(t("ws.resetTabs"))}" aria-label="${esc(t("ws.resetTabs"))}">${icon("equal")}</button>`;
@@ -385,10 +441,14 @@ function resetRatios(tabId = "") {
 function renderPaneHeads(tab) {
   if (draggedPane) return; // the header being dragged stays the same element until it is let go
   const many = getPanesOf(tab.root).length > 1;
+  // A tab with panes of several projects: each pane says whose it is.
+  const mixed = getTabProjects(tab).length > 0;
   document.querySelectorAll("#panes .pane").forEach(el => {
     const x = getTerminal(el.dataset.term);
     const s = getTermSession(x), l = getTermLive(x);
+    const p = mixed ? getTermProject(x) : null;
     const html = `${x?.agent ? agentMark(x.agent) : `<span class="agent-mark">${icon("terminal")}</span>`}
+      ${p ? `<span class="pane-project" style="--h:${hue(p.n)}" title="${esc(p.path)}">${esc(p.name)}</span>` : ""}
       <span class="pane-title" title="${esc(x?.cwd || "")}">${esc(!many && tab.name ? tab.name : getTermTitle(x))}</span>
       ${x?.note ? `<span class="pane-note">${esc(x.note)}</span>` : ""}
       ${s ? getContextChip(s) : ""}${l ? statusMark(l, isLoading(sessionKey(l), l)) : ""}
@@ -524,6 +584,9 @@ $("panes").addEventListener("pointerdown", e => {
 // A tab dragged onto another tab takes its place; onto a pane, its panes go beside that one. A pane's header dragged
 // onto another pane moves the pane there; onto the tab bar, the pane gets a tab of its own.
 let draggedTab = "", draggedPane = "";
+// A project card dragged from the sidebar (renderer.js sets it): dropped onto a pane, a terminal or agent of that project
+// opens on that side of it, in this tab - which then mixes projects.
+let draggedProject = null;
 const PANE_SIDES = ["left", "right", "up", "down"];
 const getTabDropSide = (el, e) => (e.clientX > el.getBoundingClientRect().left + el.offsetWidth / 2 ? "after" : "before");
 // The side of the pane the pointer is nearest to.
@@ -542,6 +605,7 @@ function clearPaneDropMarks() {
 function endDrag() {
   draggedTab = "";
   draggedPane = "";
+  draggedProject = null;
   clearTabDropMarks();
   clearPaneDropMarks();
 }
@@ -549,7 +613,8 @@ function endDrag() {
 // the dragged tab (the shown one).
 function getDropPane(e) {
   const el = e.target.closest?.(".pane");
-  if (!el || (!draggedTab && !draggedPane)) return null;
+  if (!el || (!draggedTab && !draggedPane && !draggedProject)) return null;
+  if (draggedProject) return el;
   return draggedPane === el.dataset.term || draggedTab === getShownTab()?.id ? null : el;
 }
 $("panes").addEventListener("dragstart", e => {
@@ -573,7 +638,8 @@ $("panes").addEventListener("drop", e => {
   if (!el) return;
   e.preventDefault();
   const side = getPaneDropSide(el, e), into = getShownTab()?.id, at = el.dataset.term;
-  if (draggedTab) runWorkspace("merge-tab", { tab: draggedTab, into, at, side });
+  if (draggedProject) openBesideMenu(draggedProject, { side, at }, { x: e.clientX, y: e.clientY });
+  else if (draggedTab) runWorkspace("merge-tab", { tab: draggedTab, into, at, side });
   else runWorkspace("move-pane", { term: draggedPane, into, at, side });
   endDrag();
 });
