@@ -244,7 +244,10 @@ function parseAccelerator(accelerator) {
 }
 
 const EVENT_PREFIX = `agentdeck${process.pid}:`;
-const bindDescription = name => `AgentDeck ${name}`;
+// The description carries the process, so a binding left by an AgentDeck that is gone can be told from a live one's.
+const bindDescription = name => `AgentDeck ${name} ${process.pid}`;
+const pidAlive = pid => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; } };
+const staleBind = b => { const pid = Number(String(b.description).split(" ")[2]); return !pid || (pid !== process.pid && !pidAlive(pid)); };
 
 // Hyprland's bindings as last read (refreshed asynchronously: at the start, and on every config reload), for
 // "is this combination taken" - register() answers synchronously, as RegisterHotKey does.
@@ -255,9 +258,12 @@ async function refreshBinds() {
   return bindsCache;
 }
 const ours = b => String(b.description || "").startsWith("AgentDeck ");
+const mine = b => ours(b) && String(b.description).endsWith(` ${process.pid}`);
+// Someone else's: Hyprland's, another application's, or another AgentDeck's that is still running.
+const others = b => !ours(b) || (!mine(b) && !staleBind(b));
 // Taken: a binding of Hyprland's (or another application's) has the combination. Non-consuming ones count too:
 // Omarchy's Ctrl+Space passes the key on because it is the terminal multiplexer's prefix, which ours would swallow.
-const takenBy = parsed => bindsCache.some(b => !b.release && !ours(b) && !b.submap
+const takenBy = parsed => bindsCache.some(b => !b.release && others(b) && !b.submap
   && b.modmask === parsed.modmask && String(b.key).toLowerCase() === parsed.key.toLowerCase());
 
 // Binding changes go to Hyprland one after another, never blocking the main thread.
@@ -269,7 +275,7 @@ const keysOf = b => [...MOD_ORDER.filter(m => b.modmask & MOD_BITS[m]), b.key].j
 // hl.unbind drops every binding of a combination, not only ours: one that also has a binding of someone else's
 // (added by a config reload since) is left bound - its events are ignored once nothing of ours is registered.
 const sameCombo = (b, keys) => keysOf(b).toLowerCase() === keys.toLowerCase();
-const foreignOn = keys => bindsCache.some(b => !ours(b) && !b.submap && sameCombo(b, keys));
+const foreignOn = keys => bindsCache.some(b => others(b) && !b.submap && sameCombo(b, keys));
 const unbindLua = keys => `hl.unbind(${hypr.luaString(keys)})`;
 
 // Held state per accelerator, for keyHeld(): set by the press event, cleared by the release.
@@ -334,10 +340,10 @@ hl.bind(${keys}, hl.dsp.event(${up}), { description = ${desc}, release = true, t
     // Reads Hyprland's bindings, and drops those an earlier AgentDeck left behind (it crashed, or was killed): they
     // would make the combinations look taken. Awaited before the first register().
     async ready() {
-      const stale = new Set((await refreshBinds()).filter(b => ours(b) && !b.release).map(keysOf));
+      const stale = new Set((await refreshBinds()).filter(b => ours(b) && !b.release && staleBind(b)).map(keysOf));
       for (const k of stale) if (foreignOn(k)) stale.delete(k);
       if (stale.size) await queueLua([...stale].map(unbindLua).join("\n"));
-      bindsCache = bindsCache.filter(b => !ours(b));
+      bindsCache = bindsCache.filter(b => !ours(b) || !staleBind(b));
     },
     // Resolves once Hyprland has every change asked for so far (at quit: nothing left bound).
     async dispose() { unregisterAll(); alive = false; stopEvents(); stopReload(); await ops; }

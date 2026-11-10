@@ -25,12 +25,26 @@ const HEIGHT = 236;         // the card with its whole text (shown while the poi
 const PAD_BOTTOM = 26;      // transparent room below the pill for its shadow (matches --pad-bottom in overlay.css)
 const BOTTOM_GAP = 24;      // the pill's bottom edge sits this far above the work-area bottom
 // Wayland: the compositor places windows, not the application. Under Hyprland the panel's window is found by its
-// title and given a rule of its own: floating at the bottom centre, pinned to every workspace, never focused.
+// title and given a rule of its own: floating at the bottom centre, pinned to every workspace, not focused when shown.
+// Not `no_focus`: Hyprland then gives the window no pointer input either, and the panel's buttons would not click.
 const WAYLAND = process.platform === "linux";
 const WAYLAND_TITLE = "AgentDeck voice panel";
 const HYPRLAND_RULE = `{ match = { title = "^${WAYLAND_TITLE}$" }, float = true, pin = true, no_initial_focus = true,
-  no_focus = true, border_size = 0, no_shadow = true, no_blur = true, no_anim = true, no_dim = true,
+  border_size = 0, no_shadow = true, no_blur = true, no_anim = true, no_dim = true,
   size = { ${WIDTH}, ${HEIGHT} }, move = { "((monitor_w-window_w)/2)", "(monitor_h-window_h-${Math.max(0, BOTTOM_GAP - PAD_BOTTOM)})" } }`;
+// A click on the panel makes it the active window; the keyboard goes straight back to the window that had it, which
+// is where a dictation is pasted. The click itself still reaches the panel.
+function keepFocusOffPanel(hypr) {
+  let last = null, onPanel = false;
+  return hypr.onEvent((name, data) => {
+    // "activewindow>>class,title" comes first, then "activewindowv2>>address" (hex, without 0x).
+    if (name === "activewindow") onPanel = data.slice(data.indexOf(",") + 1) === WAYLAND_TITLE;
+    else if (name === "activewindowv2" && /^[0-9a-f]+$/i.test(data)) {
+      if (!onPanel) last = data;
+      else if (last) hypr.focusWindow(`0x${last}`).catch(() => {});
+    }
+  });
+}
 const REVEAL_TIMEOUT_MS = 250; // show anyway if the page has not confirmed the new state by then
 const EXIT_MS = 240;        // the page's exit animation; the window is hidden after it
 const NOTICE_MS = 3500;
@@ -68,6 +82,7 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
   let destroyed = false;
   const hypr = WAYLAND ? require("../shared/hyprland") : null;
   const stopRule = hypr?.available() ? hypr.keepWindowRule(HYPRLAND_RULE) : () => {};
+  const stopRefocus = hypr?.available() ? keepFocusOffPanel(hypr) : () => {};
 
   const alive = () => Boolean(win && !win.isDestroyed());
   const isOurs = e => alive() && e.sender === win.webContents;
@@ -316,6 +331,7 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
 
   function destroy() {
     stopRule();
+    stopRefocus();
     destroyed = true;
     hide();
     clearTimeout(exitTimer);

@@ -11,6 +11,12 @@ const testProfile = process.env.AGENTDECK_USER_DATA || process.env.ASM_USER_DATA
 const formerProfile = path.join(app.getPath("appData"), "ai-session-manager");
 if (testProfile) app.setPath("userData", path.resolve(testProfile));
 else if (fs.existsSync(formerProfile)) app.setPath("userData", formerProfile);
+// Linux under Wayland: Chromium multiplies the display's scale by the desktop's text scaling factor (GNOME's
+// text-scaling-factor), and a window of a fixed size then draws its page smaller than the window the compositor
+// gives it - the rest stays empty. A factor of 1 leaves only the display's own scale, applied per monitor.
+const wayland = process.platform === "linux" && Boolean(process.env.WAYLAND_DISPLAY)
+  && !/x11/i.test(app.commandLine.getSwitchValue("ozone-platform") || process.env.ELECTRON_OZONE_PLATFORM_HINT || "");
+if (wayland && !app.commandLine.hasSwitch("force-device-scale-factor")) app.commandLine.appendSwitch("force-device-scale-factor", "1");
 const { terminalEnv } = require("./host/terminal-env");
 const { focusSession, allowForeground, terminalWindows, raiseNewTerminal } = require("./terminal-focus");
 const { createLog } = require("./shared/log-file");
