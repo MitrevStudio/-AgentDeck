@@ -52,3 +52,20 @@ jobs:
       - run: npm run test:audit
       - name: Package (unpacked, no AppImage)
         run: npx electron-builder --linux --dir --publish never
+
+  # The relay's Docker image builds, starts and answers on its port (it is published by the release workflow).
+  docker-relay:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker build -f host/Dockerfile -t agentdeck-relay:ci .
+      - name: Start it and wait until it is healthy
+        run: |
+          docker run -d --name relay agentdeck-relay:ci
+          for i in $(seq 30); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' relay)" = healthy ] && break
+            sleep 2
+          done
+          docker logs relay
+          docker exec relay agentdeck-host pair
+          [ "$(docker inspect -f '{{.State.Health.Status}}' relay)" = healthy ]

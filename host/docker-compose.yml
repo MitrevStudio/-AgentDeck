@@ -1,0 +1,15 @@
+# AgentDeck relay in Docker: `docker compose up -d` here, then `docker compose exec relay agentdeck-host pair` for
+# the pairing code. The volume keeps its identity and its paired computers; without it every start is a new relay.
+services:
+  relay:
+    image: ghcr.io/mitrevstudio/agentdeck-relay:latest
+    container_name: agentdeck-relay
+    hostname: agentdeck-relay # the name your computers see for it
+    restart: unless-stopped
+    ports:
+      - "7421:7421" # forward this port on your router to reach the relay from outside
+    volumes:
+      - agentdeck-relay:/data
+
+volumes:
+  agentdeck-relay:

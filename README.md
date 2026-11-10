@@ -403,6 +403,28 @@ The installer checks out the host-related directories into `~/.agentdeck/app`, i
 
 If `node-pty` cannot load, the installer reports missing build prerequisites. On Debian/Ubuntu, these can include `build-essential` and `python3`.
 
+### Relay in Docker
+
+A relay only routes mesh traffic between your paired computers: the tunnels are end-to-end TLS, so it can neither read nor act on what it carries, and it runs no agents. It ships as an image for `amd64` and `arm64`, published with every release:
+
+```bash
+docker run -d --name agentdeck-relay --hostname agentdeck-relay --restart unless-stopped \
+  -p 7421:7421 -v agentdeck-relay:/data ghcr.io/mitrevstudio/agentdeck-relay:latest
+
+# Its pairing code (it changes after each pairing)
+docker exec agentdeck-relay agentdeck-host pair
+```
+
+Or with [`host/docker-compose.yml`](host/docker-compose.yml): `docker compose up -d`, then `docker compose exec relay agentdeck-host pair`.
+
+- Keep the `/data` volume: it holds the relay's identity, pairing code and paired computers. Without it every new container is a different relay that must be paired again.
+- The hostname is the name your computers see for the relay.
+- To reach it from outside your network, forward a TCP port on your router to the server's port `7421`, and allow only the source addresses you need where you can. On each computer, pair under **Settings → Computers** with your public address or DDNS name, plus `:port` when the external port is not 7421.
+- The container runs with `--no-discovery`, because mDNS does not leave a container network. Computers reach the relay by its address.
+- Build it yourself from the repository root: `docker build -f host/Dockerfile -t agentdeck-relay .`
+
+The image is relay-only. Running agents on a machine (`--with-api`) needs the agents, their sign-in and `node-pty`, so use the installer below for a resource host.
+
 ### Manage the service
 
 ```bash
