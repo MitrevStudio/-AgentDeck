@@ -143,15 +143,15 @@ async function run() {
     fs.writeFileSync(nodeFile, JSON.stringify({ ...saved, ...patch, ...(opt("interface") ? { interface: opt("interface") } : {}) }, null, 2));
   }
 
-  // A fixed pairing token must be one that cannot be guessed (peers.js).
+  // A fixed pairing token must be one that cannot be guessed (peers.js). A weak one (accepted by older versions, so
+  // it may sit in a service's command line) is ignored with a warning - the host still starts, with a long code of
+  // its own; exiting would leave a restarting service down for its paired computers.
   const { isLong } = require(path.join(ROOT, "src", "mesh", "peers"));
-  if (opt("pair-token") && !isLong(opt("pair-token"))) {
-    console.error("--pair-token: the token needs at least 20 letters or digits (leave it out and one is made).");
-    process.exit(2);
-  }
+  const token = opt("pair-token") && isLong(opt("pair-token")) ? opt("pair-token") : "";
+  if (opt("pair-token") && !token) console.error("--pair-token ignored: it needs at least 20 letters or digits, not just a few repeated. Using the host's own long code (agentdeck-host pair shows it).");
   host?.start();
   const self = await links.start();
-  if (opt("pair-token")) links.peers().setCode(opt("pair-token"));
+  if (token) links.peers().setCode(token);
   log(`agentdeck-host ${pkg.version}${withApi ? "" : " (relay only)"} on ${process.platform}, node ${process.version}: ${self.name} (${self.id.slice(0, 8)}), port ${self.port}, data ${dataDir}`);
   console.log(`\n${withApi ? "Resource host" : "Relay only"}\nPairing code: ${links.peers().code()}\nAddress: ${firstAddress()}:${self.port}\n`);
   let shownCode = links.peers().code();

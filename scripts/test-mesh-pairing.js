@@ -9,7 +9,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { createPeers, normCode, isLong } = require("../src/mesh/peers");
-const { createPairGuard, MAX_DELAY_MS, GLOBAL_PER_MINUTE, GLOBAL_LOCK_MS, MAX_PENDING } = require("../src/mesh/pair-guard");
+const { createPairGuard, MAX_DELAY_MS, GLOBAL_PER_MINUTE, GLOBAL_LOCK_MS, MAX_PENDING, MAX_PER_SOURCE } = require("../src/mesh/pair-guard");
 const { createLinks } = require("../src/mesh/links");
 const { loadIdentity } = require("../src/mesh/identity");
 const { connect } = require("../src/mesh/client");
@@ -43,8 +43,9 @@ const LONG = /^([0-9A-HJKMNP-TV-Z]{4}-){6}[0-9A-HJKMNP-TV-Z]{2}$/;
   assert.match(desk.regenerate(), /^\d{6}$/);
   assert.match(createPeers(dir("desk")).code(), /^\d{6}$/, "a desktop's code is kept across restarts");
 
-  // A fixed token (--pair-token) must be long; a 32-hex token of an older install still counts as long.
+  // A fixed token (--pair-token) must be long and varied; a 32-hex token of an older install still counts as long.
   assert.throws(() => host.setCode("123456"));
+  for (const weak of ["a".repeat(20), "_".repeat(24), "abababababababababab", "1234567 1234567 1234567"]) assert.ok(!isLong(weak), weak);
   assert.ok(isLong("0123456789abcdef0123456789abcdef"));
   host.setCode("0123456789abcdef0123456789abcdef");
   assert.ok(host.check("0123456789ABCDEF0123456789ABCDEF"));
@@ -65,7 +66,11 @@ const LONG = /^([0-9A-HJKMNP-TV-Z]{4}-){6}[0-9A-HJKMNP-TV-Z]{2}$/;
   assert.equal(g.stats().failures, 24);
   assert.equal(g.stats().lastSource, "a");
 
-  // Many sources: GLOBAL_PER_MINUTE wrong codes in a minute lock pairing for everyone.
+  // Many sources: GLOBAL_PER_MINUTE wrong codes in a minute lock pairing for everyone - on a desktop only; a host's
+  // long code cannot be guessed, and there a lock would only let address-rotating clients keep pairing shut.
+  const gHost = createPairGuard({ now: () => t, globalLock: false });
+  for (let i = 0; i < GLOBAL_PER_MINUTE * 3; i++) gHost.failed(`10.0.0.${i}`);
+  assert.ok(gHost.allowed("fresh").ok, "no global lock on a host");
   const g2 = createPairGuard({ now: () => t });
   for (let i = 0; i < GLOBAL_PER_MINUTE; i++) g2.failed(`10.0.0.${i}`);
   const locked = g2.allowed("fresh");
@@ -73,14 +78,19 @@ const LONG = /^([0-9A-HJKMNP-TV-Z]{4}-){6}[0-9A-HJKMNP-TV-Z]{2}$/;
   t += GLOBAL_LOCK_MS;
   assert.ok(g2.allowed("fresh").ok, "open again after the lock");
 
-  // Only so many may wait to pair at once.
+  // Only so many may wait to pair at once: per source and in all.
   const g3 = createPairGuard();
-  const held = Array.from({ length: MAX_PENDING }, () => g3.admit());
-  assert.ok(held.every(Boolean));
-  assert.equal(g3.admit(), null, "one too many");
-  held[0](); held[0]();
-  assert.ok(g3.admit(), "a released place is free again (released once)");
-  assert.equal(g3.admit(), null);
+  const mine = Array.from({ length: MAX_PER_SOURCE }, () => g3.admit("x"));
+  assert.ok(mine.every(Boolean));
+  assert.equal(g3.admit("x"), null, "one too many of one source");
+  assert.ok(g3.admit("y"), "another source still gets a place");
+  mine[0](); mine[0]();
+  assert.ok(g3.admit("x"), "a released place is free again (released once)");
+  assert.equal(g3.admit("x"), null);
+  const g4 = createPairGuard();
+  const all = Array.from({ length: MAX_PENDING }, (_, i) => g4.admit(`s${i}`));
+  assert.ok(all.every(Boolean));
+  assert.equal(g4.admit("new"), null, "one too many in all");
 
   // ---------- one try per connection ----------
   fs.writeFileSync(path.join(dir("N"), "node.json"), JSON.stringify({ port: 0 }));
@@ -95,9 +105,18 @@ const LONG = /^([0-9A-HJKMNP-TV-Z]{4}-){6}[0-9A-HJKMNP-TV-Z]{2}$/;
   await assert.rejects(link.call("pair", { code: selfN.code }), e => e.code === "closed" || e.code === "pairLater", "no second try on the connection");
   await closed;
   assert.equal(n.nodes().length, 0, "nothing paired");
+
+  // ---------- busy: too many waiting from one source get a reason they can show ----------
+  const silent = [];
+  for (let i = 0; i < MAX_PER_SOURCE; i++) silent.push((await connect({ identity, address: "127.0.0.1", port: selfN.port })).ws);
+  const extra = (await connect({ identity, address: "127.0.0.1", port: selfN.port })).ws;
+  const extraLink = createLink(extra);
+  extra.resume?.();
+  await assert.rejects(extraLink.call("pair", { code: selfN.code }), e => e.code === "pairBusy", "busy is answered as pairBusy");
+  for (const w of silent) w.terminate();
   n.stop();
 
   fs.rmSync(root, { recursive: true, force: true });
-  console.log("pairing: long host codes, lenient reading, guard backoff/lock/limit, one try per connection OK");
+  console.log("pairing: long host codes, lenient reading, weak tokens refused, guard backoff/lock (desktop only)/limits, one try per connection, busy answered OK");
   process.exit(0);
 })().catch(e => { console.error(e); process.exit(1); });

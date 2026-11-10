@@ -22,6 +22,15 @@ const { HostError } = require("../host/errors");
 const RECONNECT_MIN_MS = 2000, RECONNECT_MAX_MS = 30000;
 const HELLO_TIMEOUT_MS = 10000;
 const PAIR_TIMEOUT_MS = 20000;
+const BUSY_ANSWER_MS = 3000;
+// An IPv6 address's /64 ("2001:db8:1:2::/64"): one network, which may hold any number of addresses. "" for IPv4.
+function ipv6Net(a) {
+  if (!a.includes(":")) return "";
+  const [head, tail = ""] = a.split("::");
+  const h = head ? head.split(":") : [], tl = a.includes("::") && tail ? tail.split(":") : [];
+  const groups = [...h, ...Array(Math.max(0, 8 - h.length - tl.length)).fill("0"), ...tl];
+  return `${groups.slice(0, 4).map(x => (parseInt(x, 16) || 0).toString(16)).join(":")}::/64`;
+}
 
 // dir: where the identity and the peers are kept; defaultName; kind: "desktop" | "host"; version;
 // api(method, params, peer) -> the answer to a peer's request; log(line); discover: announce and look for nodes
@@ -33,7 +42,7 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
   const retries = new Map(); // peer id -> { timer, delay }
   const incompatible = new Map(); // peer id -> explicit update-required reason
   let identity = null, peers = null, server = null, discovery = null, running = false;
-  const guard = createPairGuard();
+  let guard = createPairGuard();
 
   const relay = require("./relay").createRelay({
     self: () => self(),
@@ -203,12 +212,13 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
   const connectAll = () => peers.list().forEach(p => scheduleConnect(p.id, 0));
 
   // ---------- answering the peers ----------
-  // Where a connection came from, for pair-guard.js: { key, label } - its address, or the neighbour whose relay
-  // tunnel brought it (those all come from 127.0.0.1), keyed by its id (a name it could change) and shown by name.
+  // Where a connection came from, for pair-guard.js: { key, label } - its IPv4 address or IPv6 /64, or the neighbour
+  // whose relay tunnel brought it (those all come from 127.0.0.1), keyed by its id (a name it could change) and shown
+  // by name.
   function sourceOf(address, port) {
-    const a = String(address || "").replace(/^::ffff:/, "");
+    const a = String(address || "").replace(/^::ffff:(?=d+.)/, "");
     const via = a === "127.0.0.1" || a === "::1" ? relay.sourceOf(port) : "";
-    if (!via) return { key: a || "?", label: a || "?" };
+    if (!via) return { key: ipv6Net(a) || a || "?", label: a || "?" };
     return { key: `via:${via}`, label: `via ${links.get(via)?.info?.name || via.slice(0, 8)} (${via.slice(0, 8)})` };
   }
   // An unknown node may only pair: it shows this node's code, and is trusted from then on. One try per connection,
@@ -222,14 +232,18 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
       adopt(ws, id, { initiatedHere: false, address, port: 0 }).catch(e => console.error("Adopting a link failed:", e.message));
       return;
     }
-    const release = guard.admit();
+    const source = sourceOf(address, port);
+    const release = guard.admit(source.key);
     if (!release) {
-      ws.close(1013, "busy");
+      // Too many wait to pair: the pairing side hears why (a code it can translate), then the socket goes.
+      const busy = createLink(ws, { onRequest: () => { throw new HostError("pairBusy", "This computer is busy with other pairing attempts; try again shortly."); } });
+      setTimeout(() => { busy.close(1013, "busy"); ws.terminate(); }, BUSY_ANSWER_MS).unref?.();
       return;
     }
-    const source = sourceOf(address, port);
     let tried = false;
-    const timer = setTimeout(() => ws.close(1008, "unpaired"), PAIR_TIMEOUT_MS);
+    // A client that says nothing in time goes at once (terminate): a graceful close would keep its place until the
+    // close handshake times out too.
+    const timer = setTimeout(() => { link.close(1008, "unpaired"); ws.terminate(); }, PAIR_TIMEOUT_MS);
     // The error goes out first, then the connection closes.
     const refuse = (code, message) => {
       setTimeout(() => link.close(1008, code), 100).unref?.();
@@ -353,6 +367,8 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
   async function start() {
     identity = await loadIdentity(dir, { defaultName });
     peers = createPeers(dir, { long: kind === "host" });
+    // A host's long code cannot be guessed: no lock for everyone there (pair-guard.js).
+    guard = createPairGuard({ globalLock: kind !== "host" });
     if (discover) {
       discovery = createDiscovery({ self: () => self(), iface: identity.settings.interface });
       discovery.on("changed", () => { out.emit("discovered", discovery.list()); connectAll(); });

@@ -26,7 +26,8 @@ function longToken() {
 }
 // What is compared: no spaces or dashes, upper case, and the letters Crockford reads as digits (I, L -> 1; O -> 0).
 const normCode = code => String(code ?? "").replace(/[\s-]/g, "").toUpperCase().replace(/[IL]/g, "1").replace(/O/g, "0");
-const isLong = code => normCode(code).length >= 20;
+// Long enough not to be guessed: 20 or more letters and digits, not just a few repeated ("aaaa...").
+const isLong = code => { const n = normCode(code); return /^[0-9A-Z]{20,}$/.test(n) && new Set(n).size >= 8; };
 
 // long: this node's codes are long ones (a host); a short code saved earlier is replaced at once.
 function createPeers(dir, { long: hostCodes = false } = {}) {
