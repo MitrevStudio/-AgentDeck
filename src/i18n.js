@@ -178,6 +178,19 @@
       "theme.system": "System",
       "theme.dark": "Dark",
       "theme.light": "Light",
+      "theme.black": "Black",
+      "theme.one-dark-pro": "One Dark Pro",
+      "theme.dracula": "Dracula",
+      "theme.github-dark": "GitHub Dark",
+      "theme.tokyo-night": "Tokyo Night",
+      "theme.catppuccin-mocha": "Catppuccin Mocha",
+      "theme.night-owl": "Night Owl",
+      "theme.nord": "Nord",
+      "theme.ayu-mirage": "Ayu Mirage",
+      "theme.gruvbox-dark": "Gruvbox Dark",
+      "theme.solarized-dark": "Solarized Dark",
+      "theme.group.app": "AgentDeck",
+      "theme.group.vscode": "From VS Code",
 
       "tray.openMenu": "Open the menu",
       "tray.edgeHandle": "Show the handle at the top edge",
@@ -1309,6 +1322,19 @@
       "theme.system": "Системна",
       "theme.dark": "Тъмна",
       "theme.light": "Светла",
+      "theme.black": "Черна",
+      "theme.one-dark-pro": "One Dark Pro",
+      "theme.dracula": "Dracula",
+      "theme.github-dark": "GitHub Dark",
+      "theme.tokyo-night": "Tokyo Night",
+      "theme.catppuccin-mocha": "Catppuccin Mocha",
+      "theme.night-owl": "Night Owl",
+      "theme.nord": "Nord",
+      "theme.ayu-mirage": "Ayu Mirage",
+      "theme.gruvbox-dark": "Gruvbox Dark",
+      "theme.solarized-dark": "Solarized Dark",
+      "theme.group.app": "AgentDeck",
+      "theme.group.vscode": "От VS Code",
 
       "tray.openMenu": "Отвори менюто",
       "tray.edgeHandle": "Показвай дръжката в горния край",
@@ -2337,14 +2363,18 @@
   // ---------- page ----------
   globalThis.I18N = api;
   const root = document.documentElement;
-  const applyTheme = theme => { root.dataset.theme = theme === "light" ? "light" : "dark"; };
+  // themeId: the theme.css / themes.css block to draw (prefs.js); resolvedTheme (dark or light) for an older snapshot.
+  const applyTheme = p => {
+    const id = String(p.themeId || p.resolvedTheme || "dark");
+    root.dataset.theme = /^[a-z0-9-]+$/.test(id) ? id : "dark";
+  };
   const prefs = globalThis.prefs; // from the page's preload
   if (prefs) {
     setLanguage(prefs.language, { dev: prefs.dev });
-    applyTheme(prefs.resolvedTheme);
+    applyTheme(prefs);
     // A language change reloads the page; a theme change only swaps the tokens.
-    prefs.onChanged(p => applyTheme(p.resolvedTheme));
-  } else applyTheme("dark");
+    prefs.onChanged(p => applyTheme(p));
+  } else applyTheme({});
   root.lang = lang;
   // common.js applies the static texts as soon as the body is parsed; this covers a page without it.
   document.addEventListener("DOMContentLoaded", () => { if (!applied) applyI18n(); });

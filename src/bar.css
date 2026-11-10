@@ -1,8 +1,9 @@
 /* Edge menu layout. Tokens and shared components come from theme.css, which is linked first; this file keeps the
    menu's own layout and its denser sizes. */
 /* The menu floats over other apps: hairlines instead of solid lines, raised surfaces one step further from the
-   background. Listed for both themes, so theme.css's light block does not win. */
-:root, :root[data-theme="light"] {
+   background. Listed for every theme, so the theme blocks of theme.css and themes.css (:root[data-theme="..."], linked
+   before this file) do not win. */
+:root, :root[data-theme] {
   --line: var(--hairline); --line-2: var(--hairline-2); --panel-2: var(--panel-3);
   --accent-weak: color-mix(in srgb, var(--accent) 15%, transparent);
 }
