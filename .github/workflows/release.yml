@@ -3,6 +3,8 @@
 # the Windows installer is built from that tag, attached to the release, and only then is the release published.
 # The installed app updates itself from the latest published release (electron-updater reads its latest.yml), so a
 # release must never be public without its installer; a failed build leaves a draft nobody sees.
+# The Linux AppImage (experimental) is built alongside and attached to the same release. It does not hold the
+# release back: the app does not update itself on Linux, so a release without it misleads no one.
 name: Release
 
 on:
@@ -79,5 +81,30 @@ jobs:
         run: |
           gh release upload "v$VERSION" dist/*.exe dist/*.blockmap dist/latest.yml --clobber
           gh release edit "v$VERSION" --draft=false --latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  build-linux:
+    needs: release
+    if: needs.release.outputs.published == 'true'
+    runs-on: ubuntu-26.04
+    env:
+      VERSION: ${{ needs.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: v${{ needs.release.outputs.version }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run setup:linux
+      - run: npm version "$VERSION" --no-git-tag-version --allow-same-version
+      - name: Build AppImage
+        run: npx electron-builder --linux --publish never
+      # The release may still be a draft (the Windows job publishes it) or already public: gh finds it by its tag.
+      - name: Attach the AppImage
+        run: gh release upload "v$VERSION" dist/*.AppImage dist/latest-linux.yml --clobber
         env:
           GH_TOKEN: ${{ github.token }}
