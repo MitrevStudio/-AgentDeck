@@ -132,6 +132,7 @@ body:not([data-tab="network"]) [data-for="network"], body:not([data-tab="nodes"]
 .vs-hint.err { color: var(--danger); }
 
 .vs-hint { margin-top: 5px; font-size: 12px; line-height: 1.45; color: var(--faint); }
+.vs-hint.warn { color: var(--attn); }
 .vs-grid > .vs-hint { margin-top: -3px; }
 .vs-list { white-space: pre-line; }
 

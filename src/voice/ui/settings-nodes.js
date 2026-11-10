@@ -28,6 +28,7 @@
         <div class="vs-field">
           <div class="vs-code"><b id="nodeCode"></b><button type="button" class="btn sm" id="nodeNewCode">${icon("refresh")}<span>${esc(t("settings.nodes.newCode"))}</span></button></div>
           <div class="vs-hint">${esc(t("settings.nodes.codeHint"))}</div>
+          <div class="vs-hint warn" id="nodePairFailures" hidden></div>
         </div>
       </div>
     </section>
@@ -112,6 +113,10 @@
     $("nodeDiscoverable").checked = s.discoverable;
     if (document.activeElement !== $("nodeProxy")) $("nodeProxy").value = s.proxy || "";
     $("nodeCode").textContent = s.code.length > 8 ? s.code : `${s.code.slice(0, 3)} ${s.code.slice(3)}`;
+    // Wrong pairing codes since AgentDeck started (pair-guard.js): someone may be guessing.
+    const fails = s.pairFailures || {};
+    $("nodePairFailures").hidden = !fails.failures;
+    if (fails.failures) $("nodePairFailures").textContent = t("settings.nodes.pairFailures", { n: fails.failures, source: fails.lastSource, time: new Date(fails.lastAt).toLocaleString() });
     $("nodeAddressHint").textContent = t("settings.nodes.addressHint", { port: s.port });
     const paired = state.nodes.map(n => nodeRow(n, `${n.relayOnly ? `<span class="tag" title="${esc(t("settings.nodes.relayHint"))}">${esc(t("settings.nodes.relay"))}</span>` : n.status === "online" ? `<button type="button" class="btn sm" data-setup="${esc(n.id)}">${icon("sliders")}<span>${esc(t("settings.nodes.setup"))}</span></button>` : ""}<button type="button" class="btn sm" data-forget="${esc(n.id)}">${icon("x")}<span>${esc(t("settings.nodes.forget"))}</span></button>`)
       + (setupOpen === n.id ? `<div class="vs-setup" id="nodeSetup">${setupHtml()}</div>` : ""));

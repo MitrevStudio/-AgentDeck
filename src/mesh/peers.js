@@ -1,7 +1,9 @@
 // The nodes this one trusts (<dir>/peers.json: id = certificate fingerprint, name, kind, the last address it was
-// reached at) and this node's pairing code (<dir>/pair-token.json), which another node must show to be added. The
-// code is six digits for people to read off a screen; a headless host gets a long token instead (install.sh). It is
-// made anew after every pairing and after too many wrong tries, so it cannot be guessed over time.
+// reached at) and this node's pairing code (<dir>/pair-token.json), which another node must show to be added. A
+// desktop's code is six digits for people to read off a screen and type. A host's (a relay or a resource host, often
+// reachable from the internet) is long: 128 random bits as 26 Crockford base32 characters in groups of four, which
+// cannot be guessed. A code is made anew after every pairing and after too many wrong tries; how fast codes may be
+// tried at all is pair-guard.js's business.
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
@@ -13,9 +15,21 @@ const MAX_TRIES = 5;
 const TRIES_WINDOW_MS = 10 * 60 * 1000;
 
 const digits = () => String(crypto.randomInt(0, 1000000)).padStart(6, "0");
-const longToken = () => crypto.randomBytes(16).toString("hex");
+// Crockford base32 (no I, L, O, U): 26 characters, 128 random bits and 2 more, "XXXX-XXXX-...-XX".
+const BASE32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+function longToken() {
+  let bits = 0n;
+  for (const b of crypto.randomBytes(17)) bits = (bits << 8n) | BigInt(b);
+  let out = "";
+  for (let i = 0; i < 26; i++) out += BASE32[Number((bits >> BigInt(5 * i)) & 31n)];
+  return out.match(/.{1,4}/g).join("-");
+}
+// What is compared: no spaces or dashes, upper case, and the letters Crockford reads as digits (I, L -> 1; O -> 0).
+const normCode = code => String(code ?? "").replace(/[\s-]/g, "").toUpperCase().replace(/[IL]/g, "1").replace(/O/g, "0");
+const isLong = code => normCode(code).length >= 20;
 
-function createPeers(dir) {
+// long: this node's codes are long ones (a host); a short code saved earlier is replaced at once.
+function createPeers(dir, { long: hostCodes = false } = {}) {
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, "peers.json"), tokenFile = path.join(dir, "pair-token.json");
 
@@ -69,15 +83,17 @@ function createPeers(dir) {
     if (typeof saved?.code === "string" && saved.code) token = { code: saved.code, long: saved.long === true, tries: [] };
   } catch {}
   const saveToken = () => fs.writeFileSync(tokenFile, JSON.stringify({ code: token.code, long: token.long }), { mode: 0o600 });
-  // long: a token for a headless host (printed by its installer), not a code to read off a screen.
-  function regenerate({ long = false } = {}) {
+  // long: a token for a host (printed by its installer and by `agentdeck-host pair`), not a code to read off a screen.
+  function regenerate({ long = hostCodes } = {}) {
     token = { code: long ? longToken() : digits(), long, tries: [] };
     saveToken();
     return token.code;
   }
-  if (!token.code) regenerate();
-  // A fixed token (a scripted install): kept until the next pairing.
+  // A host that still has a short code (made before host codes were long) gets a long one.
+  if (!token.code || (hostCodes && !isLong(token.code))) regenerate();
+  // A fixed token (a scripted install): kept until the next pairing. One that could be guessed is refused.
   function setCode(code) {
+    if (!isLong(code)) throw new Error("A pairing token needs at least 20 letters or digits.");
     token = { code: String(code), long: true, tries: [] };
     saveToken();
   }
@@ -86,7 +102,7 @@ function createPeers(dir) {
   function check(given) {
     const now = Date.now();
     token.tries = token.tries.filter(at => now - at < TRIES_WINDOW_MS);
-    const a = Buffer.from(String(given ?? "").replace(/[\s-]/g, "")), b = Buffer.from(token.code);
+    const a = Buffer.from(normCode(given)), b = Buffer.from(normCode(token.code));
     const ok = a.length === b.length && crypto.timingSafeEqual(a, b);
     if (ok) return true;
     token.tries.push(now);
@@ -97,4 +113,4 @@ function createPeers(dir) {
   return { list, get, add, update, remove, code, regenerate, setCode, check, ID, KINDS };
 }
 
-module.exports = { createPeers, ID, KINDS };
+module.exports = { createPeers, ID, KINDS, normCode, isLong };

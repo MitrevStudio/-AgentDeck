@@ -30,6 +30,7 @@ const peersOf = dataDir => JSON.parse(fs.readFileSync(path.join(dataDir, "node",
   const r = createLinks({ dir: relayNode, defaultName: "R", kind: "host", version: "test", api: () => {}, relayOnly: true, discover: false, log: () => {} });
   const selfR = await r.start();
   assert.equal(selfR.port, port, "the relay listens on the port in its node.json");
+  assert.match(selfR.code, /^([0-9A-HJKMNP-TV-Z]{4}-){6}[0-9A-HJKMNP-TV-Z]{2}$/, "a host's code is long (Crockford base32)");
 
   // pair-relay: the code and the port come from the relay's files.
   const resource = path.join(root, "resource");
@@ -53,6 +54,7 @@ const peersOf = dataDir => JSON.parse(fs.readFileSync(path.join(dataDir, "node",
   res = await cli("pair-to", "127.0.0.1", String(port), "000000", "--data-dir", other);
   assert.notEqual(res.code, 0, "a wrong code is an error");
   assert.match(res.out, /pairing code is wrong/i);
+  await new Promise(done => setTimeout(done, 1100)); // the next try from this address waits after a wrong one
   res = await cli("pair-to", "127.0.0.1", String(port), r.self().code, "--data-dir", other);
   assert.equal(res.code, 0, res.out);
   assert.match(res.out, /Paired with R/);

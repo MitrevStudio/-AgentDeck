@@ -7,6 +7,9 @@ const ID = /^[a-f0-9]{64}$/;
 const MAX_HOPS = 8;
 function createRelay({ self, neighbors, changed }) {
   const adverts = new Map(), channels = new Map(), inputs = new Set();
+  // The local port of each tunnel's last hop into this node's own listener -> the neighbour it came through: those
+  // connections all come from 127.0.0.1, and pairing tries are counted by where they came from (sourceOf).
+  const tunnelPorts = new Map();
   let routes = new Map(), signature = "";
   const key = (peer, id) => `${peer}:${id}`;
   function refresh() {
@@ -74,7 +77,16 @@ function createRelay({ self, neighbors, changed }) {
       const socket = bind(peer, p.id, new Duplex({ read() {}, write(_c, _e, cb) { cb(new Error("Tunnel not ready")); } }));
       try {
         const downstream = path.length === 2
-          ? await new Promise((resolve, reject) => { const s = net.connect(self().port, "127.0.0.1"); s.once("connect", () => resolve(s)); s.once("error", reject); })
+          ? await new Promise((resolve, reject) => {
+            const s = net.connect(self().port, "127.0.0.1");
+            s.once("connect", () => {
+              const port = s.localPort;
+              tunnelPorts.set(port, peer);
+              s.once("close", () => { if (tunnelPorts.get(port) === peer) tunnelPorts.delete(port); });
+              resolve(s);
+            });
+            s.once("error", reject);
+          })
           : await open(path.slice(1));
         if (socket.destroyed) { downstream.destroy(); throw new Error("Tunnel closed"); }
         channels.set(k, downstream);
@@ -108,8 +120,9 @@ function createRelay({ self, neighbors, changed }) {
   }
   return { refresh, broadcast, event, request, down,
     list: () => [...routes.values()],
+    sourceOf: port => tunnelPorts.get(port) || "",
     open: async path => open(path),
-    stop() { for (const s of channels.values()) s.destroy(); channels.clear(); inputs.clear(); adverts.clear(); routes.clear(); signature = ""; }
+    stop() { for (const s of channels.values()) s.destroy(); channels.clear(); inputs.clear(); tunnelPorts.clear(); adverts.clear(); routes.clear(); signature = ""; }
   };
 }
 module.exports = { createRelay };

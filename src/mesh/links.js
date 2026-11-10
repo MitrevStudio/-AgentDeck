@@ -11,6 +11,7 @@
 const { EventEmitter } = require("node:events");
 const { loadIdentity } = require("./identity");
 const { createPeers } = require("./peers");
+const { createPairGuard } = require("./pair-guard");
 const { createServer } = require("./server");
 const { connect } = require("./client");
 const { connectViaProxy } = require("./proxy");
@@ -32,6 +33,7 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
   const retries = new Map(); // peer id -> { timer, delay }
   const incompatible = new Map(); // peer id -> explicit update-required reason
   let identity = null, peers = null, server = null, discovery = null, running = false;
+  const guard = createPairGuard();
 
   const relay = require("./relay").createRelay({
     self: () => self(),
@@ -44,7 +46,7 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
     return [...found.values()];
   };
   const self = () => (!identity ? null : { id: identity.id, name: identity.settings.name, kind, version, protocol: PROTOCOL, port: server?.port() || identity.settings.port,
-    discoverable: identity.settings.discoverable, proxy: identity.settings.proxy, code: peers.code() });
+    discoverable: identity.settings.discoverable, proxy: identity.settings.proxy, code: peers.code(), pairFailures: guard.stats() });
   // relayOnly: this node serves no api (its installer set none); peers use it to skip resource fetches and to label it.
   const hello = () => ({ id: identity.id, name: identity.settings.name, kind, version, protocol: PROTOCOL, relay: 1, relayOnly, port: server?.port() || 0 });
 
@@ -201,8 +203,17 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
   const connectAll = () => peers.list().forEach(p => scheduleConnect(p.id, 0));
 
   // ---------- answering the peers ----------
-  // An unknown node may only pair: it shows this node's code, and is trusted from then on.
-  function onConnection(ws, { id, address }) {
+  // Where a connection came from, for pair-guard.js: { key, label } - its address, or the neighbour whose relay
+  // tunnel brought it (those all come from 127.0.0.1), keyed by its id (a name it could change) and shown by name.
+  function sourceOf(address, port) {
+    const a = String(address || "").replace(/^::ffff:/, "");
+    const via = a === "127.0.0.1" || a === "::1" ? relay.sourceOf(port) : "";
+    if (!via) return { key: a || "?", label: a || "?" };
+    return { key: `via:${via}`, label: `via ${links.get(via)?.info?.name || via.slice(0, 8)} (${via.slice(0, 8)})` };
+  }
+  // An unknown node may only pair: it shows this node's code, and is trusted from then on. One try per connection,
+  // and only as often as pair-guard.js lets that source try.
+  function onConnection(ws, { id, address, port }) {
     if (!id) {
       ws.close(1008, "no certificate");
       return;
@@ -211,11 +222,33 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
       adopt(ws, id, { initiatedHere: false, address, port: 0 }).catch(e => console.error("Adopting a link failed:", e.message));
       return;
     }
+    const release = guard.admit();
+    if (!release) {
+      ws.close(1013, "busy");
+      return;
+    }
+    const source = sourceOf(address, port);
+    let tried = false;
     const timer = setTimeout(() => ws.close(1008, "unpaired"), PAIR_TIMEOUT_MS);
+    // The error goes out first, then the connection closes.
+    const refuse = (code, message) => {
+      setTimeout(() => link.close(1008, code), 100).unref?.();
+      throw new HostError(code, message);
+    };
     const link = createLink(ws, {
       onRequest: async (method, params) => {
-        if (method !== "pair") throw new HostError("unpaired", "This node is not paired with yours.");
-        if (!peers.check(params?.code)) throw new HostError("wrongCode", "The pairing code is wrong.");
+        if (method !== "pair") refuse("unpaired", "This node is not paired with yours.");
+        if (tried) refuse("pairLater", "One pairing code per connection.");
+        tried = true;
+        const may = guard.allowed(source.key);
+        if (!may.ok) refuse("pairLater", `Too many wrong pairing codes; try again in ${Math.ceil(may.waitMs / 1000)} s.`);
+        if (!peers.check(params?.code)) {
+          guard.failed(source.key, source.label);
+          log(`wrong pairing code from ${source.label}`);
+          out.emit("self", self());
+          refuse("wrongCode", "The pairing code is wrong.");
+        }
+        guard.succeeded(source.key);
         clearTimeout(timer);
         const p = params || {};
         peers.add({ id, name: String(p.name || "").slice(0, 60), kind: p.kind, address: p.routed ? "" : address, port: p.routed ? 0 : Number(p.port) || 0 });
@@ -226,9 +259,8 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
         setImmediate(() => { link.close(1000, "paired"); changed(); });
         return { ok: true, id: identity.id, name: identity.settings.name, kind, version };
       },
-      onClose: () => clearTimeout(timer)
+      onClose: () => { clearTimeout(timer); release(); }
     });
-    void link;
   }
 
   // ---------- pairing from here ----------
@@ -320,7 +352,7 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
   }
   async function start() {
     identity = await loadIdentity(dir, { defaultName });
-    peers = createPeers(dir);
+    peers = createPeers(dir, { long: kind === "host" });
     if (discover) {
       discovery = createDiscovery({ self: () => self(), iface: identity.settings.interface });
       discovery.on("changed", () => { out.emit("discovered", discovery.list()); connectAll(); });
