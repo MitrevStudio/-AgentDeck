@@ -29,7 +29,7 @@ const node = (name, api) => {
  for(const [x,y] of [[a,b],[b,c],[c,d]]){await x.pair('127.0.0.1',y.self().port,y.self().code);await wait(()=>x.online(y.self().id)&&y.online(x.self().id));}
  await wait(()=>a.discovered().some(n=>n.id===d.self().id));
  await assert.rejects(a.call(d.self().id,'test'));
- await assert.rejects(a.pair(d.self().id,0,'wrong'),e=>e.code==='wrongCode');
+ await assert.rejects(a.pair(d.self().id,0,'wrong'),e=>e.code==='wrongCode'); assert.ok(d.self().pairFailures.lastSource.startsWith('via '),'a relayed try is counted by the neighbour it came through: '+d.self().pairFailures.lastSource); await new Promise(r=>setTimeout(r,1100));
  await a.pair(d.self().id,0,d.self().code);
  await wait(()=>a.online(d.self().id));
  assert.equal(a.nodes().find(n=>n.id===d.self().id).via.length,2);

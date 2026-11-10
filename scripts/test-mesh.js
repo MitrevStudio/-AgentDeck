@@ -32,10 +32,15 @@ const node = (name, api) => {
   const a2 = node("A", async method => ({ answered: `A:${method}` }));
   assert.equal((await a2.start()).id, selfA.id, "the id survives a restart");
 
-  // A wrong code is refused and leaves nothing behind.
+  // A wrong code is refused and leaves nothing behind; the next try from that address waits (pair-guard.js), and
+  // the wrong try is counted for Settings.
   await assert.rejects(a2.pair("127.0.0.1", selfB.port, "000000"), e => e.code === "wrongCode");
   assert.equal(b.nodes().length, 0);
   assert.equal(a2.nodes().length, 0);
+  await assert.rejects(a2.pair("127.0.0.1", selfB.port, selfB.code), e => e.code === "pairLater", "too soon after a wrong code");
+  assert.equal(b.self().pairFailures.failures, 1);
+  assert.equal(b.self().pairFailures.lastSource, "127.0.0.1");
+  await new Promise(r => setTimeout(r, 1100));
 
   // Pairing with the right code: both list each other, and the link comes up both ways.
   const upB = until(b, "link", l => l.up), upA = until(a2, "link", l => l.up);

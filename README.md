@@ -411,7 +411,7 @@ A relay only routes mesh traffic between your paired computers: the tunnels are 
 docker run -d --name agentdeck-relay --hostname agentdeck-relay --restart unless-stopped \
   -p 7421:7421 -v agentdeck-relay:/data ghcr.io/mitrevstudio/agentdeck-relay:latest
 
-# Its pairing code (it changes after each pairing)
+# Its pairing code: 26 letters and digits, XXXX-XXXX-...-XX (it changes after each pairing)
 docker exec agentdeck-relay agentdeck-host pair
 ```
 
@@ -419,6 +419,7 @@ Or with [`host/docker-compose.yml`](host/docker-compose.yml): `docker compose up
 
 - Keep the `/data` volume: it holds the relay's identity, pairing code and paired computers. Without it every new container is a different relay that must be paired again.
 - The hostname is the name your computers see for the relay.
+- A relay's (and any host's) pairing code is long - 128 random bits - so it cannot be guessed even when the port is open to the internet; a desktop's is six digits. Every node allows one code per connection and makes the next try from the same address (an IPv6 /64 counts as one) wait longer after each wrong code (up to 5 minutes); a desktop also stops pairing for a minute after 10 wrong codes from anywhere. Wrong tries show under **Settings → Computers** and in the log. `--pair-token` needs at least 20 letters or digits (not a few repeated); a weaker one is ignored with a warning and the host keeps its own long code.
 - To reach it from outside your network, forward a TCP port on your router to the server's port `7421`, and allow only the source addresses you need where you can. On each computer, pair under **Settings → Computers** with your public address or DDNS name, plus `:port` when the external port is not 7421.
 - The container runs with `--no-discovery`, because mDNS does not leave a container network. Computers reach the relay by its address.
 - Build it yourself from the repository root: `docker build -f host/Dockerfile -t agentdeck-relay .`
