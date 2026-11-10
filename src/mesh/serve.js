@@ -63,6 +63,8 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
     "usage.get": () => host.usage.get(),
     "limits.get": () => { host.limits.refresh().catch(() => {}); return host.limits.get(); },
     "resources.get": () => host.resources.get() || host.resources.refresh(),
+    // A session running here without a terminal of this host's own, ended for a peer (launch.stopSession).
+    "sessions.stop": p => launch.stopSession(str(p?.agent, 16), str(p?.id, 200)),
     "terminals.list": (_p, peer) => peerTabs(peer.id),
     // {cwd, kind: "shell" | "new" | "resume" | "prompt", agent, sessionId, prompt} -> the tab, opened here for the peer.
     "terminals.open": async (p, peer) => {

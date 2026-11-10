@@ -918,6 +918,12 @@ function registerIpc() {
     await moveToTab(text(agent), text(id));
     return true;
   });
+  // "Stop": a session running without a terminal here, on this computer or on another one (launch.stopSession).
+  handle("session:stop", (node, agent, id) => {
+    if (!node) return launch.stopSession(text(agent), text(id));
+    if (!links.online(text(node, 64))) throw new HostError("offline");
+    return links.call(text(node, 64), "sessions.stop", { agent: text(agent), id: text(id) });
+  });
   ipcMain.on("terminal:input", (e, id, data) => {
     if (!trusted(e) || typeof data !== "string" || data.length > 1_000_000) return;
     const node = remoteTerms.get(id)?.node;

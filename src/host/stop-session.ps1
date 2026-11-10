@@ -1,6 +1,7 @@
-# "Move here": stops a Claude Code process in another terminal and switches off the terminal modes it left on (or
-# that tab prints escape codes). Run with -EncodedCommand, $ClaudePid, $ClaudeStart (its procStart from the live
-# registry, '' when unknown) and $AgentDeckPid set in front.
+# "Move here" and "Stop": stops a Claude Code process in another terminal (or in none) and switches off the terminal
+# modes it left on (or that tab prints escape codes). Run with -EncodedCommand, $ClaudePid, $ClaudeStart (its
+# procStart from the live registry, '' when unknown), $AgentDeckPid and $Note (the line left in that terminal) set in
+# front.
 # Exit: 0 stopped, 3 not Claude (the session's process is gone), 4 AgentDeck runs inside the session, 1 error
 
 $ErrorActionPreference = 'Stop'
@@ -98,7 +99,7 @@ try
     Stop-Tree $ids
     if ($attached)
     {
-        Write-ConsoleText "$resetModes`r`n[This session was moved to AgentDeck]`r`n"
+        Write-ConsoleText "$resetModes`r`n[$Note]`r`n"
         [void][StopNative]::FreeConsole()
     }
     exit 0

@@ -244,19 +244,22 @@ function createSessions({ dataDir, home, isExcluded = () => false, untitled = (a
     return { id, agent: "Codex", cwd, title: title || untitled("Codex", id.slice(0, 8)), updatedAt, file };
   }
 
-  // ---------- OpenCode ----------
-  // On Windows `opencode` is usually an npm .cmd shim, which execFile cannot start without going through cmd.exe. The
-  // scan runs it in project folders, and cmd.exe looks in the current folder before PATH - for `opencode` and for the
-  // `node` the shim calls - so it is found on PATH once, by its full path, and cmd.exe is told to skip the folder.
-  const openCodeExe = process.platform === "win32" ? findOnPath("opencode") : Promise.resolve("opencode");
-  async function runOpenCode(args, cwd, timeout) {
-    const exe = await openCodeExe;
-    if (!exe) throw new Error("opencode is not on PATH");
+  // ---------- an agent's CLI ----------
+  // On Windows `opencode` (and an npm-installed `claude`) is usually an npm .cmd shim, which execFile cannot start
+  // without going through cmd.exe. The scan runs it in project folders, and cmd.exe looks in the current folder before
+  // PATH - for the agent and for the `node` the shim calls - so it is found on PATH once, by its full path, and cmd.exe
+  // is told to skip the folder. args: fixed words (no quoting is done).
+  const cliExes = new Map();
+  async function runCli(name, args, cwd, timeout) {
+    if (!cliExes.has(name)) cliExes.set(name, process.platform === "win32" ? findOnPath(name) : Promise.resolve(name));
+    const exe = await cliExes.get(name);
+    if (!exe) throw new Error(`${name} is not on PATH`);
     const opts = { cwd, windowsHide: true, timeout, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, NoDefaultCurrentDirectoryInExePath: "1" } };
     if (!/\.(cmd|bat)$/i.test(exe)) return execFileAsync(exe, args, opts);
-    // /s: the outer quotes go, the rest is taken as typed (args are fixed words).
+    // /s: the outer quotes go, the rest is taken as typed.
     return execFileAsync(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", `""${exe}" ${args.join(" ")}"`], { ...opts, windowsVerbatimArguments: true });
   }
+  const runOpenCode = (args, cwd, timeout) => runCli("opencode", args, cwd, timeout);
   let lastOpenCode = [], openCodeWarning = "";
 
   // ---------- the scan ----------
@@ -439,7 +442,7 @@ function createSessions({ dataDir, home, isExcluded = () => false, untitled = (a
   }
 
   return {
-    CLAUDE_DIR, CODEX_DIR, OPENCODE_DB, AGENT_EXES, norm, findOnPath, runOpenCode, agents,
+    CLAUDE_DIR, CODEX_DIR, OPENCODE_DB, AGENT_EXES, norm, findOnPath, runCli, runOpenCode, agents,
     registry: { read: () => registry.read(), save: saveRegistry, write: reg => registry.write(reg) },
     scan, scheduleRescan, watchTranscripts, scanPeriodically, stop,
     get: () => cache, data: async () => cache ?? await scan(), registryChanged, forget, invalidate

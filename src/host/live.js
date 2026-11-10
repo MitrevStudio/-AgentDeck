@@ -14,6 +14,8 @@
 // `parkedJobId`; a spare bg process (`spare`, no transcript) is kept ready beside it. The parent is the session the
 // user sees, so a job's state and activity count for its parent and spares are left out (foldJobs).
 //
+// A job whose parent is gone is listed on its own (`kind: "bg"`, its `jobId`).
+//
 // Codex's rollout lifecycle is read separately by codex-live.js and merged in host/index.js.
 // OpenCode has no live status source here.
 const { execFile } = require("node:child_process");
@@ -167,6 +169,9 @@ async function claudeLive() {
     .map(x => ({ x, lead: leadingEntry(x), activities: [x, ...x.jobs].map(e => getActivity(e.sessionId)) }))
     .map(({ x, lead, activities }) => ({
       agent: "Claude", id: x.sessionId, pid: x.pid, procStart: String(x.procStart || ""), cwd: x.cwd || "", name: x.name || "",
+      // A background job left on its own (its parent gone): Claude Code's daemon restarts its process when it dies,
+      // so it is stopped by `claude stop <jobId>` (launch.stopSession).
+      kind: x.kind === "bg" ? "bg" : "", jobId: x.kind === "bg" ? String(x.jobId || "") : "",
       status: lead.status === "shell" ? "busy" : lead.status || "running",
       waitingFor: lead.waitingFor || "",
       statusAt: lead.statusUpdatedAt || lead.updatedAt || lead.startedAt || 0,

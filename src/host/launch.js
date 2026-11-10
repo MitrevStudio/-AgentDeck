@@ -1,7 +1,7 @@
 // Starting the agents and shells on this host: the command each launch runs (a new session, one resumed, one on a
 // ready prompt, one with a handoff), the checks before it (the agent, the session id, the folder, the transcript),
 // a terminal of the host's own (terminals.js) with that command in it, moving a session out of another terminal
-// (stop-session.ps1), and deleting a session. Where a terminal goes - a pane of the window, Windows Terminal - is
+// (stop-session.ps1), stopping one, and deleting a session. Where a terminal goes - a pane of the window, Windows Terminal - is
 // the caller's business (main.js); the host only knows its own terminals.
 //
 // A command is a PowerShell line (Windows Terminal and the host's terminals both run PowerShell); it reaches the
@@ -169,9 +169,10 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
   // resume it in a terminal of the host's own. Not while it works - that would cut the turn off. Answers the session's
   // live entry (its folder is where it resumes).
   // entry: the session's live registry entry; its procStart tells a recycled pid from the session's own process.
-  function stopExternalSession(entry) {
+  // note: the line left in the terminal it ran in (fixed text, no quotes). -> stop-session.ps1's exit code.
+  function stopExternalSession(entry, note = "This session was moved to AgentDeck") {
     const start = /^\d+$/.test(entry.procStart) ? entry.procStart : "";
-    const script = `$ClaudePid = ${Number(entry.pid)}\n$ClaudeStart = '${start}'\n$AgentDeckPid = ${process.pid}\n${fs.readFileSync(STOP_SCRIPT, "utf8")}`;
+    const script = `$ClaudePid = ${Number(entry.pid)}\n$ClaudeStart = '${start}'\n$AgentDeckPid = ${process.pid}\n$Note = '${note}'\n${fs.readFileSync(STOP_SCRIPT, "utf8")}`;
     const encoded = Buffer.from(script, "utf16le").toString("base64");
     return new Promise(resolve => {
       execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded], { windowsHide: true, timeout: 20000 }, err => resolve(err ? err.code ?? 1 : 0));
@@ -190,6 +191,52 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
     if (code === 4) fail("moveHostsAgentDeck");
     if (code !== 0 && code !== 3) fail("moveStopFailed");
     return entry;
+  }
+
+  // ---------- stopping a session ----------
+  // "Stop": a Claude session running where no terminal of the host's own shows it - in another terminal, or in none
+  // at all (a terminal that died and left it behind, a background job whose parent is gone) - is ended. A background
+  // job is stopped by Claude Code (`claude stop <jobId>`), as its daemon would start the process again; any other one
+  // as "Move here" stops it (stop-session.ps1), on Linux and macOS by SIGTERM (SIGKILL when that is not enough).
+  // The conversation stays and can be resumed.
+  async function stopSession(agent, id) {
+    checkAgent(agent);
+    checkSessionId(id);
+    if (agent !== "Claude") fail("stopUnsupported");
+    if (terminals.getTabs().some(x => x.agent === agent && x.sessionId === id && !x.exited)) fail("sessionRunning");
+    const entry = (await liveSessions()).find(l => l.agent === agent && l.id === id);
+    if (!entry) fail("moveNotRunning");
+    log(`stop ${agent} ${id} pid ${entry.pid}${entry.jobId ? ` job ${entry.jobId}` : ""}`);
+    if (entry.kind === "bg" && /^[\w-]{1,64}$/.test(entry.jobId)) {
+      try { await sessions.runCli("claude", ["stop", entry.jobId], isDir(entry.cwd) ? entry.cwd : undefined, 30000); } catch { fail("stopFailed"); }
+      return true;
+    }
+    if (process.platform === "win32") {
+      const code = await stopExternalSession(entry, "This session was stopped from AgentDeck");
+      if (code === 4) fail("moveHostsAgentDeck");
+      if (code !== 0 && code !== 3) fail("stopFailed");
+      return true;
+    }
+    if (hostsProcess(entry.pid)) fail("moveHostsAgentDeck");
+    await killPid(entry.pid);
+    return true;
+  }
+  // Linux: whether AgentDeck itself runs under the process (its parents, read from /proc). Elsewhere: no.
+  function hostsProcess(pid) {
+    for (let p = process.ppid, i = 0; p > 1 && i < 64; i++) {
+      if (p === pid) return true;
+      let stat;
+      try { stat = fs.readFileSync(`/proc/${p}/stat`, "utf8"); } catch { return false; }
+      // "pid (comm) state ppid ...": comm may hold spaces and parentheses.
+      p = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
+    }
+    return false;
+  }
+  async function killPid(pid) {
+    const alive = () => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; } };
+    try { process.kill(pid, "SIGTERM"); } catch (e) { if (e.code === "ESRCH") return; fail("stopFailed"); }
+    for (let i = 0; i < 25 && alive(); i++) await new Promise(r => setTimeout(r, 200));
+    if (alive()) try { process.kill(pid, "SIGKILL"); } catch {}
   }
 
   // ---------- deleting ----------
@@ -220,7 +267,7 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
   return {
     NEW_SESSION, SESSION_ID, isAgent, checkAgent, checkSessionId, checkResumable, agentCommand, getSessionTitle, isDir,
     shellCommand, newCommand, resumeCommand, promptCommand, handoffCommand, cloneCommand, commandFor,
-    openTerminal, sweepPrompts, takeOverSession, deleteSession
+    openTerminal, sweepPrompts, takeOverSession, stopSession, deleteSession
   };
 }
 

@@ -58,6 +58,7 @@ contextBridge.exposeInMainWorld("manager", {
   onAnswer: cb => ipcRenderer.on("answer:show", (_e, a) => cb(a)),
   answerAction: a => ipcRenderer.send("answer:action", a),
   deleteSession: (agent, id) => ipcRenderer.invoke("session:delete", agent, id),
+  stopSession: (node, agent, id) => ipcRenderer.invoke("session:stop", node || "", agent, id),
   isDir: p => ipcRenderer.invoke("fs:is-dir", p),
   openVoiceHistory: () => ipcRenderer.invoke("voice:open-history"),
   openSettings: () => ipcRenderer.invoke("voice:open-settings"),

@@ -14,7 +14,9 @@ const MESSAGES = {
   moveBusy: "The agent is still working in this session.",
   moveStopFailed: "The session could not be closed in its terminal.",
   moveNoConversation: "The session has no conversation saved yet.",
-  moveHostsAgentDeck: "AgentDeck itself runs inside this session."
+  moveHostsAgentDeck: "AgentDeck itself runs inside this session.",
+  stopUnsupported: "Only Claude sessions can be stopped from here.",
+  stopFailed: "The session could not be stopped."
 };
 
 class HostError extends Error {

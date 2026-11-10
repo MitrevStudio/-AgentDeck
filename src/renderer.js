@@ -728,7 +728,18 @@ function openProjectMenu(btn, path) {
     { label: t("action.remove"), icon: "trash", danger: true, run: () => runAction("remove", btn) }
   ]);
 }
-// A running session's menu (the agents list, on a right-click): bring it up or move it here, its id and folder.
+// "Stop": a Claude session that runs without a terminal in AgentDeck (in another terminal, or left behind by one that
+// died, or a background job whose parent is gone) - here or on another computer - is ended there (launch.stopSession).
+const isStopOffered = s => s.agent === "Claude" && Boolean(liveOf(s)) && !findSessionTab(s);
+async function stopSession(s) {
+  const where = s.node ? s.nodeName || nodeNameOf(s.node) : t("term.thisComputer");
+  if (!confirm(t("term.stopConfirm", { title: s.title, where }))) return;
+  try { await window.manager.stopSession(s.node, s.agent, s.id); }
+  catch (e) { return toast(String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""), true); }
+  toast(t("term.stopped"));
+  pollLive();
+}
+// A running session's menu (the agents list, on a right-click): bring it up or move it here, stop it, its id and folder.
 function openRowMenu(btn, s) {
   if (!s) return;
   const copy = (text, msg) => async () => { await window.manager.copyText(text); toast(msg); };
@@ -740,7 +751,8 @@ function openRowMenu(btn, s) {
       { label: t("action.copyPath"), icon: "copy", run: copy(s.cwd, t("toast.copied", { path: s.cwd })) },
       { label: t("action.terminalHere"), icon: "terminal", run: async () => { await window.manager.launchFolder(s.cwd); toast(t("manager.toast.terminal", { path: s.cwd })); } },
       { label: t("action.explorerTitle"), icon: "open", run: async () => { const err = await window.manager.openPath(s.cwd); if (err) throw new Error(err); } }
-    ] : [])
+    ] : []),
+    ...(isStopOffered(s) ? [{ separator: true }, { label: t("term.stop"), icon: "stop", danger: true, run: () => stopSession(s) }] : [])
   ]);
 }
 function getGroupMenuItems(path) {
