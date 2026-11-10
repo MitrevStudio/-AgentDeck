@@ -14,6 +14,7 @@
     "test:git": "node scripts/test-git-repositories.js && node scripts/test-git-panel.js && node scripts/test-git-diff-ui.js && node scripts/test-git-actions.js && node scripts/test-git-workflow-ui.js",
     "test:git-ui": "node scripts/test-git-ui-electron.cjs",
     "test:layout": "node scripts/test-layout-sync.js",
+    "test:devices": "node scripts/test-device-view.js",
     "test:relay": "node scripts/test-relay.js",
     "test:mesh": "node scripts/test-mesh.js",
     "test:mesh-proxy": "node scripts/test-mesh-proxy.js",

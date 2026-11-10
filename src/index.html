@@ -41,10 +41,13 @@
       <section class="side-sec projects-sec" id="sideProjects">
         <div class="side-sec-head"><h2 data-i18n="manager.projects"></h2><span class="count" id="projectCount">0</span>
           <span class="side-tools">
+            <button class="icon-btn" id="projectView" hidden aria-pressed="false"></button>
             <button class="icon-btn" id="projectOrder" hidden></button>
             <button class="icon-btn" id="newGroup" hidden data-i18n-title="manager.projectGroup.addTitle"><span data-icon="groupAdd"></span></button>
             <button class="icon-btn" id="add" data-i18n-title="manager.addProject"><span data-icon="plus"></span></button>
           </span></div>
+        <!-- By device (renderer.js): only the projects of the chosen computers. -->
+        <div class="dev-chips" id="deviceChips" role="group" data-i18n-aria-label="manager.devices.filter" hidden></div>
         <div class="side-list" id="projects"></div>
       </section>
       <section class="side-sec agents-sec" id="sideAgents">
@@ -109,6 +112,7 @@
 <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
 <script src="workspace-ui.js"></script>
 <script src="nodes-ui.js"></script>
+<script src="device-view.js"></script>
 <script src="clone-ui.js"></script>
 <script src="renderer.js"></script>
 <script src="git-workflow.js"></script>
