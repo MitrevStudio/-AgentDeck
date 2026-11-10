@@ -26,9 +26,15 @@ function createPeers(dir) {
     peers = (Array.isArray(saved?.peers) ? saved.peers : []).filter(p => isObj(p) && ID.test(p.id)).map(clean);
   } catch {}
   function clean(p) {
+    const kind = KINDS.includes(p.kind) ? p.kind : "desktop";
     return {
-      id: p.id, name: typeof p.name === "string" ? p.name.slice(0, 60) : "", kind: KINDS.includes(p.kind) ? p.kind : "desktop",
+      id: p.id, name: typeof p.name === "string" ? p.name.slice(0, 60) : "", kind,
       address: typeof p.address === "string" ? p.address : "", port: Number.isInteger(p.port) ? p.port : 0,
+      // May this peer control this computer (open terminals, run git, write files - mesh/serve.js)? A desktop peer may;
+      // a host (a VPS/relay, or a resource host) may relay and be used as a resource but never reach back into this
+      // computer, so a broken or hostile relay cannot control the machines it connects. Fixed from the peer's kind at
+      // pairing - not spoofable later, since an existing boolean is kept even if the peer re-announces another kind.
+      control: typeof p.control === "boolean" ? p.control : kind === "desktop",
       pairedAt: Number(p.pairedAt) || Date.now(), lastSeen: Number(p.lastSeen) || 0
     };
   }

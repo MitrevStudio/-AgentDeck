@@ -22,6 +22,8 @@
           <label class="vs-toggle" for="nodeDiscoverable"><span><b>${esc(t("settings.nodes.discoverable"))}</b></span><input type="checkbox" id="nodeDiscoverable" class="switch"></label>
           <div class="vs-hint">${esc(t("settings.nodes.discoverableHint"))}</div>
         </div>
+        <label class="vs-label" for="nodeProxy">${esc(t("settings.nodes.proxy"))}</label>
+        <div class="vs-field"><input id="nodeProxy" class="input mono" type="text" spellcheck="false" autocomplete="off" placeholder="http://proxy:8080" style="width:260px"><div class="vs-hint">${esc(t("settings.nodes.proxyHint"))}</div></div>
         <span class="vs-label">${esc(t("settings.nodes.code"))}</span>
         <div class="vs-field">
           <div class="vs-code"><b id="nodeCode"></b><button type="button" class="btn sm" id="nodeNewCode">${icon("refresh")}<span>${esc(t("settings.nodes.newCode"))}</span></button></div>
@@ -108,9 +110,10 @@
     if (document.activeElement !== $("nodePort")) $("nodePort").value = s.port;
     $("nodePortHint").textContent = t("settings.nodes.portHint", { port: s.port });
     $("nodeDiscoverable").checked = s.discoverable;
+    if (document.activeElement !== $("nodeProxy")) $("nodeProxy").value = s.proxy || "";
     $("nodeCode").textContent = s.code.length > 8 ? s.code : `${s.code.slice(0, 3)} ${s.code.slice(3)}`;
     $("nodeAddressHint").textContent = t("settings.nodes.addressHint", { port: s.port });
-    const paired = state.nodes.map(n => nodeRow(n, `${n.status === "online" ? `<button type="button" class="btn sm" data-setup="${esc(n.id)}">${icon("sliders")}<span>${esc(t("settings.nodes.setup"))}</span></button>` : ""}<button type="button" class="btn sm" data-forget="${esc(n.id)}">${icon("x")}<span>${esc(t("settings.nodes.forget"))}</span></button>`)
+    const paired = state.nodes.map(n => nodeRow(n, `${n.relayOnly ? `<span class="tag" title="${esc(t("settings.nodes.relayHint"))}">${esc(t("settings.nodes.relay"))}</span>` : n.status === "online" ? `<button type="button" class="btn sm" data-setup="${esc(n.id)}">${icon("sliders")}<span>${esc(t("settings.nodes.setup"))}</span></button>` : ""}<button type="button" class="btn sm" data-forget="${esc(n.id)}">${icon("x")}<span>${esc(t("settings.nodes.forget"))}</span></button>`)
       + (setupOpen === n.id ? `<div class="vs-setup" id="nodeSetup">${setupHtml()}</div>` : ""));
     $("nodesPaired").innerHTML = paired.join("") || `<div class="vs-hint">${esc(t("settings.nodes.pairedEmpty"))}</div>`;
     const known = new Set(state.nodes.map(n => n.id));
@@ -143,6 +146,7 @@
   $("nodeName").addEventListener("change", async e => apply(await mesh.set({ name: e.target.value })));
   $("nodePort").addEventListener("change", async e => apply(await mesh.set({ port: Number(e.target.value) })));
   $("nodeDiscoverable").addEventListener("change", async e => apply(await mesh.set({ discoverable: e.target.checked })));
+  $("nodeProxy").addEventListener("change", async e => apply(await mesh.set({ proxy: e.target.value })));
   $("nodeNewCode").addEventListener("click", async () => apply(await mesh.newCode()));
   $("nodesPaired").addEventListener("click", async e => {
     const open = e.target.closest("[data-setup]")?.dataset.setup;

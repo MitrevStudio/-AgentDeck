@@ -3,7 +3,12 @@ const { execFile } = require('node:child_process');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { realpathSync } = require('node:fs');
 const { normPath } = require('../shared/util');
+
+// A path as the file system names it - Windows 8.3 short names (C:\Users\RUNNER~1) expanded, links followed - so a path
+// given one way matches the one Git prints; a path that does not exist (any more) is compared as given.
+const real = p => { try { return normPath(realpathSync.native(p)); } catch { return normPath(p); } };
 
 function run(root, args, { limit = 4 * 1024 * 1024, timeout = 120000, input } = {}) {
   return new Promise((resolve, reject) => {
@@ -67,7 +72,8 @@ function createGitActions({ status, refresh, parseStatus, context = () => ({}) }
     }
     const ctx = await context();
     for (const w of list) {
-      const within = cwd => { const a = normPath(cwd), b = normPath(w.path); return a === b || a.startsWith(b + '/'); };
+      const b = real(w.path);
+      const within = cwd => { const a = real(cwd); return a === b || a.startsWith(b + '/'); };
       w.sessions = (ctx.sessions || []).filter(s => within(s.workDir || s.cwd)).map(s => ({ id: s.id, agent: s.agent, title: s.title || s.id }));
       w.active = (ctx.terminals || []).filter(t => !t.exited && within(t.cwd)).map(t => ({ id: t.id, agent: t.agent, title: t.title }));
       w.active.push(...(ctx.live || []).filter(s => within(s.workDir || s.cwd)).map(s => ({ id: s.id, agent: s.agent })));
@@ -192,7 +198,7 @@ function createGitActions({ status, refresh, parseStatus, context = () => ({}) }
       return { ...result, path: destination };
     }
     if (p.action === 'worktree-remove') {
-      const trees = await worktrees(root), item = trees.find(w => normPath(w.path) === normPath(value(p.path)));
+      const trees = await worktrees(root), wanted = real(value(p.path)), item = trees.find(w => real(w.path) === wanted);
       if (!item || item === trees[0] || item.locked || item.bare || item.active.length) throw new Error('Worktree is primary, locked or used by an active session/terminal');
       const state = await current(item.path);
       if (state.files.length || await operations(item.path)) throw new Error('Worktree has uncommitted changes or an unfinished operation');

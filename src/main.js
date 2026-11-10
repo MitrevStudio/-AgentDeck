@@ -379,6 +379,9 @@ links.on("link", async ({ node, up }) => {
     remoteTermsChanged(); // the panes of its terminals say "offline"
     return nodesChanged();
   }
+  // A relay-only peer serves no api: don't fetch sessions/git/terminals from it (they would only be refused). It still
+  // relays, and its events arrive as usual; it simply has nothing of its own to show.
+  if (links.nodes().find(n => n.id === node)?.relayOnly) return nodesChanged();
   try {
     const [data, live, git, tabs, info, usage, limits, resources] = await Promise.all([links.call(node, "sessions.list"), links.call(node, "live.list"), links.call(node, "git.status"), links.call(node, "terminals.list"), links.call(node, "host.info").catch(() => null), links.call(node, "usage.get").catch(() => null), links.call(node, "limits.get").catch(() => null), links.call(node, "resources.get").catch(() => null)]);
     remote.set(node, { ...remote.get(node), data, live, git, info, usage, limits, resources });
@@ -678,7 +681,7 @@ function buildTrayMenu() {
       label: t("tray.autoCompact"), submenu: [
         { label: t("tray.autoCompact.on"), type: "checkbox", checked: p.autoCompact, click: item => prefs.set({ autoCompact: item.checked }) },
         { type: "separator" },
-        ...radio("autoCompactTokens", prefs.AUTO_COMPACT_TOKENS, n => t("tray.autoCompact.from", { n: `${n / 1000}k` }))
+        ...radio("autoCompactTokens", prefs.AUTO_COMPACT_TOKENS, n => n >= 1000000 ? t("tray.autoCompact.max") : t("tray.autoCompact.from", { n: `${n / 1000}k` }))
       ]
     },
     { label: t("tray.settings"), enabled: Boolean(voice), click: () => voice?.openSettings() },
