@@ -3,7 +3,7 @@
 // desktop's code is six digits for people to read off a screen and type. A host's (a relay or a resource host, often
 // reachable from the internet) is long: 128 random bits as 26 Crockford base32 characters in groups of four, which
 // cannot be guessed. A code is made anew after every pairing and after too many wrong tries; how fast codes may be
-// tried at all is pair-guard.js's business.
+// tried at all is pair-guard.js's business, and how a code is shown to be known without sending it pair-proof.js's.
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
@@ -99,19 +99,22 @@ function createPeers(dir, { long: hostCodes = false } = {}) {
     saveToken();
   }
   const code = () => token.code;
-  // true when the code is right; too many wrong tries make a new code, which the user sees in Settings.
-  function check(given) {
+  // A wrong try (links.js: a proof that did not match): too many make a new code, which the user sees in Settings.
+  function miss() {
     const now = Date.now();
     token.tries = token.tries.filter(at => now - at < TRIES_WINDOW_MS);
-    const a = Buffer.from(normCode(given)), b = Buffer.from(normCode(token.code));
-    const ok = a.length === b.length && crypto.timingSafeEqual(a, b);
-    if (ok) return true;
     token.tries.push(now);
     if (token.tries.length >= MAX_TRIES) regenerate({ long: token.long });
-    return false;
+  }
+  // true when the code is right; a wrong one counts as a try.
+  function check(given) {
+    const a = Buffer.from(normCode(given)), b = Buffer.from(normCode(token.code));
+    const ok = a.length === b.length && crypto.timingSafeEqual(a, b);
+    if (!ok) miss();
+    return ok;
   }
 
-  return { list, get, add, update, remove, code, regenerate, setCode, check, ID, KINDS };
+  return { list, get, add, update, remove, code, regenerate, setCode, check, miss, ID, KINDS };
 }
 
 module.exports = { createPeers, ID, KINDS, normCode, isLong };

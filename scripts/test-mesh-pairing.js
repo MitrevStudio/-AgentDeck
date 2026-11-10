@@ -3,7 +3,10 @@
 //   a desktop's stays six digits; codes are read leniently (case, dashes, spaces, I/L/O); a short fixed token is refused;
 // - pair-guard: the wait doubles per wrong code of a source up to 5 minutes, a right code clears it, too many wrong
 //   codes from all sources lock pairing for a minute, and only so many connections may wait to pair;
-// - a connection gets one try: after a wrong code it is closed.
+// - a connection gets one try: after a wrong code it is closed;
+// - the code is proven, never sent (pair-proof.js): the proofs match only for the same code and the same two nodes,
+//   an older "pair" with the code itself is refused, a node in the middle that passes the messages on gets nothing
+//   and is not trusted, and neither is a node that answers without knowing the code.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -14,6 +17,8 @@ const { createLinks } = require("../src/mesh/links");
 const { loadIdentity } = require("../src/mesh/identity");
 const { connect } = require("../src/mesh/client");
 const { createLink } = require("../src/mesh/protocol");
+const { createServer } = require("../src/mesh/server");
+const pairProof = require("../src/mesh/pair-proof");
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "agentdeck-pairing-"));
 const dir = name => { const d = path.join(root, name); fs.mkdirSync(d, { recursive: true }); return d; };
@@ -92,6 +97,26 @@ const LONG = /^([0-9A-HJKMNP-TV-Z]{4}-){6}[0-9A-HJKMNP-TV-Z]{2}$/;
   assert.ok(all.every(Boolean));
   assert.equal(g4.admit("new"), null, "one too many in all");
 
+  // ---------- the proof ----------
+  const idA = "a".repeat(64), idB = "b".repeat(64), idM = "c".repeat(64);
+  const run = (codeA, codeB, seenByA = idB, seenByB = idA) => {
+    const pa = pairProof.start({ code: codeA, initiator: idA, responder: seenByA, role: "initiator" });
+    const pb = pairProof.start({ code: codeB, initiator: seenByB, responder: idB, role: "responder" });
+    const fa = pa.finish(pb.y), fb = pb.finish(pa.y);
+    return pairProof.same(fa.own, fb.expect) && pairProof.same(fb.own, fa.expect);
+  };
+  assert.ok(run("123456", "123456"), "the same code and nodes: both proofs match");
+  assert.ok(run("abcd-efgh io", "ABCDEFGH10"), "codes are read leniently");
+  assert.ok(!run("123456", "123457"), "another code");
+  assert.ok(!run("123456", "123456", idM, idA), "the caller saw another node answer");
+  assert.ok(!run("123456", "123456", idB, idM), "the answering node saw another node call");
+  const pz = pairProof.start({ code: "123456", initiator: idA, responder: idB, role: "initiator" });
+  assert.throws(() => pz.finish("00".repeat(32)), "the neutral element is refused");
+  assert.throws(() => pz.finish("ff".repeat(32)), "not a point");
+  assert.throws(() => pz.finish(""), "nothing");
+  assert.notEqual(pz.y, pairProof.start({ code: "123456", initiator: idA, responder: idB, role: "initiator" }).y, "a new number every time");
+  assert.ok(!pairProof.same(undefined, "ab") && !pairProof.same("a", "ab") && pairProof.same("ab", "ab"));
+
   // ---------- one try per connection ----------
   fs.writeFileSync(path.join(dir("N"), "node.json"), JSON.stringify({ port: 0 }));
   const n = createLinks({ dir: path.join(root, "N"), defaultName: "N", kind: "desktop", version: "test", api: () => ({}), discover: false });
@@ -101,10 +126,94 @@ const LONG = /^([0-9A-HJKMNP-TV-Z]{4}-){6}[0-9A-HJKMNP-TV-Z]{2}$/;
   const closed = new Promise(resolve => ws.once("close", resolve));
   const link = createLink(ws);
   ws.resume?.();
-  await assert.rejects(link.call("pair", { code: "000000" }), e => e.code === "wrongCode");
-  await assert.rejects(link.call("pair", { code: selfN.code }), e => e.code === "closed" || e.code === "pairLater", "no second try on the connection");
+  const wrong = pairProof.start({ code: "000000", initiator: identity.id, responder: selfN.id, role: "initiator" });
+  const first = await link.call("pair.start", { y: wrong.y });
+  await assert.rejects(link.call("pair.finish", { mac: wrong.finish(first.y).own }), e => e.code === "wrongCode");
+  await assert.rejects(link.call("pair.start", { y: wrong.y }), e => e.code === "closed" || e.code === "pairLater", "no second try on the connection");
   await closed;
   assert.equal(n.nodes().length, 0, "nothing paired");
+  assert.equal(n.self().pairFailures.failures, 1);
+  await new Promise(r => setTimeout(r, 1100));
+
+  // An AgentDeck from before the proof sends the code itself: refused (and not counted as a wrong code), as is a
+  // point that would give the same key for any code.
+  const raw = async (method, params) => {
+    const c = (await connect({ identity, address: "127.0.0.1", port: selfN.port })).ws;
+    const l = createLink(c);
+    c.resume?.();
+    try { return await l.call(method, params); } finally { c.terminate(); }
+  };
+  await assert.rejects(raw("pair", { code: selfN.code }), e => e.code === "pairOutdated");
+  await assert.rejects(raw("pair.start", { y: "00".repeat(32) }), e => e.code === "invalidData");
+  await assert.rejects(raw("pair.finish", { mac: "x" }), e => e.code === "pairLater", "no finish without a start");
+  assert.equal(n.self().pairFailures.failures, 1);
+  assert.equal(n.nodes().length, 0);
+
+  // ---------- a node in the middle ----------
+  // M answers at the address the caller was given and passes every message on to N under its own certificate. The
+  // caller's proof is for (caller, M) and N expects one for (M, N): N refuses, M is trusted by nobody, and the code
+  // was never on the wire.
+  fs.writeFileSync(path.join(dir("C"), "node.json"), JSON.stringify({ port: 0 }));
+  const cn = createLinks({ dir: path.join(root, "C"), defaultName: "C", kind: "desktop", version: "test", api: () => ({}), discover: false });
+  await cn.start();
+  const middle = await loadIdentity(dir("middle"), { defaultName: "M" });
+  const seen = [];
+  const relayServer = createServer({ identity: middle, onConnection: async near => {
+    const queue = [];
+    near.on("message", d => queue.push(d.toString("utf8")));
+    const far = (await connect({ identity: middle, address: "127.0.0.1", port: selfN.port })).ws;
+    far.resume?.();
+    const pass = (to, text) => { seen.push(text); to.send(text); };
+    near.removeAllListeners("message");
+    near.on("message", d => pass(far, d.toString("utf8")));
+    far.on("message", d => pass(near, d.toString("utf8")));
+    for (const text of queue) pass(far, text);
+    near.on("close", () => far.terminate());
+    far.on("close", () => near.terminate());
+  } });
+  const middlePort = await relayServer.start(0, "127.0.0.1");
+  const code = n.self().code;
+  await assert.rejects(cn.pair("127.0.0.1", middlePort, code), e => e.code === "wrongCode");
+  assert.ok(seen.length >= 3, "the messages did pass through the node in the middle");
+  assert.ok(!seen.some(text => text.includes(code)), "the code is never sent");
+  assert.equal(cn.nodes().length, 0, "the caller trusts nobody");
+  assert.equal(n.nodes().length, 0, "nor does the node it meant to pair with");
+  relayServer.stop();
+  await new Promise(r => setTimeout(r, 2100));
+
+  // A node that answers but does not know the code (it says yes to anything) is not trusted either.
+  const liar = createServer({ identity: middle, onConnection: near => {
+    createLink(near, { onRequest: method => (method === "pair.start"
+      ? { y: pairProof.start({ code: "999999", initiator: cn.self().id, responder: middle.id, role: "responder" }).y }
+      : { ok: true, mac: "0".repeat(64), id: middle.id, name: "M", kind: "desktop" }) });
+  } });
+  const liarPort = await liar.start(0, "127.0.0.1");
+  await assert.rejects(cn.pair("127.0.0.1", liarPort, code), e => e.code === "pairUnproven");
+  assert.equal(cn.nodes().length, 0, "a node that could not prove the code is not trusted");
+  liar.stop();
+
+  // An older AgentDeck answering (it knows only "pair"): told apart, and the code is not sent to it.
+  const older = createServer({ identity: middle, onConnection: near => {
+    createLink(near, { onRequest: (method, params) => {
+      seen.push(JSON.stringify(params));
+      if (method !== "pair") throw Object.assign(new Error("This node is not paired with yours."), { code: "unpaired" });
+      return { ok: true };
+    } });
+  } });
+  const oldPort = await older.start(0, "127.0.0.1");
+  await assert.rejects(cn.pair("127.0.0.1", oldPort, code), e => e.code === "pairOutdated");
+  assert.ok(!seen.some(text => text.includes(code)), "no code for an older AgentDeck either");
+  older.stop();
+
+  // And the real thing still pairs.
+  const paired = await cn.pair("127.0.0.1", selfN.port, code);
+  assert.equal(paired.id, selfN.id);
+  assert.notEqual(n.self().code, code, "a new code after a pairing");
+  for (let i = 0; i < 100 && !(cn.online(selfN.id) && n.online(cn.self().id)); i++) await new Promise(r => setTimeout(r, 50));
+  cn.forget(selfN.id);
+  cn.stop();
+  await new Promise(r => setTimeout(r, 300));
+  assert.equal(n.nodes().length, 0, "forgotten again");
 
   // ---------- busy: too many waiting from one source get a reason they can show ----------
   const silent = [];
@@ -112,11 +221,11 @@ const LONG = /^([0-9A-HJKMNP-TV-Z]{4}-){6}[0-9A-HJKMNP-TV-Z]{2}$/;
   const extra = (await connect({ identity, address: "127.0.0.1", port: selfN.port })).ws;
   const extraLink = createLink(extra);
   extra.resume?.();
-  await assert.rejects(extraLink.call("pair", { code: selfN.code }), e => e.code === "pairBusy", "busy is answered as pairBusy");
+  await assert.rejects(extraLink.call("pair.start", { y: wrong.y }), e => e.code === "pairBusy", "busy is answered as pairBusy");
   for (const w of silent) w.terminate();
   n.stop();
 
   fs.rmSync(root, { recursive: true, force: true });
-  console.log("pairing: long host codes, lenient reading, weak tokens refused, guard backoff/lock (desktop only)/limits, one try per connection, busy answered OK");
+  console.log("pairing: long host codes, lenient reading, weak tokens refused, guard backoff/lock (desktop only)/limits, one try per connection, the code proven and never sent (middle node, liar, older AgentDeck refused), busy answered OK");
   process.exit(0);
 })().catch(e => { console.error(e); process.exit(1); });

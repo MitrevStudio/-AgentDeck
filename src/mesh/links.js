@@ -12,6 +12,7 @@ const { EventEmitter } = require("node:events");
 const { loadIdentity } = require("./identity");
 const { createPeers } = require("./peers");
 const { createPairGuard } = require("./pair-guard");
+const pairProof = require("./pair-proof");
 const { createServer } = require("./server");
 const { connect } = require("./client");
 const { connectViaProxy } = require("./proxy");
@@ -79,12 +80,20 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
       return null;
     }
     let info = null;
+    // A node this one trusts that pairs again (it forgot this one): the code is asked of it as of anyone, or whoever
+    // answered in this node's place would be trusted for nothing.
+    const again = { key: `peer:${id}`, label: peer.name || id.slice(0, 8) };
+    let repair = null;
     let settleHello;
     const helloSeen = new Promise(r => { settleHello = r; });
     const link = createLink(ws, {
       onRequest: (method, params) => {
-        // A node this one trusts that asks to pair again (it forgot this one): no code needed, it is the same node.
-        if (method === "pair") return { ok: true, id: identity.id, name: identity.settings.name, kind, version, already: true };
+        if (method === "pair" || method.startsWith("pair.")) {
+          if (method === "pair.start") repair = pairing({ id, source: again });
+          const step = repair || pairing({ id, source: again });
+          if (method !== "pair.start") repair = null;
+          return step(method, params, (code, message) => { repair = null; throw new HostError(code, message); });
+        }
         if (!info) throw new HostError("handshake", "The protocol handshake has not completed.");
         if (method.startsWith("relay.")) return relay.request(id, method, params);
         // This computer is a relay only (its installer set no api): it routes traffic but runs no sessions of its own.
@@ -221,8 +230,55 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
     if (!via) return { key: ipv6Net(a) || a || "?", label: a || "?" };
     return { key: `via:${via}`, label: `via ${links.get(via)?.info?.name || via.slice(0, 8)} (${via.slice(0, 8)})` };
   }
-  // An unknown node may only pair: it shows this node's code, and is trusted from then on. One try per connection,
-  // and only as often as pair-guard.js lets that source try.
+  // The answering side of one pairing with node `id` (pair-proof.js): "pair.start" exchanges the points, "pair.finish"
+  // checks the caller's proof of this node's code and answers with this node's own. One try, and only as often as
+  // pair-guard.js lets that source try. address: where the node called from (omitted for one that is known already:
+  // what is kept of it stays). -> (method, params, refuse) => the answer; refuse(code, message) throws.
+  function pairing({ id, source, address, paired = () => {} }) {
+    let session = null, tried = false;
+    return (method, params, refuse) => {
+      // An AgentDeck from before codes were proven sends the code itself.
+      if (method === "pair") refuse("pairOutdated", "That AgentDeck is older and pairs in a way this one no longer accepts. Update it and pair again.");
+      const wait = () => {
+        const may = guard.allowed(source.key);
+        if (!may.ok) refuse("pairLater", `Too many wrong pairing codes; try again in ${Math.ceil(may.waitMs / 1000)} s.`);
+      };
+      if (method === "pair.start") {
+        if (session || tried) refuse("pairLater", "One pairing code per connection.");
+        wait();
+        const code = peers.code();
+        try {
+          const proof = pairProof.start({ code, initiator: id, responder: identity.id, role: "responder" });
+          session = { code, y: proof.y, ...proof.finish(params?.y) };
+        } catch {
+          refuse("invalidData", "That is not a pairing request.");
+        }
+        return { y: session.y };
+      }
+      if (method !== "pair.finish") refuse("unpaired", "This node is not paired with yours.");
+      if (!session || tried) refuse("pairLater", "One pairing code per connection.");
+      tried = true;
+      wait();
+      // The code was replaced meanwhile (another pairing, or too many wrong tries): this try was for the old one.
+      if (session.code !== peers.code()) refuse("wrongCode", "The pairing code is wrong.");
+      if (!pairProof.same(params?.mac, session.expect)) {
+        guard.failed(source.key, source.label);
+        peers.miss();
+        log(`wrong pairing code from ${source.label}`);
+        out.emit("self", self());
+        refuse("wrongCode", "The pairing code is wrong.");
+      }
+      guard.succeeded(source.key);
+      const p = params || {};
+      peers.add({ id, name: String(p.name || "").slice(0, 60), kind: p.kind, ...(address === undefined ? {} : { address: p.routed ? "" : address, port: p.routed ? 0 : Number(p.port) || 0 }) });
+      peers.regenerate();
+      out.emit("self", self());
+      log(`paired with ${p.name || id.slice(0, 8)} (it called)`);
+      paired();
+      return { ok: true, mac: session.own, id: identity.id, name: identity.settings.name, kind, version };
+    };
+  }
+  // An unknown node may only pair: it proves it knows this node's code, and is trusted from then on.
   function onConnection(ws, { id, address, port }) {
     if (!id) {
       ws.close(1008, "no certificate");
@@ -240,7 +296,6 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
       setTimeout(() => { busy.close(1013, "busy"); ws.terminate(); }, BUSY_ANSWER_MS).unref?.();
       return;
     }
-    let tried = false;
     // A client that says nothing in time goes at once (terminate): a graceful close would keep its place until the
     // close handshake times out too.
     const timer = setTimeout(() => { link.close(1008, "unpaired"); ws.terminate(); }, PAIR_TIMEOUT_MS);
@@ -249,36 +304,21 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
       setTimeout(() => link.close(1008, code), 100).unref?.();
       throw new HostError(code, message);
     };
+    const step = pairing({ id, source, address, paired: () => {
+      clearTimeout(timer);
+      // Pairing has its own parser. Reconnect for hello rather than attaching two parsers/heartbeats to one socket.
+      setImmediate(() => { link.close(1000, "paired"); changed(); });
+    } });
     const link = createLink(ws, {
-      onRequest: async (method, params) => {
-        if (method !== "pair") refuse("unpaired", "This node is not paired with yours.");
-        if (tried) refuse("pairLater", "One pairing code per connection.");
-        tried = true;
-        const may = guard.allowed(source.key);
-        if (!may.ok) refuse("pairLater", `Too many wrong pairing codes; try again in ${Math.ceil(may.waitMs / 1000)} s.`);
-        if (!peers.check(params?.code)) {
-          guard.failed(source.key, source.label);
-          log(`wrong pairing code from ${source.label}`);
-          out.emit("self", self());
-          refuse("wrongCode", "The pairing code is wrong.");
-        }
-        guard.succeeded(source.key);
-        clearTimeout(timer);
-        const p = params || {};
-        peers.add({ id, name: String(p.name || "").slice(0, 60), kind: p.kind, address: p.routed ? "" : address, port: p.routed ? 0 : Number(p.port) || 0 });
-        peers.regenerate();
-        out.emit("self", self());
-        log(`paired with ${p.name || id.slice(0, 8)} (it called)`);
-        // Pairing has its own parser. Reconnect for hello rather than attaching two parsers/heartbeats to one socket.
-        setImmediate(() => { link.close(1000, "paired"); changed(); });
-        return { ok: true, id: identity.id, name: identity.settings.name, kind, version };
-      },
+      onRequest: async (method, params) => step(method, params, refuse),
       onClose: () => { clearTimeout(timer); release(); }
     });
   }
 
   // ---------- pairing from here ----------
-  // Pairs with the node at address:port, which must show `code` (its own, from its Settings or its installer).
+  // Pairs with the node at address:port, whose code (from its Settings or its installer) is `code`. The code is not
+  // sent: this node proves it knows it, and the node that answers must prove the same before it is trusted here
+  // (pair-proof.js) - so a node that merely answers at that address, or sits on the way, gets nothing.
   async function pair(address, port, code) {
     const route = relay.list().find(r => r.id === address && r.path.length > 2)?.path;
     const socket = route ? await relay.open(route)
@@ -293,9 +333,16 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
     ws.resume?.();
     let r;
     try {
-      r = await link.call("pair", { code, routed: Boolean(route), name: identity.settings.name, kind, version, port: server?.port() || 0 }, { timeout: PAIR_TIMEOUT_MS });
+      const proof = pairProof.start({ code, initiator: identity.id, responder: id, role: "initiator" });
+      const s = await link.call("pair.start", { y: proof.y }, { timeout: PAIR_TIMEOUT_MS });
+      let proofs;
+      try { proofs = proof.finish(s?.y); } catch { throw new HostError("pairUnproven", "The computer that answered did not prove it knows the pairing code."); }
+      r = await link.call("pair.finish", { mac: proofs.own, routed: Boolean(route), name: identity.settings.name, kind, version, port: server?.port() || 0 }, { timeout: PAIR_TIMEOUT_MS });
+      if (!pairProof.same(r?.mac, proofs.expect)) throw new HostError("pairUnproven", "The computer that answered did not prove it knows the pairing code.");
     } catch (e) {
       link.close();
+      // An AgentDeck from before codes were proven knows only "pair" (and would be sent the code itself).
+      if (e.code === "unpaired" || e.code === "handshake") throw new HostError("pairOutdated", "That AgentDeck is older and pairs in a way this one no longer accepts. Update it and pair again.");
       throw e;
     }
     peers.add({ id, name: String(r?.name || "").slice(0, 60), kind: r?.kind, address: route ? "" : address, port: route ? 0 : port });
@@ -304,7 +351,7 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
     link.close(1000, "paired");
     changed();
     scheduleConnect(id, 0);
-    return { id, name: r?.name || "", kind: r?.kind || "desktop", already: r?.already === true };
+    return { id, name: r?.name || "", kind: r?.kind || "desktop", already: false };
   }
   // tell: the other side hears of it (and forgets this node) before the link closes.
   function forget(id, { tell = true } = {}) {

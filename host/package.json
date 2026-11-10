@@ -11,6 +11,7 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@noble/curves": "^1.9.7",
     "bonjour-service": "^1.4.4",
     "node-pty": "^1.1.0",
     "selfsigned": "^5.5.0",

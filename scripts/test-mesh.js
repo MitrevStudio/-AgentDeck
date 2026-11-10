@@ -69,11 +69,14 @@ const node = (name, api) => {
   await back;
   assert.deepEqual(await a2.call(selfB.id, "ping"), { answered: "B2:ping" });
 
-  // Forgotten on one side only (the peers file edited): pairing again needs no code, the other side still trusts it.
+  // Forgotten on one side only (the peers file edited): pairing again needs the code like the first time - the other
+  // side still trusts this one, but this one must not trust whoever answers there without proof.
   a2.peers().remove(selfB.id);
-  const r2 = await a2.pair("127.0.0.1", b2.self().port, "wrong-code");
+  await assert.rejects(a2.pair("127.0.0.1", b2.self().port, "wrong-code"), e => e.code === "wrongCode");
+  assert.equal(a2.peers().get(selfB.id), null, "nothing trusted after a wrong code");
+  await new Promise(r => setTimeout(r, 1100));
+  const r2 = await a2.pair("127.0.0.1", b2.self().port, b2.self().code);
   assert.equal(r2.id, selfB.id);
-  assert.equal(r2.already, true, "the other side still trusted this one");
   assert.ok(a2.peers().get(selfB.id), "trusted again here");
   assert.deepEqual(await a2.call(selfB.id, "ping"), { answered: "B2:ping" });
 
