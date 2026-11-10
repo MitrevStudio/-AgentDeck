@@ -27,10 +27,11 @@ const BOTTOM_GAP = 24;      // the pill's bottom edge sits this far above the wo
 // Wayland: the compositor places windows, not the application. Under Hyprland the panel's window is found by its
 // title and given a rule of its own: floating at the bottom centre, pinned to every workspace, not focused when shown.
 // Not `no_focus`: Hyprland then gives the window no pointer input either, and the panel's buttons would not click.
+// `no_follow_mouse`: only a click makes it the active window, not the pointer passing over it.
 const WAYLAND = process.platform === "linux";
 const WAYLAND_TITLE = "AgentDeck voice panel";
 const HYPRLAND_RULE = `{ match = { title = "^${WAYLAND_TITLE}$" }, float = true, pin = true, no_initial_focus = true,
-  border_size = 0, no_shadow = true, no_blur = true, no_anim = true, no_dim = true,
+  no_follow_mouse = true, border_size = 0, no_shadow = true, no_blur = true, no_anim = true, no_dim = true,
   size = { ${WIDTH}, ${HEIGHT} }, move = { "((monitor_w-window_w)/2)", "(monitor_h-window_h-${Math.max(0, BOTTOM_GAP - PAD_BOTTOM)})" } }`;
 // A click on the panel makes it the active window; the keyboard goes straight back to the window that had it, which
 // is where a dictation is pasted. The click itself still reaches the panel.
@@ -41,7 +42,7 @@ function keepFocusOffPanel(hypr) {
     if (name === "activewindow") onPanel = data.slice(data.indexOf(",") + 1) === WAYLAND_TITLE;
     else if (name === "activewindowv2" && /^[0-9a-f]+$/i.test(data)) {
       if (!onPanel) last = data;
-      else if (last) hypr.focusWindow(`0x${last}`).catch(() => {});
+      else if (last) hypr.focusWindowInPlace(`0x${last}`).catch(() => {}); // the pointer stays on the panel
     }
   });
 }

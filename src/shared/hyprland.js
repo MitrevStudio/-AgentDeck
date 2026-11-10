@@ -124,6 +124,11 @@ const activeWindow = () => json(requestSync(["-j", "activewindow"])) || null;
 const activeWindowAsync = async () => json(await request("j/activewindow")) || null;
 const clients = async () => json(await request("j/clients")) || [];
 const focusWindow = address => lua(`hl.dispatch(hl.dsp.focus({ window = ${luaString(`address:${address}`)} }))`);
+// The same without moving the mouse pointer, which Hyprland otherwise puts on the newly focused window.
+const focusWindowInPlace = address => lua(`local warps = hl.get_config("cursor.no_warps")
+hl.config({ cursor = { no_warps = true } })
+hl.dispatch(hl.dsp.focus({ window = ${luaString(`address:${address}`)} }))
+hl.config({ cursor = { no_warps = warps } })`);
 
 // Rules for windows of ours (a Lua table's fields as given), kept across config reloads.
 function keepWindowRule(fields) {
@@ -134,5 +139,5 @@ function keepWindowRule(fields) {
 
 module.exports = {
   available, signature, request, requestSync, lua, luaSync, query, luaString, json,
-  onEvent, onReload, activeWindow, activeWindowAsync, clients, focusWindow, keepWindowRule
+  onEvent, onReload, activeWindow, activeWindowAsync, clients, focusWindow, focusWindowInPlace, keepWindowRule
 };
