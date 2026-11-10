@@ -11,6 +11,12 @@ const testProfile = process.env.AGENTDECK_USER_DATA || process.env.ASM_USER_DATA
 const formerProfile = path.join(app.getPath("appData"), "ai-session-manager");
 if (testProfile) app.setPath("userData", path.resolve(testProfile));
 else if (fs.existsSync(formerProfile)) app.setPath("userData", formerProfile);
+// Linux under Wayland: Chromium multiplies the display's scale by the desktop's text scaling factor (GNOME's
+// text-scaling-factor), and a window of a fixed size then draws its page smaller than the window the compositor
+// gives it - the rest stays empty. A factor of 1 leaves only the display's own scale, applied per monitor.
+const wayland = process.platform === "linux" && Boolean(process.env.WAYLAND_DISPLAY)
+  && !/x11/i.test(app.commandLine.getSwitchValue("ozone-platform") || process.env.ELECTRON_OZONE_PLATFORM_HINT || "");
+if (wayland && !app.commandLine.hasSwitch("force-device-scale-factor")) app.commandLine.appendSwitch("force-device-scale-factor", "1");
 const { terminalEnv } = require("./host/terminal-env");
 const { focusSession, allowForeground, terminalWindows, raiseNewTerminal } = require("./terminal-focus");
 const { createLog } = require("./shared/log-file");
@@ -145,9 +151,9 @@ async function reopenTerminal(meta, env) {
   }
   if (meta.agent && meta.sessionId) {
     try {
-      const { command, meta: what } = launch.resumeCommand(meta.agent, meta.sessionId, meta.cwd);
+      const { command, argv, meta: what } = launch.resumeCommand(meta.agent, meta.sessionId, meta.cwd);
       const title = typeof meta.title === "string" && meta.title ? meta.title : what.title;
-      return await launch.openTerminal(meta.cwd, command, { ...what, title }, env, "resume");
+      return await launch.openTerminal(meta.cwd, command, { ...what, title }, env, "resume", argv);
     } catch (e) {
       launchLog(`resuming failed (${e.message}), a shell instead`, `cwd="${meta.cwd}"`);
     }
@@ -239,7 +245,7 @@ const orchestrator = createOrchestrator({
   norm,
   openTerminal: async (cwd, args, meta) => {
     const proxy = await network.terminalProxy().catch(() => null);
-    return launch.openTerminal(cwd, "& " + args.map(promptLaunch.psQuote).join(" "), meta, terminalEnv(process.env, proxy), "centre");
+    return launch.openTerminal(cwd, "& " + args.map(promptLaunch.psQuote).join(" "), meta, terminalEnv(process.env, proxy), "centre", args);
   },
   launchNew: (agent, cwd, prompt) => launchNewWithPrompt(agent, cwd, prompt),
   focusSession: opts => focusSessionAnywhere(opts),
@@ -456,10 +462,10 @@ function getSpaceFor(cwd) {
 const PLACES = ["tab", "right", "down"];
 // A terminal of AgentDeck's own: the command reaches PowerShell encoded, so no quoting of it can break the command
 // line. It opens in a new tab of its project's space, or split off the focused pane (place "right" / "down").
-async function openTab(cwd, command, meta, env, place = "tab") {
+async function openTab(cwd, command, meta, env, place = "tab", argv = null) {
   // A layout still being restored would replace a tab opened meanwhile.
   await restoring;
-  const id = await launch.openTerminal(cwd, command, meta, env, place);
+  const id = await launch.openTerminal(cwd, command, meta, env, place, argv);
   const shown = workspace.getActiveTab();
   if (place !== "tab" && shown) workspace.split(shown.id, id, place);
   else workspace.addTab(getSpaceFor(cwd), id);
@@ -479,12 +485,14 @@ function focusSessionAnywhere(opts) {
 }
 // meta: {title, agent, sessionId} of what runs, for the tab; inTab: an AgentDeck terminal whatever the setting ("Move
 // here", a split); place: where in the window (PLACES).
-async function launchTerminal(cwd, command = null, meta = {}, inTab = false, place = "tab") {
+// argv: the same program as `command`, for a pseudo terminal (Linux: launch.openTerminal).
+async function launchTerminal(cwd, command = null, meta = {}, inTab = false, place = "tab", argv = null) {
   if (!cwd || !fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) throw new Error(t("errors.folderMissing"));
   if (!PLACES.includes(place)) place = "tab";
-  if (inTab || place !== "tab" || prefs.get().sessionsIn === "tabs") {
+  // Windows Terminal is Windows only: elsewhere every session opens in AgentDeck's own terminals.
+  if (inTab || place !== "tab" || prefs.get().sessionsIn === "tabs" || process.platform !== "win32") {
     const proxy = await network.terminalProxy().catch(() => null);
-    return openTab(cwd, command, meta, terminalEnv(process.env, proxy), place);
+    return openTab(cwd, command, meta, terminalEnv(process.env, proxy), place, argv);
   }
   // Pass fixed argument arrays to wt.exe. No user-supplied shell command is evaluated. "-w new" gives the session a
   // window of its own (Settings -> General); "-w 0" adds a tab to the last used window.
@@ -524,8 +532,8 @@ async function launchTerminal(cwd, command = null, meta = {}, inTab = false, pla
   }
 }
 async function launchAgent(agent, id, cwd, inTab = false, place = "tab") {
-  const { command, meta } = launch.resumeCommand(agent, id, cwd);
-  await launchTerminal(cwd, command, meta, inTab, place);
+  const { command, argv, meta } = launch.resumeCommand(agent, id, cwd);
+  await launchTerminal(cwd, command, meta, inTab, place, argv);
   // Only Claude reports when it is ready (live.js), which ends the windows' "Loading".
   if (agent === "Claude") {
     broadcast("launch:started", `${agent}:${id}`);
@@ -533,17 +541,17 @@ async function launchAgent(agent, id, cwd, inTab = false, place = "tab") {
 }
 // Continue fresh: a new Claude session with the earlier one's handoff (launch.handoffCommand).
 async function launchFresh(cwd, handoff, place = "tab") {
-  const { command, meta, undo } = launch.handoffCommand(cwd, handoff);
+  const { command, argv, meta, undo } = launch.handoffCommand(cwd, handoff);
   try {
-    await launchTerminal(cwd, command, meta, false, place);
+    await launchTerminal(cwd, command, meta, false, place, argv);
   } catch (e) {
     undo();
     throw e;
   }
 }
 function launchNew(agent, cwd, place = "tab") {
-  const { command, meta } = launch.newCommand(agent, cwd);
-  return launchTerminal(cwd, command, meta, false, place);
+  const { command, argv, meta } = launch.newCommand(agent, cwd);
+  return launchTerminal(cwd, command, meta, false, place, argv);
 }
 // "Move here": a session running in another terminal is stopped there (launch.takeOverSession) and resumed in an
 // AgentDeck tab.
@@ -554,9 +562,9 @@ async function moveToTab(agent, id) {
 // A new session that starts on a prompt (voice commands, the command centre): the prompt travels in a file the
 // terminal reads and deletes (launch.promptCommand); one whose terminal never started goes at once.
 async function launchNewWithPrompt(agent, cwd, prompt) {
-  const { command, meta, undo } = launch.promptCommand(agent, cwd, prompt);
+  const { command, argv, meta, undo } = launch.promptCommand(agent, cwd, prompt);
   try {
-    await launchTerminal(cwd, command, meta);
+    await launchTerminal(cwd, command, meta, false, "tab", argv);
   } catch (e) {
     undo();
     throw e;
@@ -1104,7 +1112,9 @@ if (!app.requestSingleInstanceLock()) {
     voiceContext.start();
     // Started once the windows are up: the first run copies VoiceTray's history first, and a voice part that cannot
     // start (native module, broken data) must not take the session manager down with it.
-    voiceStarting = Promise.resolve()
+    // Voice needs the platform's hotkeys, focus, synthetic keys and clipboard (voice/native.js): Windows, or Linux
+    // under Hyprland.
+    voiceStarting = !require("./voice/native").supported() ? Promise.resolve() : Promise.resolve()
       .then(() => require("./voice/controller").initVoice({
         balloon, onTrayChanged: buildTrayMenu, icon: makeIcon(64), prefs, showAnswer: a => answerPopup?.show(a),
         // The dictionary may include the projects' names.

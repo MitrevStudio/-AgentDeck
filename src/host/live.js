@@ -37,20 +37,33 @@ function pidAlive(pid) {
   try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; }
 }
 
-// Process creation times in the format Claude Code writes to `procStart`: Windows FILETIME ticks; on Linux and
-// macOS the text of `ps -o lstart=` (LC_ALL=C, TZ=UTC), as it is.
+// Process creation times in the formats Claude Code writes to `procStart`, pid -> [accepted values]: Windows FILETIME
+// ticks; on Linux the start time from /proc/<pid>/stat (clock ticks since boot, what current versions write) and,
+// on Linux and macOS, the text of `ps -o lstart=` (LC_ALL=C, TZ=UTC), as older versions wrote it.
+function procStatStart(pid) {
+  try {
+    // Fields after the command name, which is in parentheses and may hold spaces: starttime is field 22 of the line.
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+    return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19] || null;
+  } catch { return null; }
+}
 function processStartTimes(pids) {
   if (!pids.length) return Promise.resolve(null);
   if (process.platform !== "win32") {
     return new Promise(resolve => {
       execFile("ps", ["-o", "pid=,lstart=", "-p", pids.join(",")], { env: { ...process.env, LC_ALL: "C", TZ: "UTC" }, timeout: 8000 }, (err, stdout) => {
-        if (err && !stdout) return resolve(null);
         const map = new Map();
-        for (const line of String(stdout).split(/\r?\n/)) {
+        for (const line of String(stdout || "").split(/\r?\n/)) {
           const m = /^\s*(\d+)\s+(.+?)\s*$/.exec(line);
-          if (m) map.set(m[1], m[2]);
+          if (m) map.set(m[1], [m[2]]);
         }
-        resolve(map);
+        if (process.platform === "linux") {
+          for (const pid of pids) {
+            const ticks = procStatStart(pid);
+            if (ticks) map.set(String(pid), [...(map.get(String(pid)) || []), ticks]);
+          }
+        }
+        resolve(err && !map.size ? null : map);
       });
     });
   }
@@ -58,7 +71,7 @@ function processStartTimes(pids) {
   return new Promise(resolve => {
     execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { windowsHide: true, timeout: 8000 }, (err, stdout) => {
       if (err && !stdout) return resolve(null);
-      resolve(new Map(String(stdout).trim().split(/\r?\n/).filter(Boolean).map(l => l.trim().split(/\s+/))));
+      resolve(new Map(String(stdout).trim().split(/\r?\n/).filter(Boolean).map(l => { const [pid, start] = l.trim().split(/\s+/); return [pid, [start]]; })));
     });
   });
 }
@@ -68,7 +81,7 @@ async function verifyStarts(entries) {
   if (!todo.length) return;
   const starts = await processStartTimes([...new Set(todo.map(e => e.pid))]);
   if (!starts) return; // cannot verify; fall back to the PID check alone
-  for (const e of todo) startVerified.set(`${e.pid}:${e.procStart}`, starts.get(String(e.pid)) === String(e.procStart));
+  for (const e of todo) startVerified.set(`${e.pid}:${e.procStart}`, (starts.get(String(e.pid)) || []).includes(String(e.procStart)));
 }
 
 // A Claude Code session's transcript, found by its id (remembered once found).

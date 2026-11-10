@@ -28,3 +28,26 @@ jobs:
         run: npx electron-builder --win --dir --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+  # Linux (experimental): the same checks that do not need Windows or a display, and an unpacked build. node-pty is
+  # rebuilt for Electron's ABI, as `npm run setup:linux` does locally.
+  check-linux:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run setup:linux
+      - run: npm run check
+      - run: npm run test:git
+      - run: node scripts/test-remote-state.js
+      - run: node scripts/test-resources.js
+      - run: node scripts/test-codex-live.js
+      - run: node scripts/test-project-sessions.js
+      - run: npm run test:limits
+      - run: npm run test:audit
+      - name: Package (unpacked, no AppImage)
+        run: npx electron-builder --linux --dir --publish never

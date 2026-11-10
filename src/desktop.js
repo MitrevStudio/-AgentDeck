@@ -11,6 +11,8 @@ const FULL_SCREEN = new Set([2, 3, 4]);
 let api;
 function native() {
   if (api !== undefined) return api;
+  // shell32/user32: Windows only. Elsewhere nothing is reported full screen and the session counts as local.
+  if (process.platform !== "win32") return (api = null);
   try {
     const koffi = require("koffi");
     api = {

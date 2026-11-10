@@ -24,6 +24,28 @@ const WIDTH = 380;          // transparent canvas around the pill: room for the 
 const HEIGHT = 236;         // the card with its whole text (shown while the pointer rests on it), or the key hints
 const PAD_BOTTOM = 26;      // transparent room below the pill for its shadow (matches --pad-bottom in overlay.css)
 const BOTTOM_GAP = 24;      // the pill's bottom edge sits this far above the work-area bottom
+// Wayland: the compositor places windows, not the application. Under Hyprland the panel's window is found by its
+// title and given a rule of its own: floating at the bottom centre, pinned to every workspace, not focused when shown.
+// Not `no_focus`: Hyprland then gives the window no pointer input either, and the panel's buttons would not click.
+// `no_follow_mouse`: only a click makes it the active window, not the pointer passing over it.
+const WAYLAND = process.platform === "linux";
+const WAYLAND_TITLE = "AgentDeck voice panel";
+const HYPRLAND_RULE = `{ match = { title = "^${WAYLAND_TITLE}$" }, float = true, pin = true, no_initial_focus = true,
+  no_follow_mouse = true, border_size = 0, no_shadow = true, no_blur = true, no_anim = true, no_dim = true,
+  size = { ${WIDTH}, ${HEIGHT} }, move = { "((monitor_w-window_w)/2)", "(monitor_h-window_h-${Math.max(0, BOTTOM_GAP - PAD_BOTTOM)})" } }`;
+// A click on the panel makes it the active window; the keyboard goes straight back to the window that had it, which
+// is where a dictation is pasted. The click itself still reaches the panel.
+function keepFocusOffPanel(hypr) {
+  let last = null, onPanel = false;
+  return hypr.onEvent((name, data) => {
+    // "activewindow>>class,title" comes first, then "activewindowv2>>address" (hex, without 0x).
+    if (name === "activewindow") onPanel = data.slice(data.indexOf(",") + 1) === WAYLAND_TITLE;
+    else if (name === "activewindowv2" && /^[0-9a-f]+$/i.test(data)) {
+      if (!onPanel) last = data;
+      else if (last) hypr.focusWindowInPlace(`0x${last}`).catch(() => {}); // the pointer stays on the panel
+    }
+  });
+}
 const REVEAL_TIMEOUT_MS = 250; // show anyway if the page has not confirmed the new state by then
 const EXIT_MS = 240;        // the page's exit animation; the window is hidden after it
 const NOTICE_MS = 3500;
@@ -59,6 +81,9 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
   let exitTimer = null;
   let playerId = null;
   let destroyed = false;
+  const hypr = WAYLAND ? require("../shared/hyprland") : null;
+  const stopRule = hypr?.available() ? hypr.keepWindowRule(HYPRLAND_RULE) : () => {};
+  const stopRefocus = hypr?.available() ? keepFocusOffPanel(hypr) : () => {};
 
   const alive = () => Boolean(win && !win.isDestroyed());
   const isOurs = e => alive() && e.sender === win.webContents;
@@ -70,7 +95,8 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
   const NO_SHAPE = [{ x: 0, y: 0, width: 0, height: 0 }];
   let shape = null;
   let loggedState = null;
-  const applyShape = () => { if (alive()) win.setShape(shape || NO_SHAPE); };
+  // Not on Wayland, where a window shape is not supported: the panel's transparent margin takes clicks there.
+  const applyShape = () => { if (alive() && !WAYLAND) win.setShape(shape || NO_SHAPE); };
 
   // Only show() and a new reading bring the window (back): after a renderer crash, or once destroyed at quit, nothing
   // else may conjure one up.
@@ -80,11 +106,12 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
       width: WIDTH, height: HEIGHT,
       show: false, frame: false, transparent: true, backgroundColor: "#00000000", hasShadow: false, thickFrame: false,
       resizable: false, movable: false, minimizable: false, maximizable: false, fullscreenable: false,
-      skipTaskbar: true, focusable: false, alwaysOnTop: true, type: "toolbar", title: "AgentDeck",
+      skipTaskbar: true, focusable: false, alwaysOnTop: true, type: "toolbar", title: WAYLAND ? WAYLAND_TITLE : "AgentDeck",
       webPreferences: { preload: preloadPath, contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false }
     });
     w.setAlwaysOnTop(true, "screen-saver");
-    w.setShape(NO_SHAPE);
+    if (WAYLAND) w.on("page-title-updated", e => e.preventDefault()); // the title is what the Hyprland rule matches
+    else w.setShape(NO_SHAPE);
     // Without this Windows throws every press on the panel away (it never takes focus; see window-clicks.js).
     if (!acceptClicks(w)) diag("clicks unavailable");
     // A crashed page, or one that never loaded, takes its window along; the next show() or reading makes a new one.
@@ -304,6 +331,8 @@ function createOverlay({ preloadPath = path.join(__dirname, "ui", "overlay-prelo
   };
 
   function destroy() {
+    stopRule();
+    stopRefocus();
     destroyed = true;
     hide();
     clearTimeout(exitTimer);

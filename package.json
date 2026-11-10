@@ -10,6 +10,7 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
+    "setup:linux": "node node_modules/electron/install.js && electron-rebuild -f -o node-pty",
     "check": "node scripts/check.js",
     "test:git": "node scripts/test-git-repositories.js && node scripts/test-git-panel.js && node scripts/test-git-diff-ui.js && node scripts/test-git-actions.js && node scripts/test-git-workflow-ui.js",
     "test:git-ui": "node scripts/test-git-ui-electron.cjs",
@@ -26,7 +27,8 @@
     "test:audit": "node scripts/test-audit-regressions.js",
     "test:themes": "node scripts/test-themes.js",
     "dist": "electron-builder --win --publish never",
-    "dist:dir": "electron-builder --win --dir --publish never"
+    "dist:dir": "electron-builder --win --dir --publish never",
+    "dist:linux": "electron-builder --linux --publish never"
   },
   "//": "build.files: soundtouchjs ships a demo page and song (public/) the app never loads. build.asarUnpack: koffi loads its native addon (koffi.node from @koromix/koffi-win32-x64) with process.dlopen, which needs a real file on disk, so both packages stay outside app.asar (resources/app.asar.unpacked). Everything else, the selection worker and the AudioWorklet modules included, loads fine from app.asar.",
   "build": {
@@ -45,7 +47,8 @@
     ],
     "asarUnpack": [
       "node_modules/koffi/**",
-      "node_modules/@koromix/koffi-win32-x64/**"
+      "node_modules/@koromix/koffi-win32-x64/**",
+      "node_modules/node-pty/**"
     ],
     "win": {
       "target": [
@@ -57,6 +60,26 @@
         }
       ],
       "icon": "build/icon.png"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "dir",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "category": "Development",
+      "executableName": "agentdeck",
+      "artifactName": "AgentDeck-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -75,6 +98,7 @@
     ]
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.2.1",
     "electron": "^44.7.2",
     "electron-builder": "^26.17.0"
   },
@@ -87,5 +111,8 @@
     "selfsigned": "^5.5.0",
     "soundtouchjs": "^0.3.0",
     "ws": "^8.22.1"
+  },
+  "optionalDependencies": {
+    "node-pty": "^1.1.0"
   }
 }

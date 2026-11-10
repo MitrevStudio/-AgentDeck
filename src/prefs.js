@@ -27,7 +27,7 @@ const TERMINAL_FONT_SIZES = [11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24];
 const UI_SCALES = [0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5];
 
 const prefs = new EventEmitter();
-const state = { language: "bg", theme: themes.DEFAULT, edgeHandle: true, autoUpdate: true, newWindow: true, sessionsIn: "tabs", autoCompact: true, autoCompactTokens: AUTO_COMPACT_MAX, dayView: false, notify: null, terminalFontSize: 16, uiScale: 1 };
+const state = { language: "bg", theme: themes.DEFAULT, edgeHandle: process.platform === "win32", autoUpdate: true, newWindow: true, sessionsIn: "tabs", autoCompact: true, autoCompactTokens: AUTO_COMPACT_MAX, dayView: false, notify: null, terminalFontSize: 16, uiScale: 1 };
 let sessionsInChosen = false; // the user picked where sessions open (settings or the tray menu)
 let autoCompactTokensChosen = false; // the user picked a compaction threshold, so a stale old default is ignored
 let handleX = 0.5; // the edge handle's centre, as a fraction of the display width
@@ -58,7 +58,8 @@ function load() {
   if (THEMES.includes(ui.theme)) state.theme = ui.theme;
   // Before the handle, `hoverEdge` switched the invisible hover zone it replaces; its choice carries over.
   const handle = isObj(root.edgeHandle) ? root.edgeHandle : {};
-  state.edgeHandle = typeof handle.show === "boolean" ? handle.show : root.hoverEdge !== false;
+  // Off by default outside Windows: a Wayland compositor places the handle's window itself (mid-screen), not at the edge.
+  state.edgeHandle = typeof handle.show === "boolean" ? handle.show : process.platform === "win32" && root.hoverEdge !== false;
   handleX = fraction(handle.x) ?? handleX;
   handleDisplay = Number.isInteger(handle.display) ? handle.display : null;
   state.autoUpdate = ui.autoUpdate !== false;

@@ -86,6 +86,19 @@ The installer targets **Windows x64**, installs for the current user and lets yo
 
 The installer is currently unsigned. If Windows SmartScreen shows a warning, verify that you downloaded it from this repository's Releases page before choosing **More info → Run anyway**.
 
+### Linux AppImage (experimental)
+
+1. Open [GitHub Releases](https://github.com/MitrevStudio/-AgentDeck/releases/latest).
+2. Download `AgentDeck-<version>.AppImage`.
+3. Make it executable and run it:
+
+```bash
+chmod +x AgentDeck-*.AppImage
+./AgentDeck-*.AppImage --ozone-platform=wayland   # leave the flag out under X11
+```
+
+The AppImage targets **Linux x64** and is tested on Wayland under Hyprland. It does not update itself: download the new AppImage from Releases. Start it from a shell, or from a launcher whose environment has the agents (`claude`, `codex`, `opencode`) on `PATH`. Voice tools need Hyprland, `wtype` and `wl-clipboard`; see [Linux desktop](#linux-desktop-experimental) for what differs from Windows.
+
 ### Supported agent versions
 
 AgentDeck supports **only the latest stable releases** of **Claude Code**, **Codex CLI**, and **OpenCode 2.x**. Keep the agents up to date on every connected machine. Older releases and OpenCode 1.x are not supported; we do not maintain legacy storage readers or API compatibility fallbacks.
@@ -103,6 +116,8 @@ Run `npm run test:context` to check context accounting, compaction, subagent iso
 | Component | Needed for |
 | --- | --- |
 | Windows 10/11, x64 | The desktop application and Windows integrations |
+| Linux x64 (experimental) | The desktop application as an AppImage; Wayland/Hyprland is the tested setup |
+| Hyprland, `wtype`, `wl-clipboard` | Voice tools on Linux |
 | Installed, authenticated coding CLI | Starting and resuming that agent's sessions |
 | Windows Terminal (`wt.exe`) | External Windows Terminal mode |
 | Git on the relevant machine | Repository status, branches and clone workflows |
@@ -604,6 +619,25 @@ npm run dist:dir
 
 Outputs are written under `dist/`. The installer is `AgentDeck-Setup-<version>.exe`; the unpacked executable is `dist/win-unpacked/AgentDeck.exe`. Build configuration lives in `package.json`.
 
+### Linux desktop (experimental)
+
+The desktop also runs on Linux x64 (tested on Wayland/Hyprland). Terminals use `node-pty`, built for Electron's ABI:
+
+```bash
+npm ci
+npm run setup:linux   # downloads Electron and rebuilds node-pty for it
+npm start             # add --ozone-platform=wayland on Wayland
+npm run dist:linux    # AppImage and dist/linux-unpacked/
+```
+
+Pushes and pull requests check and package it on Linux too, and every release carries `AgentDeck-<version>.AppImage` (see [Release workflow](#release-workflow)).
+
+On Linux every session opens in AgentDeck's own terminals (there is no Windows Terminal). Focusing external terminal windows, full-screen detection, start at login and automatic updates are Windows only; the edge handle is off by default because a Wayland compositor places its window itself.
+
+Voice runs under **Hyprland** (0.5x, Lua config) and needs `wtype` and `wl-clipboard`. Wayland lets no application grab keys or type into others, so AgentDeck asks Hyprland: its hotkeys are Hyprland bindings added at run time (press and release, so push-to-talk works) and removed at quit, read-aloud and voice edits read the primary selection, and dictation pastes with `wtype` (Ctrl+Shift+V in terminals). A combination Hyprland already binds counts as taken, as on Windows: on Omarchy, Ctrl+Space (the terminal multiplexer prefix) is, so choose another dictation key in Voice settings. Agents must be on the app's `PATH`: start it from a shell, or make sure the launcher's environment includes them.
+
+The voice panel floats, pinned, at the bottom centre through a Hyprland window rule. It does not take the focus when shown or when the pointer passes over it; a click on it works, and the keyboard goes straight back to the window you were in. Wayland gives a window no click-through area, so the panel's transparent margin (380×236 around the pill) takes clicks while it is shown. Under Wayland AgentDeck uses the display's scale only and ignores GNOME's text scaling factor, which otherwise made fixed-size windows draw smaller than their frame; use the interface scale in Settings instead.
+
 The repository version is intentionally `0.0.0-development`. Release automation injects the version associated with the Git tag into the build.
 
 ### Environment variables
@@ -630,7 +664,9 @@ Pushes to `main` run validation and semantic-release. Conventional Commits deter
 
 Automation creates a tag and draft release, builds the Windows installer, uploads the `.exe`, `.blockmap` and `latest.yml`, and then publishes the release. A failed build leaves a draft rather than a published release without its installer.
 
-Pull requests and non-main branches run checks and an unpacked Windows packaging build. See the [CI workflow](.github/workflows/ci.yml) and [release workflow](.github/workflows/release.yml).
+Alongside it, a Linux job builds the AppImage from the same tag and attaches `AgentDeck-<version>.AppImage` and `latest-linux.yml`. It does not hold the release back: the app does not update itself on Linux, so a Linux build failure leaves the Windows release as it is.
+
+Pull requests and non-main branches run checks and an unpacked packaging build on both Windows and Linux. The Linux job skips the Electron UI test (`test:git-ui`), which needs a display. See the [CI workflow](.github/workflows/ci.yml) and [release workflow](.github/workflows/release.yml).
 
 ## Architecture
 
@@ -730,7 +766,7 @@ On Windows, built-in terminals are designed to outlive the desktop. Reopen Agent
 
 ## Current boundaries
 
-- The desktop targets Windows x64. Linux has a headless host without a desktop UI.
+- The desktop targets Windows x64. The Linux desktop (x64 AppImage) is experimental: tested on Wayland under Hyprland, voice tools need Hyprland, and there are no automatic updates, start at login or edge handle. Linux also has a headless host without a desktop UI.
 - Discovery depends on supported CLI storage formats and available metadata.
 - Full-text indexing supports local Claude and Codex transcripts. Remote metadata search does not imply remote transcript full-text search.
 - The command centre currently coordinates local projects and depends on Claude Code.

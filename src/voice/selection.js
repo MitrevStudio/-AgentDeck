@@ -13,7 +13,7 @@
 // ever if it hangs - and the app must stay responsive meanwhile.
 const path = require("node:path");
 const { Worker } = require("node:worker_threads");
-const w = require("./win32");
+const w = require("./native");
 const { sleep } = require("../shared/util");
 const { createLog } = require("../shared/log-file");
 const i18n = require("../i18n");
@@ -141,7 +141,7 @@ async function captureHere(targetHwnd) {
   // Taken after the snapshot, so a format rendered on demand while snapshotting cannot pass for a copy.
   const before = diag.seqBefore = w.clipboardSeq();
   t0 = Date.now();
-  if (!w.sendCopy({ terminal: w.isTerminalClass(w.className(fg)) })) return fail("CopyFailed", diag);
+  if (!(await w.sendCopy({ terminal: w.isTerminalClass(w.className(fg)) }))) return fail("CopyFailed", diag);
 
   const copied = await waitForClipboardChange(before);
   diag.copyMs = Date.now() - t0;
@@ -221,6 +221,7 @@ async function readUia(hwnd) {
 // -> { text, failure: "None"|"NothingSelected"|"FocusChanged"|"KeysHeld"|"CopyFailed", clipboardRestored, message? }
 // Copying never happens at the same time as a delivery: both borrow the clipboard.
 async function capture(target) {
+  if (w.platform === "wayland") return capturePrimary(target);
   const t0 = Date.now();
   const uia = UIA_CLASSES.has(target?.className) ? await readUia(target.hwnd) : null;
   const r = uia?.text.trim() ? { text: uia.text, failure: "None", clipboardRestored: true }
@@ -230,9 +231,23 @@ async function capture(target) {
   return r;
 }
 
+// Wayland: what is selected is the primary selection, read as it is - no keys, no clipboard to borrow and put back.
+// It outlives the highlight in some applications, so it is only taken while the window it came from is still in front.
+async function capturePrimary(target) {
+  const t0 = Date.now();
+  const fg = await w.foregroundHwnd();
+  const r = target?.hwnd && fg !== BigInt(target.hwnd) ? { text: "", failure: "FocusChanged", clipboardRestored: true }
+    : await w.readPrimaryText(MAX_TEXT_CHARS).then(text => (text && text.trim()
+      ? { text, failure: "None", clipboardRestored: true }
+      : { text: "", failure: "NothingSelected", clipboardRestored: true }));
+  logCapture(target, null, { ...r, diag: { read: r.text ? "ok" : "blank" } }, Date.now() - t0);
+  return r;
+}
+
 // The clipboard's text as it is (at most maxChars characters), or null. On the capture's thread, for the same
 // reason as the capture: the application that copied it may render it only now.
 async function clipboardText(maxChars) {
+  if (w.platform === "wayland") return (await w.readClipboardText(maxChars)) || null;
   const r = await w.exclusive(() => inWorker({ op: "text", max: maxChars }, { text: null }));
   return r.text || null;
 }
@@ -258,7 +273,7 @@ function logClipboardRead({ via, chars, ageMs }) {
 const writeLog = createLog("selection.log");
 
 // Starts the thread - and the terminal helper - ahead of the first capture; dispose() ends the thread.
-const warmUp = () => { ensureWorker(); terminalFocus().keepWarm(); };
+const warmUp = () => { if (w.platform === "wayland") return; ensureWorker(); terminalFocus().keepWarm(); };
 function dispose() {
   const t = worker;
   worker = null;
