@@ -263,6 +263,15 @@ function createSessions({ dataDir, home, isExcluded = () => false, untitled = (a
   let lastOpenCode = [], openCodeWarning = "";
 
   // ---------- the scan ----------
+  // The project of a Claude transcript folder (its cwd with every other character than a letter or digit as "-"): the
+  // project whose folder it is, else the one with the longest folder name in it.
+  function getTranscriptProject(reg, projectFolder) {
+    const folder = projectFolder.toLowerCase();
+    const local = reg.projects.filter(p => !p.node);
+    return local.find(p => p.path.replace(/[^a-z0-9]/gi, "-").toLowerCase() === folder)
+      || local.filter(p => folder.includes(path.basename(p.path).toLowerCase()))
+        .sort((a, b) => path.basename(b.path).length - path.basename(a.path).length)[0];
+  }
   function scanTranscripts(reg, found) {
     // Claude Code transcripts. Subagent transcripts live in `subagents/` and cannot be resumed on their own.
     const claudeFiles = walkFiles(CLAUDE_DIR, ".jsonl", [], 0, ["subagents"]);
@@ -270,9 +279,7 @@ function createSessions({ dataDir, home, isExcluded = () => false, untitled = (a
     for (const f of claudeFiles) {
       const s = parseClaude(f);
       if (s) {
-        const projectFolder = path.basename(path.dirname(f));
-        const p = reg.projects.filter(p => !p.node).find(p => projectFolder === p.path.replace(/:/g, "-").replace(/\\/g, "-").replace(/\//g, "-") ||
-          projectFolder.toLowerCase().includes(path.basename(p.path).toLowerCase()));
+        const p = getTranscriptProject(reg, path.basename(path.dirname(f)));
         if (!s.cwd && p) s.cwd = p.path;
         if (s.cwd || p) { s.cwd = s.cwd || p.path; s.projectName = p?.name; }
         found.push(s);
