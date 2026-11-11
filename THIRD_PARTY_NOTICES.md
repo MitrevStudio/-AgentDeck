@@ -19,6 +19,12 @@ are not derived from them.
 | Ayu Mirage | ayu (Ayu Mirage) | Copyright (c) 2016 Ike Kurghinyan | MIT | https://github.com/ayu-theme/vscode-ayu |
 | Gruvbox Dark | Gruvbox Theme (Gruvbox Dark Medium) | Copyright © 2017 JD | MIT | https://github.com/jdinhify/vscode-theme-gruvbox |
 | Solarized Dark | Solarized Dark, as shipped in VS Code; the Solarized palette | Copyright (c) 2015 - present Microsoft Corporation; Copyright (c) 2011 Ethan Schoonover | MIT | https://github.com/microsoft/vscode/tree/main/extensions/theme-solarized-dark, https://github.com/altercation/solarized |
+| One Light | One Light (One Dark Pro) | Copyright (c) 2013-2022 Binaryify | MIT | https://github.com/Binaryify/OneDark-Pro |
+| Tokyo Night Light | Tokyo Night (Tokyo Night Light) | Copyright (c) 2018-present Enkia | MIT | https://github.com/enkia/tokyo-night-vscode-theme |
+| Light Owl | Night Owl (Night Owl Light) | Copyright (c) 2018 Sarah Drasner | MIT | https://github.com/sdras/night-owl-vscode-theme |
+| Ayu Light | ayu (Ayu Light) | Copyright (c) 2016 Ike Kurghinyan | MIT | https://github.com/ayu-theme/vscode-ayu |
+| Catppuccin Latte | Catppuccin for VSCode / Catppuccin palette | Copyright (c) 2021 Catppuccin | MIT | https://github.com/catppuccin/vscode, https://github.com/catppuccin/palette |
+| Solarized Light | Solarized Light, as shipped in VS Code; the Solarized palette | Copyright (c) 2015 - present Microsoft Corporation; Copyright (c) 2011 Ethan Schoonover | MIT | https://github.com/microsoft/vscode/tree/main/extensions/theme-solarized-light, https://github.com/altercation/solarized |
 
 Each of the works above is distributed under the MIT License:
 
