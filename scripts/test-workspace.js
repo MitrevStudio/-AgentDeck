@@ -136,4 +136,13 @@ assert.deepEqual(d.tabs.u, { id: "u", space: "e:/x", name: "", root: { term: "c"
 bad.importState(null, x => x);
 assert.deepEqual(bad.snapshot(), { activeSpace: "", spaces: {}, tabs: {} });
 
+// A pane opened on the left or above goes first in its split (a session dropped on that side of a pane).
+const sides = createWorkspace();
+const st = sides.addTab("e:/app", "m1");
+sides.split(st, "m2", "left");
+assert.deepEqual(getPanes(sides.snapshot().tabs[st].root), ["m2", "m1"]);
+assert.equal(sides.snapshot().tabs[st].root.dir, "right");
+sides.split(st, "m3", "up", "m1");
+assert.deepEqual(getPanes(sides.snapshot().tabs[st].root), ["m2", "m3", "m1"]);
+
 console.log("workspace: all checks passed");

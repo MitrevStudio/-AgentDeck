@@ -459,7 +459,7 @@ function getSpaceFor(cwd) {
   return n;
 }
 // The places a terminal can open: a tab of its own in its space, or beside the shown tab's focused pane.
-const PLACES = ["tab", "right", "down"];
+const PLACES = ["tab", "right", "down", "left", "up"];
 // A terminal of AgentDeck's own: the command reaches PowerShell encoded, so no quoting of it can break the command
 // line. It opens in a new tab of its project's space, or split off the focused pane (place "right" / "down").
 async function openTab(cwd, command, meta, env, place = "tab", argv = null) {
@@ -554,10 +554,10 @@ function launchNew(agent, cwd, place = "tab") {
   return launchTerminal(cwd, command, meta, false, place, argv);
 }
 // "Move here": a session running in another terminal is stopped there (launch.takeOverSession) and resumed in an
-// AgentDeck tab.
-async function moveToTab(agent, id) {
+// AgentDeck tab, or beside the focused pane (place: PLACES).
+async function moveToTab(agent, id, place = "tab") {
   const entry = await launch.takeOverSession(agent, id);
-  await launchAgent(agent, id, entry.cwd, true);
+  await launchAgent(agent, id, entry.cwd, true, place);
 }
 // A new session that starts on a prompt (voice commands, the command centre): the prompt travels in a file the
 // terminal reads and deletes (launch.promptCommand); one whose terminal never started goes at once.
@@ -928,8 +928,8 @@ function registerIpc() {
   handle("prefs:set-view", patch => prefs.set({ terminalFontSize: patch?.terminalFontSize, uiScale: patch?.uiScale }));
   handle("workspace:command", (cmd, args) => runWorkspaceCommand(text(cmd, 32), isObj(args) ? args : {}));
   handle("terminal:attach", id => attachTerm(text(id, 64)));
-  handle("terminal:move", async (agent, id) => {
-    await moveToTab(text(agent), text(id));
+  handle("terminal:move", async (agent, id, place) => {
+    await moveToTab(text(agent), text(id), PLACES.includes(place) ? place : "tab");
     return true;
   });
   // "Stop": a session running without a terminal here, on this computer or on another one (launch.stopSession).

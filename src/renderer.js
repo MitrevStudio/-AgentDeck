@@ -328,7 +328,8 @@ function agentHtml(s, l, toks) {
   const key = sessionKey(s), here = findSessionTab(s);
   const project = isCentreSession(s) ? t("centre.title") : data.projects.find(p => inProject(s, p))?.name || s.cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop();
   const where = s.node ? ` · ${esc(s.nodeName || nodeNameOf(s.node))}` : here ? "" : ` · ${esc(t("manager.agents.outside"))}`;
-  return `<div class="agent ${here ? "here" : ""}" data-key="${esc(key)}" tabindex="0" title="${esc(`${s.title}\n${s.cwd}${s.node ? `\n${s.nodeName || ""}` : ""}`)}">${agentMark(s.agent)}
+  const drag = !s.node && !isCentreSession(s) && (here || isMoveHereOffered(s)) ? 'draggable="true"' : "";
+  return `<div class="agent ${here ? "here" : ""}" data-key="${esc(key)}" tabindex="0" ${drag} title="${esc(`${s.title}\n${s.cwd}${s.node ? `\n${s.nodeName || ""}` : ""}`)}">${agentMark(s.agent)}
       <div class="agent-main"><div class="agent-title">${hl(s.title, toks)}</div><div class="agent-sub">${esc(project)}${where}</div></div>
       ${statusMark(l, isLoading(key, l))}
       <span class="agent-tools"><button class="icon-btn" data-action="agent-menu" title="${esc(t("manager.agents.more"))}" aria-haspopup="menu">${icon("more")}</button></span></div>
@@ -1001,6 +1002,12 @@ $("agents").addEventListener("click", async e => {
   const row = e.target.closest(".agent");
   if (row) showTerminal(sessionByKey(row.dataset.key)).catch(err => toast(err.message, true));
 });
+// A running session dragged onto the terminals (workspace-ui.js dropSession).
+$("agents").addEventListener("dragstart", e => {
+  const row = e.target.closest?.(".agent[draggable]");
+  if (row) startSessionDrag(row.dataset.key, e);
+});
+$("agents").addEventListener("dragend", endDrag);
 $("agents").addEventListener("contextmenu", e => {
   const row = e.target.closest(".agent");
   if (!row) return;

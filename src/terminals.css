@@ -70,6 +70,7 @@
 .pane.drop-right::after { left: 50%; }
 .pane.drop-up::after { bottom: 50%; }
 .pane.drop-down::after { top: 50%; }
+.pane.drop-center::after { inset: 20%; }
 .pane-head {
   flex: none; display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 4px 0 10px;
   border-bottom: 1px solid var(--line); background: var(--panel); font-size: 12.5px; color: var(--muted);
