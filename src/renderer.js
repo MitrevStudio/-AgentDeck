@@ -381,10 +381,15 @@ function renderSpaceEmpty(el, key) {
       ${getInstalledAgents().map(a => `<button class="btn" data-new="${esc(a)}" title="${esc(t("ws.newAgentTitle", { agent: a, key: getNewAgentKey(a) }))}">${icon(`agent${a}`)}${esc(a)}</button>`).join("")}
     </div>
     ${recent.length ? `<p class="se-label">${esc(t("ws.sessions"))}<span class="se-hint">${esc(t("ws.sessionsHint"))}</span></p>${recent.map(s => `<div class="se-row" data-key="${esc(sessionKey(s))}" tabindex="0">
-      ${agentMark(s.agent)}<span class="se-title" title="${esc(s.title)}">${esc(s.title)}</span>${getContextChip(s)}
+      ${agentMark(s.agent)}<span class="se-title" title="${esc(s.title)}">${esc(s.title)}</span>${getContextChip(s)}${getLiveMark(s)}
       <span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span>
       <span class="se-acts">${liveOf(s) ? `<button class="btn sm" data-action="show-terminal">${icon("raise")}${esc(t("term.show"))}</button>` : getSessionActions(s)}</span></div>`).join("")}` : ""}
   </div>`);
+}
+// A running session's state (working, waiting for you, ready), as the agents list shows it.
+function getLiveMark(s) {
+  const l = liveOf(s);
+  return l ? statusMark(l, isLoading(sessionKey(s), l)) : "";
 }
 // A menu for starting a terminal or agent in the shown space.
 function openNewMenu(btn) {
@@ -512,12 +517,13 @@ function updateLiveTexts() {
   });
 }
 
-// key: a project's normalized path (its space comes up), or "g:<id>" for a group (it folds or opens).
+// key: a project's normalized path (its space comes up with all its sessions), or "g:<id>" for a group (it folds or
+// opens). The command centre's space is its one terminal.
 function selectProject(key) {
   if (key.startsWith("g:")) return toggleCollapsed(key.slice(2));
   ui.selected = key;
   render();
-  runWorkspace("space", { space: key });
+  runWorkspace("space", { space: key, sessions: key !== CENTRE });
 }
 
 // place: "tab" (a new tab of its project) or "right" (beside the focused pane).
