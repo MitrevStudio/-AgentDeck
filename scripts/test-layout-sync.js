@@ -7,6 +7,7 @@ const { EventEmitter } = require('node:events');
 const { createLayout } = require('../src/mesh/layout');
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'layout-sync-'));
 const ids = ['a', 'b', 'c'].map(x => x.repeat(64));
+const RELAY = 'e'.repeat(64);
 const machines = [], queue = [];
 function machine(i) {
   const links = new EventEmitter(), id = ids[i], dir = path.join(root, id);
@@ -16,7 +17,9 @@ function machine(i) {
   links.self = () => ({ id }); links.identity = () => ({ dir });
   links.nodes = () => ids.filter(x => x !== id).map(id => ({ id }));
   links.notify = (to, name, value) => queue.push({ from: id, to, name, data: structuredClone(value) });
-  links.notifyAll = (name, value) => ids.filter(x => x !== id).forEach(to => links.notify(to, name, value));
+  // links.js sees(): the peers that may see this computer - here every machine but RELAY (a relay host).
+  links.sees = node => node !== RELAY;
+  links.notifyAll = (name, value) => ids.filter(x => x !== id && links.sees(x)).forEach(to => links.notify(to, name, value));
   const m = { id, links, registry, online: true };
   m.layout = createLayout({ links, registry });
   m.edit = f => { const before = registry.read(), after = structuredClone(before); f(after); m.layout.capture(before, after); registry.save(after); };
@@ -57,6 +60,15 @@ try {
   assert.ok(!b.registry.read().projects.some(p => p.node === c.id), "removal survives restart");
   a.layout.restoreNode(c.id); flush();
   assert.equal(c.registry.read().projects.filter(p => !p.node).length, 1);
+  // A relay (a host peer, links.js sees() false) is sent no layout when its link comes up, and what it sends is ignored:
+  // it may not hide a computer or rename projects here.
+  queue.length = 0;
+  a.links.emit('link', { node: RELAY, up: true });
+  assert.ok(!queue.some(e => e.to === RELAY), 'no layout to a relay');
+  const forged = { [`node:${b.id}`]: { clock: 1e9, actor: RELAY, value: true } };
+  a.links.emit('event', { node: RELAY, name: 'layout.sync', data: forged });
+  assert.ok(a.registry.read().projects.some(p => p.node === b.id), 'a layout from a relay is ignored');
+  assert.ok(!a.layout.isRemoved(b.id));
   const src = fs.readFileSync(path.join(__dirname, '../src/renderer.js'), 'utf8');
   const toggle = src.match(/async function toggleOrder\(\) \{[\s\S]*?\n\}/)[0];
   const saved = ['B', 'A'];

@@ -20,8 +20,9 @@ function mergeNodes(raw, live) {
   return { raw: { ...raw, sessions }, live: merged };
 }
 
+// A phone (kind "mobile") is no computer: main leaves phones out, and so does this list should one come.
 function setNodes(list) {
-  nodes = (list || []).map(n => {
+  nodes = (list || []).filter(n => n?.kind !== "mobile").map(n => {
     const liveMap = new Map((n.status === "online" ? n.live || [] : []).map(l => [sessionKey(l), l]));
     const view = n.data ? buildData(n.data, liveMap) : { projects: [], sessions: [], groups: [] };
     return { ...n, view, liveMap };

@@ -456,7 +456,7 @@ Run a host manually:
 node host/bin/agentdeck-host.js run --name dev-host --port 7421
 ```
 
-Supported run options include `--data-dir`, `--port`, `--name`, `--pair-token`, `--no-discovery` and `--interface`.
+Supported run options include `--data-dir`, `--port`, `--name`, `--pair-token`, `--no-discovery` and `--interface`; `agentdeck-host.js --help` lists every command and option (an unknown one is refused).
 
 Installer variables include `AGENTDECK_BRANCH`, `AGENTDECK_REPO`, `AGENTDECK_APP` and `AGENTDECK_DATA`. The installer manages its checkout and can reset it to the selected remote branch when rerun; keep personal code changes in a separate checkout.
 

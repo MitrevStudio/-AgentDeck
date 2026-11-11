@@ -45,3 +45,16 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## QR code encoder
+
+The QR code of Settings → Computers → Phones → "Add phone" (`src/voice/ui/settings-nodes.js`) is made by
+qrcode-generator, loaded from `node_modules/qrcode-generator/dist/qrcode.js` and run unchanged, on the computer itself.
+
+| Used for | Upstream | Copyright | Licence | Source |
+| --- | --- | --- | --- | --- |
+| The phone pairing QR code | qrcode-generator 2.0.4 | Copyright (c) 2009 Kazuhiko Arase | MIT | https://github.com/kazuhikoarase/qrcode-generator |
+
+It is distributed under the MIT License, whose text is the one above (with the copyright holder listed here).
+
+The word "QR Code" is a registered trademark of DENSO WAVE INCORPORATED.

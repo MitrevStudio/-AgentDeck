@@ -92,8 +92,8 @@ const parseJson = text => {
 };
 
 // onData(id, data, end), onChange(tabs): to the manager window. onExit(id, code, lost): the program ended (lost: its
-// DockPty went away without saying so - killed, or Windows shutting down).
-function createTerminals({ userDataDir, onData, onExit, onChange }) {
+// DockPty went away without saying so - killed, or Windows shutting down). onResize(id, cols, rows): its size changed.
+function createTerminals({ userDataDir, onData, onExit, onChange, onResize = () => {} }) {
   const terminals = new Map();
   const registryDir = path.join(userDataDir, "terminals");
   // Terminals left running by an AgentDeck whose DockPty speaks another protocol: not attached, but stopped with the
@@ -257,11 +257,12 @@ function createTerminals({ userDataDir, onData, onExit, onChange }) {
       handleExit(terminal, -1, true);
     }
   }
-  // owner: the id of the peer that opened it (mesh), "" for this computer's own.
+  // owner: the id of the peer that opened it (mesh), "" for this computer's own. cols, rows: its size as last set here
+  // (one attached again after a restart counts as the default until a pane sizes it).
   function createTerminal({ id, pid, token, cwd, title, agent = "", sessionId = "", agentOnly = false, codexLog = "", owner = "", createdAt = Date.now() }) {
     return {
       id, pid, token, cwd, title, agent, sessionId, agentOnly, codexLog, owner, createdAt, socket: null, chunks: [], chunkChars: 0, modes: new Map(), end: 0,
-      exitCode: null, lost: false, closed: false, lastInputAt: 0, note: ""
+      exitCode: null, lost: false, closed: false, lastInputAt: 0, note: "", cols: DEFAULT_COLS, rows: DEFAULT_ROWS
     };
   }
 
@@ -372,14 +373,20 @@ function createTerminals({ userDataDir, onData, onExit, onChange }) {
     if (!terminal || !(cols > 0) || !(rows > 0)) {
       return;
     }
+    const c = Math.min(Math.floor(cols), MAX_SIZE), r = Math.min(Math.floor(rows), MAX_SIZE);
     const payload = Buffer.alloc(4);
-    payload.writeInt16LE(Math.min(Math.floor(cols), MAX_SIZE), 0);
-    payload.writeInt16LE(Math.min(Math.floor(rows), MAX_SIZE), 2);
+    payload.writeInt16LE(c, 0);
+    payload.writeInt16LE(r, 2);
     write(terminal, FRAME_RESIZE, payload);
+    if (terminal.cols !== c || terminal.rows !== r) {
+      terminal.cols = c;
+      terminal.rows = r;
+      onResize(id, c, r);
+    }
   }
   function attach(id) {
     const terminal = terminals.get(id);
-    return terminal ? { scrollback: getScrollback(terminal), end: terminal.end, exitCode: terminal.exitCode } : null;
+    return terminal ? { scrollback: getScrollback(terminal), end: terminal.end, exitCode: terminal.exitCode, cols: terminal.cols, rows: terminal.rows } : null;
   }
   // Ends the terminal (its program tree with it) and forgets it.
   function close(id) {

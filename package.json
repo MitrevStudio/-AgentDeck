@@ -24,6 +24,12 @@
     "test:mesh-proxy": "node scripts/test-mesh-proxy.js",
     "test:mesh-relay-only": "node scripts/test-mesh-relay-only.js",
     "test:host-pair": "node scripts/test-host-pair.js",
+    "test:noise": "node scripts/test-noise.js",
+    "test:web-link": "node scripts/test-web-link.js",
+    "test:phone-invites": "node scripts/test-phone-invites.js",
+    "test:web-hardening": "node scripts/test-web-hardening.js",
+    "test:mobile-provider": "node scripts/test-mobile-provider.js",
+    "test:shared-terminals": "node scripts/test-shared-terminals.js",
     "test:limits": "node scripts/test-limits.js",
     "test:live": "node scripts/test-live-jobs.js",
     "test:context": "node scripts/test-session-context.js && node scripts/test-opencode-sessions.js",
@@ -106,12 +112,15 @@
     "electron-builder": "^26.17.0"
   },
   "dependencies": {
+    "@noble/ciphers": "^1.3.0",
     "@noble/curves": "^1.9.7",
+    "@noble/hashes": "^1.8.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "bonjour-service": "^1.4.4",
     "electron-updater": "^6.8.10",
     "koffi": "^3.3.3",
+    "qrcode-generator": "^2.0.4",
     "selfsigned": "^5.5.0",
     "soundtouchjs": "^0.3.0",
     "ws": "^8.22.1"

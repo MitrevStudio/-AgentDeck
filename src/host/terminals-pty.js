@@ -1,15 +1,16 @@
 // The host's own terminals on Linux (and macOS): a pseudo terminal per program through node-pty, children of the
 // host's process - they end with it, and the next start opens the panes anew (agents resume their sessions). The
 // same interface as terminals.js (DockPty, Windows): open, restore, input, type, resize, attach, close, stopAll,
-// detachAll, link, getTabs, getUnlinkedTabs, countRunning. The scrollback is kept here, as chunks, with `end` the
-// output's length so far (what a window attaching midway skips).
+// detachAll, link, getTabs, getUnlinkedTabs, countRunning; onResize(id, cols, rows) when a size changed. The
+// scrollback is kept here, as chunks, with `end` the output's length so far (what a window attaching midway skips),
+// and the size as last set (attach answers both).
 const crypto = require("node:crypto");
 const os = require("node:os");
 
 const SCROLLBACK_CHARS = 512 * 1024;
 const DEFAULT_COLS = 120, DEFAULT_ROWS = 32, MAX_SIZE = 1000;
 
-function createTerminals({ onData, onExit, onChange }) {
+function createTerminals({ onData, onExit, onChange, onResize = () => {} }) {
   const terminals = new Map();
   let pty = null;
   const getPty = () => (pty ??= require("node-pty"));
@@ -34,7 +35,7 @@ function createTerminals({ onData, onExit, onChange }) {
     const [file, ...args] = argv?.length ? argv : [shell(), "-l"];
     const id = crypto.randomUUID();
     const proc = getPty().spawn(file, args, { name: "xterm-256color", cols: DEFAULT_COLS, rows: DEFAULT_ROWS, cwd, env: { ...env, AGENTDECK_TERMINAL: id } });
-    const terminal = { id, proc, pid: proc.pid, cwd, title, agent, sessionId, agentOnly, codexLog, owner, createdAt: Date.now(), chunks: [], chunkChars: 0, end: 0, exitCode: null, closed: false, lastInputAt: 0, note: "" };
+    const terminal = { id, proc, pid: proc.pid, cwd, title, agent, sessionId, agentOnly, codexLog, owner, createdAt: Date.now(), chunks: [], chunkChars: 0, end: 0, exitCode: null, closed: false, lastInputAt: 0, note: "", cols: DEFAULT_COLS, rows: DEFAULT_ROWS };
     terminals.set(id, terminal);
     proc.onData(data => {
       terminal.end += data.length;
@@ -72,11 +73,17 @@ function createTerminals({ onData, onExit, onChange }) {
   function resize(id, cols, rows) {
     const terminal = terminals.get(id);
     if (!terminal || !(cols > 0) || !(rows > 0) || terminal.exitCode !== null) return;
-    try { terminal.proc.resize(Math.min(Math.floor(cols), MAX_SIZE), Math.min(Math.floor(rows), MAX_SIZE)); } catch {}
+    const c = Math.min(Math.floor(cols), MAX_SIZE), r = Math.min(Math.floor(rows), MAX_SIZE);
+    try { terminal.proc.resize(c, r); } catch { return; }
+    if (terminal.cols !== c || terminal.rows !== r) {
+      terminal.cols = c;
+      terminal.rows = r;
+      onResize(id, c, r);
+    }
   }
   function attach(id) {
     const terminal = terminals.get(id);
-    return terminal ? { scrollback: terminal.chunks.join("").slice(-SCROLLBACK_CHARS), end: terminal.end, exitCode: terminal.exitCode } : null;
+    return terminal ? { scrollback: terminal.chunks.join("").slice(-SCROLLBACK_CHARS), end: terminal.end, exitCode: terminal.exitCode, cols: terminal.cols, rows: terminal.rows } : null;
   }
   function close(id) {
     const terminal = terminals.get(id);

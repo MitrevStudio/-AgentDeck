@@ -3,6 +3,15 @@
 // attached, its keystrokes and sizes taken back. What changes here is pushed to every connected peer. The same for
 // Electron's main process (its windows look on too) and for the headless host (host/bin), which has nothing else.
 //
+// The wide view (a phone, docs/MOBILE.md): a peer that asks for terminals.list { all: true } sees every terminal
+// here - this computer's own (owner "") and other peers' - and may attach to, type into, size, send to and close any
+// of them, until its link drops. A peer that never asks (a desktop) keeps seeing and driving only the terminals it
+// opened. Only a request reaches the wide view, and requests are refused to a peer without control (links.js), so a
+// relay-only peer's frames never reach a terminal that is not its own. Wide peers also hear "terminal.size" for the
+// terminals they are attached to; one that sized a terminal (the user's "fit to phone") and lets go of it hands the
+// size back to the pane that shows it: "terminal:refit" on the host for this computer's own terminals, the event
+// "terminal.refit" { id } to the peer that owns it otherwise.
+//
 // createServed({ host, env }) -> { api, attach(links) }: api(method, params, peer) answers a peer's request;
 // attach(links) hooks the host's events to the links once they exist.
 const { HostError } = require("../host/errors");
@@ -10,6 +19,8 @@ const { terminalEnv } = require("../host/terminal-env");
 const frames = require("./frames");
 const { savePaste, MAX_BYTES } = require("../host/paste");
 const { localSnapshot } = require("./projects");
+const { SESSION_ID, isAgent } = require("../host/launch");
+const { TEXT_MAX } = require("../host/send-text");
 
 const LIVE_MS = 3000;
 
@@ -21,16 +32,29 @@ const str = (v, max) => {
 // host: host/index.js; env(): the environment for a terminal opened for a peer (a promise; with the proxy, on a
 // desktop); info(): what host.info adds (the node's own description comes from the links).
 function createServed({ host, env = async () => terminalEnv(process.env), info = () => ({}) }) {
-  const { terminals, launch, sessions, liveSessions, git, setup } = host;
+  const { terminals, launch, sendText, sessions, liveSessions, git, setup } = host;
   const path = require("node:path");
   const fs = require("node:fs");
   let links = null, layout = null;
   const watchers = new Map(); // terminal id -> Set of peer ids attached to it
+  const wide = new Set();     // peers with the wide view (terminals.list { all: true }) on their current link
+  const sizedBy = new Map();  // terminal id -> the wide peer whose size it has, when that peer does not own it
   const peerTabs = peer => terminals.getTabs().filter(x => x.owner === peer);
+  const mayUse = (tab, peer) => tab.owner === peer || wide.has(peer);
   function ownTerm(id, peer) {
-    const tab = terminals.getTabs().find(x => x.id === id && x.owner === peer);
+    const tab = terminals.getTabs().find(x => x.id === id && mayUse(x, peer));
     if (!tab) throw new HostError("invalidData", "Not a terminal of yours here.");
     return tab;
+  }
+  // The peer let go of the terminal (detached, or its link dropped): a size it set goes back to the pane that shows
+  // the terminal, which sends its own fit again. Nothing when another size came since (sizedBy is dropped then).
+  function release(id, peer) {
+    if (sizedBy.get(id) !== peer) return;
+    sizedBy.delete(id);
+    const tab = terminals.getTabs().find(x => x.id === id);
+    if (!tab || tab.exited) return;
+    if (tab.owner === "") host.emit("terminal:refit", { id });
+    else if (tab.owner !== peer && links?.online(tab.owner)) links.notify(tab.owner, "terminal.refit", { id });
   }
 
   // The folder joins the projects once the clone has made it (a failed clone leaves nothing behind); given up after
@@ -65,7 +89,22 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
     "resources.get": () => host.resources.get() || host.resources.refresh(),
     // A session running here without a terminal of this host's own, ended for a peer (launch.stopSession).
     "sessions.stop": p => launch.stopSession(str(p?.agent, 16), str(p?.id, 200)),
-    "terminals.list": (_p, peer) => peerTabs(peer.id),
+    // A session's last messages and a few facts about it (host/session-preview.js): {agent, id} -> the preview (at
+    // most a few messages of a bounded length), or null when there is nothing to read. A session started since the
+    // last scan is looked up by its id.
+    "sessions.preview": p => {
+      const agent = str(p?.agent, 16), id = str(p?.id, 200);
+      if (!isAgent(agent) || !SESSION_ID.test(id)) throw new HostError("invalidSession");
+      const s = sessions.get()?.sessions.find(x => x.agent === agent && x.id === id)
+        ?? { agent, id, file: agent === "Claude" ? host.findTranscript(id) : "" };
+      return host.preview(s);
+    },
+    // {all}: true -> every terminal here, and the wide view for this link (above); otherwise those the peer opened.
+    "terminals.list": (p, peer) => {
+      if (p?.all !== true) return peerTabs(peer.id);
+      wide.add(peer.id);
+      return terminals.getTabs();
+    },
     // {cwd, kind: "shell" | "new" | "resume" | "prompt", agent, sessionId, prompt} -> the tab, opened here for the peer.
     "terminals.open": async (p, peer) => {
       const cwd = str(p?.cwd, 4096);
@@ -84,8 +123,22 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
       watchers.get(tab.id).add(peer.id);
       return terminals.attach(tab.id);
     },
-    "terminals.detach": (p, peer) => { watchers.get(str(p?.id, 64))?.delete(peer.id); return true; },
+    "terminals.detach": (p, peer) => {
+      const id = str(p?.id, 64);
+      watchers.get(id)?.delete(peer.id);
+      release(id, peer.id);
+      return true;
+    },
     "terminals.close": (p, peer) => terminals.close(ownTerm(str(p?.id, 64), peer.id).id),
+    // {id, text}: the text typed into the agent in that terminal and submitted (host/send-text.js), as the command
+    // centre's send_to_session does. Refused (agentNotReady) unless an agent runs there and waits for input.
+    "terminals.send": async (p, peer) => {
+      const tab = ownTerm(str(p?.id, 64), peer.id);
+      const text = str(p?.text, TEXT_MAX);
+      if (!tab.agent) throw new HostError("agentNotReady");
+      await sendText.typeLine(tab.id, text);
+      return true;
+    },
     // A repository cloned here, a branch, an agent on a prompt: a terminal in the folder above `dir` (made when it
     // is not there), and the folder listed as a project. -> the tab, with the folder.
     "repo.clone": async (p, peer) => {
@@ -123,9 +176,19 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
     });
     host.on("terminals", tabs => {
       for (const id of watchers.keys()) if (!tabs.some(x => x.id === id)) watchers.delete(id);
-      // Each peer hears of its own terminals here.
-      for (const n of links.nodes()) if (n.status === "online") links.notify(n.id, "terminals", tabs.filter(x => x.owner === n.id));
+      for (const id of sizedBy.keys()) if (!tabs.some(x => x.id === id)) sizedBy.delete(id);
+      // Each peer hears of its own terminals here; one with the wide view, of all of them. A peer that may not see
+      // this computer (a host: links.js sees) can have none here, and hears nothing.
+      for (const n of links.nodes()) if (n.status === "online" && links.sees(n.id)) links.notify(n.id, "terminals", wide.has(n.id) ? tabs : tabs.filter(x => x.owner === n.id));
     });
+    // A terminal's new size, to the wide peers attached to it (they draw at the host's size). Whoever sized it last
+    // holds the size now: a wide peer's own resize marks itself just after this (links.on("binary") below).
+    host.on("terminal:size", ({ id, cols, rows }) => {
+      sizedBy.delete(id);
+      for (const peer of watchers.get(id) || []) if (wide.has(peer)) links.notify(peer, "terminal.size", { id, cols, rows });
+    });
+    // What this computer has and does, to the peers that may see it (links.js notifyAll: desktops and phones, never a
+    // relay or a resource host).
     host.on("data", data => links.notifyAll("data", localSnapshot(data)));
     host.on("git", g => links.notifyAll("git", g));
     host.on("usage", u => links.notifyAll("usage", u));
@@ -143,16 +206,23 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
         links.notifyAll("live", live);
       }
     }, LIVE_MS).unref();
-    // A peer's keystrokes and sizes for its terminals here.
+    // A peer's keystrokes and sizes for its terminals here (any terminal, with the wide view).
     links.on("binary", ({ node, data }) => {
       const f = frames.decode(data);
       if (!f || f.type === "output") return;
-      if (!terminals.getTabs().some(x => x.id === f.id && x.owner === node)) return;
+      const tab = terminals.getTabs().find(x => x.id === f.id);
+      if (!tab || !mayUse(tab, node)) return;
       if (f.type === "input") terminals.input(f.id, f.data);
-      else terminals.resize(f.id, f.cols, f.rows);
+      else {
+        terminals.resize(f.id, f.cols, f.rows);
+        if (wide.has(node) && tab.owner !== node) sizedBy.set(f.id, node);
+      }
     });
     links.on("link", ({ node, up }) => {
-      if (!up) for (const peers of watchers.values()) peers.delete(node);
+      if (up) return;
+      for (const peers of watchers.values()) peers.delete(node);
+      for (const [id, peer] of [...sizedBy]) if (peer === node) release(id, node);
+      wide.delete(node);
     });
   }
 

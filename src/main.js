@@ -75,6 +75,8 @@ host.on("data", data => broadcast("data:changed", data));
 host.on("usage", u => broadcast("usage:changed", u));
 host.on("git", g => broadcast("git:changed", g));
 host.on("terminal:data", d => sendToManager("terminal:data", d));
+// A peer (a phone) that sized one of this computer's terminals let go of it: the pane sends its own size again.
+host.on("terminal:refit", ({ id }) => sendToManager("terminal:refit", id));
 // A program that ends takes its pane with it, as in Herdr. A terminal lost with its DockPty (killed, or Windows
 // shutting down first) keeps its pane, which opens anew on the next start.
 host.on("terminal:exit", ({ id, lost }) => { if (lost) terminals.setNote(id, t("term.lost")); else terminals.close(id); });
@@ -341,10 +343,35 @@ async function remoteLaunch(node, args) {
 const served = createServed({ host, env: async () => terminalEnv(process.env, await network.terminalProxy().catch(() => null)) });
 const links = createLinks({ dir: path.join(app.getPath("userData"), "node"), defaultName: os.hostname(), kind: "desktop", version: app.getVersion(), api: served.api, log: meshLog });
 served.attach(links);
+// The mesh starts with the app. A file of the node that cannot be read (identity.js readKept: locked, or damaged)
+// keeps only the mesh off - the rest of AgentDeck runs - with the reason in Settings -> Computers and once in a
+// balloon; the start is tried again every half minute (a lock goes away; a damaged file waits for the user).
+const MESH_RETRY_MS = 30000;
+let meshError = "";
+function startMesh() {
+  links.start().then(() => {
+    if (meshError) meshLog("the mesh started after all");
+    meshError = "";
+    nodesChanged();
+  }, e => {
+    if (e.code !== "unreadable") return console.error("The mesh could not start:", e.message);
+    if (e.message !== meshError) {
+      meshError = e.message;
+      meshLog(`the mesh cannot start: ${e.message}`);
+      console.error("The mesh cannot start:", e.message);
+      balloon(t("mesh.unreadable.body", { file: e.file }), { title: t("mesh.unreadable.title"), iconType: "warning" });
+      links.emit("self", null); // Settings -> Computers, when open, shows it
+    }
+    setTimeout(startMesh, MESH_RETRY_MS).unref?.();
+  });
+}
 // What the other computers show - their last list, live status and git - kept per node and pushed to the manager
 // window with the nodes themselves ("mesh:nodes").
 const remote = new Map(); // node id -> { data, live, git }
-const nodesView = () => links.nodes().filter(n => !served.layout.isRemoved(n.id)).map(n => ({ ...n, ...(remote.get(n.id) || {}) }));
+// The paired computers. Phones (kind "mobile", docs/MOBILE.md) are peers too, but no computers: they have no projects,
+// sessions or git and take no clones, so they show only under Settings -> Computers -> Phones.
+const computers = () => links.nodes().filter(n => n.kind !== "mobile");
+const nodesView = () => computers().filter(n => !served.layout.isRemoved(n.id)).map(n => ({ ...n, ...(remote.get(n.id) || {}) }));
 let nodesTimer = null;
 function nodesChanged() {
   if (nodesTimer) return;
@@ -357,7 +384,7 @@ function syncRemoteProjects() {
   try {
     const data = readRegistry();
     const before = JSON.stringify(data);
-    require("./mesh/projects").mergeProjects(data, links.nodes(), remote);
+    require("./mesh/projects").mergeProjects(data, computers(), remote);
     served.layout.apply(data);
     if (JSON.stringify(data) !== before) sessions.registry.save(data);
   } catch (e) {
@@ -369,6 +396,8 @@ links.on("nodes", nodesChanged);
 links.on("layout", nodesChanged);
 links.on("event", ({ node, name, data }) => {
   if (name === "terminals") return reconcileRemote(node, Array.isArray(data) ? data.filter(x => isObj(x) && frames.UUID.test(x.id)) : []);
+  // Our terminal there was sized by another peer (a phone) that let go of it: its pane here sends its size again.
+  if (name === "terminal.refit") return void (remoteTerms.get(data?.id)?.node === node && sendToManager("terminal:refit", data.id));
   if (!["data", "live", "git", "usage", "limits", "resources"].includes(name)) return;
   remote.set(node, { ...remote.get(node), [name]: data, ...(name === 'git' ? { gitError: '' } : {}) });
   nodesChanged();
@@ -407,10 +436,84 @@ links.on("link", async ({ node, up }) => {
 // Settings -> Computers (voice/windows.js serves the page): the picture, the settings of this node, pairing and
 // forgetting. Errors come as texts in the user's language, not as exceptions.
 const ADDRESS = /^\s*(\[[0-9a-f:.]+\]|[^:\s[\]]+)(?::(\d{1,5}))?\s*$/i;
+// This computer's addresses on the local networks (IPv4), for a phone that pairs without a relay.
+const lanAddresses = () => Object.values(os.networkInterfaces()).flat().filter(a => a && a.family === "IPv4" && !a.internal).map(a => a.address);
+// An invite as a node answered pair.invite (mesh/links.js): checked before it goes into a QR code.
+function checkInvite(x, id) {
+  if (!isObj(x) || x.id !== id || !/^[0-9a-f]{64}$/.test(x.key) || typeof x.code !== "string" || !/^[0-9A-Z-]{26,40}$/.test(x.code) || !Number.isFinite(x.expires)) throw new HostError("invalidData");
+  return { id: x.id, key: x.key, code: x.code, name: typeof x.name === "string" ? x.name.slice(0, 60) : "", kind: x.kind === "host" ? "host" : "desktop", expires: x.expires };
+}
+// Adding a phone (docs/MOBILE.md 4): one-time invites from this computer and from the chosen ones, in one QR code.
+// relay: the id of the paired computer the phone dials ("" for none: the same network, every computer directly);
+// address: where the phone reaches that relay (or, with none, this computer), "host" or "host:port"; nodes: the ids of
+// the other computers the phone may use. -> { ok, text, expires, included: [names], skipped: [{ name, error }] }.
+async function invitePhone({ relay = "", address = "", nodes: wanted = [] } = {}) {
+  const pairCode = require("./mesh/pair-code");
+  const list = computers(), self = links.self();
+  const m = ADDRESS.exec(String(address ?? ""));
+  if (!m) return { ok: false, error: t("errors.badAddress") };
+  const host = m[1].replace(/^\[|\]$/g, "");
+  const r = relay ? list.find(n => n.id === relay && n.status === "online" && !n.via?.length) : null;
+  if (relay && !r) return { ok: false, error: t("errors.offline") };
+  const port = Number(m[2]) || (r ? r.port : self.port) || DEFAULT_PORT;
+  if (port > 65535) return { ok: false, error: t("errors.badAddress") };
+  const ids = [...new Set((Array.isArray(wanted) ? wanted : []).filter(id => typeof id === "string" && id !== relay && id !== self.id))];
+  const skipped = [], entries = [];
+  const own = links.invite();
+  entries.push({ ...own, ...(r ? {} : { a: host, p: port }) });
+  await Promise.all(ids.map(async id => {
+    const n = list.find(x => x.id === id);
+    if (!n) return;
+    const name = n.name || id.slice(0, 8);
+    if (n.status !== "online") return void skipped.push({ name, error: t("errors.offline") });
+    // Without a relay the phone dials every computer itself: only one this computer reaches directly has an address.
+    if (!r && (n.via?.length || !n.address || !n.port)) return void skipped.push({ name, error: t("settings.phones.needsRelay") });
+    try {
+      const x = checkInvite(await links.call(id, "pair.invite", {}, { timeout: 10000 }), id);
+      entries.push({ ...x, ...(r ? {} : { a: n.address, p: n.port }) });
+    } catch (e) {
+      skipped.push({ name, error: ["unpaired", "unknownMethod"].includes(e.code) ? t("settings.phones.outdated") : translated(e).message });
+    }
+  }));
+  let rel = null;
+  if (r) {
+    try { rel = checkInvite(await links.call(r.id, "pair.invite", {}, { timeout: 10000 }), r.id); } catch (e) {
+      return { ok: false, error: ["unpaired", "unknownMethod"].includes(e.code) ? t("settings.phones.outdated") : translated(e).message };
+    }
+  }
+  // This computer first, the others in the order they were ticked; the rest stays out of an easily scanned code.
+  const order = new Map(ids.map((id, i) => [id, i]));
+  const nodes = [entries[0], ...entries.slice(1).sort((a, b) => order.get(a.id) - order.get(b.id))];
+  for (const x of nodes.splice(pairCode.MAX_NODES)) skipped.push({ name: x.name || x.id.slice(0, 8), error: t("settings.phones.tooMany", { n: pairCode.MAX_NODES }) });
+  try {
+    const text = pairCode.encode({
+      r: rel && { a: host, p: port, id: rel.id, k: pairCode.hexToKey(rel.key), c: rel.code, n: rel.name || r.name || "" },
+      n: nodes.map(x => ({ id: x.id, k: pairCode.hexToKey(x.key), c: x.code, n: x.name || "", t: x.kind, ...(x.a ? { a: x.a, p: x.p } : {}) }))
+    });
+    return { ok: true, text, expires: Math.min(...[rel, ...nodes].filter(Boolean).map(x => x.expires)), included: nodes.map(x => x.name || x.id.slice(0, 8)), skipped };
+  } catch (e) {
+    return { ok: false, error: translated(e).message };
+  }
+}
+// "Forget" on a phone: here, and on every computer and relay this one is paired with, relays last (links.js
+// forgetPhone). -> the names of those that could not hear it now: the phone may still be paired there.
+async function forgetPhone(id) {
+  const phone = links.nodes().find(n => n.id === id && n.kind === "mobile");
+  if (!phone) return [];
+  const all = computers().length;
+  const still = await links.forgetPhone(id);
+  meshLog(`phone ${phone.name || id.slice(0, 8)} (${id.slice(0, 8)}) forgotten here and on ${all - still.length} of ${all} computer(s)${still.length ? `; not reached now: ${still.join(", ")}` : ""}`);
+  return still;
+}
 const meshSettings = {
-  state: () => ({ self: links.self(), nodes: links.nodes(), discovered: links.discovered() }),
-  set: patch => { links.setSelf(patch); return meshSettings.state(); },
-  newCode: () => { links.regenerateCode(); return meshSettings.state(); },
+  // error: why the mesh is off (self is null then).
+  state: () => ({ self: links.self(), error: meshError, nodes: computers(), phones: links.nodes().filter(n => n.kind === "mobile"), discovered: links.discovered(), lan: lanAddresses() }),
+  invitePhone: async args => {
+    try { return await invitePhone(isObj(args) ? args : {}); } catch (e) { return { ok: false, error: translated(e).message }; }
+  },
+  forgetPhone: async id => ({ still: await forgetPhone(String(id ?? "")), state: meshSettings.state() }),
+  set: patch => { if (links.self()) links.setSelf(patch); return meshSettings.state(); },
+  newCode: () => { if (links.self()) links.regenerateCode(); return meshSettings.state(); },
   pair: async (address, code) => {
     const m = ADDRESS.exec(address);
     if (!m) return { ok: false, error: t("errors.badAddress") };
@@ -1006,7 +1109,7 @@ function registerIpc() {
   });
   handle("git:refresh", async force => {
     const errors = [];
-    await Promise.all([gitStatus.refresh({ force: force === true }), ...(force === true ? links.nodes().filter(n => n.status === "online").map(n => links.call(n.id, "git.refresh").then(git => { remote.set(n.id, { ...remote.get(n.id), git, gitError: '' }); nodesChanged(); }).catch(e => { errors.push(`${n.name}: ${e.message}`); remote.set(n.id, { ...remote.get(n.id), gitError: e.message }); nodesChanged(); })) : [])]);
+    await Promise.all([gitStatus.refresh({ force: force === true }), ...(force === true ? computers().filter(n => n.status === "online").map(n => links.call(n.id, "git.refresh").then(git => { remote.set(n.id, { ...remote.get(n.id), git, gitError: '' }); nodesChanged(); }).catch(e => { errors.push(`${n.name}: ${e.message}`); remote.set(n.id, { ...remote.get(n.id), gitError: e.message }); nodesChanged(); })) : [])]);
     if (errors.length) throw new Error(errors.join('\n'));
     return true;
   });
@@ -1113,7 +1216,7 @@ if (!app.requestSingleInstanceLock()) {
     autostart.applyDefault().catch(err => console.error("Could not set up starting with Windows:", err.message));
     launch.sweepPrompts(); // prompts of voice commands whose terminal never started
     host.start(); // the scans, the usage figures, the git status, the tabs' links to their sessions
-    links.start().then(nodesChanged, e => console.error("The mesh could not start:", e.message));
+    startMesh();
     answerPopup = require("./answer-popup").createAnswerPopup({ preload: PRELOAD, background: prefs.background, copy: async s => clipboard.writeText(s), icon: makeIcon(64) });
     voiceContext.start();
     // Started once the windows are up: the first run copies VoiceTray's history first, and a voice part that cannot

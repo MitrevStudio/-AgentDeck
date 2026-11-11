@@ -66,7 +66,9 @@ function createLayout({ links, registry }) {
     }
     return data;
   }
-  function publish() { persist(); links.notifyAll("layout.sync", state); links.emit("layout"); }
+  // The layout is the computers' business: kept in step between the ones that may see each other (links.js sees), never
+  // sent to a relay or a resource host, nor to a phone, and taken only from them.
+  function publish() { persist(); links.notifyAll("layout.sync", state, { phones: false }); links.emit("layout"); }
   function capture(before, after) {
     if (applying || !ensure()) return;
     const old = new Map(before.projects.map(p => [key(p), p]));
@@ -98,8 +100,8 @@ function createLayout({ links, registry }) {
     if (k === "groups") return Array.isArray(v) && v.length <= 1000 && v.every(g => g && typeof g.id === "string" && g.id.length <= 64 && typeof g.name === "string" && g.name.length <= 1000 && (g.pin === undefined || Number.isInteger(g.pin) && g.pin >= 0));
     return k.startsWith("project:") && v && ID.test(v.node) && typeof v.path === "string" && v.path.length > 0 && v.path.length <= 4096 && k === `project:${v.node}:${normPath(v.path)}` && typeof v.name === "string" && v.name.length <= 1000 && (v.group === undefined || typeof v.group === "string" && v.group.length <= 64) && (v.pin === undefined || Number.isInteger(v.pin) && v.pin >= 0);
   }
-  links.on("event", ({ name, data }) => {
-    if (name !== "layout.sync" || !data || typeof data !== "object" || Array.isArray(data) || Object.keys(data).length > 20000 || !ensure()) return;
+  links.on("event", ({ node, name, data }) => {
+    if (name !== "layout.sync" || !links.sees(node, { phones: false }) || !data || typeof data !== "object" || Array.isArray(data) || Object.keys(data).length > 20000 || !ensure()) return;
     let changed = false;
     for (const [k, r] of Object.entries(data)) if (valid(k, r) && newer(r, state[k])) {
       state[k] = r; clock = Math.max(clock, r.clock); changed = true;
@@ -109,7 +111,7 @@ function createLayout({ links, registry }) {
   links.on("link", ({ node, up }) => {
     if (!up || !ensure()) return;
     reconcile();
-    links.notify(node, "layout.sync", state);
+    if (links.sees(node, { phones: false })) links.notify(node, "layout.sync", state);
   });
   return { apply, capture, reconcile,
     isRemoved(id) { return ensure() && state[`node:${id}`]?.value === true; },

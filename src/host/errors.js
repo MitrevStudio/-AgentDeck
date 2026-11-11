@@ -16,7 +16,11 @@ const MESSAGES = {
   moveNoConversation: "The session has no conversation saved yet.",
   moveHostsAgentDeck: "AgentDeck itself runs inside this session.",
   stopUnsupported: "Only Claude sessions can be stopped from here.",
-  stopFailed: "The session could not be stopped."
+  stopFailed: "The session could not be stopped.",
+  // Typing into a session (send-text.js); the command centre shows these texts as they are.
+  agentNotReady: "The agent is not ready; nothing was sent.",
+  agentStopped: "The agent stopped before the message could be submitted.",
+  terminalTooOld: "Reopen this agent terminal before sending automatically; it was started by an older version."
 };
 
 class HostError extends Error {

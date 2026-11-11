@@ -14,6 +14,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { isObj } = require("./shared/util");
+const { createSendText, TEXT_MAX } = require("./host/send-text");
 
 const SPACE = "orchestrator";
 const SESSION_NAME = "AgentDeck";
@@ -21,14 +22,12 @@ const AGENTS = ["Claude", "Codex", "OpenCode"];
 const PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const MAX_BODY = 1024 * 1024;
 const POLL_MS = 1500;
-const ENTER_DELAY_MS = 400;     // the text first, Enter a moment later (as autopilot.js types)
 const READY_WAIT_MS = 45000;    // a Claude Code just started takes a while before it reads its input
 const STARTED_WAIT_MS = 30000;  // for a new session to register itself (live.js)
 const SETTLE_MS = 20000;        // a session idle this long after a wait began has nothing more to say
 const DEFAULT_WAIT_S = 600, MAX_WAIT_S = 1800;
 const ANSWER_WAIT_MS = 30 * 60 * 1000;
 const NOTIFY_CHARS = 240;
-const TEXT_MAX = 20000;
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const str = (v, max = 4000) => (typeof v === "string" ? v.trim().slice(0, max) : "");
@@ -90,7 +89,8 @@ function createOrchestrator(deps) {
 
   const isOwn = cwd => typeof cwd === "string" && deps.norm(cwd) === deps.norm(dir);
   const getTab = () => deps.terminals.getTabs().find(x => isOwn(x.cwd) && !x.exited) || null;
-  const tabOf = id => deps.terminals.getTabs().find(x => x.sessionId === id && !x.exited) || null;
+  // Typing into a session's tab (host/send-text.js), shared with a peer's terminals.send.
+  const { tabOfSession: tabOf, isReady, typeLine } = createSendText({ terminals: deps.terminals, liveSessions: (...a) => deps.liveSessions(...a) });
   const saveState = () => fs.writeFileSync(stateFile, JSON.stringify(state));
 
   // ---------- the server ----------
@@ -200,13 +200,6 @@ function createOrchestrator(deps) {
     const file = deps.findTranscript(id);
     if (file) return { agent: "Claude", id, cwd: "", file };
     throw new Error(`No session ${id}.`);
-  }
-  async function typeLine(tabId, text) {
-    if (!await isReady(tabId)) throw new Error("The agent is not ready; nothing was sent.");
-    deps.terminals.type(tabId, text);
-    await sleep(ENTER_DELAY_MS);
-    if (!await isReady(tabId)) throw new Error("The agent stopped before the message could be submitted.");
-    deps.terminals.type(tabId, "\r");
   }
 
   async function listProjects() {
@@ -344,14 +337,6 @@ function createOrchestrator(deps) {
       state.sessionId = tab.sessionId;
       try { saveState(); } catch (e) { console.error("Saving the command centre's session failed:", e.message); }
     }
-  }
-  async function isReady(tabId) {
-    const tab = deps.terminals.getTabs().find(x => x.id === tabId);
-    if (!tab || tab.exited) return false;
-    if (process.platform === "win32" && !tab.agentOnly) throw new Error("Reopen this agent terminal before sending automatically; it was started by an older version.");
-    if (!tab.sessionId) return false;
-    const l = (await deps.liveSessions()).find(x => x.id === tab.sessionId);
-    return Boolean(l && ["idle", "waiting"].includes(l.status));
   }
   // What the user said or typed goes into the terminal (started first when it does not run), and the window shows
   // it. Its answer is announced when the window is not in front.

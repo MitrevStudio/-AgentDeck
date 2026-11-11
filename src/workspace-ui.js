@@ -437,6 +437,9 @@ window.terminals.onData(({ id, data, end }) => {
   if (view.attachedEnd === null) view.queue.push({ data, end });
   else writeAfter(view, data, end);
 });
+// Another viewer (a phone) sized the terminal and let go of it: its pane, when shown, gives it its own size back (a
+// hidden one does when it is shown next).
+window.terminals.onRefit(id => fitTerm(id));
 // The drawing reads renderer.js's session data, and the page may hear from main between two of its scripts (a layout
 // restored on start arrives at once): nothing is drawn before every script ran.
 const isPageLoading = () => document.readyState === "loading";

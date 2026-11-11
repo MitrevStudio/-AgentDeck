@@ -128,11 +128,26 @@ body:not([data-tab="network"]) [data-for="network"], body:not([data-tab="nodes"]
 .vs-keyline { display: flex; align-items: center; gap: 8px; }
 .vs-keyline code { flex: 1; min-width: 0; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
 .vs-setup .vs-pair .input { height: 30px; }
+/* Phones: "Add phone" - the computers to reach and the relay, then the QR code with its time left and its text. */
+.vs-phone { width: min(520px, calc(100vw - 48px)); }
+.vs-phone .confirm-form { gap: 8px; }
+.vs-phone-label { margin-top: 6px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.vs-phone-node { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--bg); font-size: 13px; }
+.vs-phone-node b { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vs-phone-node small { margin-left: auto; color: var(--faint); font-size: 11.5px; }
+.vs-phone-node:has(input:disabled) { opacity: .6; }
+.vs-phone .select, .vs-phone .input { width: 100%; height: 32px; }
+.vs-qr { align-self: center; padding: 0; border-radius: var(--r-md); background: #fff; overflow: hidden; }
+.vs-qr svg { display: block; max-width: 100%; height: auto; }
+.vs-qr.expired { opacity: .15; }
+.vs-phone textarea.input { height: 64px; padding: 6px 8px; resize: none; font-size: 11px; word-break: break-all; user-select: text; }
+.vs-phone-left { align-self: center; font-family: var(--mono); font-size: 13px; color: var(--muted); }
 .vs-hint.ok { color: var(--ok, var(--accent)); }
 .vs-hint.err { color: var(--danger); }
 
 .vs-hint { margin-top: 5px; font-size: 12px; line-height: 1.45; color: var(--faint); }
 .vs-hint.warn { color: var(--attn); }
+#nodesOff { margin: 12px 14px 0; user-select: text; }
 .vs-grid > .vs-hint { margin-top: -3px; }
 .vs-list { white-space: pre-line; }
 

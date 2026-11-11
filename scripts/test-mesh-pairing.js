@@ -148,6 +148,11 @@ const LONG = /^([0-9A-HJKMNP-TV-Z]{4}-){6}[0-9A-HJKMNP-TV-Z]{2}$/;
   await assert.rejects(raw("pair.finish", { mac: "x" }), e => e.code === "pairLater", "no finish without a start");
   assert.equal(n.self().pairFailures.failures, 1);
   assert.equal(n.nodes().length, 0);
+  // A pair.start counts against its source when it comes (pair-guard.js started) - the one with the bad point above
+  // too, though it is not a wrong code: the next try from here waits 2 s.
+  await assert.rejects(raw("pair.start", { y: wrong.y }), e => e.code === "pairLater", "a start counts as a try");
+  assert.equal(n.self().pairFailures.failures, 1, "but not as a wrong code");
+  await new Promise(r => setTimeout(r, 2100));
 
   // ---------- a node in the middle ----------
   // M answers at the address the caller was given and passes every message on to N under its own certificate. The
@@ -179,7 +184,8 @@ const LONG = /^([0-9A-HJKMNP-TV-Z]{4}-){6}[0-9A-HJKMNP-TV-Z]{2}$/;
   assert.equal(cn.nodes().length, 0, "the caller trusts nobody");
   assert.equal(n.nodes().length, 0, "nor does the node it meant to pair with");
   relayServer.stop();
-  await new Promise(r => setTimeout(r, 2100));
+  // The third counted try from here (two wrong codes, one bad start): the next waits 4 s.
+  await new Promise(r => setTimeout(r, 4100));
 
   // A node that answers but does not know the code (it says yes to anything) is not trusted either.
   const liar = createServer({ identity: middle, onConnection: near => {

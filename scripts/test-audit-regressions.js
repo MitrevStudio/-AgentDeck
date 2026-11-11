@@ -29,7 +29,9 @@ const test = (name, fn) => cases.push([name, fn]);
 let dir;
 
 test('1 command centre: timeout, exit and exit between text and Enter never submit to a shell', async () => {
-  const { createOrchestrator } = load('orchestrator.js', {}, s => s.replace('const POLL_MS = 1500', 'const POLL_MS = 1').replace('const READY_WAIT_MS = 45000', 'const READY_WAIT_MS = 5').replace('const ENTER_DELAY_MS = 400', 'const ENTER_DELAY_MS = 1'));
+  // The pause between the text and Enter lives in host/send-text.js, which the orchestrator requires.
+  const sendText = load('host/send-text.js', {}, s => s.replace('const ENTER_DELAY_MS = 400', 'const ENTER_DELAY_MS = 1'));
+  const { createOrchestrator } = load('orchestrator.js', { './host/send-text': sendText }, s => s.replace('const POLL_MS = 1500', 'const POLL_MS = 1').replace('const READY_WAIT_MS = 45000', 'const READY_WAIT_MS = 5'));
   let tabs, live, written = [], exitOnText = false;
   const cwd = path.join(dir, 'orchestrator');
   const centre = createOrchestrator({ userData: dir, norm: s => s, t: s => s,
@@ -227,7 +229,8 @@ test('9 silent socket dies on heartbeat, pending requests reject, healthy slow c
 
 test('10 incompatible hello is rejected before online or serving application requests', async () => {
   let accept, calls = 0;
-  const peer = { id: 'peer', name: 'Peer' };
+  // As peers.js keeps one: control is always set (a request from a peer without control === true is refused).
+  const peer = { id: 'peer', name: 'Peer', control: true };
   const peers = { get: id => id === 'peer' ? peer : null, list: () => [peer], code: () => '123456', update() {} };
   const { createLinks } = load('mesh/links.js', {
     './identity': { loadIdentity: async () => ({ id: 'self', settings: { name: 'Self', port: 0 } }) },

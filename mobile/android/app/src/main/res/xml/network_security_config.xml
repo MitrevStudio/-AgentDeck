@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The relay is wherever the user runs it (a LAN IP, a public IP, a host name), reached over plain ws://.
+     Cleartext is therefore allowed everywhere; confidentiality comes from the Noise layer, not from TLS. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

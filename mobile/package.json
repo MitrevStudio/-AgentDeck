@@ -1,0 +1,30 @@
+{
+  "name": "agentdeck-mobile",
+  "productName": "AgentDeck",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AgentDeck on the phone: the sessions of your computers through your own relay (Capacitor, Android first)",
+  "license": "MIT",
+  "author": "MitrevStudio",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "dev": "node scripts/build.mjs && node scripts/serve.mjs",
+    "android": "npm run build && cap sync android",
+    "apk": "npm run android && node scripts/gradle.mjs assembleDebug",
+    "open:android": "cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/core": "^8.6.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "jsqr": "^1.4.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.6.0",
+    "esbuild": "^0.28.2"
+  }
+}

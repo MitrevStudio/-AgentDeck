@@ -52,12 +52,13 @@ const remove = file => serial(file, () => retry(() => fs.promises.unlink(file)).
 // Settles once everything queued so far has (shutdown).
 const flush = () => Promise.all([...tails.values()]);
 
-// Synchronous registries need read-modify-write to finish before the next caller reads.
-function writeSync(file, contents) {
+// Synchronous registries need read-modify-write to finish before the next caller reads. mode: the new file's (0o600
+// for a secret).
+function writeSync(file, contents, { mode } = {}) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const temp = `${file}.${require("node:crypto").randomUUID()}.tmp`;
   try {
-    fs.writeFileSync(temp, contents, { encoding: "utf8", flag: "wx" });
+    fs.writeFileSync(temp, contents, { encoding: "utf8", flag: "wx", ...(mode ? { mode } : {}) });
     fs.renameSync(temp, file);
   } finally {
     try { fs.unlinkSync(temp); } catch (e) { if (e.code !== "ENOENT") throw e; }

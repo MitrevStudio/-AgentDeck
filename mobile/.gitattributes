@@ -1,0 +1,3 @@
+# The Gradle wrapper runs on Linux / macOS CI: LF whatever the checkout (autocrlf) does to the rest.
+android/gradlew text eol=lf
+*.bat text eol=crlf

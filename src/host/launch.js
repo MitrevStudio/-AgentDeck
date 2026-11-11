@@ -198,7 +198,10 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
   // at all (a terminal that died and left it behind, a background job whose parent is gone) - is ended. A background
   // job is stopped by Claude Code (`claude stop <jobId>`), as its daemon would start the process again; any other one
   // as "Move here" stops it (stop-session.ps1), on Linux and macOS by SIGTERM (SIGKILL when that is not enough).
-  // The conversation stays and can be resumed.
+  // The conversation stays and can be resumed. Codex and OpenCode sessions answer stopUnsupported: outside a terminal
+  // of the host's own nothing names their process for sure (codex-live.js has a Codex session's pid only from such a
+  // terminal, OpenCode no live status at all), and a guessed pid could be another program's. The app and the manager
+  // do not offer Stop for them.
   async function stopSession(agent, id) {
     checkAgent(agent);
     checkSessionId(id);

@@ -6,7 +6,9 @@
 // peers. Nothing here needs Electron or the pages' language: errors carry codes (errors.js).
 //
 // Events (an EventEmitter): "data" (the scan's cache), "terminal:data" ({id, data, end}), "terminal:exit" ({id,
-// code, lost}), "terminals" (the tabs), "usage" (the summary), "git" (the snapshot).
+// code, lost}), "terminal:size" ({id, cols, rows}: a size changed), "terminal:refit" ({id}: a peer that sized one of
+// this computer's own terminals let go of it - its pane here sends its own size again; mesh/serve.js), "terminals"
+// (the tabs), "usage" (the summary), "git" (the snapshot).
 const path = require("node:path");
 const { EventEmitter } = require("node:events");
 const { createSessions } = require("./sessions");
@@ -67,11 +69,13 @@ function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () 
     userDataDir: dataDir,
     onData: (id, data, end) => host.emit("terminal:data", { id, data, end }),
     onExit: (id, code, lost) => host.emit("terminal:exit", { id, code, lost }),
-    onChange: tabs => host.emit("terminals", tabs)
+    onChange: tabs => host.emit("terminals", tabs),
+    onResize: (id, cols, rows) => host.emit("terminal:size", { id, cols, rows })
   });
   const codexLive = createCodexLive({ sessions: () => sessions.get()?.sessions || [], tabs: () => terminals.getTabs(), link: terminals.link });
   const liveSessions = async () => (await Promise.all([claudeLiveSessions(), codexLive()])).flat();
   const launch = createLaunch({ dataDir, terminals, sessions, liveSessions, findTranscript, log, noLauncher });
+  const sendText = require("./send-text").createSendText({ terminals, liveSessions });
   const tabLinks = createTabLinks({ terminals, liveSessions });
   const setup = createSetup({ agents: () => sessions.agents });
   gitStatus.configure(async () => ({
@@ -121,7 +125,7 @@ function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () 
   }
 
   return Object.assign(host, {
-    dataDir, home, sessions, terminals, launch, setup, liveSessions, findTranscript, preview, search,
+    dataDir, home, sessions, terminals, launch, sendText, setup, liveSessions, findTranscript, preview, search,
     git: gitStatus, usage, limits, resources, start, flush, stop
   });
 }

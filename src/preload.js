@@ -88,6 +88,8 @@ contextBridge.exposeInMainWorld("terminals", {
   // A dropped file for a terminal on another computer: its bytes go there, its path there comes back.
   uploadFile: (id, name, bytes) => ipcRenderer.invoke("terminal:upload", id, name, new Uint8Array(bytes)),
   onData: cb => ipcRenderer.on("terminal:data", (_e, d) => cb(d)),
+  // A terminal whose size another viewer (a phone) set and gave back: its pane sends its own size again.
+  onRefit: cb => ipcRenderer.on("terminal:refit", (_e, id) => cb(id)),
   onWorkspace: cb => ipcRenderer.on("workspace:changed", (_e, w) => cb(w))
 });
 // UI language and theme, read before the page renders; i18n.js applies them.

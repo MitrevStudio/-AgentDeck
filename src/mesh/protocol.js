@@ -8,7 +8,8 @@ const PROTOCOL = 1;
 const DEFAULT_TIMEOUT_MS = 30000;
 const MAX_TEXT = 16 * 1024 * 1024;
 
-// ws: an open WebSocket (ws package). onRequest(method, params) -> the result (or throws); onEvent(name, data);
+// ws: an open WebSocket (ws package), or what web-link.js makes that behaves like one (a phone's Noise link: text
+// arrives as a string, binary as bytes; it runs in the phone's WebView too). onRequest(method, params) -> the result (or throws); onEvent(name, data);
 // onBinary(buffer); onClose(code, reason).
 function createLink(ws, { onRequest = () => { throw new HostError("unknownMethod"); }, onEvent = () => {}, onBinary = () => {}, onClose = () => {}, heartbeatMs = 15000 } = {}) {
   const pending = new Map(); // id -> { resolve, reject, timer }
@@ -50,7 +51,7 @@ function createLink(ws, { onRequest = () => { throw new HostError("unknownMethod
       return;
     }
     let m;
-    try { m = JSON.parse(data.toString("utf8")); } catch { return; }
+    try { m = JSON.parse(typeof data === "string" ? data : data.toString("utf8")); } catch { return; }
     if (!m || typeof m !== "object") return;
     if (m.event !== undefined) onEvent(String(m.event), m.data);
     else if (m.method !== undefined) answer(m);

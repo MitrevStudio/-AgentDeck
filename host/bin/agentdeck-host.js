@@ -12,6 +12,7 @@
 //   agentdeck-host pair-relay [--relay-data-dir DIR] [--relay-port N]
 //                                             pair with the relay on this machine (its code and port read from its files)
 //   agentdeck-host status | logs | update | uninstall   (the systemd service, install.sh)
+//   agentdeck-host help | --help | -h         every command and option (USAGE below); an unknown one is an error
 // --instance NAME (any command): a second service on this machine - agentdeck-host-NAME, data in ~/.agentdeck/host-NAME.
 // install.sh AGENTDECK_INSTANCE makes one: a resource host beside the relay, on loopback, paired with the relay.
 const fs = require("node:fs");
@@ -25,16 +26,82 @@ process.env.NODE_PATH = [path.join(__dirname, "..", "node_modules"), process.env
 require("node:module").Module._initPaths();
 
 const pkg = require("../package.json");
-const args = process.argv.slice(2);
-const command = args[0] && !args[0].startsWith("--") ? args.shift() : "run";
-const opt = (name, fallback = "") => {
-  const i = args.indexOf(`--${name}`);
-  return i >= 0 ? args[i + 1] ?? "" : fallback;
+
+// What each command takes. Options with a value (VALUE) take the next argument; the rest are switches. Every command
+// takes COMMON (the Dockerfile's wrapper adds --data-dir to whatever it runs). An option a command does not take is
+// an error rather than something silently ignored.
+const VALUE = { "data-dir": "DIR", instance: "NAME", port: "N", name: "NAME", "pair-token": "TOKEN", interface: "ADDR", listen: "ADDR", "relay-data-dir": "DIR", "relay-port": "N" };
+const COMMON = ["data-dir", "instance"];
+const OPTIONS = {
+  run: ["with-api", "port", "name", "pair-token", "no-discovery", "interface", "listen"],
+  pair: [], "pair-to": ["name"], "pair-relay": ["relay-data-dir", "relay-port", "name"],
+  status: [], logs: [], update: [], uninstall: []
 };
-const has = name => args.includes(`--${name}`);
-// The arguments before the first --option (pair-to ADDRESS PORT CODE).
-const firstOption = args.findIndex(a => a.startsWith("--"));
+// The arguments before the first option, per command (pair-to ADDRESS PORT CODE).
+const POSITIONAL = { "pair-to": 3 };
+const USAGE = `agentdeck-host ${pkg.version} - AgentDeck's headless host: a relay that routes the mesh between paired
+AgentDecks and phones, or with --with-api also a resource host (projects, sessions, terminals, agents).
+
+Usage: agentdeck-host [COMMAND] [OPTIONS]
+
+Commands:
+  run                         start the node in the foreground (the default; what the service runs)
+  pair                        print the pairing code (to enter on a desktop AgentDeck or in the phone app)
+  pair-to ADDRESS PORT CODE   pair this host with the node at ADDRESS:PORT, which shows CODE
+  pair-relay                  pair with the relay on this machine (its code and port read from its files)
+  status                      the systemd service's state (install.sh)
+  logs                        the service's log, followed
+  update                      pull this checkout, refresh its packages, restart this machine's services
+  uninstall                   remove the service (the data and the code stay)
+  help                        this text (also --help, -h)
+
+Options for every command:
+  --data-dir DIR              the node's data (default ~/.agentdeck/host; ~/.agentdeck/host-NAME with --instance)
+  --instance NAME             a second service on this machine: agentdeck-host-NAME (lowercase, digits, dashes)
+Options for run:
+  --with-api                  serve this machine as a resource too (default: relay only)
+  --port N                    the port to listen on (kept in the node's settings; default 7421, 0: any free one)
+  --listen ADDR               the address to listen on (127.0.0.1: reached only through a relay on this machine)
+  --interface ADDR            the network interface's address to announce on (default: all of them)
+  --name NAME                 the name peers see (default: this machine's host name)
+  --no-discovery              no discovery on the local network (mDNS)
+  --pair-token TOKEN          a fixed pairing code (at least 20 letters or digits; default: a long code of its own)
+Options for pair-to:
+  --name NAME                 the name peers see
+Options for pair-relay:
+  --relay-data-dir DIR        the relay's data (default ~/.agentdeck/host)
+  --relay-port N              the relay's port, when its settings do not say
+  --name NAME                 the name peers see
+`;
+// A bad command line: what is wrong, the way to the usage, exit 2.
+function badUsage(message) {
+  console.error(`agentdeck-host: ${message}\nRun "agentdeck-host --help" for the commands and their options.`);
+  process.exit(2);
+}
+
+const args = process.argv.slice(2);
+if (args[0] === "help" || args.includes("--help") || args.includes("-h")) {
+  process.stdout.write(USAGE);
+  process.exit(0);
+}
+const command = args[0] && !args[0].startsWith("-") ? args.shift() : "run";
+if (!Object.hasOwn(OPTIONS, command)) badUsage(`unknown command "${command}"`);
+// The arguments before the first option (pair-to ADDRESS PORT CODE), then options only.
+const firstOption = args.findIndex(a => a.startsWith("-"));
 const positional = firstOption < 0 ? args : args.slice(0, firstOption);
+if (positional.length > (POSITIONAL[command] || 0)) badUsage(`unexpected argument "${positional[POSITIONAL[command] || 0]}" for ${command}`);
+const options = new Map();
+for (let i = positional.length; i < args.length; i++) {
+  const a = args[i], name = a.startsWith("--") ? a.slice(2) : "";
+  if (!name || (!COMMON.includes(name) && !OPTIONS[command].includes(name))) badUsage(a.startsWith("-") ? `unknown option ${a} for ${command}` : `unexpected argument "${a}"`);
+  if (!VALUE[name]) { options.set(name, true); continue; }
+  const value = args[i + 1];
+  if (value === undefined || value.startsWith("--")) badUsage(`${a} needs a value (${a} ${VALUE[name]})`);
+  options.set(name, value);
+  i++;
+}
+const opt = (name, fallback = "") => (options.has(name) ? String(options.get(name)) : fallback);
+const has = name => options.get(name) === true;
 const instance = opt("instance");
 if (instance && !/^[a-z0-9][a-z0-9-]{0,31}$/.test(instance)) {
   console.error(`agentdeck-host: --instance must be lowercase letters, digits and dashes, not "${instance}"`);
@@ -47,6 +114,7 @@ const nodeDir = path.join(dataDir, "node");
 const defaultName = () => opt("name", instance ? `${os.hostname()}-${instance}` : os.hostname());
 
 const stamp = () => new Date().toISOString();
+const RETRY_START_MS = Number(process.env.AGENTDECK_RETRY_START_MS) || 30000; // tests make it short
 function makeLog(name) {
   const dir = path.join(dataDir, "logs");
   fs.mkdirSync(dir, { recursive: true });
@@ -73,6 +141,7 @@ switch (command) {
     const code = pairCode();
     console.log(code ? `Pairing code: ${code}` : "No code yet: the host has not run.");
     console.log("Enter it on a desktop AgentDeck: Settings → Computers → Add by address (this machine's address), or under Found when it is reached through a relay.");
+    console.log("A phone (the AgentDeck app) pairs with it the same way: this machine's address and port, and this code.");
     process.exit(code ? 0 : 1);
     break;
   }
@@ -109,7 +178,8 @@ async function run() {
   fs.mkdirSync(dataDir, { recursive: true });
 
   // Relay only by default (install.sh): this machine routes mesh traffic between paired computers but runs no sessions
-  // of its own - a pure, untrusted pipe (the tunnels are end-to-end TLS, so it cannot read or act on what it carries).
+  // of its own - a pure, untrusted pipe (the tunnels are end-to-end TLS - Noise for phones, web-link.js - so it cannot
+  // read or act on what it carries). Phones reach it on the same port with a plain WebSocket.
   // --with-api turns it into a resource too: projects, sessions, terminals and agents served to paired computers.
   const withApi = has("with-api");
   let host = null, served = null;
@@ -131,17 +201,19 @@ async function run() {
     api: served ? served.api : () => {}, relayOnly: !withApi, listen: opt("listen"), log: meshLog, discover: !has("no-discovery")
   });
   served?.attach(links);
-  // Before the first start: the settings given on the command line.
+  // Before the first start: the settings given on the command line, into node.json as it is (a file that cannot be
+  // read is not written over: identity.js readKept).
+  const { readKept } = require(path.join(ROOT, "src", "mesh", "identity"));
+  const { writeSync } = require(path.join(ROOT, "src", "shared", "atomic-file"));
   const patch = {};
   if (opt("port")) patch.port = Number(opt("port"));
   if (opt("name")) patch.name = opt("name");
+  if (opt("interface")) patch.interface = opt("interface");
   fs.mkdirSync(nodeDir, { recursive: true });
   const nodeFile = path.join(nodeDir, "node.json");
-  if (Object.keys(patch).length || opt("interface")) {
-    let saved = {};
-    try { saved = JSON.parse(fs.readFileSync(nodeFile, "utf8")); } catch {}
-    fs.writeFileSync(nodeFile, JSON.stringify({ ...saved, ...patch, ...(opt("interface") ? { interface: opt("interface") } : {}) }, null, 2));
-  }
+  const applySettings = () => {
+    if (Object.keys(patch).length) writeSync(nodeFile, JSON.stringify({ ...readKept(nodeFile), ...patch }, null, 2));
+  };
 
   // A fixed pairing token must be one that cannot be guessed (peers.js). A weak one (accepted by older versions, so
   // it may sit in a service's command line) is ignored with a warning - the host still starts, with a long code of
@@ -150,7 +222,20 @@ async function run() {
   const token = opt("pair-token") && isLong(opt("pair-token")) ? opt("pair-token") : "";
   if (opt("pair-token") && !token) console.error("--pair-token ignored: it needs at least 20 letters or digits, not just a few repeated. Using the host's own long code (agentdeck-host pair shows it).");
   host?.start();
-  const self = await links.start();
+  // A file of the node that cannot be read (locked, damaged) stops nothing but the mesh: the reason is logged once and
+  // the start tried again every half minute, rather than exiting into a restart loop (systemd Restart=on-failure)
+  // that would only fill the journal. A damaged file is never replaced: the user repairs or removes it.
+  let self = null;
+  for (let shown = ""; !self;) {
+    try {
+      applySettings();
+      self = await links.start();
+    } catch (e) {
+      if (e.code !== "unreadable") throw e;
+      if (e.message !== shown) { shown = e.message; log(`The mesh cannot start: ${e.message} (trying again every ${RETRY_START_MS / 1000} s)`); }
+      await new Promise(r => setTimeout(r, RETRY_START_MS));
+    }
+  }
   if (token) links.peers().setCode(token);
   log(`agentdeck-host ${pkg.version}${withApi ? "" : " (relay only)"} on ${process.platform}, node ${process.version}: ${self.name} (${self.id.slice(0, 8)}), port ${self.port}, data ${dataDir}`);
   console.log(`\n${withApi ? "Resource host" : "Relay only"}\nPairing code: ${links.peers().code()}\nAddress: ${firstAddress()}:${self.port}\n`);
