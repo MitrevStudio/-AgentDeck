@@ -1,9 +1,9 @@
 // Live status of running agent sessions.
 //
 // Claude Code registers every running session in ~/.claude/sessions/<pid>.json with its sessionId, cwd and
-// status ("busy" while it works, "shell" while it runs a shell command - reported here as "busy" -, "waiting" while
-// it is blocked on the user, with `waitingFor` saying on what, "idle" while it waits for input). A file can outlive
-// its process (crash, kill) and Windows reuses PIDs, so an entry only counts when the PID is alive *and* was started at `procStart`.
+// status ("busy" while it works, "waiting" while it is blocked on the user, with `waitingFor` saying on what, "idle"
+// while it waits for input, "shell" while it waits for input with a background shell still running - see getStatus).
+// A file can outlive its process (crash, kill) and Windows reuses PIDs, so an entry only counts when the PID is alive *and* was started at `procStart`.
 // "busy" alone does not tell whether anything is still happening, so the newest write to the transcript or to
 // one of its subagent transcripts is reported as `activityAt`.
 // Its subagents (<transcript>/subagents/agent-*.jsonl, described by the .meta.json beside each) come along as
@@ -150,9 +150,15 @@ function foldJobs(entries) {
   return kept.map(x => ({ ...x, jobs: jobs.get(x.sessionId) || [] }));
 }
 // The state shown for a session with background jobs: whatever needs the user first, else whatever works.
-const STATUS_RANK = { waiting: 0, busy: 1, shell: 1 };
+const STATUS_RANK = { waiting: 0, busy: 1 };
 function leadingEntry(x) {
-  return [x, ...(x.jobs || [])].reduce((best, e) => (STATUS_RANK[e.status] ?? 2) < (STATUS_RANK[best.status] ?? 2) ? e : best);
+  return [x, ...(x.jobs || [])].reduce((best, e) => (STATUS_RANK[getStatus(e)] ?? 2) < (STATUS_RANK[getStatus(best)] ?? 2) ? e : best);
+}
+// "shell": the session waits for the user, a run_in_background shell still running - idle. A ctrl+b job's "shell" is
+// the parked work itself still running - busy.
+function getStatus(e) {
+  if (e.status !== "shell") return e.status || "running";
+  return e.kind === "bg" ? "busy" : "idle";
 }
 
 async function claudeLive() {
@@ -172,13 +178,14 @@ async function claudeLive() {
       // A background job left on its own (its parent gone): Claude Code's daemon restarts its process when it dies,
       // so it is stopped by `claude stop <jobId>` (launch.stopSession).
       kind: x.kind === "bg" ? "bg" : "", jobId: x.kind === "bg" ? String(x.jobId || "") : "",
-      status: lead.status === "shell" ? "busy" : lead.status || "running",
+      status: getStatus(lead),
+      hasBackgroundShell: x.status === "shell",
       waitingFor: lead.waitingFor || "",
       statusAt: lead.statusUpdatedAt || lead.updatedAt || lead.startedAt || 0,
       startedAt: x.startedAt || 0,
       activityAt: Math.max(...activities.map(a => a.at)),
       subagents: activities.flatMap(a => a.subagents).sort((a, b) => b.at - a.at),
-      jobs: x.jobs.map(j => ({ id: j.sessionId, pid: j.pid, status: j.status === "shell" ? "busy" : j.status || "running" }))
+      jobs: x.jobs.map(j => ({ id: j.sessionId, pid: j.pid, status: getStatus(j) }))
     }));
 }
 
@@ -186,4 +193,4 @@ async function liveSessions() {
   return claudeLive();
 }
 
-module.exports = { liveSessions, findTranscript, foldJobs, leadingEntry };
+module.exports = { liveSessions, findTranscript, foldJobs, leadingEntry, getStatus };
