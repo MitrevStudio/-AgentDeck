@@ -78,7 +78,7 @@ contextBridge.exposeInMainWorld("terminals", {
   setView: patch => ipcRenderer.invoke("prefs:set-view", patch),
   command: (cmd, args) => ipcRenderer.invoke("workspace:command", cmd, args),
   attach: id => ipcRenderer.invoke("terminal:attach", id),
-  move: (agent, id) => ipcRenderer.invoke("terminal:move", agent, id),
+  move: (agent, id, place) => ipcRenderer.invoke("terminal:move", agent, id, place),
   input: (id, data) => ipcRenderer.send("terminal:input", id, data),
   resize: (id, cols, rows) => ipcRenderer.send("terminal:resize", id, cols, rows),
   // A clipboard picture saved as a PNG (its path, "" when the clipboard holds text or no picture), and a dropped

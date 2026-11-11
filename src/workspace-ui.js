@@ -278,9 +278,10 @@ function showSessionTab(s) {
 function isMoveHereOffered(s) {
   return s.agent === "Claude" && !findSessionTab(s);
 }
-async function moveSessionHere(s) {
+// place: "tab", or a side of the focused pane.
+async function moveSessionHere(s, place = "tab") {
   toast(t("term.moving"));
-  try { await window.terminals.move(s.agent, s.id); }
+  try { await window.terminals.move(s.agent, s.id, place); }
   catch (e) { toast(e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ""), true); }
 }
 // The session a terminal runs, from the scan (renderer.js data), if it is linked to one.
@@ -570,8 +571,9 @@ $("panes").addEventListener("pointerdown", e => {
 
 // ---------- dragging: tabs to reorder or to join, panes to move ----------
 // A tab dragged onto another tab takes its place; onto a pane, its panes go beside that one. A pane's header dragged
-// onto another pane moves the pane there; onto the tab bar, the pane gets a tab of its own.
-let draggedTab = "", draggedPane = "";
+// onto another pane moves the pane there; onto the tab bar, the pane gets a tab of its own. A session dragged from the
+// agents list onto a pane goes to that side of it, or into a tab of its own when dropped in the middle.
+let draggedTab = "", draggedPane = "", draggedSession = "";
 const PANE_SIDES = ["left", "right", "up", "down"];
 const getTabDropSide = (el, e) => (e.clientX > el.getBoundingClientRect().left + el.offsetWidth / 2 ? "after" : "before");
 // The side of the pane the pointer is nearest to.
@@ -583,13 +585,20 @@ function getPaneDropSide(el, e) {
 function clearTabDropMarks() {
   document.querySelectorAll(".wtab.drop-before, .wtab.drop-after, .wtab.dragging").forEach(el => el.classList.remove("drop-before", "drop-after", "dragging"));
 }
+// A dragged session: the middle of a pane (a fifth of it each way) is "center", a tab of its own.
+function getSessionDropPlace(el, e) {
+  const r = el.getBoundingClientRect();
+  const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+  return Math.abs(x - 0.5) < 0.2 && Math.abs(y - 0.5) < 0.2 ? "center" : getPaneDropSide(el, e);
+}
 function clearPaneDropMarks() {
-  document.querySelectorAll("#panes .pane").forEach(el => el.classList.remove(...PANE_SIDES.map(s => "drop-" + s)));
+  document.querySelectorAll("#panes .pane").forEach(el => el.classList.remove(...[...PANE_SIDES, "center"].map(s => "drop-" + s)));
   $("tabbar").classList.remove("drop-new");
 }
 function endDrag() {
   draggedTab = "";
   draggedPane = "";
+  draggedSession = "";
   clearTabDropMarks();
   clearPaneDropMarks();
 }
@@ -597,8 +606,29 @@ function endDrag() {
 // the dragged tab (the shown one).
 function getDropPane(e) {
   const el = e.target.closest?.(".pane");
-  if (!el || (!draggedTab && !draggedPane)) return null;
+  if (!el || (!draggedTab && !draggedPane && !draggedSession)) return null;
+  if (draggedSession) return findSessionTab(sessionByKey(draggedSession))?.id === el.dataset.term ? null : el;
   return draggedPane === el.dataset.term || draggedTab === getShownTab()?.id ? null : el;
+}
+// Called by the agents list (renderer.js) when one of its sessions starts being dragged.
+function startSessionDrag(key, e) {
+  draggedSession = key;
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData("text/plain", key);
+}
+// A session in a pane here moves there; one running elsewhere moves here ("Move here") beside the pane it was dropped on.
+function dropSession(key, target, place) {
+  const s = sessionByKey(key), x = s && findSessionTab(s);
+  if (!s) return;
+  if (!x) {
+    runWorkspace("focus", { term: target }).then(() => moveSessionHere(s, place === "center" ? "tab" : place));
+    return;
+  }
+  if (place !== "center") runWorkspace("move-pane", { term: x.id, into: getShownTab()?.id, at: target, side: place });
+  else {
+    const tab = Object.values(ws.tabs).find(tb => getPanesOf(tb.root).includes(x.id));
+    runWorkspace(tab && getPanesOf(tab.root).length > 1 ? "detach-pane" : "focus", { term: x.id });
+  }
 }
 $("panes").addEventListener("dragstart", e => {
   const pane = e.target.closest?.(".pane-head")?.closest(".pane");
@@ -612,7 +642,7 @@ $("panes").addEventListener("dragover", e => {
   if (!el) return;
   e.preventDefault();
   e.dataTransfer.dropEffect = "move";
-  const mark = "drop-" + getPaneDropSide(el, e);
+  const mark = "drop-" + (draggedSession ? getSessionDropPlace(el, e) : getPaneDropSide(el, e));
   if (!el.classList.contains(mark)) { clearPaneDropMarks(); el.classList.add(mark); }
 });
 $("panes").addEventListener("dragleave", e => { if (!$("panes").contains(e.relatedTarget)) clearPaneDropMarks(); });
@@ -621,7 +651,8 @@ $("panes").addEventListener("drop", e => {
   if (!el) return;
   e.preventDefault();
   const side = getPaneDropSide(el, e), into = getShownTab()?.id, at = el.dataset.term;
-  if (draggedTab) runWorkspace("merge-tab", { tab: draggedTab, into, at, side });
+  if (draggedSession) dropSession(draggedSession, at, getSessionDropPlace(el, e));
+  else if (draggedTab) runWorkspace("merge-tab", { tab: draggedTab, into, at, side });
   else runWorkspace("move-pane", { term: draggedPane, into, at, side });
   endDrag();
 });

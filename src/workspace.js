@@ -105,9 +105,10 @@ function createWorkspace({ onChange = () => {} } = {}) {
   // `term` beside the pane of `target` (the tab's focused one when not given), taking half of it.
   function split(tabId, term, dir, target = "") {
     const tab = tabs.get(tabId);
-    if (!tab || !["right", "down"].includes(dir)) return false;
+    if (!tab || !SIDES[dir]) return false;
     const at = target && hasTerm(tab.root, target) ? target : tab.focus;
-    tab.root = replacePane(tab.root, at, pane => ({ dir, ratio: 0.5, a: pane, b: { term } }));
+    const first = dir === "left" || dir === "up";
+    tab.root = replacePane(tab.root, at, pane => ({ dir: SIDES[dir], ratio: 0.5, a: first ? { term } : pane, b: first ? pane : { term } }));
     tab.focus = term;
     tab.zoom = "";
     const s = getSpace(tab.space);
