@@ -134,7 +134,7 @@ assert.equal(d.activeSpace, "");
 assert.deepEqual(d.spaces["e:/x"], { tabs: ["u"], active: "u" });
 assert.deepEqual(d.tabs.u, { id: "u", space: "e:/x", name: "", root: { term: "c" }, focus: "c", zoom: "" });
 bad.importState(null, x => x);
-assert.deepEqual(bad.snapshot(), { activeSpace: "", spaces: {}, tabs: {} });
+assert.deepEqual(bad.snapshot(), { activeSpace: "", spaces: {}, tabs: {}, hidden: [] });
 
 // A pane opened on the left or above goes first in its split (a session dropped on that side of a pane).
 const sides = createWorkspace();
@@ -144,5 +144,30 @@ assert.deepEqual(getPanes(sides.snapshot().tabs[st].root), ["m2", "m1"]);
 assert.equal(sides.snapshot().tabs[st].root.dir, "right");
 sides.split(st, "m3", "up", "m1");
 assert.deepEqual(getPanes(sides.snapshot().tabs[st].root), ["m2", "m3", "m1"]);
+
+// A pane dragged onto the agents list leaves the layout and keeps its terminal: saved as hidden, placed again as a tab
+// (before a given one) or beside a pane.
+const parked = createWorkspace();
+const pa = parked.addTab("e:/app", "h1");
+parked.split(pa, "h2", "right");
+assert.equal(parked.hideTerm("h2"), true);
+assert.deepEqual(getPanes(parked.snapshot().tabs[pa].root), ["h1"]);
+assert.deepEqual(parked.snapshot().hidden, ["h2"]);
+assert.equal(parked.hideTerm("h2"), false, "a hidden terminal is not hidden twice");
+const reloaded = createWorkspace();
+reloaded.importState(JSON.parse(JSON.stringify(parked.exportState())), term => term);
+assert.equal(reloaded.isHidden("h2"), true);
+reloaded.placeTab("h2", "e:/app", pa);
+const placed = reloaded.snapshot();
+assert.deepEqual(placed.hidden, []);
+assert.equal(placed.spaces["e:/app"].tabs.length, 2);
+assert.deepEqual(placed.tabs[placed.spaces["e:/app"].tabs[0]].root, { term: "h2" }, "the new tab goes before the given one");
+assert.equal(placed.spaces["e:/app"].active, placed.spaces["e:/app"].tabs[0]);
+reloaded.hideTerm("h2");
+assert.equal(reloaded.movePane("h2", pa, "h1", "left"), true);
+assert.deepEqual(getPanes(reloaded.snapshot().tabs[pa].root), ["h2", "h1"]);
+reloaded.hideTerm("h1");
+assert.equal(reloaded.removeTerm("h1"), true, "a hidden terminal that ends goes from the list");
+assert.deepEqual(reloaded.snapshot().hidden, []);
 
 console.log("workspace: all checks passed");

@@ -28,6 +28,8 @@ main {
 .projects-sec { flex: 1 1 0; }
 .agents-sec { flex: 0 1 var(--agents-h, auto); max-height: 50%; }
 .agents-sec .side-list { flex: 0 1 auto; }
+/* A pane or tab dragged here leaves the layout and keeps running (renderer.js). */
+.agents-sec.drop-hide { background: var(--accent-weak); box-shadow: inset 0 0 0 1px var(--accent); }
 /* Between the projects and the agents (renderer.js): the line between them, dragged up or down. */
 .side-splitter { position: relative; z-index: 1; flex: none; height: 7px; margin: -3px 0; cursor: row-resize; outline: none; touch-action: none; }
 .side-splitter::after { content: ""; position: absolute; inset: 3px 0; background: var(--line); transition: background .15s; }
