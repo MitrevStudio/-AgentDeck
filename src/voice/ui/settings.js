@@ -68,9 +68,14 @@ function nextTab(step) {
 
 // ---------- General ----------
 const SESSIONS_IN = ["windows", "tabs"];
-// prefs.js: the themes ({id, group}, "system" first), TERMINAL_FONT_SIZES and UI_SCALES, as the prefs snapshot
-// brings them.
-const { themes: THEMES = [], terminalFontSizes: TERM_FONT_SIZES, uiScales: UI_SCALES } = window.prefs;
+// The Claude plan (prefs:get's claudePlan) whose advice shows; "other" for Team, Enterprise, an API key or unknown.
+// Max runs 1M-context models, so 300k keeps a session cheap and sharp; elsewhere about 75% of a 200k context.
+const PLAN = ["pro", "max"].includes(window.prefs.claudePlan) ? window.prefs.claudePlan : "other";
+const AUTO_COMPACT_RECOMMENDED = PLAN === "max" ? 300000 : 150000;
+const CONTEXT_200K = 200000;
+// prefs.js: the themes ({id, group}, "system" first), TERMINAL_FONT_SIZES, UI_SCALES and AUTO_COMPACT_TOKENS, as the
+// prefs snapshot brings them.
+const { themes: THEMES = [], terminalFontSizes: TERM_FONT_SIZES, uiScales: UI_SCALES, autoCompactSizes: AUTO_COMPACT_SIZES } = window.prefs;
 let general = { ...window.prefs };
 const dirty = new Set(); // tabs with unsaved edits: a language switch reloads the window
 function setDirty(tab, on) {
@@ -96,9 +101,25 @@ function renderGeneral() {
   $("uiScale").innerHTML = options(UI_SCALES, general.uiScale ?? 1, v => `${Math.round(v * 100)}%${v === 1 ? ` · ${t("settings.general.default")}` : ""}`);
   $("newWindow").checked = general.newWindow !== false;
   $("newWindow").disabled = general.sessionsIn === "tabs";
+  $("autoCompact").checked = general.autoCompact;
+  $("autoCompactTokens").innerHTML = AUTO_COMPACT_SIZES.map(n => buildAutoCompactOption(n, general.autoCompactTokens)).join("");
+  $("autoCompactTokens").title = getAutoCompactTip(general.autoCompactTokens);
+  $("autoCompactTokens").disabled = !general.autoCompact;
   $("dayView").checked = general.dayView === true;
   $("notify").checked = general.notify !== false;
   if (["uiLanguage", "sessionsIn"].includes(focused)) $(focused).querySelector(".on")?.focus();
+}
+const buildAutoCompactOption = (n, value) =>
+  `<option value="${n}" title="${esc(getAutoCompactTip(n))}" ${n === value ? "selected" : ""}>${esc(getAutoCompactLabel(n))}</option>`;
+// What a threshold means on the user's plan, shown on hover.
+function getAutoCompactTip(n) {
+  if (n === AUTO_COMPACT_RECOMMENDED) return t(`settings.general.autoCompactTip.${PLAN}`);
+  if (PLAN !== "max" && n >= CONTEXT_200K) return t("settings.general.autoCompactTip.beyond");
+  return t(n < AUTO_COMPACT_RECOMMENDED ? "settings.general.autoCompactTip.earlier" : "settings.general.autoCompactTip.later");
+}
+function getAutoCompactLabel(n) {
+  const label = t("tray.autoCompact.from", { n: `${n / 1000}k` });
+  return n === AUTO_COMPACT_RECOMMENDED ? `${label} · ${t("settings.general.recommended")}` : label;
 }
 // Too many themes for a segmented control: a select, AgentDeck's own first, then those from VS Code. Built once (a
 // language change reloads the page); the arrow keys on it switch the theme at once, so one can step through them.
@@ -146,6 +167,12 @@ for (const [id, key] of [["uiLanguage", "language"], ["sessionsIn", "sessionsIn"
 $("edgeHandle").addEventListener("change", e => setPref("edgeHandle", e.target.checked));
 $("autoUpdate").addEventListener("change", e => setPref("autoUpdate", e.target.checked));
 $("newWindow").addEventListener("change", e => setPref("newWindow", e.target.checked));
+// Switched on before any threshold was picked: the plan's recommended one.
+$("autoCompact").addEventListener("change", async e => {
+  if (e.target.checked && !general.autoCompactChosen) await setPref("autoCompactTokens", AUTO_COMPACT_RECOMMENDED);
+  setPref("autoCompact", e.target.checked);
+});
+$("autoCompactTokens").addEventListener("change", e => setPref("autoCompactTokens", Number(e.target.value)));
 $("termFont").addEventListener("change", e => setPref("terminalFontSize", Number(e.target.value)));
 $("uiScale").addEventListener("change", e => setPref("uiScale", Number(e.target.value)));
 $("dayView").addEventListener("change", e => setPref("dayView", e.target.checked));
