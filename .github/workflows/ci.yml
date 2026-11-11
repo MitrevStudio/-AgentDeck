@@ -24,6 +24,7 @@ jobs:
       - run: node scripts/test-project-sessions.js
       - run: npm run test:limits
       - run: npm run test:themes
+      - run: npm run test:prefs
       - name: Package (unpacked, no installer)
         run: npx electron-builder --win --dir --publish never
         env:
@@ -49,6 +50,7 @@ jobs:
       - run: node scripts/test-project-sessions.js
       - run: npm run test:limits
       - run: npm run test:themes
+      - run: npm run test:prefs
       - run: npm run test:audit
       - name: Package (unpacked, no AppImage)
         run: npx electron-builder --linux --dir --publish never
