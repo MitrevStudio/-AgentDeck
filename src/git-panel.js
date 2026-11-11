@@ -22,17 +22,30 @@
     };
   });
   const within = (child, parent) => child === parent || child.startsWith(parent.endsWith('/') ? parent : parent + '/');
-  function openProjects() {
-    const projects = data.projects || [], open = projects.filter(p => ws.spaces[p.n]?.tabs.some(id => ws.tabs[id])), terminalIds = new Set();
-    const visit = pane => { if (!pane) return; if (pane.term) terminalIds.add(pane.term); else { visit(pane.a); visit(pane.b); } };
-    for (const tab of Object.values(ws.tabs)) visit(tab.root);
-    for (const term of ws.terminals || []) {
-      if (!terminalIds.has(term.id) || !term.cwd) continue;
-      const candidates = projects.filter(p => (p.node || '') === (term.node || '') && within(normPath(term.cwd), normPath(p.path)));
-      candidates.sort((a, b) => b.path.length - a.path.length);
-      open.push(candidates[0] || { node: term.node, path: term.cwd });
+  // The folders something is open in: every terminal that stands in a tab, by its own folder. A project whose tabs
+  // name no terminal with a folder goes by the project's folder.
+  function openFolders() {
+    const open = [], terminals = new Map((ws.terminals || []).map(x => [x.id, x]));
+    const visit = (pane, out) => { if (!pane) return out; if (pane.term) out.push(terminals.get(pane.term)); else { visit(pane.a, out); visit(pane.b, out); } return out; };
+    for (const p of data.projects || []) {
+      const tabs = (ws.spaces[p.n]?.tabs || []).map(id => ws.tabs[id]).filter(Boolean);
+      if (tabs.length && !tabs.some(tab => visit(tab.root, []).some(x => x?.cwd))) open.push({ node: p.node, path: p.path });
     }
+    for (const tab of Object.values(ws.tabs)) for (const x of visit(tab.root, [])) if (x?.cwd) open.push({ node: x.node, path: x.cwd });
     return open;
+  }
+  // The repositories those folders are about: the one a folder lies in, or - for a folder that is in none, such as
+  // one that holds several repositories side by side - the ones right inside it. Not every repository further down:
+  // a session at a drive's root would bring the whole drive.
+  const depth = p => p.split('/').filter(Boolean).length;
+  function openRoots(paths, roots) {
+    const out = new Set();
+    for (const p of paths) {
+      const holding = roots.filter(r => within(p, r)).sort((a, b) => b.length - a.length)[0];
+      if (holding) out.add(holding);
+      else for (const r of roots) if (within(r, p) && depth(r) - depth(p) <= 1) out.add(r);
+    }
+    return out;
   }
   const conflict = f => /U|AA|DD/.test(f.status);
   const accepts = (group, f) => group === 'conflicts' ? conflict(f) : group === 'staged'
@@ -68,15 +81,15 @@
   }
   function render() {
     if (selected !== 'git') return;
-    const sources = [{ id: 'local', name: t('git.panel.local'), status: 'online', git }, ...nodes], rows = [], open = openProjects();
+    const sources = [{ id: 'local', name: t('git.panel.local'), status: 'online', git }, ...nodes], rows = [], open = openFolders();
     const tips = new Map();
     repositories.clear();
     for (const source of sources) {
       const paths = open.filter(p => (p.node || 'local') === source.id).map(p => normPath(p.path));
       if (!paths.length) continue;
+      const shown = openRoots(paths, Object.values(source.git?.repos || {}).map(repo => normPath(repo.root)));
       for (const repo of Object.values(source.git?.repos || {}).sort((a, b) => a.root.localeCompare(b.root))) {
-        const root = normPath(repo.root);
-        if (!paths.some(p => within(root, p) || within(p, root))) continue;
+        if (!shown.has(normPath(repo.root))) continue;
         const key = JSON.stringify([source.id, repo.root]), node = { key, node: source.id === 'local' ? '' : source.id, repo, offline: source.status !== 'online', source: source.name, error: errors.get(key) || source.gitError || repo.error };
         repositories.set(key, node);
         const offline = source.status !== 'online', disabled = offline || busy.has(key), files = repo.files || [], staged = files.some(f => accepts('staged', f));

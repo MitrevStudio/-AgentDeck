@@ -101,7 +101,8 @@ main {
 .dev-empty { padding: 2px 8px 4px 30px; font-size: 12px; color: var(--faint); }
 /* The device toggle: lit while a filter is on; only a quiet background while its chips are open with none chosen. */
 .side-sec-head #projectView.open:not(.on) { background: var(--panel-2); }
-.dev-chips { flex: none; display: flex; gap: 4px; padding: 0 8px 6px 12px; overflow-x: auto; scrollbar-width: none; }
+/* Every computer is in view: the chips go on to a next line when one is not enough. */
+.dev-chips { flex: none; display: flex; flex-wrap: wrap; gap: 4px; padding: 0 8px 6px 12px; }
 .dev-chips[hidden] { display: none; }
 .dev-chip {
   display: inline-flex; align-items: center; gap: 4px; flex: none; max-width: 160px; height: 22px; padding: 0 8px; border: 1px solid var(--line);
@@ -303,6 +304,17 @@ button.machine-name:hover { color: var(--accent); }
 .machine-resources { display: inline-flex; align-items: center; gap: 7px; padding-left: 8px; border-left: 1px solid var(--line-2); font-variant-numeric: tabular-nums; }
 .resource-value { display: inline-flex; align-items: center; gap: 3px; }
 .resource-value .i { width: 12px; height: 12px; color: var(--faint); }
+/* A processor or a memory that is nearly full (limits-ui.js HOT_PCT): its figure beats in red, and so does the
+   chip of a computer that is not shown in full. */
+.resource-value.hot { color: var(--danger); font-weight: 700; animation: hot 1.1s ease-in-out infinite; }
+.resource-value.hot .i { color: var(--danger); }
+.machine-status.hot { border-color: var(--danger-line); animation: hot-chip 1.1s ease-in-out infinite; }
+@keyframes hot { 50% { opacity: .35; } }
+@keyframes hot-chip { 50% { background: var(--danger-bg); border-color: var(--danger); } }
+@media (prefers-reduced-motion: reduce) {
+  .resource-value.hot, .machine-status.hot { animation: none; }
+  .machine-status.hot { background: var(--danger-bg); }
+}
 
 /* ---------- messages (renderer.js toast) ---------- */
 .toasts { position: fixed; left: 50%; bottom: 44px; z-index: 70; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: min(640px, 80vw); pointer-events: none; }

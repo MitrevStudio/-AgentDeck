@@ -7,7 +7,9 @@
 // Checks a little after start and then every 4 hours. With auto on (ui.autoUpdate, the default) a new version is
 // downloaded in the background and installed silently when AgentDeck quits, or at once with install(), which also
 // starts it again. With auto off a new version is only announced; download() fetches it, and it then installs the
-// same way. Nothing here shows a dialog: being offline, a GitHub rate limit or a failed download end up in the state
+// same way. A version that waits to be installed does not end the checks: when a newer one comes out meanwhile, it
+// takes the waiting one's place, so one restart always lands on the newest version - also when install() is asked
+// for hours after the last check. Nothing here shows a dialog: being offline, a GitHub rate limit or a failed download end up in the state
 // and the next check tries again; a release whose installer is not uploaded yet counts as no update.
 //
 // Requests go through electron-updater's own session, which network.js gives the proxy settings; a proxy that asks
@@ -24,10 +26,12 @@ const path = require("node:path");
 const FIRST_CHECK_MS = 30 * 1000;
 const CHECK_EVERY_MS = 4 * 60 * 60 * 1000;
 const OFFLINE_RETRY_MS = 30 * 60 * 1000;
+const INSTALL_RECHECK_MS = 5 * 60 * 1000; // install() looks for a newer version first when the last check is older
 
 const updater = new EventEmitter();
 let au = null; // electron-updater's autoUpdater; loaded only where updates are supported
 let timer = null, checking = null, installing = false;
+let installWhenDownloaded = false; // install() found a newer version: it goes in as soon as it is downloaded
 const s = {
   supported: false, auto: true,
   checking: false, downloading: false,
@@ -76,8 +80,7 @@ const firstLine = e => String(e?.message || e).split("\n")[0].trim().slice(0, 20
 
 function schedule(ms) {
   clearTimeout(timer);
-  // Once an update is downloaded there is nothing more to look for: it goes in when AgentDeck quits.
-  timer = setTimeout(() => { if (!s.downloaded) check(); }, ms);
+  timer = setTimeout(check, ms);
 }
 
 function start({ auto = true } = {}) {
@@ -100,7 +103,8 @@ function start({ auto = true } = {}) {
 
 // Resolves with the state once the check is over (a download it starts goes on in the background).
 function check() {
-  if (!s.supported || s.downloaded) return Promise.resolve(state());
+  // Not while a download runs: electron-updater does one thing at a time.
+  if (!s.supported || s.downloading || installing) return Promise.resolve(state());
   checking ??= runCheck().finally(() => { checking = null; });
   return checking;
 }
@@ -112,16 +116,21 @@ async function runCheck() {
   try {
     const r = await au.checkForUpdates();
     const found = r?.isUpdateAvailable ? r.updateInfo.version : null;
-    const done = { checking: false, checkedAt: Date.now(), available: found };
-    if (found && r.downloadPromise && !s.downloading) {
-      set({ ...done, downloading: true, percent: 0 });
+    const done = { checking: false, checkedAt: Date.now(), available: found || s.downloaded };
+    if (!found || found === s.downloaded) {
+      // Nothing newer than what is here or already waiting.
+      r?.downloadPromise?.catch(() => {});
+      set(done);
+    } else if (r.downloadPromise && !s.downloading) {
+      // Newer than the one that waits, if any: that one is dropped for it.
+      set({ ...done, downloaded: null, downloading: true, percent: 0 });
       follow(r.downloadPromise);
-    } else set(done);
+    } else set({ ...done, downloaded: null });
   } catch (e) {
     const reason = classify(e);
     console.error(`Update check failed (${reason}): ${firstLine(e)}`);
     // The newest release without its installer yet (or no release at all): no update for now.
-    if (reason === "pending") set({ checking: false, checkedAt: Date.now(), available: null });
+    if (reason === "pending") set({ checking: false, checkedAt: Date.now(), available: s.downloaded });
     else set({ checking: false, error: { during: "check", reason, message: firstLine(e) } });
     if (reason === "offline" || reason === "proxy") again = OFFLINE_RETRY_MS;
   }
@@ -131,8 +140,12 @@ async function runCheck() {
 
 function follow(download) {
   download.then(
-    () => set({ downloading: false, downloaded: s.available, percent: 100, error: null }),
+    () => {
+      set({ downloading: false, downloaded: s.available, percent: 100, error: null });
+      if (installWhenDownloaded) { installWhenDownloaded = false; install(); }
+    },
     e => {
+      installWhenDownloaded = false;
       const reason = classify(e);
       console.error(`Update download failed (${reason}): ${firstLine(e)}`);
       set({ downloading: false, percent: 0, error: { during: "download", reason, message: firstLine(e) } });
@@ -157,7 +170,22 @@ function setAuto(on) {
 // The update goes in on the way out, after AgentDeck has shut down as on any quit: silently, and it starts again
 // afterwards. electron-updater's own install-on-quit would not start it again, so it stands aside. Should the
 // installer not start, AgentDeck comes back as it was and tries again the next time it quits.
+// Asked for long after the last check, it first looks whether something newer came out: that one is downloaded and
+// installed instead, so the restart is not followed by another one.
 function install() {
+  if (!s.downloaded || installing) return false;
+  if (Date.now() - s.checkedAt > INSTALL_RECHECK_MS) {
+    check().then(() => {
+      // With automatic updates off the newer one is not on its way by itself: asked to update, it is fetched now.
+      if (!s.downloading && !s.downloaded && s.available) download();
+      if (s.downloading) installWhenDownloaded = true;
+      else if (s.downloaded) installNow();
+    });
+    return true;
+  }
+  return installNow();
+}
+function installNow() {
   if (!s.downloaded || installing) return false;
   installing = true;
   au.autoInstallOnAppQuit = false;

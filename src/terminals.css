@@ -12,6 +12,16 @@
 .wtab:hover { background: var(--panel-2); color: var(--text); }
 .wtab.active { background: var(--panel-3); color: var(--text); box-shadow: inset 0 0 0 1px var(--line-2); }
 .wtab-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* The computer a tab's or a pane's terminal runs on (workspace-ui.js getComputerMark). */
+.term-node {
+  flex: none; display: inline-flex; align-items: center; gap: 3px; max-width: 110px; height: 18px; padding: 0 6px;
+  border-radius: var(--r-pill); background: var(--panel-2); color: var(--muted); font-size: 10.5px; font-weight: 650; white-space: nowrap;
+}
+.term-node span { overflow: hidden; text-overflow: ellipsis; }
+.term-node .i { width: 11px; height: 11px; flex: none; }
+.term-node.remote { background: var(--accent-weak); color: var(--text); }
+.term-node.remote .i { color: var(--accent); }
+.term-node.offline { opacity: .55; }
 .wtab-close {
   flex: none; width: 20px; height: 20px; display: grid; place-items: center; padding: 0;
   border: 0; border-radius: 50%; background: none; color: var(--faint); opacity: 0;
