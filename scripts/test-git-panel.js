@@ -98,6 +98,8 @@ element('gitPanelRefresh').onclick().then(async () => {
   ctx.ws.terminals = [{ id: 'w', cwd: 'C:/app-wt' }];
   ctx.window.gitPanel.render();
   assert.doesNotMatch(element('gitRepositories').innerHTML, /git-project-head/, 'not grouped unless chosen');
+  // Drawn open in the plain list, a repository reports itself opened; that must not open it inside a group.
+  element('gitRepositories').listeners.toggle({ target: { dataset: { expand: repoKey }, open: true } });
   element('gitPanelMenu').onclick();
   await menuItems.find(item => item.label === 'byProject').run();
   const html = element('gitRepositories').innerHTML;
