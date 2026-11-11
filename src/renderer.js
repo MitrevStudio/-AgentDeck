@@ -27,7 +27,7 @@ function prepare() {
   order = built.projects.map(refOf);
   groupOfPath = new Map(built.projects.map(p => [refOf(p), p.group || ""]));
   data = conceal(built, readHidden());
-  if (groupMenu?.dataset.path && !groupOfPath.has(groupMenu.dataset.path)) closeGroupMenu();
+  if (groupMenu?.dataset.owner === "project" && !groupOfPath.has(groupMenu.dataset.path)) closeGroupMenu();
 }
 const getEmptyUnit = g => ({ group: g, members: [], sessions: [] });
 
@@ -58,6 +58,7 @@ function render() {
   window.searchPalette?.render();
   const input = document.querySelector(".rename");
   if (input && document.activeElement !== input) { input.focus(); input.select(); }
+  syncAnimations();
 }
 
 // The command centre (orchestrator.js): its space, its terminal and the state of its session.
@@ -98,7 +99,7 @@ function renderProjects(v) {
   const listed = v.projects.map(x => x.p);
   html += byDevice() ? buildSections(listed, devices, filter).map(s => buildDeviceHtml(s, v, counts)).join("") : buildUnitsHtml(listed, v, counts);
   if (!total && ui.loaded) html += `<div class="empty small">${esc(t("manager.projects.empty"))}</div>`;
-  $("projects").innerHTML = html;
+  patchChildren($("projects"), html);
 }
 // Projects as listed, each group (folded or open) where its first project is.
 function buildUnitsHtml(projects, v, counts) {
@@ -112,8 +113,15 @@ function buildUnitsHtml(projects, v, counts) {
 const getDraggableAttr = (v, n) => (v.toks.length || byDevice() || ui.renaming === n ? "" : 'draggable="true"');
 const buildPinMark = () => `<span class="pin-mark" title="${esc(t("manager.project.pinned"))}">${icon("pin")}</span>`;
 const buildPinButton = x => `<button class="icon-btn ${isPinned(x) ? "on" : ""}" data-action="pin" title="${esc(t(isPinned(x) ? "action.unpin" : "action.pin"))}">${icon("pin")}</button>`;
-const buildCountHtml = (count, v) =>
-  `<span class="count" title="${esc(t(v.toks.length ? "manager.project.countMatching" : "manager.project.countAll"))}">${count}</span>`;
+// Beside a project only what asks for attention - uncommitted changes, commits not in step with the upstream; the
+// branch itself is in the row's tooltip.
+function getProjectGit(p, node) {
+  const state = node ? node.git || {} : git;
+  const g = gitOf(p.path, state);
+  return { g: g && !g.error ? g : null, chip: g && !g.error && (gitDirty(g) || g.ahead || g.behind) ? gitChip(p.path, state) : "" };
+}
+// In the device view the rows stand a step in from their computer's heading.
+const getDeviceClass = () => (byDevice() ? "in-dev" : "");
 const buildNameHtml = (x, v, label) => (ui.renaming === x.n
   ? `<input class="rename" value="${esc(x.name)}" maxlength="80" aria-label="${esc(t(label))}">`
   : `<span class="proj-name" title="${esc(x.name)}">${hl(x.name, v.toks)}</span>`);
@@ -124,13 +132,14 @@ function buildProjectHtml(p, count, v) {
   const offline = Boolean(p.node && getNode(p.node)?.status !== "online");
   const member = Boolean(p.group);
   const node = p.node ? getNode(p.node) : null;
-  const tip = `${p.name}\n${p.path}${node ? `\n${nodeLabel(node)}` : ""}\n${p.last ? ago(p.last) : t("manager.project.noSessions")}`;
+  const { g, chip } = getProjectGit(p, node);
+  const tip = `${p.name}\n${p.path}${node ? `\n${nodeLabel(node)}` : ""}\n${p.last ? ago(p.last) : t("manager.project.noSessions")}${g ? `\n\n${gitTitle(g)}` : ""}`;
   return `
-    <div class="proj ${offline ? "offline" : ""} ${member ? "member" : ""} ${ui.selected === p.n ? "active" : ""}" data-path="${esc(refOf(p))}" ${p.node ? `data-node="${esc(p.node)}"` : ""} tabindex="0" ${getDraggableAttr(v, p.n)}>
+    <div class="proj ${offline ? "offline" : ""} ${member ? "member" : ""} ${getDeviceClass()} ${ui.selected === p.n ? "active" : ""}" data-path="${esc(refOf(p))}" ${p.node ? `data-node="${esc(p.node)}"` : ""} tabindex="0" ${getDraggableAttr(v, p.n)}>
       <div class="proj-row" title="${esc(tip)}"><span class="pmono" style="--h:${hue(p.n)}">${esc(initials(p.name))}</span>
         ${buildNameHtml(p, v, "manager.project.newName")}
         ${isPinned(p) ? buildPinMark() : ""}
-        ${node ? `${byDevice() ? "" : `<span class="proj-node ${node.status}" title="${esc(nodeLabel(node))}">${icon(node.kind === "host" ? "terminal" : "nodes")}${esc(node.name)}</span>`}${gitChip(p.path, node.git || {})}` : gitChip(p.path)}${projectLive(p.sessions)}
+        ${node && !byDevice() ? `<span class="proj-node ${node.status}" title="${esc(nodeLabel(node))}">${icon(node.kind === "host" ? "terminal" : "nodes")}${esc(node.name)}</span>` : ""}${chip}${projectLive(p.sessions)}
         ${getSpaceTabsHtml(p.n)}
       </div>
       <span class="proj-tools">
@@ -148,16 +157,14 @@ function getGroupMeta(members) {
 }
 function buildGroupHtml(u, v, shut) {
   const g = u.group;
-  const count = v.toks.length ? u.sessions.filter(s => v.hitSet.has(s)).length : u.sessions.length;
-  const tip = `${g.name}\n${g.size ? `${getMemberNames(u.members)}\n${getGroupMeta(u.members)}` : t("manager.projectGroup.empty")}`;
+  const tip = `${g.name}\n${g.size ? `${getMemberNames(u.members)}\n${getGroupMeta(u.members)} · ${tn("manager.status.sessions", u.sessions.length)}` : t("manager.projectGroup.empty")}`;
   return `
-    <div class="proj grp ${ui.selected === g.n ? "active" : ""}" data-group="${esc(g.id)}" tabindex="0" ${g.size ? getDraggableAttr(v, g.n) : ""}>
+    <div class="proj grp ${getDeviceClass()} ${ui.selected === g.n ? "active" : ""}" data-group="${esc(g.id)}" tabindex="0" ${g.size ? getDraggableAttr(v, g.n) : ""}>
       <div class="proj-row" title="${esc(tip)}">
         <button class="icon-btn fold" data-action="fold" title="${esc(t(shut ? "manager.projectGroup.expand" : "manager.projectGroup.collapse"))}">${icon(shut ? "right" : "down")}</button>
         ${icon("stack")}${buildNameHtml(g, v, "manager.projectGroup.newName")}
         ${isPinned(g) ? buildPinMark() : ""}
         ${projectLive(u.sessions)}
-        ${buildCountHtml(count, v)}
       </div>
       <span class="proj-tools">
         ${g.size ? buildPinButton(g) : ""}
@@ -305,7 +312,7 @@ function renderTitle(v) {
 function renderAgents(v) {
   $("agentCount").textContent = v.running.length;
   if (!v.running.length) {
-    $("agents").innerHTML = `<div class="side-empty">${esc(t(ui.loaded ? "manager.agents.none" : "manager.status.scanning"))}</div>`;
+    patchChildren($("agents"), `<div class="side-empty">${esc(t(ui.loaded ? "manager.agents.none" : "manager.status.scanning"))}</div>`);
     return;
   }
   let last = "", html = "";
@@ -315,15 +322,16 @@ function renderAgents(v) {
     last = group;
     html += agentHtml(s, l, v.toks);
   }
-  $("agents").innerHTML = html;
+  patchChildren($("agents"), html);
 }
 function agentHtml(s, l, toks) {
   const key = sessionKey(s), here = findSessionTab(s);
   const project = isCentreSession(s) ? t("centre.title") : data.projects.find(p => inProject(s, p))?.name || s.cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop();
   const where = s.node ? ` · ${esc(s.nodeName || nodeNameOf(s.node))}` : here ? "" : ` · ${esc(t("manager.agents.outside"))}`;
-  return `<div class="agent ${here ? "here" : ""}" data-key="${esc(key)}" title="${esc(`${s.title}\n${s.cwd}${s.node ? `\n${s.nodeName || ""}` : ""}`)}">${agentMark(s.agent)}
+  return `<div class="agent ${here ? "here" : ""}" data-key="${esc(key)}" tabindex="0" title="${esc(`${s.title}\n${s.cwd}${s.node ? `\n${s.nodeName || ""}` : ""}`)}">${agentMark(s.agent)}
       <div class="agent-main"><div class="agent-title">${hl(s.title, toks)}</div><div class="agent-sub">${esc(project)}${where}</div></div>
-      ${statusMark(l, isLoading(key, l))}</div>
+      ${statusMark(l, isLoading(key, l))}
+      <span class="agent-tools"><button class="icon-btn" data-action="agent-menu" title="${esc(t("manager.agents.more"))}" aria-haspopup="menu">${icon("more")}</button></span></div>
     ${l.subagents?.length ? subagentsHtml(key, l.subagents, "data-action", SIDEBAR_SUBAGENTS) : ""}`;
 }
 // The sidebar lists only the newest few of a session's subagents.
@@ -353,30 +361,30 @@ function renderSpaceEmpty(el, key) {
   el.onclick = null;
   if (renderRemoteSpace(el, key)) return; // a project of another computer (nodes-ui.js)
   if (key === CENTRE) {
-    el.innerHTML = `<div class="se-box">
+    setHtml(el, `<div class="se-box">
       <div class="se-head"><span class="centre-mark">${icon("bolt")}</span><div><h2>${esc(t("centre.title"))}</h2><p class="se-body">${esc(t("centre.body"))}</p></div></div>
-      <div class="se-new"><button class="btn" data-new="centre">${icon("play")}${esc(t("centre.start"))}</button></div>
-    </div>`;
+      <div class="se-new"><button class="btn primary" data-new="centre">${icon("play")}${esc(t("centre.start"))}</button></div>
+    </div>`);
     return;
   }
   const p = data.projects.find(x => x.n === key);
   if (!p) {
-    el.innerHTML = `<div class="se-box empty"><h3>${esc(t("ws.pick.title"))}</h3><p>${esc(t("ws.pick.body"))}</p></div>`;
+    setHtml(el, `<div class="se-box empty"><div class="empty-ico">${icon("terminal")}</div><h3>${esc(t("ws.pick.title"))}</h3><p>${esc(t("ws.pick.body"))}</p></div>`);
     return;
   }
   const recent = [...p.sessions].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-  el.innerHTML = `<div class="se-box">
+  setHtml(el, `<div class="se-box">
     <div class="se-head"><span class="pmono" style="--h:${hue(p.n)}">${esc(initials(p.name))}</span>
       <div><h2>${esc(p.name)}</h2>${pathHtml(p.path, [])}</div></div>
     <div class="se-new">
       <button class="btn" data-new="terminal" title="${esc(t("ws.newTerminalTitle"))}">${icon("terminal")}${esc(t("ws.newTerminal"))}</button>
       ${getInstalledAgents().map(a => `<button class="btn" data-new="${esc(a)}" title="${esc(t("ws.newAgentTitle", { agent: a, key: getNewAgentKey(a) }))}">${icon(`agent${a}`)}${esc(a)}</button>`).join("")}
     </div>
-    ${recent.length ? `<p class="se-label">${esc(t("ws.sessions"))}</p>${recent.map(s => `<div class="se-row" data-key="${esc(sessionKey(s))}">
+    ${recent.length ? `<p class="se-label">${esc(t("ws.sessions"))}<span class="se-hint">${esc(t("ws.sessionsHint"))}</span></p>${recent.map(s => `<div class="se-row" data-key="${esc(sessionKey(s))}" tabindex="0">
       ${agentMark(s.agent)}<span class="se-title" title="${esc(s.title)}">${esc(s.title)}</span>${getContextChip(s)}
       <span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span>
       <span class="se-acts">${liveOf(s) ? `<button class="btn sm" data-action="show-terminal">${icon("raise")}${esc(t("term.show"))}</button>` : getSessionActions(s)}</span></div>`).join("")}` : ""}
-  </div>`;
+  </div>`);
 }
 // A menu for starting a terminal or agent in the shown space.
 function openNewMenu(btn) {
@@ -402,13 +410,37 @@ function onWorkspaceChanged() {
 }
 
 // ---------- actions ----------
-let toastTimer;
-function toast(msg, isError = false) {
-  const el = $("toast");
-  el.textContent = msg;
-  el.className = `toast show${isError ? " error" : ""}`;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove("show"), isError ? 5000 : 2200);
+// Messages stack above the status bar, the newest lowest. An error stays longer, can be closed, and waits while it is
+// pointed at; the same message again only restarts its time. action: { label, run } for a button in the message.
+const TOAST_MS = 2600, TOAST_ERROR_MS = 8000, TOASTS_MAX = 4, TOAST_OUT_MS = 180;
+const getErrorText = msg => String(msg ?? "").replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
+function toast(msg, isError = false, action = null) {
+  const box = $("toasts"), text = isError ? getErrorText(msg) : String(msg ?? "");
+  let el = [...box.children].find(x => x.dataset.text === text && !x.classList.contains("out"));
+  if (!el) {
+    el = document.createElement("div");
+    el.className = `toast-item${isError ? " error" : ""}`;
+    el.dataset.text = text;
+    el.setAttribute("role", isError ? "alert" : "status");
+    el.innerHTML = `<span class="toast-text">${esc(text)}</span>${action ? `<button class="toast-act" data-toast="act">${esc(action.label)}</button>` : ""}${isError || action ? `<button class="toast-x" data-toast="close" aria-label="${esc(t("common.close"))}">${icon("x")}</button>` : ""}`;
+    const close = () => {
+      clearTimeout(el.timer);
+      el.classList.add("out");
+      setTimeout(() => el.remove(), TOAST_OUT_MS);
+    };
+    el.start = () => { clearTimeout(el.timer); el.timer = setTimeout(close, isError || action ? TOAST_ERROR_MS : TOAST_MS); };
+    el.addEventListener("click", e => {
+      const kind = e.target.closest("[data-toast]")?.dataset.toast;
+      if (!kind) return;
+      close();
+      if (kind === "act") Promise.resolve().then(action.run).catch(err => toast(err.message, true));
+    });
+    el.addEventListener("mouseenter", () => clearTimeout(el.timer));
+    el.addEventListener("mouseleave", el.start);
+    box.append(el);
+    while (box.children.length > TOASTS_MAX) box.firstElementChild.remove();
+  }
+  el.start();
 }
 const setStatus = s => { $("status").textContent = s; $("status").title = s; };
 
@@ -498,7 +530,7 @@ async function resume(s, place = "tab") {
     return toast(t("manager.node.toast.opened", { node: s.nodeName || nodeNameOf(s.node) }));
   }
   const l = liveOf(s);
-  if (l && !confirm(t("manager.confirm.openAgain", { pid: l.pid }))) return;
+  if (l && !(await confirmDialog({ title: t("confirm.openAgain"), body: t("manager.confirm.openAgain", { pid: l.pid }) }))) return;
   await window.manager.launchAgent(s.agent, s.id, s.cwd, place);
   toast(t("manager.toast.resuming", { agent: s.agent, cwd: s.cwd }));
 }
@@ -608,13 +640,14 @@ async function runAction(action, btn) {
     case "copy": await window.manager.copyText(folder); return toast(t("toast.copied", { path: folder }));
     case "rename": ui.renaming = groupId ? "g:" + groupId : normPath(path); return render();
     case "pin": return pinProject(path, groupId);
-    case "group-menu": return openGroupMenu(btn, path);
+    case "group-menu": return openOwnedMenu(btn, path, getGroupMenuItems(path));
     case "project-menu": return openProjectMenu(btn, path);
+    case "agent-menu": return openRowMenu(btn, session());
     case "ungroup": return applyRegistry(await window.manager.deleteGroup(groupId));
     case "fold": return toggleCollapsed(groupId);
     case "fold-device": return toggleDeviceFold(btn.closest("[data-device]").dataset.device);
     case "remove":
-      if (!confirm(t("manager.confirm.remove", { path: folder }))) return;
+      if (!(await confirmDialog({ title: t("action.remove"), body: t("manager.confirm.remove", { path: folder }), danger: true }))) return;
       return applyRegistry(await window.manager.removeProject(path));
     case "subagents": {
       const key = btn.dataset.key;
@@ -683,6 +716,17 @@ async function moveByKey(card, down) {
   await applyDrop(getDropPlan(getSource(card), next, down ? "after" : "before"));
   [...document.querySelectorAll(".proj[draggable]")].find(el => getCardKey(el) === key)?.focus();
 }
+// Up and Down walk a list's rows, Home and End go to its ends (Alt+Up/Down moves a project instead).
+function onListArrows(e) {
+  if (e.altKey || e.ctrlKey || e.metaKey || !["ArrowUp", "ArrowDown", "Home", "End"].includes(e.key)) return;
+  if (!e.target.matches(".proj, .agent, .se-row")) return;
+  const rows = [...e.currentTarget.querySelectorAll(".proj[tabindex], .agent[tabindex], .se-row[tabindex]")];
+  const i = rows.indexOf(e.target);
+  const next = rows[e.key === "Home" ? 0 : e.key === "End" ? rows.length - 1 : i + (e.key === "ArrowDown" ? 1 : -1)];
+  e.preventDefault();
+  next?.focus();
+}
+for (const id of ["projects", "agents", "spaceEmpty"]) $(id).addEventListener("keydown", onListArrows);
 $("projectOrder").addEventListener("click", () => toggleOrder().catch(err => toast(err.message, true)));
 $("newGroup").addEventListener("click", () => createGroup().catch(err => toast(err.message, true)));
 $("projectView").addEventListener("click", toggleDeviceMode);
@@ -710,12 +754,17 @@ function openMenu(btn, path, items) {
   focusFirst(root);
 }
 function openGroupMenu(btn, path, items = getGroupMenuItems(path)) { openMenu(btn, path, items); }
+// A project's menu closes when its project leaves the list (prepare); any other menu stays until the user closes it.
+function openOwnedMenu(btn, path, items) {
+  openMenu(btn, path, items);
+  groupMenu.dataset.owner = "project";
+}
 // A project's menu: its folder, its place in the list and its group, its name; removing it. Also on a right-click.
 function openProjectMenu(btn, path) {
   const p = data.projects.find(x => refOf(x) === path);
   if (!p) return;
   const pinned = isPinned(p);
-  openGroupMenu(btn, path, [
+  openOwnedMenu(btn, path, [
     { label: t("action.copyPath"), icon: "copy", run: async () => { await window.manager.copyText(p.path); toast(t("toast.copied", { path: p.path })); } },
     ...(p.group ? [] : [{ label: t("action.pin"), icon: "pin", checked: pinned, run: () => pinProject(path) }]),
     { separator: true },
@@ -733,9 +782,9 @@ function openProjectMenu(btn, path) {
 const isStopOffered = s => s.agent === "Claude" && Boolean(liveOf(s)) && !findSessionTab(s);
 async function stopSession(s) {
   const where = s.node ? s.nodeName || nodeNameOf(s.node) : t("term.thisComputer");
-  if (!confirm(t("term.stopConfirm", { title: s.title, where }))) return;
+  if (!(await confirmDialog({ title: t("term.stop"), body: t("term.stopConfirm", { title: s.title, where }), danger: true }))) return;
   try { await window.manager.stopSession(s.node, s.agent, s.id); }
-  catch (e) { return toast(String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""), true); }
+  catch (e) { return toast(e.message || e, true); }
   toast(t("term.stopped"));
   pollLive();
 }
@@ -952,6 +1001,13 @@ $("agents").addEventListener("contextmenu", e => {
   e.preventDefault();
   openRowMenu(row, sessionByKey(row.dataset.key));
 });
+// Enter brings a running session's terminal up; the Menu key (or Shift+F10) opens its menu.
+$("agents").addEventListener("keydown", e => {
+  if (!e.target.classList.contains("agent")) return;
+  const s = sessionByKey(e.target.dataset.key);
+  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showTerminal(s).catch(err => toast(err.message, true)); }
+  if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) { e.preventDefault(); openRowMenu(e.target, s); }
+});
 $("centre").addEventListener("click", () => selectProject(CENTRE));
 $("centre").addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectProject(CENTRE); } });
 $("spaceEmpty").addEventListener("click", async e => {
@@ -961,6 +1017,11 @@ $("spaceEmpty").addEventListener("click", async e => {
   if (await onAction(e)) return;
   const row = e.target.closest(".se-row");
   if (row && e.detail === 2) openSession(sessionByKey(row.dataset.key)).catch(err => toast(err.message, true));
+});
+$("spaceEmpty").addEventListener("keydown", e => {
+  if (e.key !== "Enter" || !e.target.classList.contains("se-row") || !e.target.dataset.key) return;
+  e.preventDefault();
+  openSession(sessionByKey(e.target.dataset.key)).catch(err => toast(err.message, true));
 });
 
 // F5 scans again; "/" outside a terminal or a field opens the search.
@@ -1027,7 +1088,6 @@ $("splitter").addEventListener("pointerdown", e => {
   el.addEventListener("lostpointercapture", () => el.removeEventListener("pointermove", move), { once: true });
 });
 $("splitter").addEventListener("dblclick", resetProjectsWidth);
-$("resetSidebar").onclick = resetProjectsWidth;
 $("splitter").addEventListener("keydown", e => {
   const step = { ArrowLeft: -SPLITTER_STEP_PX, ArrowRight: SPLITTER_STEP_PX }[e.key];
   if (step) {

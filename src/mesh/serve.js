@@ -46,7 +46,7 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
       clearInterval(timer);
       const reg = sessions.registry.read();
       reg.removed = reg.removed.filter(x => x !== sessions.norm(dir));
-      if (!reg.projects.some(x => sessions.norm(x.path) === sessions.norm(dir))) reg.projects.push({ name: path.basename(dir), path: dir });
+      if (!reg.projects.some(x => sessions.norm(x.path) === sessions.norm(dir))) reg.projects.push({ name: path.basename(dir) || dir, path: dir });
       sessions.registry.save(reg);
     }, CLONE_POLL_MS);
     timer.unref?.();

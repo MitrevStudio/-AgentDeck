@@ -23,7 +23,6 @@
       <div class="logo">⌘</div>
       <!-- One quiet row of icons: the search is a popup (palette-ui.js), not a field, so it needs no field of its own. -->
       <span class="side-tools">
-        <button id="resetSidebar" class="icon-btn" data-i18n-title="manager.resetSidebar" data-i18n-aria-label="manager.resetSidebar"><span data-icon="equal"></span></button>
         <button id="openPalette" class="icon-btn" data-i18n-title="palette.open"><span data-icon="search"></span></button>
         <button id="usage" class="icon-btn" data-i18n-title="usage.button.title" aria-pressed="false"><span data-icon="chart"></span></button>
         <button id="voiceHistory" class="icon-btn" data-i18n-title="manager.history.title"><span data-icon="clock"></span></button>
@@ -31,9 +30,9 @@
         <button id="keysBtn" class="icon-btn" data-i18n-title="keys.open"><span data-icon="keyboard"></span></button>
       </span>
     </div>
-    <nav class="side-tabs" role="tablist" aria-label="Sidebar">
-      <button role="tab" id="sideTabProjects" aria-controls="sideOverview" data-side-tab="projects" data-i18n-title="manager.projects" data-i18n-aria-label="manager.projects"><span data-icon="folder"></span></button>
-      <button role="tab" id="sideTabGit" aria-controls="sideGit" data-side-tab="git" data-i18n-title="manager.git" data-i18n-aria-label="manager.git"><span data-icon="branch"></span></button>
+    <nav class="side-tabs" role="tablist" data-i18n-aria-label="manager.sidebar">
+      <button role="tab" id="sideTabProjects" aria-controls="sideOverview" data-side-tab="projects"><span data-icon="folder"></span><span data-i18n="manager.projects"></span></button>
+      <button role="tab" id="sideTabGit" aria-controls="sideGit" data-side-tab="git"><span data-icon="branch"></span><span data-i18n="manager.git"></span></button>
     </nav>
     <div class="side-body">
       <div id="sideOverview" class="side-overview" role="tabpanel" aria-labelledby="sideTabProjects">
@@ -56,8 +55,8 @@
       </section>
       </div>
       <section class="side-sec git-sec" id="sideGit" role="tabpanel" aria-labelledby="sideTabGit" hidden>
-        <div class="side-sec-head git-panel-head"><h2>Source Control</h2><span class="count" id="gitRepoCount">0</span><span class="side-tools"><button class="icon-btn git-head-action" id="gitPanelRefresh" data-i18n-title="git.panel.refresh"><span data-icon="refresh"></span></button><button class="git-more" id="gitPanelMenu" type="button" aria-label="Source Control actions" aria-haspopup="menu"><span data-icon="more"></span></button></span></div>
-        <div class="git-toolbar" id="gitFilterBar"><input id="gitFilter" type="search" aria-label="Filter Git paths"><button class="icon-btn" id="gitTreeToggle" type="button" aria-label="Toggle folder tree" aria-pressed="false"><span data-icon="folder"></span></button></div>
+        <div class="side-sec-head git-panel-head"><h2 id="gitPanelTitle"></h2><span class="count" id="gitRepoCount">0</span><span class="side-tools"><button class="icon-btn" id="gitPanelRefresh" data-i18n-title="git.panel.refresh"><span data-icon="refresh"></span></button><button class="icon-btn" id="gitPanelMenu" type="button" aria-haspopup="menu"><span data-icon="more"></span></button></span></div>
+        <div id="gitFilterBar"><input id="gitFilter" class="input" type="search" autocomplete="off" spellcheck="false"><button class="icon-btn" id="gitTreeToggle" type="button" aria-pressed="false"><span data-icon="folder"></span></button></div>
         <div class="side-list" id="gitRepositories"></div>
         <div class="git-footer" id="gitFooter" hidden></div>
       </section>
@@ -92,16 +91,16 @@
   <span id="status" data-i18n="manager.status.ready"></span>
   <div id="limits"></div>
 </footer>
-<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<div id="toasts" class="toasts" aria-live="polite"></div>
 <dialog id="gitDiffDialog" class="git-diff-dialog" aria-labelledby="gitDiffTitle">
-  <header><div class="diff-head"><span id="gitDiffIcon" class="diff-file-icon" aria-hidden="true"></span><div class="diff-titles"><h2 id="gitDiffTitle"></h2><small id="gitDiffLocation"></small></div></div><button id="gitDiffClose" class="btn" autofocus><span data-icon="x"></span><span data-i18n="common.close"></span></button></header>
+  <header><div class="diff-head"><span id="gitDiffIcon" class="diff-file-icon" aria-hidden="true"></span><div class="diff-titles"><h2 id="gitDiffTitle"></h2><small id="gitDiffLocation"></small></div></div><button id="gitDiffClose" class="icon-btn" data-i18n-title="common.close" data-i18n-aria-label="common.close" autofocus><span data-icon="x"></span></button></header>
   <div class="git-toolbar" id="gitDiffTools"></div>
   <div id="gitDiffBody" tabindex="0" aria-live="polite"></div>
 </dialog>
 <dialog id="gitActionsDialog" class="git-diff-dialog" aria-labelledby="gitActionsTitle">
-  <header><div class="git-actions-head"><span id="gitActionsIcon" class="git-actions-icon" aria-hidden="true"></span><div><h2 id="gitActionsTitle"></h2><small id="gitActionsLocation"></small></div></div><button id="gitActionsClose" class="btn"><span data-icon="x"></span><span data-i18n="common.close"></span></button></header>
+  <header><div class="git-actions-head"><span id="gitActionsIcon" class="git-actions-icon" aria-hidden="true"></span><div><h2 id="gitActionsTitle"></h2><small id="gitActionsLocation"></small></div></div><button id="gitActionsClose" class="icon-btn" data-i18n-title="common.close" data-i18n-aria-label="common.close"><span data-icon="x"></span></button></header>
   <nav id="gitActionsNav" class="git-actions-nav"></nav>
-  <pre id="gitActionsResult" role="status" aria-live="polite"></pre>
+  <div id="gitActionsResult" role="status" aria-live="polite"></div>
   <div id="gitActionsBody"></div>
 </dialog>
 <script src="common.js"></script>

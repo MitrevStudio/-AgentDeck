@@ -15,7 +15,7 @@ main {
 
 /* ---------- sidebar ---------- */
 .side { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--panel); }
-.side-head { display: flex; align-items: center; gap: 10px; padding: 12px 12px 8px; }
+.side-head { display: flex; align-items: center; gap: 10px; padding: 12px 12px 10px; }
 .side-head .logo { width: 30px; height: 30px; flex: none; border-radius: 8px; font-size: 16px; }
 /* Search, Usage, History and Settings: as quiet as the section heads' icons, so the logo stays the one thing that stands out. */
 .side-head .icon-btn { width: 28px; height: 28px; }
@@ -23,10 +23,12 @@ main {
 .side-head .icon-btn.on { color: var(--accent); background: var(--accent-weak); }
 .side-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .side-sec { min-height: 0; display: flex; flex-direction: column; }
-.projects-sec { flex: 1 1 55%; }
-.agents-sec { flex: 1 1 45%; border-top: 1px solid var(--line); }
+/* The agents take what they need, up to half the sidebar; the projects have the rest. */
+.projects-sec { flex: 1 1 0; }
+.agents-sec { flex: 0 1 auto; max-height: 50%; border-top: 1px solid var(--line); }
+.agents-sec .side-list { flex: 0 1 auto; }
 .side-sec-head { flex: none; display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 8px 0 14px; }
-.side-sec-head h2 { margin: 0; font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.side-sec-head h2 { margin: 0; font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
 .side-sec-head .count { border-color: transparent; font-size: 11px; }
 .side-tools { margin-left: auto; display: flex; gap: 1px; }
 .side-sec-head .icon-btn { width: 26px; height: 26px; }
@@ -75,6 +77,9 @@ main {
 .proj.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
 .proj.drop-into { --row-bg: color-mix(in srgb, var(--accent) 13%, var(--panel)); box-shadow: inset 0 0 0 1px var(--accent); }
 .proj.member { margin-left: 18px; }
+/* By device: everything of a computer stands a step in from its heading. */
+.proj.in-dev { margin-left: 14px; }
+.proj.in-dev.member { margin-left: 32px; }
 .proj.member::before { content: ""; position: absolute; left: -7px; top: 0; bottom: 0; border-left: 1px solid var(--line-2); }
 /* A project of another computer (nodes-ui.js) in the same list: the computer's name beside it, in place of git. */
 .proj-node { flex: none; display: inline-flex; align-items: center; gap: 3px; max-width: 96px; font-size: 11px; font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -96,10 +101,10 @@ main {
 .dev-empty { padding: 2px 8px 4px 30px; font-size: 12px; color: var(--faint); }
 /* The device toggle: lit while a filter is on; only a quiet background while its chips are open with none chosen. */
 .side-sec-head #projectView.open:not(.on) { background: var(--panel-2); }
-.dev-chips { flex: none; display: flex; flex-wrap: wrap; gap: 4px; padding: 0 8px 6px 12px; }
+.dev-chips { flex: none; display: flex; gap: 4px; padding: 0 8px 6px 12px; overflow-x: auto; scrollbar-width: none; }
 .dev-chips[hidden] { display: none; }
 .dev-chip {
-  display: inline-flex; align-items: center; gap: 4px; max-width: 100%; height: 22px; padding: 0 8px; border: 1px solid var(--line);
+  display: inline-flex; align-items: center; gap: 4px; flex: none; max-width: 160px; height: 22px; padding: 0 8px; border: 1px solid var(--line);
   border-radius: 999px; background: transparent; color: var(--muted); font: inherit; font-size: 11.5px; cursor: pointer; white-space: nowrap;
 }
 .dev-chip span { overflow: hidden; text-overflow: ellipsis; }
@@ -136,7 +141,7 @@ main {
 .proj-tools .icon-btn.on { color: var(--accent); }
 .proj-live { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 650; color: var(--muted); }
 .proj-live .pulse { margin-left: 3px; }
-.proj-row .git-chip .gb { display: none; }
+.proj-row .git-chip .gb, .proj-row .git-chip > .i { display: none; }
 .head-btn {
   padding: 2px 7px; border-radius: 999px; border: 1px solid transparent;
   flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
@@ -180,6 +185,14 @@ main {
 .agent.menu-open { background: var(--panel-2); }
 .agent.here { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
 .agent-main { flex: 1; min-width: 0; }
+/* The row's menu button, over its right end while the row is pointed at or has the keyboard (as a project's tools). */
+.agent-tools {
+  position: absolute; top: 50%; right: 4px; transform: translateY(-50%); display: flex; padding-left: 24px;
+  background: linear-gradient(90deg, transparent, var(--panel-2) 20px); opacity: 0; pointer-events: none; transition: opacity var(--dur-fast);
+}
+.agent-tools .icon-btn { width: 26px; height: 26px; }
+.agent:hover .agent-tools, .agent:focus-within .agent-tools, .agent.menu-open .agent-tools { opacity: 1; pointer-events: auto; }
+.agent:focus-visible, .proj:focus-visible, .se-row:focus-visible { outline-offset: -2px; }
 .agent-title { font-size: 13px; font-weight: 550; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .agent-sub { font-size: 11.5px; color: var(--faint); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .agents-sec .subs { margin: 0 6px 4px 30px; }
@@ -188,41 +201,117 @@ main {
 .side-empty { padding: 6px 14px; font-size: 12px; color: var(--faint); }
 
 /* ---------- footer ---------- */
+/* The focused pane's folder and the totals on the left; on the right this computer's plan limits and load in full,
+   and every other computer as a short chip that opens on a click (limits-ui.js). */
 .status {
-  display: flex; align-items: center; gap: 16px; padding: 5px 14px; font-size: 12px; color: var(--muted);
+  display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 10px; font-size: 11.5px; color: var(--muted);
   border-top: 1px solid var(--line); background: var(--panel);
 }
-/* The focused pane's folder, branch and context on the left, the plan limits on the right. */
-.focus-info { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.focus-info { display: flex; align-items: center; gap: 10px; min-width: 0; max-width: 200px; overflow: hidden; flex-shrink: 2; }
 .focus-info:empty { display: none; }
-.fi-dir { display: inline-flex; align-items: center; gap: 5px; color: var(--text); white-space: nowrap; }
-.fi-dir .i { width: 14px; height: 14px; color: var(--muted); }
-.status #limits { margin-left: auto; }
-.status #limits .lim-group { height: 24px; padding: 0 8px; background: transparent; border-color: transparent; }
-.status { flex-wrap: nowrap; gap: 8px; padding: 3px 10px; font-size: 10px; }
-.status #status { display: inline-flex; align-items: center; gap: 9px; max-width: 160px; white-space: nowrap; flex-shrink: 0; cursor: help; }
+.fi-dir { display: inline-flex; align-items: center; gap: 5px; min-width: 0; color: var(--text); white-space: nowrap; }
+.fi-dir .i { width: 13px; height: 13px; flex: none; color: var(--muted); }
+.fi-dir > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.status #status { display: inline-flex; align-items: center; gap: 9px; flex-shrink: 0; white-space: nowrap; cursor: help; }
 .summary-count { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
 .summary-count .i { width: 13px; height: 13px; }
-.status .focus-info { max-width: 170px; overflow: hidden; flex-shrink: 2; }
-.status .fi-dir { min-width: 0; font-size: 10px; }
-.status .fi-dir .i { flex: none; }
-.status .fi-dir > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.status #limits { flex: 1; flex-direction: row-reverse; justify-content: flex-start; direction: ltr; margin-left: 0; gap: 6px; overflow-x: auto; scrollbar-width: thin; }
-.machine-status { display: flex; align-items: center; gap: 7px; height: 26px; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--panel-2); flex: none; white-space: nowrap; }
-.machine-status > strong { display: inline-flex; align-items: center; gap: 4px; color: var(--text); max-width: 90px; overflow: hidden; text-overflow: ellipsis; font-size: 10px; }
-.machine-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--codex); flex: none; }
-.offline .machine-dot { background: var(--muted); }
-.machine-providers { display: inline-flex; align-items: center; gap: 7px; }
-.status #limits .machine-status .lim-group { gap: 4px; height: 22px; padding: 0; border: 0; border-radius: 0; }
-.status #limits .machine-status .lim-provider { font-size: 10px; }
-.status #limits .machine-status .lim { font-size: 10px; gap: 2px; height: 22px; }
-.status #limits .machine-status .lim + .lim { padding-left: 3px; border-left: 0; }
-.status #limits .machine-status .lim-bar { display: none; }
-.status #limits .machine-status .lim-k { font-size: 9px; }
-.machine-status.offline { opacity: .55; }
-.machine-resources { display: inline-flex; align-items: center; gap: 6px; border-left: 1px solid var(--line-2); padding-left: 7px; font-size: 10px; font-variant-numeric: tabular-nums; cursor: help; }
+/* Laid out from the right, so this computer stays in view and the rest scroll under the left end. */
+.status #limits { flex: 1; flex-direction: row-reverse; justify-content: flex-start; gap: 6px; margin-left: 0; overflow-x: auto; scrollbar-width: none; }
+.machine-status {
+  display: flex; align-items: center; gap: 8px; flex: none; height: 22px; padding: 0 8px; border: 1px solid var(--line);
+  border-radius: var(--r-pill); background: transparent; color: var(--muted); font: inherit; white-space: nowrap;
+}
+.machine-name {
+  display: inline-flex; align-items: center; gap: 5px; max-width: 120px; padding: 0; border: 0; background: none;
+  color: var(--text); font: inherit; font-weight: 600; overflow: hidden; text-overflow: ellipsis;
+}
+button.machine-status, button.machine-name { cursor: pointer; }
+button.machine-status:hover { border-color: var(--line-3); background: var(--panel-2); }
+button.machine-name:hover { color: var(--accent); }
+.machine-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--busy); flex: none; }
+.machine-status.offline { opacity: .6; }
+.machine-status.offline .machine-dot { background: var(--faint); }
+.machine-fullest { color: var(--muted); font-variant-numeric: tabular-nums; }
+.machine-fullest.warn { color: var(--wait); font-weight: 650; }
+.machine-fullest.danger { color: var(--danger); font-weight: 650; }
+/* A chip's meters: one per agent, as full as that agent's fullest limit, in the agent's colour until it is worth a look. */
+.machine-meters { display: inline-flex; flex-direction: column; gap: 2px; }
+.machine-meter { width: 22px; height: 3px; border-radius: 2px; background: var(--line-2); overflow: hidden; }
+.machine-meter i { display: block; height: 100%; border-radius: 2px; background: var(--muted); }
+.machine-meter.claude i { background: var(--claude); }
+.machine-meter.codex i { background: var(--codex); }
+.machine-meter.warn i { background: var(--wait); }
+.machine-meter.danger i { background: var(--danger); }
+.machine-status[data-card]:hover, .machine-status[data-card]:focus-within { border-color: var(--line-3); background: var(--panel-2); }
+
+/* A computer's card (limits-ui.js): over the status bar while the computer is pointed at. */
+.machine-card {
+  position: fixed; z-index: 900; width: 300px; padding: 4px 0 10px; pointer-events: none;
+  border: 1px solid var(--line-2); border-radius: var(--r-lg); background: var(--raised); color: var(--text);
+  box-shadow: var(--shadow-pop); font-size: 12px; line-height: 1.4; animation: card-in .12s ease-out;
+}
+@keyframes card-in { from { opacity: 0; transform: translateY(4px); } }
+.machine-card > header { display: flex; align-items: center; gap: 7px; padding: 8px 14px 9px; border-bottom: 1px solid var(--line); }
+.machine-card > header b { min-width: 0; flex: 1; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.machine-card > header span:last-child { color: var(--muted); font-size: 11.5px; }
+.machine-card > header .machine-dot { width: 8px; height: 8px; }
+.machine-card > header.offline .machine-dot { background: var(--faint); }
+.mc-part { padding: 9px 14px 3px; }
+.mc-part + .mc-part { border-top: 1px solid var(--line); margin-top: 6px; }
+.mc-part h4 { display: flex; justify-content: space-between; margin: 0 0 5px; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.mc-part h4 span { font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--faint); }
+.mc-part.claude h4 { color: var(--claude); }
+.mc-part.codex h4 { color: var(--codex); }
+.mc-row { display: grid; grid-template-columns: 42px 64px 38px 1fr; align-items: center; gap: 8px; min-height: 22px; }
+.mc-k { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mc-v { text-align: right; font-weight: 650; font-variant-numeric: tabular-nums; }
+.mc-note { min-width: 0; color: var(--faint); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mc-bar { position: relative; height: 5px; border-radius: 3px; background: var(--line-2); }
+.mc-bar i { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: var(--accent); }
+.mc-part.claude .mc-bar i { background: var(--claude); }
+.mc-part.codex .mc-bar i { background: var(--codex); }
+/* How much of the window's time is gone, as in the edge menu's pills. */
+.mc-bar b { position: absolute; top: -2px; width: 2px; height: 9px; margin-left: -1px; border-radius: 1px; background: var(--text); opacity: .55; }
+.mc-part .mc-bar.warn i { background: var(--wait); }
+.mc-part .mc-bar.danger i { background: var(--danger); }
+.mc-row.warn .mc-v { color: var(--wait); }
+.mc-row.danger .mc-v { color: var(--danger); }
+.mc-warn { margin: 0 0 4px 50px; font-size: 11.5px; color: var(--wait); }
+.mc-warn.danger { color: var(--danger); }
+.mc-text { padding: 2px 0 4px; color: var(--muted); }
+.machine-card > footer { margin-top: 8px; padding: 7px 14px 0; border-top: 1px solid var(--line); color: var(--faint); font-size: 11.5px; }
+.machine-providers { display: inline-flex; align-items: center; gap: 10px; }
+.machine-providers:empty { display: none; }
+.status #limits .lim-group { gap: 5px; height: 20px; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.status #limits .lim-provider { font-size: 11px; }
+.status #limits .lim { gap: 3px; height: 20px; font-size: 11.5px; font-weight: 600; }
+.status #limits .lim + .lim { padding-left: 5px; border-left: 0; }
+.status #limits .lim-k { font-size: 11px; }
+/* The agent's colour names it; a figure is plain until it is worth a look. */
+.status #limits .lim-value { color: var(--text); }
+.status #limits .lim.warn .lim-value { color: var(--wait); }
+.status #limits .lim.danger .lim-value { color: var(--danger); }
+.status #limits .lim-bar { display: none; }
+.machine-resources { display: inline-flex; align-items: center; gap: 7px; padding-left: 8px; border-left: 1px solid var(--line-2); font-variant-numeric: tabular-nums; }
 .resource-value { display: inline-flex; align-items: center; gap: 3px; }
-.resource-value .i { width: 12px; height: 12px; color: var(--muted); }
+.resource-value .i { width: 12px; height: 12px; color: var(--faint); }
+
+/* ---------- messages (renderer.js toast) ---------- */
+.toasts { position: fixed; left: 50%; bottom: 44px; z-index: 70; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: min(640px, 80vw); pointer-events: none; }
+.toast-item {
+  display: flex; align-items: center; gap: 10px; max-width: 100%; padding: 8px 14px; border-radius: var(--r-md);
+  border: 1px solid var(--line-2); background: var(--raised); box-shadow: var(--shadow-pop); font-size: 13px;
+  pointer-events: auto; animation: rise var(--dur) var(--ease-out); transition: opacity var(--dur), transform var(--dur);
+}
+.toast-item.out { opacity: 0; transform: translateY(6px); }
+.toast-item.error { border-color: color-mix(in srgb, var(--danger) 50%, transparent); color: var(--danger-text); padding-right: 6px; }
+.toast-text { min-width: 0; overflow-wrap: anywhere; }
+.toast-act { flex: none; padding: 2px 8px; border: 1px solid var(--line-3); border-radius: var(--r-xs); background: transparent; color: var(--accent); font-size: 12.5px; font-weight: 600; }
+.toast-act:hover { border-color: var(--accent); }
+.toast-x { flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: var(--r-xs); background: transparent; color: inherit; opacity: .7; }
+.toast-x:hover { opacity: 1; background: var(--panel-2); }
+.toast-x .i { width: 12px; height: 12px; }
+@media (prefers-reduced-motion: reduce) { .toast-item { animation: none; transition: none; } }
 
 /* ---------- search (palette-ui.js) ---------- */
 .pal-back { position: fixed; inset: 0; z-index: 60; display: flex; justify-content: center; align-items: flex-start; padding-top: 10vh; background: var(--backdrop); }

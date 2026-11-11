@@ -45,7 +45,9 @@ const GIT_LABELS = {
   operation: ['Operation in progress', 'Текуща операция'], select: ['Select file', 'Избери файл'],
   noAgent: ['Terminal only', 'Само терминал'], resolve: ['Resolve conflicts in your editor, stage the files, then continue.', 'Разреши конфликтите в редактора, подготви файловете и продължи.'],
   noFetch: ['Ahead/behind reflects the last fetch.', 'Ahead/behind е спрямо последния fetch.'],
-  all: ['Select group', 'Избери групата']
+  all: ['Select group', 'Избери групата'],
+  sourceControl: ['Source Control', 'Git промени'], panelActions: ['Source Control actions', 'Git действия'],
+  worktreesNav: ['Worktrees', 'Worktrees'], agent: ['Agent', 'Агент'], changedFiles: ['Changed files', 'Променени файлове']
 };
 function gitText(key) { return GIT_LABELS[key]?.[typeof I18N !== 'undefined' && I18N.language() === 'bg' ? 1 : 0] || key; }
 window.gitWorkflow = (() => {
@@ -53,12 +55,15 @@ window.gitWorkflow = (() => {
   const outputs = new Map(), drafts = new Map();
   const targetKey = () => JSON.stringify([target.node, target.root]);
   const rememberDraft = (node, root, message) => drafts.set(JSON.stringify([node, root]), message);
-  const GRAPH_COLORS = ['#7aa7ff', '#5ee0a0', '#f2b55f', '#c792ea', '#ff8a8a', '#56d4dd', '#e0b46a', '#8fd0ff'];
+  // Lane colours from the theme, so the graph follows it.
+  const GRAPH_COLORS = ['--accent', '--busy', '--wait', '--read', '--danger', '--opencode', '--working', '--claude'].map(name => `var(${name})`);
+  // The shared dialog (common.js) where the page has it.
+  const ask = (title, body, danger) => typeof confirmDialog === 'function' ? confirmDialog({ title, body, confirmLabel: title, danger }) : Promise.resolve(confirm(body));
   const GRAPH_LIMIT = 150;
   let graphCommits = [], graphSkip = 0, graphHasMore = false;
   const dialog = $('gitActionsDialog'), body = $('gitActionsBody'), result = $('gitActionsResult');
-  const button = (action, label, glyph, disabled = false) => `<button class="btn" type="button" data-git-action="${action}" ${disabled ? 'disabled' : ''}>${glyph ? icon(glyph) : ''}${esc(gitText(label || action))}</button>`;
-  const input = (id, label, value = '') => `<label>${esc(gitText(label))}<input id="${id}" value="${esc(value)}" autocomplete="off"></label>`;
+  const button = (action, label, glyph, disabled = false, kind = '') => `<button class="btn sm ${kind}" type="button" data-git-action="${action}" ${disabled ? 'disabled' : ''}>${glyph ? icon(glyph) : ''}${esc(gitText(label || action))}</button>`;
+  const input = (id, label, value = '', kind = '') => `<label class="git-field ${kind}">${esc(gitText(label))}<input class="input" id="${id}" value="${esc(value)}" autocomplete="off" spellcheck="false"></label>`;
   const options = (values, selected = '') => values.map(v => `<option value="${esc(v)}" ${v === selected ? 'selected' : ''}>${esc(v || gitText('noAgent'))}</option>`).join('');
   const query = args => window.manager.gitQuery(target.node, { root: target.root, ...args });
   async function execute(args) {
@@ -86,14 +91,14 @@ window.gitWorkflow = (() => {
         <span class="grow"></span>
       </div>
       <p class="git-sync-note" data-sync-only>${esc(gitText(noRemotes ? 'noRemote' : st.upstream ? 'noFetch' : 'publishHint'))}</p>
-      <div class="git-sync-bar" data-sync-only>${button('fetch', 'fetch', 'download', noRemotes)}${button('pull', 'pull', 'download', blocked || !st.upstream)}${button('push', st.upstream ? 'push' : 'publish', 'upload', noRemotes || st.detached || st.initial)}<label class="git-field" ${st.upstream || noRemotes ? 'hidden' : ''}><span>${esc(gitText('remote'))}</span><select id="gitRemote">${options(details.remotes)}</select></label><span class="grow"></span>${button('refresh', 'refresh', 'refresh')}</div>
+      <div class="git-sync-bar" data-sync-only>${button('fetch', 'fetch', 'download', noRemotes)}${button('pull', 'pull', 'download', blocked || !st.upstream)}${button('push', st.upstream ? 'push' : 'publish', 'upload', noRemotes || st.detached || st.initial)}<label class="git-field inline" ${st.upstream || noRemotes ? 'hidden' : ''}><span>${esc(gitText('remote'))}</span><select class="select" id="gitRemote">${options(details.remotes)}</select></label><span class="grow"></span>${button('refresh', 'refresh', 'refresh')}</div>
       ${dirty ? `<p class="git-state-note" data-dirty-note>${esc(gitText('dirtyHint'))}</p>` : ''}
-      ${details.operation ? `<section class="git-operation"><h3>${esc(gitText('operation'))}: ${esc(details.operation)}</h3><p>${esc(gitText(st.conflicts ? 'resolve' : 'continueHint'))}</p><div class="git-toolbar">${button('continue', 'continue', 'play', Boolean(st.conflicts))}${button('abort', 'abort', 'x')}</div></section>` : ''}
-      <section><h3>${esc(gitText('branches'))}</h3><div class="git-toolbar"><select id="gitBranch" aria-label="${esc(gitText('branches'))}">${options(details.branches, st.branch)}</select>${button('switch', 'switch', 'branch')}</div><div class="git-toolbar">${input('gitNewBranch', 'branch')}${button('branch', 'create', 'plus')}</div></section>
+      ${details.operation ? `<section class="git-operation"><h3>${esc(gitText('operation'))}: ${esc(details.operation)}</h3><p>${esc(gitText(st.conflicts ? 'resolve' : 'continueHint'))}</p><div class="git-toolbar">${button('continue', 'continue', 'play', Boolean(st.conflicts))}${button('abort', 'abort', 'x', false, 'danger')}</div></section>` : ''}
+      <section><h3>${esc(gitText('branches'))}</h3><div class="git-toolbar"><select class="select" id="gitBranch" aria-label="${esc(gitText('branches'))}">${options(details.branches, st.branch)}</select>${button('switch', 'switch', 'branch')}</div><div class="git-form-row">${input('gitNewBranch', 'branch')}${button('branch', 'create', 'plus')}</div></section>
       <section><h3>${esc(gitText('commit'))}</h3>${button('preview', 'refreshReview', 'refresh')}<div id="gitCommitReview"></div></section>
-      <section><h3>${esc(gitText('history'))}</h3><div class="git-toolbar">${button('history', 'history', 'history')}${input('gitBase', 'base', details.branches.includes('main') ? 'main' : details.branches.includes('master') ? 'master' : st.upstream || 'HEAD')}${button('compare', 'compare', 'splitRight')}</div><div id="gitHistory" class="git-graph"></div><div id="gitHistoryPager" class="git-graph-more"></div><div id="gitHistoryPatch"></div></section>
-      <section><h3>${esc(gitText('worktrees'))}</h3>${details.worktrees.map((w, i) => `<article class="git-worktree"><strong>${esc(w.branch || w.oid || '')}</strong><div>${esc(w.path)}</div><small>${esc(gitText('active'))}: ${w.active.length} · ${esc(gitText('sessions'))}: ${w.sessions.length}</small>${w.sessions.map(s => `<div>${esc(s.agent)} · ${esc(s.title)}</div>`).join('')}<div class="git-toolbar"><button class="btn" data-worktree-open="${i}">${icon('terminal')}${esc(gitText('terminal'))}</button>${i && !w.locked && !w.active.length ? `<button class="btn" data-worktree-remove="${i}">${icon('trash')}${esc(gitText('remove'))}</button>` : ''}</div></article>`).join('')}
-      <div class="git-task-form">${input('gitTaskBranch', 'branch')}${input('gitTaskPath', 'path')}${input('gitTaskBase', 'base', st.branch || 'HEAD')}<label>Agent<select id="gitTaskAgent">${options(['', 'Claude', 'Codex', 'OpenCode'])}</select></label>${button('task', 'task', 'play')}</div></section>`;
+      <section><h3>${esc(gitText('history'))}</h3><div class="git-form-row">${button('history', 'refresh', 'refresh')}<span class="grow"></span>${input('gitBase', 'base', details.branches.includes('main') ? 'main' : details.branches.includes('master') ? 'master' : st.upstream || 'HEAD', 'inline')}${button('compare', 'compare', 'splitRight')}</div><div class="git-history-split"><div class="git-history-list"><div id="gitHistory" class="git-graph"></div><div id="gitHistoryPager" class="git-graph-more"></div></div><div id="gitHistoryPatch"></div></div></section>
+      <section><h3>${esc(gitText('worktrees'))}</h3>${details.worktrees.map((w, i) => `<article class="git-worktree"><strong>${esc(w.branch || w.oid || '')}</strong><div class="git-worktree-path">${esc(w.path)}</div><small>${esc(gitText('active'))}: ${w.active.length} · ${esc(gitText('sessions'))}: ${w.sessions.length}</small>${w.sessions.map(s => `<div>${esc(s.agent)} · ${esc(s.title)}</div>`).join('')}<div class="git-toolbar"><button class="btn sm" data-worktree-open="${i}">${icon('terminal')}${esc(gitText('terminal'))}</button>${i && !w.locked && !w.active.length ? `<button class="btn sm danger" data-worktree-remove="${i}">${icon('trash')}${esc(gitText('remove'))}</button>` : ''}</div></article>`).join('')}
+      <div class="git-task-form">${input('gitTaskBranch', 'branch')}${input('gitTaskPath', 'path')}${input('gitTaskBase', 'base', st.branch || 'HEAD')}<label class="git-field">${esc(gitText('agent'))}<select class="select" id="gitTaskAgent">${options(['', 'Claude', 'Codex', 'OpenCode'])}</select></label>${button('task', 'task', 'play', false, 'primary')}</div></section>`;
     const sections = [...body.querySelectorAll(':scope > section')];
     const views = [...(details.operation ? ['sync'] : []), 'branches', 'commit', 'history', 'worktrees'];
     sections.forEach((section, i) => { section.hidden = views[i] !== 'sync' && views[i] !== (view === 'compare' ? 'history' : view); });
@@ -158,24 +163,24 @@ window.gitWorkflow = (() => {
       const at = oid => after.findIndex(l => l.oid === oid);
       const paths = [];
       // The line coming down from the row above, into this commit's node.
-      if (!created) paths.push(`<path d="M${x(nodeCol)} 0 L${x(nodeCol)} ${CY}" stroke="${nodeColor}"/>`);
+      if (!created) paths.push(`<path d="M${x(nodeCol)} 0 L${x(nodeCol)} ${CY}" style="stroke:${nodeColor}"/>`);
       before.forEach((l, i) => {
         if (i === nodeCol || merges.includes(i)) return;
         const j = at(l.oid); if (j < 0) return;
         const x1 = x(i), x2 = x(j);
-        paths.push(`<path d="M${x1} 0 C${x1} ${CY} ${x2} ${CY} ${x2} ${RH}" stroke="${l.color}"/>`);
+        paths.push(`<path d="M${x1} 0 C${x1} ${CY} ${x2} ${CY} ${x2} ${RH}" style="stroke:${l.color}"/>`);
       });
       for (const m of merges) {
         const xm = x(m), xc = x(nodeCol);
-        paths.push(`<path d="M${xm} 0 C${xm} ${CY * 0.9} ${xc} ${CY * 0.6} ${xc} ${CY}" stroke="${before[m].color}"/>`);
+        paths.push(`<path d="M${xm} 0 C${xm} ${CY * 0.9} ${xc} ${CY * 0.6} ${xc} ${CY}" style="stroke:${before[m].color}"/>`);
       }
       for (const [pi, p] of c.parents.entries()) {
         if (!p) continue;
         const j = at(p); if (j < 0) continue;
         const xc = x(nodeCol), xp = x(j);
-        paths.push(`<path d="M${xc} ${CY} C${xc} ${CY + 4} ${xp} ${RH - 6} ${xp} ${RH}" stroke="${pi === 0 ? nodeColor : after[j].color}"/>`);
+        paths.push(`<path d="M${xc} ${CY} C${xc} ${CY + 4} ${xp} ${RH - 6} ${xp} ${RH}" style="stroke:${pi === 0 ? nodeColor : after[j].color}"/>`);
       }
-      const node = `<circle cx="${x(nodeCol)}" cy="${CY}" r="4.5" fill="var(--panel)" stroke="${nodeColor}" stroke-width="2"/>`;
+      const node = `<circle cx="${x(nodeCol)}" cy="${CY}" r="4.5" style="fill:var(--panel);stroke:${nodeColor};stroke-width:2"/>`;
       const date = new Date(c.date);
       const when = Number.isNaN(date.getTime()) ? c.date.slice(0, 10) : date.toLocaleDateString(undefined, { day: '2-digit', month: 'short' });
       return `<button type="button" class="graph-row" data-commit="${esc(c.oid)}" title="${esc(c.oid)}">
@@ -184,7 +189,7 @@ window.gitWorkflow = (() => {
       </button>`;
     }).join('');
     host.innerHTML = `<div class="graph-list">${html}</div>`;
-    if (pager) pager.innerHTML = graphHasMore ? `<button class="btn git-diff-btn" type="button" data-git-action="more">${icon('history')}<span>${esc(gitText('more'))}</span></button>` : '';
+    if (pager) pager.innerHTML = graphHasMore ? `<button class="btn sm" type="button" data-git-action="more">${icon('history')}<span>${esc(gitText('more'))}</span></button>` : '';
   }
   async function action(name) {
     if (name === 'refresh') return refresh();
@@ -192,7 +197,7 @@ window.gitWorkflow = (() => {
       const oldMessage = body.querySelector('#gitCommitMessage');
       if (oldMessage) draft = oldMessage.value;
       const review = await query({ kind: 'preview' });
-      $('gitCommitReview').innerHTML = `${review.patch ? `<pre class="diff-patch">${renderGitPatch(review.patch)}</pre>` : `<p class="git-state-note">${esc(gitText('noStaged'))}</p>`}<label>${esc(gitText('message'))}<textarea id="gitCommitMessage" maxlength="20000" placeholder="${esc(gitText('commitHint'))}"></textarea></label><div class="git-review-submit"><small>${esc(gitText('commitReady'))}</small><button class="btn" id="gitCommitSubmit" disabled>${esc(gitText('reviewed'))}</button></div>`;
+      $('gitCommitReview').innerHTML = `${review.patch ? `<pre class="diff-patch">${renderGitPatch(review.patch)}</pre>` : `<p class="git-state-note">${esc(gitText('noStaged'))}</p>`}<label class="git-field">${esc(gitText('message'))}<textarea class="textarea" id="gitCommitMessage" maxlength="20000" spellcheck="false" placeholder="${esc(gitText('commitHint'))}"></textarea></label><div class="git-review-submit"><small>${esc(gitText('commitReady'))}</small><button class="btn sm primary" id="gitCommitSubmit" disabled>${esc(gitText('reviewed'))}</button></div>`;
       const updateSubmit = () => { $('gitCommitSubmit').disabled = !review.patch || !$('gitCommitMessage').value.trim() || Boolean(details.status.conflicts); };
       $('gitCommitSubmit').onclick = () => guarded(async () => {
         const message = $('gitCommitMessage').value.trim(); if (!message) return;
@@ -220,10 +225,10 @@ window.gitWorkflow = (() => {
     }
     if (name === 'compare') {
       const comparison = await query({ kind: 'compare', base: $('gitBase').value });
-      $('gitHistoryPatch').innerHTML = `<p>${esc(gitText('changes'))}: ${comparison.files.length}</p><ul>${comparison.files.map(file => `<li><code>${esc(file)}</code></li>`).join('')}</ul><pre class="diff-patch">${renderGitPatch(comparison.patch || gitText('empty'))}</pre>`;
+      $('gitHistoryPatch').innerHTML = `<p class="git-sync-note">${esc(gitText('changedFiles'))}: ${comparison.files.length}</p><ul>${comparison.files.map(file => `<li><code>${esc(file)}</code></li>`).join('')}</ul><pre class="diff-patch">${renderGitPatch(comparison.patch || gitText('empty'))}</pre>`;
       return;
     }
-    if (name === 'abort' && !confirm(gitText('abortConfirm'))) return;
+    if (name === 'abort' && !(await ask(gitText('abort'), gitText('abortConfirm'), true))) return;
     if (name === 'task') {
       const agent = $('gitTaskAgent').value;
       const response = await execute({ action: 'worktree-add', branch: $('gitTaskBranch').value.trim(), path: $('gitTaskPath').value.trim(), base: $('gitTaskBase').value });
@@ -253,18 +258,18 @@ window.gitWorkflow = (() => {
       $('gitHistoryPatch').scrollIntoView({ block: 'nearest' });
     });
     if (b.dataset.worktreeOpen !== undefined) return guarded(() => launch(details.worktrees[Number(b.dataset.worktreeOpen)].path));
-    if (b.dataset.worktreeRemove !== undefined && confirm(gitText('removeConfirm'))) return guarded(async () => {
+    if (b.dataset.worktreeRemove !== undefined) return ask(gitText('remove'), gitText('removeConfirm'), true).then(ok => ok && guarded(async () => {
       await execute({ action: 'worktree-remove', path: details.worktrees[Number(b.dataset.worktreeRemove)].path }); await refresh();
-    });
+    }));
   });
   $('gitActionsClose').onclick = () => { if (!busy) dialog.close(); };
   dialog.addEventListener('cancel', e => { if (busy) e.preventDefault(); });
   dialog.addEventListener('close', () => { generation++; });
   function renderNav() {
     const nav = $('gitActionsNav'); nav.setAttribute('aria-label', gitText('manage'));
-    const labels = { commit: 'commitMenu', compare: 'comparison' };
+    const labels = { commit: 'commitMenu', compare: 'comparison', worktrees: 'worktreesNav' };
     $('gitActionsIcon').innerHTML = icon({ sync: 'refresh', commit: 'eye', compare: 'splitRight', history: 'history', worktrees: 'layers', branches: 'branch' }[view] || 'branch');
-    nav.innerHTML = ['commit', 'branches', 'sync', 'history', 'compare', 'worktrees'].map(mode => `<button type="button" data-view="${mode}" aria-pressed="${view === mode}">${mode === 'worktrees' ? 'Worktrees' : esc(gitText(labels[mode] || mode))}</button>`).join('');
+    nav.innerHTML = ['commit', 'branches', 'sync', 'history', 'compare', 'worktrees'].map(mode => `<button type="button" data-view="${mode}" aria-pressed="${view === mode}">${esc(gitText(labels[mode] || mode))}</button>`).join('');
   }
   $('gitActionsNav').addEventListener('click', e => {
     const mode = e.target.closest('[data-view]')?.dataset.view;

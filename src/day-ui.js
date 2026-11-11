@@ -61,7 +61,7 @@
 
   function groupHtml(g) {
     const sessions = g.sessions.map(s => `<div class="drow" data-agent="${esc(s.agent)}" data-id="${esc(s.id)}" title="${esc(t("bar.day.open"))}">
-        <span class="adot ${esc(s.agent.toLowerCase())}"></span>
+        ${agentMark(s.agent)}
         <div class="rmain"><div class="t">${esc(s.title || s.id)}</div><div class="path">${esc(`${clock(s.from)}–${clock(s.to)}${s.branch ? ` · ${s.branch}` : ""}`)}</div></div>
         <span class="when">${esc(hm(s.minutes))}</span></div>`).join("");
     return `<div class="dgroup"><div class="dg-head"><span class="dg-name">${esc(g.ticket || g.project)}</span>${g.ticket ? `<span class="dg-sub">${esc(g.project)}</span>` : ""}<span class="grow"></span><span class="dg-time">${esc(hm(g.minutes))}</span></div>${sessions}</div>`;
@@ -91,7 +91,7 @@
     const list = st.error ? `<div class="empty err">${esc(st.error)}</div>`
       : !rep ? `<div class="empty">${esc(t("bar.loading"))}</div>`
       : rep.groups.length ? rep.groups.map(groupHtml).join("") : `<div class="empty">${esc(t("bar.day.none"))}</div>`;
-    return head + `<div class="dbody"><div class="rows" id="rows">${list}</div>${summaryHtml()}</div>`;
+    return head + `<div class="dbody"><div class="rows">${list}</div>${summaryHtml()}</div>`;
   }
 
   async function summarize() {

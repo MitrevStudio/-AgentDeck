@@ -79,7 +79,7 @@ function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () 
     register: async dir => {
       const reg = sessions.registry.read();
       reg.removed = reg.removed.filter(x => x !== sessions.norm(dir));
-      if (!reg.projects.some(p => !p.node && sessions.norm(p.path) === sessions.norm(dir))) reg.projects.push({ name: path.basename(dir), path: dir });
+      if (!reg.projects.some(p => !p.node && sessions.norm(p.path) === sessions.norm(dir))) reg.projects.push({ name: path.basename(dir) || dir, path: dir });
       sessions.registry.save(reg);
       await sessions.scan();
     },

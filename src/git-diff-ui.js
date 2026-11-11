@@ -40,7 +40,7 @@ function renderGitSplit(patch) {
   const tools = $('gitDiffTools');
   $('gitDiffIcon').innerHTML = icon('file');
   const note = key => `<p class="git-panel-note">${esc(t(key))}</p>`;
-  const diffButton = (action, label, glyph, disabled = false) => `<button class="btn git-diff-btn" data-diff-action="${action}" title="${esc(label)}" ${disabled ? 'disabled' : ''}>${icon(glyph)}<span>${esc(label)}</span></button>`;
+  const diffButton = (action, label, glyph, disabled = false) => `<button type="button" class="btn sm git-diff-btn" data-diff-action="${action}" title="${esc(label)}" ${disabled ? 'disabled' : ''}>${icon(glyph)}<span>${esc(label)}</span></button>`;
   // The tools, grouped: go between files, reload, the layout, and the editor.
   function renderTools() {
     if (!current) return;

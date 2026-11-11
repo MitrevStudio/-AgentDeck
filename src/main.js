@@ -797,7 +797,7 @@ function registerIpc() {
     pickedFrom = path.dirname(p);
     const data = readRegistry();
     data.removed = data.removed.filter(x => x !== norm(p));
-    if (!getProject(data, p)) data.projects.push({ name: path.basename(p), path: p });
+    if (!getProject(data, p)) data.projects.push({ name: path.basename(p) || p, path: p });
     data.lastAdded = p;
     return saveRegistry(data);
   });

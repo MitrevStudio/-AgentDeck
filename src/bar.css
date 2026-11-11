@@ -45,8 +45,13 @@ kbd { font-size: 10.5px; border-bottom-width: 1px; border-radius: 4px; padding: 
 .search input { height: 42px; padding: 0 14px 0 42px; border-radius: 11px; font-size: 15px; user-select: text; }
 /* The command centre's field (bar.js): what is typed here goes to it, as a spoken command does. */
 .cmdline { position: relative; padding: 0 16px 8px; }
-.cmdline > .i { position: absolute; left: 29px; top: 50%; transform: translateY(-62%); width: 16px; height: 16px; color: var(--accent); pointer-events: none; }
-.cmdline input { width: 100%; height: 34px; padding: 0 12px 0 40px; border-radius: 9px; font-size: 13.5px; user-select: text; }
+.cmdline > .i { position: absolute; left: 29px; top: 17px; transform: translateY(-50%); width: 16px; height: 16px; color: var(--accent); pointer-events: none; }
+.cmdline input {
+  width: 100%; height: 34px; padding: 0 12px 0 40px; border-radius: 9px; font-size: 13.5px; user-select: text; outline: none;
+  border: 1px solid var(--line-2); background: var(--bg); color: var(--text);
+}
+.cmdline input::placeholder { color: var(--faint); }
+.cmdline input:focus { border-color: var(--accent); box-shadow: var(--ring); }
 
 /* ---------- project strip ---------- */
 .strip-wrap { position: relative; border-bottom: 1px solid var(--line); }
@@ -62,8 +67,11 @@ kbd { font-size: 10.5px; border-bottom-width: 1px; border-radius: 4px; padding: 
 .tile > .mono { width: 44px; height: 44px; }
 .tile:hover { background: var(--panel-2); }
 .mono.group { box-shadow: 3px -3px 0 -1px color-mix(in srgb, hsl(var(--h) 60% 55%) 45%, transparent); }
-.tile .tpin { position: absolute; top: 4px; right: 4px; display: inline-flex; color: var(--muted); }
+.tile .tpin { position: absolute; top: 6px; right: 6px; display: inline-flex; color: var(--muted); }
 .tile .tpin .i { width: 12px; height: 12px; }
+/* A pinned tile: the count and the branch make room for the pin in the badge line. */
+.tile:has(.tpin) .tcount { right: 21px; }
+.tile:has(.tpin) .tgit { right: 40px; }
 .tile.sel { background: var(--accent-weak); border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
 .mono {
   --h: 215; position: relative; flex: none; width: 46px; height: 46px; border-radius: 13px; display: grid; place-items: center;
@@ -88,11 +96,15 @@ kbd { font-size: 10.5px; border-bottom-width: 1px; border-radius: 4px; padding: 
 
 /* ---------- detail ---------- */
 .detail { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* The sessions of the chosen tile, or the day (bar.js): one of the two is shown. */
+.detail > .view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .dhead { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
-.dtitle { min-width: 0; }
-.dname { font-size: 15px; font-weight: 700; }
+.dtitle { flex: 1; min-width: 0; }
+.dname { font-size: 15px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dsub { font-size: 12.5px; color: var(--muted); }
-.dactions { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.dactions { margin-left: auto; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+/* The quieter things to do with the project: after its buttons, behind a hairline. */
+.dtools { display: flex; gap: 2px; margin-left: 2px; padding-left: 6px; border-left: 1px solid var(--line-2); }
 .dhead .path { font-size: 16px; }
 .rows { flex: 1; overflow: auto; padding: 6px 8px 8px; }
 .row { display: flex; align-items: center; gap: 11px; min-height: 40px; padding: 5px 10px; border-radius: 10px; cursor: pointer; }
@@ -114,8 +126,15 @@ kbd { font-size: 10.5px; border-bottom-width: 1px; border-radius: 4px; padding: 
 .row.dir .path { font-size: 14px; }
 /* A column of its own (as the cost before it, usage.css), so the live pills line up from row to row. */
 .when { flex: none; min-width: 88px; text-align: right; font-size: 12px; color: var(--muted); white-space: nowrap; }
-.ract { flex: none; display: flex; gap: 2px; opacity: 0; }
-.row:hover .ract, .row.sel .ract, .ract.show { opacity: 1; }
+/* The row's end: its figures, and over them its buttons while the row is pointed at (or walked to with the keys).
+   Both lie in one cell, so the buttons take no room of their own and nothing moves when they come. */
+.rend { flex: none; display: grid; align-items: center; justify-items: end; }
+.rend > * { grid-area: 1 / 1; }
+.rmeta { display: flex; align-items: center; gap: 11px; }
+.ract { flex: none; display: flex; gap: 2px; visibility: hidden; }
+.ract.show { visibility: visible; }
+.row:hover .ract, .row:focus-within .ract, .rows.by-keys .row.sel .ract { visibility: visible; }
+.row:hover .rmeta, .row:focus-within .rmeta, .rows.by-keys .row.sel .rmeta { visibility: hidden; }
 .ract .go { color: var(--text); }
 .confirm {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 2px 6px 8px 30px; padding: 9px 12px;
@@ -144,8 +163,8 @@ kbd { font-size: 10.5px; border-bottom-width: 1px; border-radius: 4px; padding: 
 .confirm.danger { background: var(--danger-bg); color: var(--danger-text); }
 .btn.danger { border-color: var(--danger-line); color: var(--danger); }
 .ract .icon-btn.danger:hover { color: var(--danger); border-color: var(--danger-line); }
-/* Same right edge, padding and gap as the row, so the buttons line up under .ract's last two. */
-.confirm.del { flex-wrap: nowrap; gap: 2px; margin: 2px 0 8px 30px; padding: 6px 10px 6px 12px; }
+/* Ends where the row's buttons end (before the state mark), with their gap, so its two line up under .ract's last two. */
+.confirm.del { flex-wrap: nowrap; gap: 2px; margin: 2px 23px 8px 30px; padding: 6px 10px 6px 12px; }
 .confirm.del .msg { flex: 1; min-width: 0; margin-right: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .confirm.del .btn, .confirm.del .icon-btn { flex: none; height: 32px; }
 
@@ -159,7 +178,7 @@ kbd { font-size: 10.5px; border-bottom-width: 1px; border-radius: 4px; padding: 
 .dg-name { font-weight: 700; }
 .dg-sub { font-size: 12px; color: var(--muted); }
 .dg-time { font-weight: 700; font-variant-numeric: tabular-nums; }
-.drow { display: flex; align-items: center; gap: 11px; min-height: 40px; padding: 5px 10px 5px 18px; border-radius: 10px; cursor: pointer; }
+.drow { display: flex; align-items: center; gap: 11px; min-height: 40px; padding: 5px 10px; border-radius: 10px; cursor: pointer; }
 .drow:hover { background: var(--panel-2); }
 .drow .when { min-width: 52px; font-variant-numeric: tabular-nums; }
 .dsum .pv-title { padding-bottom: 8px; border-bottom: 1px solid var(--line); }

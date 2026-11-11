@@ -519,3 +519,16 @@ kbd {
 }
 .dialog::backdrop { background: var(--backdrop); }
 .dialog[open] { animation: rise var(--dur) var(--ease-out); }
+/* A yes/no question (common.js confirmDialog). */
+.confirm-form { display: flex; flex-direction: column; gap: 10px; padding: 20px 22px 18px; }
+.confirm-form h2 { margin: 0; font-size: 15px; font-weight: 650; }
+.confirm-form p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted); white-space: pre-line; overflow-wrap: anywhere; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+
+/* ---------- less motion, when the system asks for it ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .pulse, .pulse.attn { animation: none; }
+  .spinner { animation-duration: 2.4s; }
+  .skel { animation: none; }
+  .dialog[open], .menu-sub { animation: none; }
+}

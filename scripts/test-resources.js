@@ -30,7 +30,7 @@ const fs = require('node:fs');
   host.emit('resources', sample); host.emit('limits', host.limits.get());
   assert.deepEqual(events.map(x => x.name), ['resources', 'limits']);
 
-  const el = {}, callbacks = {};
+  const el = { addEventListener() {} }, callbacks = {};
   const manager = {
     onLimitsChanged: cb => { callbacks.limits = cb; },
     onResourcesChanged: cb => { callbacks.resources = cb; },
@@ -39,7 +39,8 @@ const fs = require('node:fs');
     getResources: async () => sample, getNodes: async () => [], getLimits: async () => null,
   };
   vm.runInNewContext(fs.readFileSync(require('node:path').join(__dirname, '../src/limits-ui.js'), 'utf8'), {
-    window: { manager }, document: { querySelector: () => true }, $: () => el,
+    window: { manager, addEventListener() {} }, document: { querySelector: () => true }, $: () => el,
+    setHtml: (target, html) => { target.innerHTML = html; }, localStorage: { getItem: () => null, setItem() {} },
     t: k => k, esc: s => String(s).replaceAll('<', '&lt;'),
     I18N: { formatNumber: String, formatTime: String },
   });

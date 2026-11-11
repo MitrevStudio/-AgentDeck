@@ -37,7 +37,13 @@
     <div class="strip" id="strip"></div>
     <button class="nav right" id="navR" data-i18n-title="bar.nav.forward"><span data-icon="right"></span></button>
   </div>
-  <div class="detail" id="detail"></div>
+  <div class="detail" id="detail">
+    <div class="view" id="sessionView">
+      <div id="dhead"></div>
+      <div class="dbody"><div class="rows" id="rows"></div><aside class="pv" id="pv" data-i18n-aria-label="preview.title" hidden></aside></div>
+    </div>
+    <div class="view" id="dayView" hidden></div>
+  </div>
   <div class="keys"><kbd>↑</kbd><kbd>↓</kbd><span data-i18n="bar.keys.session"></span><kbd>←</kbd><kbd>→</kbd><span data-i18n="bar.keys.project"></span><kbd>Enter</kbd><span data-i18n="bar.keys.open"></span><kbd>Esc</kbd><span data-i18n="bar.keys.close"></span><span class="grow"></span><span id="hotkey"></span></div>
   <div id="kbdPanel" class="kbd-panel" hidden></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>

@@ -223,15 +223,93 @@ function getStatusClass(l) {
   if (kind === "waiting") return "st pulse attn";
   return kind === "idle" ? "st pulse" : "st pulse other";
 }
-function getStatusTitle(l) {
+// timed: with how long it has been so ("Working · 12 s").
+function getStatusTitle(l, timed = true) {
   const kind = getLiveKind(l);
   const label = kind === "other" ? l.status : t(`live.label.${kind}`);
-  return [`${label}${liveText(l) ? ` · ${liveText(l)}` : ""}`, getLiveHint(l), `PID ${l.pid}`].join("\n");
+  return [`${label}${timed && liveText(l) ? ` · ${liveText(l)}` : ""}`, getLiveHint(l), `PID ${l.pid}`].join("\n");
 }
+// The markup holds nothing that changes by the second: the pages compare it to tell whether a row is drawn again, and
+// a row drawn again starts its spinner over. The page's updateLiveTexts puts the timed text in the tooltip in place.
 function statusMark(l, loading) {
   if (loading) return `<span class="st spinner loading" title="${esc(t("live.hint.loading"))}"></span>`;
   if (!l) return '<span class="st none"></span>';
-  return `<span class="${getStatusClass(l)}" data-live="${esc(sessionKey(l))}" title="${esc(getStatusTitle(l))}"></span>`;
+  return `<span class="${getStatusClass(l)}" data-live="${esc(sessionKey(l))}" title="${esc(getStatusTitle(l, false))}"></span>`;
+}
+
+// ---------- drawing ----------
+// Every spinner and pulse turns in step with the page's clock, so one drawn a moment ago is where the others are
+// instead of starting over.
+const SYNCED_ANIMATIONS = new Set(["spin", "pulse", "pulse-attn"]);
+function syncAnimations() {
+  for (const a of document.getAnimations()) {
+    if (SYNCED_ANIMATIONS.has(a.animationName) && a.startTime !== 0) a.startTime = 0;
+  }
+}
+// Sets an element's markup only when it differs from what was last set; answers whether it did.
+function setHtml(el, html) {
+  if (el.__html === html) return false;
+  el.__html = html;
+  el.innerHTML = html;
+  return true;
+}
+// What a row stands for (a project, a group, a computer, a session), to find it again once it was drawn anew; "" for
+// a row that stands for nothing of its own (a heading).
+function getRowId(el) {
+  const d = el.dataset || {};
+  return ["path", "group", "device", "key"].filter(k => d[k] !== undefined).map(k => `${k}=${d[k]}`).join("|");
+}
+// Draws a list from its markup, keeping every row whose markup did not change as the element it was: its animation,
+// its hover and focus, and a click in progress on it stay. A row that did change takes over the old one's focus and
+// its "menu open" mark.
+function patchChildren(box, html) {
+  if (box.__html === html) return;
+  if (box.__html === undefined) box.replaceChildren();
+  box.__html = html;
+  const tpl = document.createElement("template");
+  tpl.innerHTML = html;
+  const old = new Map();
+  for (const el of box.children) {
+    if (old.has(el.__sig)) old.get(el.__sig).push(el); else old.set(el.__sig, [el]);
+  }
+  const next = [...tpl.content.children].map(el => {
+    const sig = el.outerHTML, same = old.get(sig)?.shift();
+    if (same) return same;
+    el.__sig = sig;
+    return el;
+  });
+  const active = box.contains(document.activeElement) ? document.activeElement : null;
+  const activeRow = active && [...box.children].find(el => el.contains(active));
+  const marked = new Set([...box.children].filter(el => el.classList.contains("menu-open")).map(getRowId));
+  const kept = new Set(next);
+  for (const el of [...box.children]) if (!kept.has(el)) el.remove();
+  let at = box.firstElementChild;
+  for (const el of next) {
+    if (el === at) at = at.nextElementSibling;
+    else box.insertBefore(el, at);
+    if (getRowId(el) && marked.has(getRowId(el))) el.classList.add("menu-open");
+  }
+  if (activeRow && !activeRow.isConnected && getRowId(activeRow)) {
+    const row = next.find(el => getRowId(el) === getRowId(activeRow));
+    const same = active === activeRow ? row : active.dataset.action && row?.querySelector(`[data-action="${active.dataset.action}"]`);
+    (same || row)?.focus({ preventScroll: true });
+  }
+}
+
+// ---------- questions ----------
+// A yes/no question in a dialog of AgentDeck's own, in place of the system's confirm(). Answers true when confirmed;
+// Escape and Cancel answer false. A dangerous answer is red, and Cancel has the keyboard then.
+function confirmDialog({ title, body = "", confirmLabel, danger = false }) {
+  return new Promise(resolve => {
+    const d = document.createElement("dialog");
+    d.className = "dialog confirm";
+    d.innerHTML = `<form method="dialog" class="confirm-form"><h2>${esc(title)}</h2>${body ? `<p>${esc(body)}</p>` : ""}
+      <div class="confirm-actions"><button class="btn sm" value="cancel" ${danger ? "autofocus" : ""}>${esc(t("common.cancel"))}</button>
+      <button class="btn sm ${danger ? "danger-solid" : "primary"}" value="ok" ${danger ? "" : "autofocus"}>${esc(confirmLabel || title)}</button></div></form>`;
+    d.addEventListener("close", () => { d.remove(); resolve(d.returnValue === "ok"); });
+    document.body.append(d);
+    d.showModal();
+  });
 }
 // The group a session is listed under: what a running one is doing, else the day it was last active.
 function getSessionGroup(s, l) {
@@ -393,11 +471,12 @@ function buildData(raw, live) {
     ...s, cwdN: keyOf(s.node, s.cwd), hay: searchable(s.title, s.prompt, s.recap, s.id, s.cwd, s.projectName, s.agent, s.nodeName)
   }));
   const projects = (raw.registry?.projects || []).map(p => {
-    const proj = { ...p, n: keyOf(p.node, p.path), hay: searchable(p.name, p.path) };
+    // A drive's root has no folder name: it goes by its path.
+    const proj = { ...p, name: p.name || p.path, n: keyOf(p.node, p.path), hay: searchable(p.name, p.path) };
     proj.sessions = sessions.filter(s => inProject(s, proj));
     proj.last = proj.sessions.reduce((m, s) => Math.max(m, s.updatedAt || 0), 0);
     // A session can be found by the (possibly renamed) name of any project it belongs to.
-    for (const s of proj.sessions) s.hay += " \u0001 " + p.name.toLowerCase();
+    for (const s of proj.sessions) s.hay += " \u0001 " + proj.name.toLowerCase();
     return proj;
   });
   const custom = raw.registry?.order === "custom";

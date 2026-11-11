@@ -243,14 +243,14 @@ document.addEventListener("keydown", e => {
 
 // ---------- actions ----------
 // A terminal running an agent asks first; a plain shell closes at once.
-function closePane(term) {
+async function closePane(term) {
   const x = getTerminal(term);
-  if (x?.agent && !confirm(t("ws.closeConfirm"))) return;
+  if (x?.agent && !(await confirmDialog({ title: t("confirm.closePane"), body: t("ws.closeConfirm"), danger: true }))) return;
   runWorkspace("close-pane", { term });
 }
-function closeTab(tabId) {
+async function closeTab(tabId) {
   const terms = getPanesOf(ws.tabs[tabId]?.root);
-  if (terms.some(id => getTerminal(id)?.agent) && !confirm(t("ws.closeTabConfirm", { n: terms.length }))) return;
+  if (terms.some(id => getTerminal(id)?.agent) && !(await confirmDialog({ title: t("ws.closeTab"), body: t("ws.closeTabConfirm", { n: terms.length }), danger: true }))) return;
   runWorkspace("close-tab", { tab: tabId });
 }
 // what: "terminal" or an agent's name; a new tab in the shown space's folder.
@@ -308,13 +308,21 @@ function renderTabbar() {
       ${l ? statusMark(l, false) : ""}<span class="wtab-name">${esc(label)}</span>
       <button class="wtab-close wtab-rename-btn" data-ws="rename-tab" title="${esc(t("action.rename"))}" aria-label="${esc(t("action.rename"))}">${icon("pencil")}</button>
       <button class="wtab-close" data-ws="close-tab" title="${esc(t("ws.closeTab"))}">${icon("x")}</button></div>`;
-  }).join("") + `<button class="icon-btn wtab-new ${!space.active ? "active" : ""}" data-ws="sessions" title="${esc(t("ws.sessions"))}" aria-label="${esc(t("ws.sessions"))}">${icon("plus")}</button>` + `<button class="icon-btn wtab-new wtab-reset" data-ws="reset-tabs" title="${esc(t("ws.resetTabs"))}" aria-label="${esc(t("ws.resetTabs"))}">${icon("equal")}</button>`;
+  }).join("") + `<button class="icon-btn wtab-new ${!space.active ? "active" : ""}" data-ws="sessions" title="${esc(t("ws.sessions"))}" aria-label="${esc(t("ws.sessions"))}">${icon("plus")}</button>`;
   // Rebuilt only when something shows differently, and not while a tab is dragged: a click or a drag in progress is
   // not lost.
   const bar = $("tabbar");
   if (draggedTab || bar.querySelector(".wtab-rename") || bar.dataset.html === html) return;
   bar.dataset.html = html;
   bar.innerHTML = html;
+  bar.querySelector(".wtab.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  markTabOverflow();
+}
+// More tabs than fit: the bar fades at the end that hides some, and the wheel moves along it.
+function markTabOverflow() {
+  const bar = $("tabbar");
+  bar.classList.toggle("more-left", bar.scrollLeft > 1);
+  bar.classList.toggle("more-right", bar.scrollLeft + bar.clientWidth < bar.scrollWidth - 1);
 }
 // The panes of the shown tab (or its zoomed pane), built anew only when the layout changed; the terminals' own
 // elements move into them, so nothing they show is lost.
@@ -349,7 +357,7 @@ function buildNode(node, path) {
     const el = document.createElement("div");
     el.className = "pane";
     el.dataset.term = node.term;
-    el.innerHTML = '<div class="pane-head" draggable="true"></div><div class="pane-body"></div>';
+    el.innerHTML = '<div class="pane-head"><div class="pane-info" draggable="true"></div><span class="pane-tools"></span></div><div class="pane-body"></div>';
     const view = termViews.get(node.term) || createTermView(node.term);
     el.lastChild.appendChild(view.host);
     return el;
@@ -393,26 +401,25 @@ function resetRatios(tabId = "") {
   for (const tab of tabId ? [ws.tabs[tabId]] : Object.values(ws.tabs)) if (tab) visit(tab, tab.root, "");
   return Promise.all(jobs);
 }
-// Each pane's header: the agent, what runs, its context, its state, and the pane's buttons.
+// Each pane's header: the agent, what runs, its context and its state on the left, the pane's buttons on the right.
+// The two halves are drawn apart, so the buttons stay the same elements while a title or a state changes - a click on
+// one is never lost to a redraw. A pane alone in its tab shows its folder: the tab above already carries its title.
 function renderPaneHeads(tab) {
   if (draggedPane) return; // the header being dragged stays the same element until it is let go
   const many = getPanesOf(tab.root).length > 1;
   document.querySelectorAll("#panes .pane").forEach(el => {
     const x = getTerminal(el.dataset.term);
     const s = getTermSession(x), l = getTermLive(x);
-    const html = `${x?.agent ? agentMark(x.agent) : `<span class="agent-mark">${icon("terminal")}</span>`}
-      <span class="pane-title" title="${esc(x?.cwd || "")}">${esc(!many && tab.name ? tab.name : getTermTitle(x))}</span>
+    const title = many ? `<span class="pane-title" title="${esc(x?.cwd || "")}">${esc(getTermTitle(x))}</span>`
+      : `<span class="pane-title pane-dir" title="${esc(getTermTitle(x))}">${esc(x?.cwd || getTermTitle(x))}</span>`;
+    setHtml(el.querySelector(".pane-info"), `${x?.agent ? agentMark(x.agent) : `<span class="agent-mark">${icon("terminal")}</span>`}${title}
       ${x?.note ? `<span class="pane-note">${esc(x.note)}</span>` : ""}
-      ${s ? getContextChip(s) : ""}${l ? statusMark(l, isLoading(sessionKey(l), l)) : ""}
-      <span class="pane-tools">
-        <button class="icon-btn" data-ws="split-right" title="${esc(t("ws.splitRight"))}">${icon("splitRight")}</button>
+      ${s ? getContextChip(s) : ""}${l ? statusMark(l, isLoading(sessionKey(l), l)) : ""}`);
+    setHtml(el.querySelector(".pane-tools"), `<button class="icon-btn" data-ws="split-right" title="${esc(t("ws.splitRight"))}">${icon("splitRight")}</button>
         <button class="icon-btn" data-ws="split-down" title="${esc(t("ws.splitDown"))}">${icon("splitDown")}</button>
         ${many ? `<button class="icon-btn" data-ws="reset-panes" title="${esc(t("ws.resetPanes"))}" aria-label="${esc(t("ws.resetPanes"))}">${icon("equal")}</button>` : ""}
         ${many ? `<button class="icon-btn ${tab.zoom ? "on" : ""}" data-ws="zoom" title="${esc(t(tab.zoom ? "ws.unzoom" : "ws.zoom"))}">${icon("maximize")}</button>` : ""}
-        <button class="icon-btn" data-ws="close-pane" title="${esc(t("ws.closePane"))}">${icon("x")}</button>
-      </span>`;
-    const head = el.querySelector(".pane-head");
-    if (head.dataset.html !== html) { head.dataset.html = html; head.innerHTML = html; }
+        <button class="icon-btn" data-ws="close-pane" title="${esc(t("ws.closePane"))}">${icon("x")}</button>`);
   });
 }
 function renderWorkspace() {
@@ -421,6 +428,7 @@ function renderWorkspace() {
   [...termViews.keys()].filter(id => !ids.has(id)).forEach(disposeTermView);
   renderTabbar();
   renderPanes();
+  syncAnimations();
 }
 
 // ---------- events ----------
@@ -452,8 +460,22 @@ $("tabbar").addEventListener("click", e => {
   if (btn?.dataset.ws === "close-tab") { e.stopPropagation(); return closeTab(tabEl.dataset.tab); }
   if (btn?.dataset.ws === "rename-tab") { e.stopPropagation(); return renameWorkspaceTab(tabEl); }
   if (btn?.dataset.ws === "sessions") return runWorkspace("sessions");
-  if (btn?.dataset.ws === "reset-tabs") return resetRatios();
   if (tabEl) { focusAfterRender = true; runWorkspace("tab", { tab: tabEl.dataset.tab }); }
+});
+$("tabbar").addEventListener("scroll", markTabOverflow);
+$("tabbar").addEventListener("wheel", e => {
+  const bar = e.currentTarget;
+  if (e.deltaX || !e.deltaY || bar.scrollWidth <= bar.clientWidth) return;
+  e.preventDefault();
+  bar.scrollLeft += e.deltaY;
+}, { passive: false });
+new ResizeObserver(markTabOverflow).observe($("tabbar"));
+// A press on a tab's button is a click, never the start of dragging the tab.
+$("tabbar").addEventListener("pointerdown", e => {
+  const tabEl = e.target.closest("button") && e.target.closest(".wtab");
+  if (!tabEl) return;
+  tabEl.draggable = false;
+  window.addEventListener("pointerup", () => { tabEl.draggable = true; }, { once: true });
 });
 $("tabbar").addEventListener("auxclick", e => {
   const tabEl = e.target.closest("[data-tab]");
@@ -632,7 +654,7 @@ $("tabbar").addEventListener("drop", e => {
 $("tabbar").addEventListener("dragend", endDrag);
 
 // The headers and tab states follow the live registry and the scan.
-setInterval(() => { renderTabbar(); const tab = getShownTab(); if (tab) renderPaneHeads(tab); }, HEADERS_REFRESH_MS);
+setInterval(() => { renderTabbar(); const tab = getShownTab(); if (tab) renderPaneHeads(tab); syncAnimations(); }, HEADERS_REFRESH_MS);
 // The first drawing: of the layout main sent while the page loaded when it did, else of the one asked for - unless
 // main sends one before the answer comes (a layout restored on start): the older answer would put back what that showed.
 function drawFirst() {

@@ -60,12 +60,12 @@ function renderRemoteSpace(el, key) {
   const n = getNode(r.id);
   const p = (typeof data !== "undefined" ? data.projects.find(x => x.n === key) : null) || n?.view.projects.find(x => x.n === r.n);
   if (!p) {
-    el.innerHTML = `<div class="se-box empty"><h3>${esc(t("ws.pick.title"))}</h3><p>${esc(t("manager.node.gone"))}</p></div>`;
+    setHtml(el, `<div class="se-box empty"><h3>${esc(t("ws.pick.title"))}</h3><p>${esc(t("manager.node.gone"))}</p></div>`);
     return true;
   }
   const online = n?.status === "online";
   const recent = [...p.sessions].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-  el.innerHTML = `<div class="se-box">
+  setHtml(el, `<div class="se-box">
     <div class="se-head"><span class="pmono" style="--h:${hue(p.n)}">${esc(initials(p.name))}</span>
       <div><h2>${esc(p.name)}</h2>${pathHtml(p.path, [])}<p class="se-body">${esc(t(online ? "manager.node.on" : "manager.node.offlineBody", { node: n?.name || r.id.slice(0, 8) }))}</p></div></div>
     ${online ? `<div class="se-new">
@@ -77,8 +77,8 @@ function renderRemoteSpace(el, key) {
       ${getContextChip({ ...s, node: r.id })}
       <span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span>
       ${n?.liveMap.has(sessionKey(s)) ? statusMark(n.liveMap.get(sessionKey(s)), false) : online && s.cwd ? `<span class="se-acts"><button class="btn sm" data-rresume="${esc(sessionKey(s))}">${icon("play")}${esc(t("action.resume"))}</button></span>` : ""}</div>`).join("")}` : ""}
-  </div>`;
-  el.onclick = e => n && onRemoteSpaceClick(e, n, p).catch(err => toast(String(err.message || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""), true));
+  </div>`);
+  el.onclick = e => n && onRemoteSpaceClick(e, n, p).catch(err => toast(err.message || err, true));
   return true;
 }
 // A terminal, a new agent session or a resumed one on the node, placed in a new tab of this space (main does both).

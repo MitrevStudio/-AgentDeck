@@ -303,7 +303,7 @@ function createSessions({ dataDir, home, isExcluded = () => false, untitled = (a
       try { if (!fs.statSync(s.cwd).isDirectory()) continue; } catch { continue; }
       let project = reg.projects.find(p => !p.node && norm(p.path) === norm(s.cwd));
       if (!project) {
-        project = { name: path.basename(s.cwd), path: path.resolve(s.cwd) };
+        project = { name: path.basename(s.cwd) || path.resolve(s.cwd), path: path.resolve(s.cwd) };
         reg.projects.push(project); changed = true;
       }
       s.projectName = project.name;

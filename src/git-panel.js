@@ -45,14 +45,13 @@
     if (sortMode === 'status') return files.sort((a, b) => statusKey(a).localeCompare(statusKey(b)) || a.path.localeCompare(b.path));
     return files.sort((a, b) => a.path.localeCompare(b.path));
   }
-  const more = (attributes, disabled = false) => `<button class="git-more" type="button" ${attributes} title="${esc(gitText('manage'))}" aria-label="${esc(gitText('manage'))}" aria-haspopup="menu" ${disabled ? 'disabled' : ''}>${icon('more')}</button>`;
-  const quick = (action, glyph, label, disabled = false) => `<button type="button" class="git-quick" data-quick="${action}" title="${esc(gitText(label))}" aria-label="${esc(gitText(label))}" ${disabled ? 'disabled' : ''}>${icon(glyph)}</button>`;
+  const more = (attributes, disabled = false) => `<button class="icon-btn git-more" type="button" ${attributes} title="${esc(gitText('manage'))}" aria-label="${esc(gitText('manage'))}" aria-haspopup="menu" ${disabled ? 'disabled' : ''}>${icon('more')}</button>`;
+  const quick = (action, glyph, label, disabled = false) => `<button type="button" class="icon-btn git-quick" data-quick="${action}" title="${esc(gitText(label))}" aria-label="${esc(gitText(label))}" ${disabled ? 'disabled' : ''}>${icon(glyph)}</button>`;
   function fileRow(f, node, group, disabled) {
     const filename = f.path.split(/[\\/]/).at(-1), folder = f.path.slice(0, f.path.length - filename.length).replace(/[\\/]$/, '');
     const extension = filename.split('.').at(-1).toLowerCase(), known = /^(js|ts|json|css|md|html|yml|yaml|py)$/.test(extension);
-    const glyph = { js: 'JS', ts: 'TS', json: '{}', css: '#', md: '≡', html: '◇', yml: '!', yaml: '!', py: 'Py' }[extension] || '·';
     const status = conflict(f) ? '!' : f.status === '??' ? 'U' : f.status[group === 'staged' ? 0 : 1];
-    return `<div class="git-file-row" data-file="${esc(f.path)}" data-group="${group}"><button type="button" class="git-file" data-diff-node="${esc(node.node)}" data-diff-root="${esc(node.repo.root)}" data-diff-file="${esc(f.path)}" ${disabled ? 'disabled' : ''} title="${esc(f.original ? `${f.original} → ${f.path}` : f.path)}"><span class="git-file-icon ext-${known ? extension : 'file'}" aria-hidden="true">${glyph}</span><span class="git-file-name">${esc(filename)}</span><small>${esc(folder)}</small></button>${more('data-file-menu', disabled)}<code class="git-file-status status-${status === '!' ? 'conflict' : status}">${esc(status)}</code></div>`;
+    return `<div class="git-file-row" data-file="${esc(f.path)}" data-group="${group}"><button type="button" class="git-file" data-diff-node="${esc(node.node)}" data-diff-root="${esc(node.repo.root)}" data-diff-file="${esc(f.path)}" ${disabled ? 'disabled' : ''} title="${esc(f.original ? `${f.original} → ${f.path}` : f.path)}"><span class="git-file-icon ext-${known ? extension : 'file'}" aria-hidden="true">${icon('file')}</span><span class="git-file-name">${esc(filename)}</span><small>${esc(folder)}</small></button>${more('data-file-menu', disabled)}<code class="git-file-status status-${status === '!' ? 'conflict' : status}">${esc(status)}</code></div>`;
   }
   function grouped(node, disabled) {
     return ['conflicts', 'staged', 'changes'].map(group => {
@@ -70,6 +69,7 @@
   function render() {
     if (selected !== 'git') return;
     const sources = [{ id: 'local', name: t('git.panel.local'), status: 'online', git }, ...nodes], rows = [], open = openProjects();
+    const tips = new Map();
     repositories.clear();
     for (const source of sources) {
       const paths = open.filter(p => (p.node || 'local') === source.id).map(p => normPath(p.path));
@@ -80,10 +80,10 @@
         const key = JSON.stringify([source.id, repo.root]), node = { key, node: source.id === 'local' ? '' : source.id, repo, offline: source.status !== 'online', source: source.name, error: errors.get(key) || source.gitError || repo.error };
         repositories.set(key, node);
         const offline = source.status !== 'online', disabled = offline || busy.has(key), files = repo.files || [], staged = files.some(f => accepts('staged', f));
-        const tip = `${source.name}\n${repo.root}\n${gitText('checked')}: ${repo.at ? new Date(repo.at).toLocaleTimeString() : '—'}${offline || Date.now() - (repo.at || 0) > 150000 ? '\n' + gitText('stale') : ''}`;
+        tips.set(key, `${source.name}\n${repo.root}\n${gitText('checked')}: ${repo.at ? new Date(repo.at).toLocaleTimeString() : '—'}${offline || Date.now() - (repo.at || 0) > 150000 ? '\n' + gitText('stale') : ''}`);
         rows.push(`<details class="git-repository ${offline ? 'offline' : ''}" data-repo="${esc(key)}" data-expand="${esc(key)}" ${expanded.get(key) !== false ? 'open' : ''}>
-          <summary title="${esc(tip)}"><span class="git-chevron">${icon('right')}</span><strong>${esc(repo.root.split(/[\\/]/).at(-1))}</strong><span class="git-repo-branch">${icon('branch')}${esc(repo.error ? '' : gitHead(repo))}</span>${gitAb(repo)}${offline ? `<span class="git-offline">${icon('alert')}</span>` : ''}<span class="grow"></span><span class="git-hover-actions">${quick('preview', 'eye', 'commit', disabled)}${quick('commit', 'check', 'commit', disabled || !staged || !(drafts.get(key) || '').trim())}${quick('branches', 'branch', 'branches', disabled)}${quick('refresh', 'refresh', 'refresh', disabled)}${more('data-repo-menu', disabled)}</span><span class="git-count">${repo.fileCount ?? files.length}</span></summary>
-          <div class="git-commit-box"><textarea data-commit-message="${esc(key)}" rows="1" spellcheck="false" aria-label="${esc(gitText('message'))}" placeholder="${esc(gitText('commitHint'))}" ${disabled ? 'disabled' : ''}>${esc(drafts.get(key) || '')}</textarea><div class="git-commit-split"><button class="git-commit-button" data-repo-action="commit" ${disabled || !staged || !(drafts.get(key) || '').trim() ? 'disabled' : ''}>${icon('check')}<span>${busy.has(key) ? esc(gitText('loading')) : 'Commit'}</span></button><button type="button" class="git-commit-options" data-commit-menu aria-label="${esc(gitText('commitOptions'))}" title="${esc(gitText('commitOptions'))}" aria-haspopup="menu" ${disabled ? 'disabled' : ''}>${icon('down')}</button></div></div>
+          <summary><span class="git-chevron">${icon('right')}</span><strong>${esc(repo.root.split(/[\\/]/).at(-1))}</strong><span class="git-repo-branch">${icon('branch')}${esc(repo.error ? '' : gitHead(repo))}</span>${gitAb(repo)}${source.id === 'local' ? '' : `<span class="proj-node ${offline ? 'offline' : 'online'}">${icon('nodes')}${esc(source.name)}</span>`}${offline ? `<span class="git-offline">${icon('alert')}</span>` : ''}<span class="grow"></span><span class="git-hover-actions">${quick('preview', 'eye', 'commit', disabled)}${quick('commit', 'check', 'commitMenu', disabled || !staged || !(drafts.get(key) || '').trim())}${quick('branches', 'branch', 'branches', disabled)}${quick('refresh', 'refresh', 'refresh', disabled)}${more('data-repo-menu', disabled)}</span><span class="git-count">${repo.fileCount ?? files.length}</span></summary>
+          <div class="git-commit-box"><textarea class="textarea" data-commit-message="${esc(key)}" rows="1" spellcheck="false" aria-label="${esc(gitText('message'))}" placeholder="${esc(gitText('commitHint'))}" ${disabled ? 'disabled' : ''}>${esc(drafts.get(key) || '')}</textarea><div class="git-commit-split"><button type="button" class="btn sm primary git-commit-button" data-repo-action="commit" ${disabled || !staged || !(drafts.get(key) || '').trim() ? 'disabled' : ''}>${icon('check')}<span>${esc(gitText(busy.has(key) ? 'loading' : 'commitMenu'))}</span></button><button type="button" class="btn sm primary git-commit-options" data-commit-menu aria-label="${esc(gitText('commitOptions'))}" title="${esc(gitText('commitOptions'))}" aria-haspopup="menu" ${disabled ? 'disabled' : ''}>${icon('down')}</button></div></div>
           ${errors.has(key) || repo.error || source.gitError ? `<p class="git-panel-error" role="status">${esc(errors.get(key) || repo.error || source.gitError)}</p>` : ''}
           ${grouped(node, disabled)}${!files.length && !repo.error ? `<p class="git-clean">${esc(gitText('empty'))}</p>` : filter && !files.some(f => f.path.toLocaleLowerCase().includes(filter)) ? `<p class="git-clean">${esc(gitText('noMatches'))}</p>` : ''}
           ${repo.filesTruncated ? `<p class="git-panel-note">${esc(t('git.panel.truncated'))}</p>` : ''}</details>`);
@@ -102,6 +102,11 @@
         const input = [...list.querySelectorAll('[data-commit-message]')].find(b => b.dataset.commitMessage === focused.commitMessage);
         input?.focus({ preventScroll: true }); if (input && selection) input.setSelectionRange(...selection);
       } else if (focused?.diffFile) [...list.querySelectorAll('[data-diff-file]')].find(b => b.dataset.diffFile === focused.diffFile && b.dataset.diffRoot === focused.diffRoot && b.dataset.diffNode === focused.diffNode)?.focus({ preventScroll: true });
+    }
+    // Outside the compared HTML: the time changes with every check, and the list must not be rebuilt for it.
+    for (const summary of list.querySelectorAll?.('[data-repo] > summary') || []) {
+      const tip = tips.get(summary.parentElement.dataset.repo);
+      if (tip && summary.dataset.tip !== tip) summary.title = tip;
     }
   }
   function renderFooter() {
@@ -152,15 +157,13 @@
     const stage = item('stageAll', 'plus', () => mutate(node, 'stage', changes()), { disabled: disabled || !changes().length });
     const unstage = item('unstageAll', 'undo', () => mutate(node, 'unstage', staged()), { disabled: disabled || !staged().length });
     return [
-      pull, push, item('checkout', 'branch', openFor(node, 'branches'), { disabled }), fetch,
+      sync, pull, push, fetch,
       sep(),
-      { label: gitText('commitMenu'), icon: 'check', items: [item('commit', 'eye', openFor(node, 'commit'), { disabled }), stage, unstage] },
-      { label: gitText('changes'), icon: 'history', items: [stage, unstage, item('refresh', 'refresh', () => $('gitPanelRefresh').onclick())] },
-      { label: gitText('pullPush'), icon: 'refresh', items: [sync, pull, push] },
-      { label: gitText('branchMenu'), icon: 'branch', items: [item('branches', 'branch', openFor(node, 'branches'), { disabled }), item('create', 'plus', openFor(node, 'branches'), { disabled }), item('compare', 'splitRight', openFor(node, 'compare'), { disabled }), item('history', 'history', openFor(node, 'history'), { disabled })] },
-      { label: gitText('remote'), icon: 'globe', items: [fetch, push, sync] },
+      item('commit', 'eye', openFor(node, 'commit'), { disabled }), stage, unstage,
       sep(),
-      item('worktrees', 'layers', openFor(node, 'worktrees'), { disabled }),
+      item('branches', 'branch', openFor(node, 'branches'), { disabled }), item('compare', 'splitRight', openFor(node, 'compare'), { disabled }),
+      item('history', 'history', openFor(node, 'history'), { disabled }), item('worktrees', 'layers', openFor(node, 'worktrees'), { disabled }),
+      sep(),
       item('showOutput', 'terminal', () => window.gitWorkflow.openOutput(node.node, node.repo.root), { disabled })
     ];
   }
@@ -234,6 +237,8 @@
   $('gitFilter').placeholder = gitText('search');
   $('gitFilter').setAttribute('aria-label', gitText('filter'));
   $('gitTreeToggle').title = gitText('tree');
+  $('gitPanelTitle').textContent = gitText('sourceControl');
+  $('gitPanelMenu').title = gitText('panelActions');
   $('gitFilter').oninput = e => { filter = e.target.value.toLocaleLowerCase(); render(); };
   $('gitTreeToggle').onclick = () => { tree = !tree; $('gitTreeToggle').setAttribute('aria-pressed', String(tree)); render(); };
   $('gitPanelMenu').onclick = () => { openGroupMenu($('gitPanelMenu'), '', panelMenuItems()); groupMenu.classList.add('git-context-menu'); };
