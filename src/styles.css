@@ -23,10 +23,15 @@ main {
 .side-head .icon-btn.on { color: var(--accent); background: var(--accent-weak); }
 .side-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .side-sec { min-height: 0; display: flex; flex-direction: column; }
-/* The agents take what they need, up to half the sidebar; the projects have the rest. */
+/* The agents take what they need, up to half the sidebar (or the height dragged on the splitter); the projects have the
+   rest. */
 .projects-sec { flex: 1 1 0; }
-.agents-sec { flex: 0 1 auto; max-height: 50%; border-top: 1px solid var(--line); }
+.agents-sec { flex: 0 1 var(--agents-h, auto); max-height: 50%; }
 .agents-sec .side-list { flex: 0 1 auto; }
+/* Between the projects and the agents (renderer.js): the line between them, dragged up or down. */
+.side-splitter { position: relative; z-index: 1; flex: none; height: 7px; margin: -3px 0; cursor: row-resize; outline: none; touch-action: none; }
+.side-splitter::after { content: ""; position: absolute; inset: 3px 0; background: var(--line); transition: background .15s; }
+.side-splitter:hover::after, .side-splitter:focus-visible::after, .side-splitter:active::after { inset: 2px 0; background: var(--accent); }
 .side-sec-head { flex: none; display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 8px 0 14px; }
 .side-sec-head h2 { margin: 0; font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
 .side-sec-head .count { border-color: transparent; font-size: 11px; }
