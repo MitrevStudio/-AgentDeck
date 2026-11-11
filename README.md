@@ -519,7 +519,7 @@ Agent-launch shortcuts require the corresponding CLI. In the search palette, arr
 | **Network** | System/PAC/manual/direct proxy modes, credentials and connection testing |
 | **Computers** | Node identity, discovery, pairing, peers and host setup |
 
-**Themes:** System (follows Windows), Dark, Light and Black (true black for OLED screens), plus ten adapted from popular VS Code themes: One Dark Pro, Dracula, GitHub Dark, Tokyo Night, Catppuccin Mocha, Night Owl, Nord, Ayu Mirage, Gruvbox Dark and Solarized Dark. A theme recolours every window and the built-in terminals at once. The VS Code themes are MIT licensed; their authors and licences are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+**Themes:** System (follows Windows), Dark, Light and Black (true black for OLED screens), plus sixteen adapted from popular VS Code themes: One Dark Pro, Dracula, GitHub Dark, Tokyo Night, Catppuccin Mocha, Night Owl, Nord, Ayu Mirage, Gruvbox Dark and Solarized Dark, and the light One Light, Tokyo Night Light, Light Owl, Ayu Light, Catppuccin Latte and Solarized Light. A theme recolours every window and the built-in terminals at once. The VS Code themes are MIT licensed; their authors and licences are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 The tray also provides quick language/theme switches, terminal destination controls, voice actions and app lifecycle controls. Closing the manager leaves AgentDeck available in the tray.
 
