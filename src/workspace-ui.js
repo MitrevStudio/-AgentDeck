@@ -126,6 +126,12 @@ function createTermView(id) {
   // As Windows Terminal: text selected with the mouse is copied at once - the agent's redraws and any keystroke clear a
   // selection (xterm), and a Ctrl+C that finds none goes to the agent -, and the right button copies a selection or pastes.
   host.addEventListener("mouseup", () => { if (term.hasSelection()) window.manager.copyText(term.getSelection()); });
+  // The right button is AgentDeck's alone: reported to an agent with mouse reporting on, the agent pasted a second time.
+  for (const type of ["mousedown", "mouseup"]) {
+    host.addEventListener(type, e => {
+      if (e.button === 2) e.stopPropagation();
+    }, true);
+  }
   host.addEventListener("contextmenu", e => {
     e.preventDefault();
     if (term.hasSelection()) { window.manager.copyText(term.getSelection()); term.clearSelection(); return; }
