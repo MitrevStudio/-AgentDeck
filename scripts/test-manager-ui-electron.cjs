@@ -215,8 +215,27 @@ app.whenReady().then(async () => {
   await capture('status-open');
   await click('#limits [data-machine=node-b]');
 
+  // A processor that is nearly full beats in red: on the chip of its computer, and in the card.
+  assert.equal(await evaluate("document.querySelectorAll('#limits .hot').length"), 0);
+  await evaluate("fx.nodes = structuredClone(fx.nodes); fx.nodes[0].resources.cpu = 97; fx.cbs.onNodesChanged(fx.nodes); 0"); await settle();
+  assert.equal(await evaluate("document.querySelector('#limits [data-machine=node-a]').classList.contains('hot')"), true);
+  assert.equal(await evaluate("document.querySelector('#limits [data-machine=node-a] .resource-value.hot').textContent"), '97%');
+  assert.equal(await evaluate("getComputedStyle(document.querySelector('#limits [data-machine=node-a]')).animationName"), 'hot-chip');
+  await capture('status-hot');
+  await evaluate("fx.nodes = structuredClone(fx.nodes); fx.nodes[0].resources.cpu = 11; fx.cbs.onNodesChanged(fx.nodes); 0"); await settle();
+
+  // ---------- which computer a terminal runs on ----------
+  assert.equal(await evaluate("document.querySelectorAll('.term-node').length"), 0, 'no marks while everything runs here');
+  await evaluate(`fx.ws = structuredClone(fx.ws); fx.ws.terminals = [fx.ws.terminals[0], { id: 'r1', node: 'node-a', cwd: 'D:/src/liberdent', title: 'pwsh', exited: false }];
+    fx.ws.tabs.t1.root = { dir: 'right', ratio: 0.5, a: { term: 'x1' }, b: { term: 'r1' } }; fx.cbs.onWorkspace(fx.ws); 0`); await settle(150);
+  assert.equal(await evaluate("document.querySelector('.pane[data-term=r1] .term-node.remote').textContent"), 'IvanDevPc');
+  assert.equal(await evaluate("document.querySelector('.pane[data-term=x1] .term-node.local').textContent"), 'DEV-01');
+  assert.equal(await evaluate("document.querySelector('.wtab .term-node').title"), 'IvanDevPc, DEV-01');
+  await capture('computers');
+
   // ---------- by device, light theme, narrow ----------
   await click('#projectView'); await settle();
+  assert.equal(await evaluate("$('deviceChips').scrollWidth <= $('deviceChips').clientWidth"), true, 'every computer chip is in view');
   assert.equal(await evaluate("document.querySelectorAll('#projects .proj.dev').length"), 4);
   assert.equal(await evaluate("document.querySelectorAll('#projects .proj.in-dev').length > 0"), true);
   await capture('by-device');

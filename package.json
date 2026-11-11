@@ -25,6 +25,7 @@
     "test:mesh-relay-only": "node scripts/test-mesh-relay-only.js",
     "test:host-pair": "node scripts/test-host-pair.js",
     "test:limits": "node scripts/test-limits.js",
+    "test:updater": "node scripts/test-updater.js",
     "test:live": "node scripts/test-live-jobs.js",
     "test:context": "node scripts/test-session-context.js && node scripts/test-opencode-sessions.js",
     "test:audit": "node scripts/test-audit-regressions.js",

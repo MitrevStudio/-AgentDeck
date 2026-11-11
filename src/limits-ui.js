@@ -73,12 +73,18 @@
   const getProviderState = (snapshot, installed, id) => snapshot?.providers?.[id] || (installed.some(a => a.toLowerCase() === id) ? { installed: true } : null);
   const getCpu = stats => (stats?.cpu == null ? "" : Math.round(stats.cpu) + "%");
   const getRam = stats => (stats?.memory?.total ? Math.round(stats.memory.used / stats.memory.total * 100) + "%" : "");
-  // CPU and memory, or nothing when the computer sent none.
-  function resourcesHtml(stats) {
+  // From here on a processor or a memory counts as nearly full: its figure beats in red in the bar.
+  const HOT_PCT = 90;
+  const isHot = text => parseInt(text, 10) >= HOT_PCT;
+  const resourceValue = (name, glyph, text) => (text ? `<span class="resource-value${isHot(text) ? " hot" : ""}" aria-label="${name} ${text}">${glyph}${text}</span>` : "");
+  // CPU and memory, or nothing when the computer sent none. hotOnly: a chip, which shows them only once they are
+  // nearly full.
+  function resourcesHtml(stats, hotOnly = false) {
     const cpu = getCpu(stats), ram = getRam(stats);
-    if (!cpu && !ram) return "";
-    return `<span class="machine-resources">${cpu ? `<span class="resource-value" aria-label="CPU ${cpu}">${CPU_ICON}${cpu}</span>` : ""}${ram ? `<span class="resource-value" aria-label="RAM ${ram}">${RAM_ICON}${ram}</span>` : ""}</span>`;
+    const html = (hotOnly && !isHot(cpu) ? "" : resourceValue("CPU", CPU_ICON, cpu)) + (hotOnly && !isHot(ram) ? "" : resourceValue("RAM", RAM_ICON, ram));
+    return html ? `<span class="machine-resources">${html}</span>` : "";
   }
+  const isMachineHot = m => !m.offline && (isHot(getCpu(m.stats)) || isHot(getRam(m.stats)));
   // The fullest limit among some windows.
   const getFullest = windows => [...(windows || [])].sort((a, b) => b.util - a.util)[0] || null;
   // m: a computer of the bar - { id, name, snapshot, stats, installed, offline, local }.
@@ -98,7 +104,7 @@
       return w ? `<span class="machine-meter ${id} ${getLevel(w)}"><i style="width:${Math.max(8, Math.min(100, w.util))}%"></i></span>` : "";
     }).join("");
     const w = m.offline ? null : getFullest(getWindows(m));
-    return `<button class="machine-status${m.offline ? " offline" : ""} chip" data-machine="${esc(m.id)}" data-card="${esc(m.id)}" aria-expanded="false"><span class="machine-name"><span class="machine-dot"></span>${esc(m.name)}</span>${meters ? `<span class="machine-meters">${meters}</span>` : ""}${w ? `<span class="machine-fullest ${getLevel(w)}">${Math.round(w.util)}%</span>` : ""}</button>`;
+    return `<button class="machine-status${m.offline ? " offline" : ""} chip${isMachineHot(m) ? " hot" : ""}" data-machine="${esc(m.id)}" data-card="${esc(m.id)}" aria-expanded="false"><span class="machine-name"><span class="machine-dot"></span>${esc(m.name)}</span>${meters ? `<span class="machine-meters">${meters}</span>` : ""}${w ? `<span class="machine-fullest ${getLevel(w)}">${Math.round(w.util)}%</span>` : ""}${m.offline ? "" : resourcesHtml(m.stats, true)}</button>`;
   }
 
   // ---------- a computer's card ----------
@@ -123,7 +129,7 @@
     if (!stats) return `<section class="mc-part"><div class="mc-text">${esc(t("resources.unavailable"))}</div></section>`;
     const memory = stats.memory?.total ? stats.memory : null, disk = stats.disk?.total ? stats.disk : null;
     const share = (used, total) => Math.round(used / total * 100);
-    const getLoadLevel = pct => (pct >= 95 ? "danger" : pct >= 85 ? "warn" : "");
+    const getLoadLevel = pct => (pct >= HOT_PCT ? "danger" : pct >= 80 ? "warn" : "");
     const rows = [
       stats.cpu == null ? "" : cardRow("CPU", stats.cpu, getCpu(stats), stats.cores ? t("resources.cores", { n: stats.cores }) : "", getLoadLevel(stats.cpu)),
       memory ? cardRow("RAM", share(memory.used, memory.total), getRam(stats), `${gib(memory.used)} / ${gib(memory.total)} GiB`, getLoadLevel(share(memory.used, memory.total))) : "",
@@ -199,8 +205,10 @@
       e.preventDefault();
       el.scrollLeft -= e.deltaY;
     }, { passive: false });
-    window.manager.onResourcesChanged(r => { resources = r; render(); });
-    window.manager.getResources().then(r => { resources = r; render(); }).catch(() => {});
+    // The computer's name also stands on its terminals (workspace-ui.js), which are drawn again once it is known.
+    const setResources = r => { const named = !resources?.name && r?.name; resources = r; render(); if (named && typeof renderWorkspace === "function") renderWorkspace(); };
+    window.manager.onResourcesChanged(setResources);
+    window.manager.getResources().then(setResources).catch(() => {});
     window.manager.onNodesChanged(list => { peers = list || []; render(); });
     window.manager.getNodes().then(list => { peers = list || []; render(); }).catch(() => {});
     const setAgents = d => { agents = d?.agents || []; render(); };
@@ -210,5 +218,6 @@
     window.manager.getLimits().then(set).catch(() => {});
   }
   // Asked when the menu comes out (main answers from its last check when that is recent).
-  window.limitsUi = { refresh: () => window.manager.getLimits().then(set).catch(() => {}) };
+  // getLocalName: this computer's own name, once main has measured it ("" until then).
+  window.limitsUi = { refresh: () => window.manager.getLimits().then(set).catch(() => {}), getLocalName: () => resources?.name || "" };
 })();

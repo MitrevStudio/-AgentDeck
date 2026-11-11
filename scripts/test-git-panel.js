@@ -64,7 +64,13 @@ assert.equal(element('gitRepoCount').textContent, 0, 'no open projects means no 
 ctx.ws.tabs = { terminal: { root: { term: 't' } } };
 ctx.ws.terminals = [{ id: 't', cwd: 'C:/app/backend/src' }];
 ctx.window.gitPanel.render();
-assert.equal(element('gitRepoCount').textContent, 2, 'attached terminal includes all repos of its project');
+assert.equal(element('gitRepoCount').textContent, 1, 'a terminal brings the repository it is in, not its neighbours');
+ctx.ws.terminals[0].cwd = 'C:/app';
+ctx.window.gitPanel.render();
+assert.equal(element('gitRepoCount').textContent, 2, 'a terminal in a folder of repositories brings the ones right inside it');
+ctx.ws.terminals[0].cwd = 'C:/';
+ctx.window.gitPanel.render();
+assert.equal(element('gitRepoCount').textContent, 0, 'a terminal far above brings none of the repositories below');
 ctx.ws.terminals[0].cwd = 'C:/application';
 ctx.window.gitPanel.render();
 assert.equal(element('gitRepoCount').textContent, 0, 'path prefix must end at directory boundary');

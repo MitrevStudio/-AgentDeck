@@ -291,6 +291,20 @@ const getTermTitle = x => getTermSession(x)?.title || x?.title || "";
 function getTermLive(x) {
   return x?.sessionId ? allLive.get(sessionKey({ agent: x.agent, id: x.sessionId, node: x.node })) || null : null;
 }
+// The computer a terminal runs on, as a small mark beside its title - drawn once any terminal runs on another
+// computer, and then on every one (this computer's too), so none is left to guess.
+const getNodeName = id => (typeof getNode === "function" && getNode(id)?.name) || id;
+const hasRemoteTerminals = () => ws.terminals.some(x => x.node && !x.exited);
+function getComputerMark(nodeIds) {
+  if (!hasRemoteTerminals()) return "";
+  // The other computers first: in a tab that mixes them, theirs is the name worth the room.
+  const ids = [...new Set(nodeIds.map(id => id || ""))].sort((a, b) => Boolean(b) - Boolean(a));
+  if (!ids.length) return "";
+  const names = ids.map(id => (id ? getNodeName(id) : window.limitsUi?.getLocalName?.() || t("manager.devices.local")));
+  const remote = ids.some(Boolean);
+  const offline = remote && ids.filter(Boolean).every(id => typeof getNode === "function" && getNode(id)?.status !== "online");
+  return `<span class="term-node ${remote ? "remote" : "local"} ${offline ? "offline" : ""}" title="${esc(names.join(", "))}">${icon(remote ? "nodes" : "window")}<span>${esc(names.length > 1 ? `${names[0]} +${names.length - 1}` : names[0])}</span></span>`;
+}
 // A tab's state: the most urgent of its panes' (needs you, working, waiting).
 function getTabLive(tab) {
   const states = getPanesOf(tab.root).map(id => getTermLive(getTerminal(id))).filter(Boolean);
@@ -305,7 +319,7 @@ function renderTabbar() {
     const l = getTabLive(tab);
     const label = tab.name || getTermTitle(getTerminal(tab.focus)) || String(i + 1);
     return `<div class="wtab ${tab.id === space.active ? "active" : ""}" data-tab="${esc(tab.id)}" role="tab" draggable="true" title="${esc(label)}">
-      ${l ? statusMark(l, false) : ""}<span class="wtab-name">${esc(label)}</span>
+      ${l ? statusMark(l, false) : ""}<span class="wtab-name">${esc(label)}</span>${getComputerMark(getPanesOf(tab.root).map(id => getTerminal(id)?.node))}
       <button class="wtab-close wtab-rename-btn" data-ws="rename-tab" title="${esc(t("action.rename"))}" aria-label="${esc(t("action.rename"))}">${icon("pencil")}</button>
       <button class="wtab-close" data-ws="close-tab" title="${esc(t("ws.closeTab"))}">${icon("x")}</button></div>`;
   }).join("") + `<button class="icon-btn wtab-new ${!space.active ? "active" : ""}" data-ws="sessions" title="${esc(t("ws.sessions"))}" aria-label="${esc(t("ws.sessions"))}">${icon("plus")}</button>`;
@@ -413,7 +427,7 @@ function renderPaneHeads(tab) {
     const title = many ? `<span class="pane-title" title="${esc(x?.cwd || "")}">${esc(getTermTitle(x))}</span>`
       : `<span class="pane-title pane-dir" title="${esc(getTermTitle(x))}">${esc(x?.cwd || getTermTitle(x))}</span>`;
     setHtml(el.querySelector(".pane-info"), `${x?.agent ? agentMark(x.agent) : `<span class="agent-mark">${icon("terminal")}</span>`}${title}
-      ${x?.note ? `<span class="pane-note">${esc(x.note)}</span>` : ""}
+      ${x ? getComputerMark([x.node]) : ""}${x?.note ? `<span class="pane-note">${esc(x.note)}</span>` : ""}
       ${s ? getContextChip(s) : ""}${l ? statusMark(l, isLoading(sessionKey(l), l)) : ""}`);
     setHtml(el.querySelector(".pane-tools"), `<button class="icon-btn" data-ws="split-right" title="${esc(t("ws.splitRight"))}">${icon("splitRight")}</button>
         <button class="icon-btn" data-ws="split-down" title="${esc(t("ws.splitDown"))}">${icon("splitDown")}</button>
