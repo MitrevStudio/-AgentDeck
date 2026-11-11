@@ -33,7 +33,7 @@ assert.match(element('gitRepositories').innerHTML, /data-repo-action="commit"/);
 assert.match(element('gitRepositories').innerHTML, /data-repo-menu/);
 assert.match(element('gitRepositories').innerHTML, /data-file-menu/);
 assert.doesNotMatch(element('gitRepositories').innerHTML, /type="checkbox"|data-repo-action="manage"|git-repo-location/);
-assert.doesNotMatch(element('gitRepositories').innerHTML, /class="git-repository[^>]*\sopen>/, 'repositories start folded');
+assert.match(element('gitRepositories').innerHTML, /class="git-repository[^>]*\sopen>/, 'without grouping the repositories start open');
 const repoKey = JSON.stringify(['local', 'C:/app/backend']);
 const fileButton = { dataset: {}, closest: selector => selector === '[data-repo]' ? { dataset: { repo: repoKey } } : selector === '[data-file]' ? { dataset: { file: 'src/<script>.js' } } : { dataset: { group: 'changes' } } };
 element('gitRepositories').listeners.click({ target: { closest: () => fileButton }, preventDefault() {}, stopPropagation() {} });
@@ -103,6 +103,7 @@ element('gitPanelRefresh').onclick().then(async () => {
   const html = element('gitRepositories').innerHTML;
   assert.equal(saved.get('agentdeck.gitByProject'), '1');
   assert.equal(html.match(/git-project-head/g).length, 1, 'the worktree joins the project of its main checkout');
+  assert.doesNotMatch(html, /class="git-repository[^>]*\sopen>/, 'inside a project group the repositories start folded');
   assert.match(html, /<details class="git-project" data-expand="project:c:\/app" ><summary class="git-project-head"><span class="git-chevron"><\/span><span>App<\/span><span class="git-count">3</);
   // A project group starts folded; opened, it stays open on the next render.
   element('gitRepositories').listeners.toggle({ target: { dataset: { expand: 'project:c:/app' }, open: true } });

@@ -89,6 +89,9 @@
       .sort((a, b) => b.path.length - a.path.length)[0];
     return project ? { key: project.n, name: project.name } : { key: home, name: home.split('/').filter(Boolean).at(-1) || home };
   }
+  // A repository is open until folded; inside a project group ("Group by Project") it is folded until opened, so an
+  // opened project shows the list of its repositories first.
+  const isRepoOpen = key => (byProject ? expanded.get(key) === true : expanded.get(key) !== false);
   // With "Group by Project": the repositories in a foldable group per project (folded until opened), the projects by name.
   function getRepoRows(items) {
     if (!byProject) return items.map(x => x.html);
@@ -123,7 +126,7 @@
         repositories.set(key, node);
         const offline = source.status !== 'online', disabled = offline || busy.has(key), files = repo.files || [], staged = files.some(f => accepts('staged', f));
         tips.set(key, `${source.name}\n${repo.root}\n${gitText('checked')}: ${repo.at ? new Date(repo.at).toLocaleTimeString() : '—'}${offline || Date.now() - (repo.at || 0) > 150000 ? '\n' + gitText('stale') : ''}`);
-        items.push({ project: getRepoProject(source.id, repo), html: `<details class="git-repository ${offline ? 'offline' : ''}" data-repo="${esc(key)}" data-expand="${esc(key)}" ${expanded.get(key) === true ? 'open' : ''}>
+        items.push({ project: getRepoProject(source.id, repo), html: `<details class="git-repository ${offline ? 'offline' : ''}" data-repo="${esc(key)}" data-expand="${esc(key)}" ${isRepoOpen(key) ? 'open' : ''}>
           <summary><span class="git-chevron">${icon('right')}</span><strong>${esc(repo.root.split(/[\\/]/).at(-1))}</strong><span class="git-repo-branch">${icon('branch')}${esc(repo.error ? '' : gitHead(repo))}</span>${gitAb(repo)}${source.id === 'local' ? '' : `<span class="proj-node ${offline ? 'offline' : 'online'}">${icon('nodes')}${esc(source.name)}</span>`}${offline ? `<span class="git-offline">${icon('alert')}</span>` : ''}<span class="grow"></span><span class="git-hover-actions">${quick('preview', 'eye', 'commit', disabled)}${quick('commit', 'check', 'commitMenu', disabled || !staged || !(drafts.get(key) || '').trim())}${quick('branches', 'branch', 'branches', disabled)}${quick('refresh', 'refresh', 'refresh', disabled)}${more('data-repo-menu', disabled)}</span><span class="git-count">${repo.fileCount ?? files.length}</span></summary>
           <div class="git-commit-box"><textarea class="textarea" data-commit-message="${esc(key)}" rows="1" spellcheck="false" aria-label="${esc(gitText('message'))}" placeholder="${esc(gitText('commitHint'))}" ${disabled ? 'disabled' : ''}>${esc(drafts.get(key) || '')}</textarea><div class="git-commit-split"><button type="button" class="btn sm primary git-commit-button" data-repo-action="commit" ${disabled || !staged || !(drafts.get(key) || '').trim() ? 'disabled' : ''}>${icon('check')}<span>${esc(gitText(busy.has(key) ? 'loading' : 'commitMenu'))}</span></button><button type="button" class="btn sm primary git-commit-options" data-commit-menu aria-label="${esc(gitText('commitOptions'))}" title="${esc(gitText('commitOptions'))}" aria-haspopup="menu" ${disabled ? 'disabled' : ''}>${icon('down')}</button></div></div>
           ${errors.has(key) || repo.error || source.gitError ? `<p class="git-panel-error" role="status">${esc(errors.get(key) || repo.error || source.gitError)}</p>` : ''}
