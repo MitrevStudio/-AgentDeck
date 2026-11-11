@@ -52,7 +52,7 @@ export const metaLine = (x, { showNode = true, glyph = false } = {}) => {
 // hooks the buttons.
 export function connNote(store, { add = true } = {}) {
   const c = store.connection();
-  if (!store.demo && (c.state === "nohub" || c.state === "none")) {
+  if (c.state === "nohub" || c.state === "none") {
     return `<div class="note warn" role="status">${icon("wifi")}<div class="note-text"><b>${esc(t("conn.noRelay"))}</b>
       <small>${esc(t("conn.noRelayWhy"))}</small></div>
       ${add ? iconBtn("scan", t("computers.scan"), 'data-act="conn-scan"') + iconBtn("plus", t("computers.add"), 'data-act="conn-add"') : ""}</div>`;

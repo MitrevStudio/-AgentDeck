@@ -254,7 +254,7 @@ textarea { resize: none; line-height: 1.35; }
 .live .dot { width: 7px; height: 7px; }
 .live .spinner { width: 10px; height: 10px; }
 
-/* ---------- notes: the relay link, the Demo, nothing connected ---------- */
+/* ---------- notes: the relay link, nothing connected ---------- */
 .note { display: flex; align-items: center; gap: 10px; min-height: 44px; margin: 4px 0 10px; padding: 6px 12px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel); color: var(--muted); font-size: 13px; }
 .note > .ic { width: 16px; height: 16px; color: var(--faint); }
 .note:has(> .icon-btn) { padding-right: 0; }
@@ -445,10 +445,6 @@ textarea { resize: none; line-height: 1.35; }
 .hero p { margin-top: 4px; color: var(--muted); font-size: 13.5px; }
 .hint { text-align: center; color: var(--faint); font-size: 12.5px; }
 .pair > .group { margin: 10px 4px 0; }
-.demo { justify-content: flex-start; text-align: left; height: auto; min-height: 52px; padding: 8px 14px; line-height: 1.3; border-style: dashed; background: transparent; }
-.demo .ic { color: var(--accent); }
-.demo span { display: flex; flex-direction: column; }
-.demo small { color: var(--muted); font-weight: 400; font-size: 12.5px; white-space: normal; }
 .pair .link { align-self: center; }
 
 /* ---------- scanner ---------- */

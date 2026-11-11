@@ -146,7 +146,6 @@ export function createRelayProvider({ WebSocket = globalThis.WebSocket, keypair,
   const guarded = fn => async (...a) => { pairing++; try { return await fn(...a); } finally { pairing--; } };
 
   return {
-    demo: false,
     on: ev.on,
     get id() { return client.id; },
     async start() { started = true; client.start(); },

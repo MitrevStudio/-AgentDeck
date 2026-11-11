@@ -46,7 +46,7 @@ export function render(el, ctx, p) {
     const canStop = x && (x.term || (x.online && x.status !== "stopped" && store.stopKind(p.node, p.agent, p.id)));
     const canResume = x && !x.term && x.online && x.status === "stopped";
     const actions = [
-      x?.online && x.cwd && !store.demo ? iconBtn("plus", t("session.shell"), 'data-act="shell"') : "",
+      x?.online && x.cwd ? iconBtn("plus", t("session.shell"), 'data-act="shell"') : "",
       x?.term ? iconBtn("terminal", t("session.terminal"), 'data-act="term"') : "",
       canStop ? iconBtn("stop", t("session.stop"), 'data-act="stop"', "danger") : "",
       canResume ? iconBtn("play", t("session.resume"), 'data-act="resume"', "accent") : ""

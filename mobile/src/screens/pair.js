@@ -1,6 +1,6 @@
 // Pairing: scan the code from AgentDeck, or paste its text; or by hand - the address of a relay (or of a computer on
 // the same network) and its code, then the computers behind it, each with its own code (routes.js). First run and
-// "Add computers" (params.add: from the Computers screen, with a way back and without the Demo).
+// "Add computers" (params.add: from the Computers screen, with a way back).
 import { t, errorText } from "../i18n.js";
 import { esc } from "../util.js";
 import { icon } from "../icons.js";
@@ -17,7 +17,6 @@ export function render(el, ctx, params) {
     </div>`}
     <button class="btn primary big" data-act="scan">${icon("scan")}<span data-i18n="pair.scan"></span></button>
     <p class="hint" data-i18n="pair.scanHint"></p>
-    ${add ? "" : `<button class="btn big demo" data-act="demo">${icon("play")}<span><b data-i18n="pair.demo"></b><small data-i18n="pair.demoHint"></small></span></button>`}
     <h2 class="group" data-i18n="pair.or"></h2>
     <form class="card form" data-form="paste" novalidate>
       <label><span data-i18n="pair.paste"></span>
@@ -38,7 +37,6 @@ export function render(el, ctx, params) {
   if (add) wireBack(el, ctx);
 
   el.querySelector("[data-act='scan']").onclick = () => ctx.go("scan");
-  el.querySelector("[data-act='demo']")?.addEventListener("click", () => ctx.startDemo());
   el.querySelector("[data-act='diag']").onclick = () => ctx.go("diag");
 
   el.querySelector("[data-form='paste']").onsubmit = e => {

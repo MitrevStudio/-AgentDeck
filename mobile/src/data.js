@@ -2,8 +2,8 @@
 // the live status, the terminals), and the actions on them. The UI never talks to a transport; a *provider* does.
 //
 // ---------------------------------------------------------------------------------------------------------------
-// THE PROVIDER (the seam). Two exist: mock.js (sample data, the "Demo") and provider-relay.js (the user's relay:
-// WebSocket + Noise, src/mesh/web-client.js). A provider is a thin transport that speaks the host's own protocol
+// THE PROVIDER (the seam): provider-relay.js (the user's relay: WebSocket + Noise, src/mesh/web-client.js).
+// A provider is a thin transport that speaks the host's own protocol
 // (src/mesh/serve.js) unchanged; everything above it lives here, so the UI does not know which one runs.
 //
 //   provider.start()                  -> Promise     connect; "nodes" follows
@@ -59,7 +59,6 @@
 //                                                    rows, driver }), "terminal.resync" ({ id }: the phone missed output
 //                                                    there and attaches again)
 //        "frame"  { node, frame: { type: "output", id, data, end } }   terminal output
-//   provider.demo                     true for the mock (the UI says so)
 //   provider.id                       the phone's own node id (the owner of the terminals it opens)
 //   optional: provider.connection() -> { state: "none" | "nohub" | "connecting" | "down" | "ok", error },
 //        provider.wake(), provider.pause()
@@ -457,7 +456,6 @@ export function createStore(provider) {
   // ---------- the store ----------
   return {
     on: out.on,
-    demo: Boolean(provider.demo),
     provider,
 
     async connect() {
@@ -475,7 +473,7 @@ export function createStore(provider) {
       provider.stop();
       started = false;
     },
-    // The relay link as a whole (see provider-relay.js connection()); the Demo is always "ok".
+    // The relay link as a whole (see provider-relay.js connection()).
     connection: () => provider.connection?.() || { state: "ok", error: "" },
     // Back in the foreground / the network changed.
     wake: () => provider.wake?.(),

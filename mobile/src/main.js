@@ -1,4 +1,4 @@
-// The phone app: picks the provider (the Demo's mock or the user's relay), runs the screens, and keeps the shell
+// The phone app: starts the provider (the user's relay), runs the screens, and keeps the shell
 // around them - the screen stack with the Android back button, the tab bar, the "waiting" banner, toasts,
 // confirmations and the visual viewport (the soft keyboard) - and the link's lifecycle: connected on start, checked
 // and made again when the app comes back to the foreground or the network changes.
@@ -7,7 +7,6 @@ import { t, setLanguage, applyI18n, errorText } from "./i18n.js";
 import { $, esc, buzz } from "./util.js";
 import { icon } from "./icons.js";
 import { createStore } from "./data.js";
-import { createMockProvider } from "./mock.js";
 import { createRelayProvider } from "./provider-relay.js";
 import { keystore, lock, deviceModel } from "./keystore.js";
 import { generateKeypair } from "../../src/mesh/noise.js";
@@ -26,7 +25,6 @@ import * as nodeScreen from "./screens/node.js";
 
 const SCREENS = { pair: pairScreen, pairing: pairingScreen, routes: routesScreen, scan: scanScreen, diag: diagScreen, inbox: inboxScreen, session: sessionScreen, terminal: terminalScreen, new: newScreen, computers: computersScreen, node: nodeScreen };
 const TABS = ["inbox", "new", "computers"];
-const MODE_KEY = "agentdeck.mode"; // "demo" while the Demo is on
 const META_KEY = "agentdeck.nodes"; // provider-relay.js meta: which nodes are relays, when each was last seen (not secret)
 
 const app = $("#app");
@@ -208,29 +206,10 @@ async function relay() {
     onMetaChanged: writeMeta,
     log: line => console.log(`[mesh] ${line}`)
   });
-  try { localStorage.removeItem(MODE_KEY); } catch {}
   await useProvider(link);
   return link;
 }
 
-async function startDemo() {
-  try { localStorage.setItem(MODE_KEY, "demo"); } catch {}
-  link?.stop();
-  link = null;
-  await useProvider(createMockProvider());
-  go("inbox", {}, { root: true });
-}
-async function leaveDemo() {
-  try { localStorage.removeItem(MODE_KEY); } catch {}
-  store?.disconnect();
-  store = null;
-  ctx.store = null;
-  if ((await keystore.getPeers()).length) {
-    await relay();
-    return go("inbox", {}, { root: true });
-  }
-  go("pair", {}, { root: true });
-}
 // Every computer that is online hears that it is forgotten; the identity and the list go.
 async function unpair() {
   if (link) for (const n of link.nodes()) { try { await link.forget(n.id); } catch {} }
@@ -239,7 +218,7 @@ async function unpair() {
   ctx.store = null;
   link = null;
   await keystore.clear();
-  try { localStorage.removeItem(MODE_KEY); localStorage.removeItem(META_KEY); } catch {}
+  try { localStorage.removeItem(META_KEY); } catch {}
   go("pair", {}, { root: true });
 }
 async function rename(name) {
@@ -250,7 +229,7 @@ async function phoneName() {
   return link?.name || (await keystore.getName()) || (await deviceModel()) || "Phone";
 }
 
-const ctx = { store: null, go, back, toast, fail, confirm: confirmSheet, prompt: promptSheet, startDemo, leaveDemo, unpair, relay, rename, phoneName, secure: () => keystore.secure };
+const ctx = { store: null, go, back, toast, fail, confirm: confirmSheet, prompt: promptSheet, unpair, relay, rename, phoneName, secure: () => keystore.secure };
 
 // ---------- the lifecycle ----------
 // The links do not survive the background reliably (and not at all on iOS): back in the foreground, or when the
@@ -286,9 +265,6 @@ async function boot() {
   navigator.connection?.addEventListener?.("change", netWake);
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") wake(); else pause(); });
 
-  let mode = null;
-  try { mode = localStorage.getItem(MODE_KEY); } catch {}
-  if (mode === "demo") return startDemo();
   if ((await keystore.getPeers()).length) {
     await relay();
     return go("inbox", {}, { root: true });
