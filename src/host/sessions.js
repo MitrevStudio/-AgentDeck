@@ -268,8 +268,9 @@ function createSessions({ dataDir, home, isExcluded = () => false, untitled = (a
   function getTranscriptProject(reg, projectFolder) {
     const folder = projectFolder.toLowerCase();
     const local = reg.projects.filter(p => !p.node);
-    return local.find(p => p.path.replace(/[^a-z0-9]/gi, "-").toLowerCase() === folder)
-      || local.filter(p => folder.includes(path.basename(p.path).toLowerCase()))
+    const asFolder = p => p.replace(/[^a-z0-9]/gi, "-").toLowerCase();
+    return local.find(p => asFolder(p.path) === folder)
+      || local.filter(p => folder.includes(asFolder(path.basename(p.path))))
         .sort((a, b) => path.basename(b.path).length - path.basename(a.path).length)[0];
   }
   function scanTranscripts(reg, found) {

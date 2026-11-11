@@ -81,13 +81,14 @@
       return `<details class="git-file-group" data-expand="${esc(id)}" data-group="${group}" ${expanded.get(id) !== false ? 'open' : ''}><summary><span class="git-chevron">${icon('right')}</span><span>${esc(gitText(group))}</span><span class="grow"></span><span class="git-hover-actions">${quick('review', 'eye', 'reviewChanges', disabled)}${quick(group === 'staged' ? 'unstage' : 'stage', group === 'staged' ? 'undo' : 'plus', group === 'staged' ? 'unstageAll' : 'stageAll', disabled)}${more('data-group-menu', disabled)}</span><span class="git-count">${files.length}</span></summary>${tree ? renderTree(files) : files.map(f => fileRow(f, node, group, disabled)).join('')}</details>`;
     }).join('');
   }
-  // The project a repository belongs to: the deepest one holding it - a linked worktree by its main checkout - or, in
-  // none, its own folder.
+  // The project a repository belongs to: the deepest one holding it - a linked worktree by its main checkout, else by
+  // its own folder (a worktree added as a project of its own) - or, in none, its own folder.
   function getRepoProject(sourceId, repo) {
-    const home = normPath(repo.mainRoot || repo.root);
-    const project = (data.projects || []).filter(p => (p.node || 'local') === sourceId && within(home, normPath(p.path)))
+    const root = normPath(repo.root);
+    const holding = dir => (data.projects || []).filter(p => (p.node || 'local') === sourceId && within(dir, normPath(p.path)))
       .sort((a, b) => b.path.length - a.path.length)[0];
-    return project ? { key: project.n, name: project.name } : { key: home, name: home.split('/').filter(Boolean).at(-1) || home };
+    const project = holding(normPath(repo.mainRoot || repo.root)) || holding(root);
+    return project ? { key: project.n, name: project.name } : { key: root, name: root.split('/').filter(Boolean).at(-1) || root };
   }
   // A repository is open until folded; inside a project group ("Group by Project") it is folded until opened, so an
   // opened project shows the list of its repositories first.

@@ -107,6 +107,14 @@ element('gitPanelRefresh').onclick().then(async () => {
   assert.equal(html.match(/git-project-head/g).length, 1, 'the worktree joins the project of its main checkout');
   assert.doesNotMatch(html, /class="git-repository[^>]*\sopen>/, 'inside a project group the repositories start folded');
   assert.match(html, /<details class="git-project" data-expand="project:c:\/app" ><summary class="git-project-head"><span class="git-chevron"><\/span><span>App<\/span><span class="git-count">3</);
+  // A worktree that is a project of its own, its main checkout in none: under its own project, not a made-up group.
+  ctx.data.projects.push({ n: 'c:/feature-wt', name: 'Feature', path: 'C:/feature-wt' });
+  state.repos.four = { root: 'C:/feature-wt', mainRoot: 'C:/elsewhere/main', branch: 'feature', files: [] };
+  ctx.ws.terminals.push({ id: 'f', cwd: 'C:/feature-wt' });
+  ctx.ws.tabs.fw = { root: { term: 'f' } };
+  ctx.window.gitPanel.render();
+  assert.match(element('gitRepositories').innerHTML, /data-expand="project:c:\/feature-wt" ><summary class="git-project-head"><span class="git-chevron"><\/span><span>Feature</);
+  assert.doesNotMatch(element('gitRepositories').innerHTML, /project:c:\/elsewhere/);
   // A project group starts folded; opened, it stays open on the next render.
   element('gitRepositories').listeners.toggle({ target: { dataset: { expand: 'project:c:/app' }, open: true } });
   ctx.window.gitPanel.render();

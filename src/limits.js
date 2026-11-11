@@ -49,24 +49,28 @@ function createLimits({ fetch, onChange = () => {} }) {
   let refusedAt = 0; // credentials mtime when the token was refused
   let timer = null, inFlight = null;
 
-  function token() {
-    if (refusedAt && mtime(CREDENTIALS) === refusedAt) return { error: "expired" };
+  // The login as Claude Code keeps it; null without one.
+  function login() {
     try {
-      const o = JSON.parse(fs.readFileSync(CREDENTIALS, "utf8"))?.claudeAiOauth;
-      return o?.accessToken ? { value: o.accessToken, plan: String(o.subscriptionType || "") } : { error: "noLogin" };
-    } catch { return { error: "noLogin" }; }
+      return JSON.parse(fs.readFileSync(CREDENTIALS, "utf8"))?.claudeAiOauth || null;
+    } catch { return null; }
+  }
+  function token(o) {
+    if (refusedAt && mtime(CREDENTIALS) === refusedAt) return { error: "expired" };
+    return o?.accessToken ? { value: o.accessToken } : { error: "noLogin" };
   }
 
+  // The plan is the login's, whatever becomes of the token: an expired one still says which plan it was for.
   async function poll() {
-    const tk = token();
-    if (tk.error) { state = { at: 0, checkedAt: Date.now(), error: tk.error, windows: [], scoped: [] }; return; }
-    state = { ...state, plan: tk.plan };
+    const o = login(), tk = token(o), plan = String(o?.subscriptionType || "");
+    if (tk.error) { state = { at: 0, checkedAt: Date.now(), error: tk.error, windows: [], scoped: [], plan }; return; }
+    state = { ...state, plan };
     let res;
     try {
       res = await fetch(URL, { headers: { Authorization: `Bearer ${tk.value}`, "anthropic-beta": "oauth-2025-04-20" } });
     } catch (e) { state = { ...state, checkedAt: Date.now(), error: "network", detail: e.message }; return; }
     const body = await res.text().catch(() => "");
-    if (res.status === 401 || res.status === 403) { refusedAt = mtime(CREDENTIALS); state = { at: 0, checkedAt: Date.now(), error: "expired", windows: [], scoped: [] }; return; }
+    if (res.status === 401 || res.status === 403) { refusedAt = mtime(CREDENTIALS); state = { at: 0, checkedAt: Date.now(), error: "expired", windows: [], scoped: [], plan }; return; }
     if (!res.ok) { state = { ...state, checkedAt: Date.now(), error: "http", detail: String(res.status) }; return; }
     let data;
     try { data = JSON.parse(body); } catch { state = { ...state, checkedAt: Date.now(), error: "http", detail: "JSON" }; return; }
@@ -78,7 +82,7 @@ function createLimits({ fetch, onChange = () => {} }) {
     const scoped = (Array.isArray(data?.limits) ? data.limits : [])
       .filter(l => l?.kind === "weekly_scoped" && l.scope?.model?.display_name)
       .map(l => ({ name: l.scope.model.display_name, util: Number(l.percent) || 0, resetsAt: Date.parse(l.resets_at) || 0 }));
-    state = { at: now, checkedAt: now, error: "", windows, scoped, plan: tk.plan };
+    state = { at: now, checkedAt: now, error: "", windows, scoped, plan };
   }
 
   function refresh(force = false) {

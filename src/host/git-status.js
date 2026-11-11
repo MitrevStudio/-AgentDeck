@@ -121,7 +121,13 @@ async function findRoot(dir) {
   }
 }
 // A linked worktree's main checkout: its .git is a file naming <main>/.git/worktrees/<name>. Else the root itself.
+// Read once per root: a checkout does not become a worktree of another one.
+const mainRoots = new Map();
 async function getMainRoot(root) {
+  if (!mainRoots.has(root)) mainRoots.set(root, await readMainRoot(root));
+  return mainRoots.get(root);
+}
+async function readMainRoot(root) {
   let text = "";
   try {
     text = await fs.promises.readFile(path.join(root, ".git"), "utf8");

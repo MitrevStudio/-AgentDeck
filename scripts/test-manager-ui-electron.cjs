@@ -529,6 +529,23 @@ app.whenReady().then(async () => {
   const SIDE_AT = { left: [0.05, 0.5], right: [0.95, 0.5], up: [0.5, 0.05], down: [0.5, 0.95], center: [0.5, 0.5] };
   assert.deepEqual(await evaluate("[...document.querySelectorAll('#terms .agent')].map(el => el.dataset.key)"), ['term:y1', 'term:y2', 'term:y6', 'term:y3', 'term:y4']);
   assert.equal(await evaluate("[...document.querySelectorAll('#terms .agent')].every(el => el.draggable)"), true, 'every Terminals row can be dragged');
+  // A pane's drag whose dragend was lost (a tab sprang up under it and redrew the panes) leaves nothing for the next
+  // drag: a file or a selection dragged over a pane or the tab bar moves no pane, and the pointer moving clears the rest.
+  const stale = await evaluate(`(() => {
+    fx.wsCommands.length = 0;
+    dragFire(document.querySelector('.pane[data-term=y1] .pane-head'), 'dragstart', new DataTransfer());
+    const other = new DataTransfer(), pane = document.querySelector('.pane[data-term=y2] .pane-body');
+    other.setData('text/plain', 'not a pane');
+    const taken = [dragFire(pane, 'dragover', other, [0.95, 0.5]), dragFire(pane, 'drop', other, [0.95, 0.5]),
+      dragFire(document.querySelector('#tabbar'), 'dragover', other), dragFire(document.querySelector('#tabbar'), 'drop', other),
+      dragFire(document.querySelector('#sideOverview'), 'dragover', other)];
+    window.dispatchEvent(new PointerEvent('pointermove', { bubbles: true }));
+    const again = new DataTransfer();
+    again.setData('application/x-agentdeck-layout', 'y1');
+    taken.push(dragFire(pane, 'dragover', again, [0.95, 0.5]));
+    return { taken, commands: fx.wsCommands.slice() };
+  })()`);
+  assert.deepEqual(stale, { taken: [false, false, false, false, false, false], commands: [] }, 'a lost dragend leaves no pane to move');
   // A terminal with no pane here, dropped on a side of a pane: it opens there, beside that pane.
   for (const side of ['right', 'left', 'up', 'down']) {
     const r = await dragTo('#terms [data-key="term:y3"]', '.pane[data-term=y2] .pane-body', SIDE_AT[side]);

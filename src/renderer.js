@@ -374,8 +374,6 @@ function renderTerms(v) {
   patchChildren($("terms"), list.map(termRowHtml).join(""));
 }
 const termOfRow = row => row?.dataset.key?.startsWith("term:") ? row.dataset.key.slice(5) : "";
-// The terminal of AgentDeck a running session is in, on its computer ("" outside one).
-const getAgentTerm = s => (s && (findSessionTab(s)?.id || getSessionTerm(s))) || "";
 // The sidebar lists only the newest few of a session's subagents.
 const SIDEBAR_SUBAGENTS = 3;
 const sessionByKey = key => data.sessions.find(s => sessionKey(s) === key) || null;
