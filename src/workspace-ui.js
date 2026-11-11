@@ -706,7 +706,17 @@ $("panes").addEventListener("pointerdown", e => {
 // ---------- dragging: tabs to reorder or to join, panes to move ----------
 // A tab dragged onto another tab takes its place; onto a pane, its panes go beside that one. A pane's header dragged
 // onto another pane moves the pane there; onto the tab bar, the pane gets a tab of its own.
+// Held over another tab for SPRING_MS while dragging, that tab comes up, so its panes can take the drop.
 let draggedTab = "", draggedPane = "";
+let springTab = "", springTimer = null;
+const SPRING_MS = 600;
+function springToTab(el) {
+  const id = el?.dataset.tab || "";
+  if (id === springTab) return;
+  clearTimeout(springTimer);
+  springTab = id;
+  if (id && id !== draggedTab && id !== getShownTab()?.id) springTimer = setTimeout(() => runWorkspace("tab", { tab: id }), SPRING_MS);
+}
 const PANE_SIDES = ["left", "right", "up", "down"];
 const getTabDropSide = (el, e) => (e.clientX > el.getBoundingClientRect().left + el.offsetWidth / 2 ? "after" : "before");
 // The side of the pane the pointer is nearest to.
@@ -725,6 +735,7 @@ function clearPaneDropMarks() {
 function endDrag() {
   draggedTab = "";
   draggedPane = "";
+  springToTab(null);
   clearTabDropMarks();
   clearPaneDropMarks();
 }
@@ -738,6 +749,7 @@ function getDropPane(e) {
 $("panes").addEventListener("dragstart", e => {
   const pane = e.target.closest?.(".pane-head")?.closest(".pane");
   if (!pane) return;
+  endDrag();
   draggedPane = pane.dataset.term;
   e.dataTransfer.effectAllowed = "move";
   e.dataTransfer.setData("text/plain", draggedPane);
@@ -764,12 +776,14 @@ $("panes").addEventListener("dragend", endDrag);
 $("tabbar").addEventListener("dragstart", e => {
   const el = e.target.closest?.(".wtab");
   if (!el) return;
+  endDrag();
   draggedTab = el.dataset.tab;
   e.dataTransfer.effectAllowed = "move";
   e.dataTransfer.setData("text/plain", draggedTab);
   el.classList.add("dragging");
 });
 $("tabbar").addEventListener("dragover", e => {
+  if (draggedTab || draggedPane) springToTab(e.target.closest?.(".wtab"));
   if (draggedPane) {
     // A pane alone in its tab has a tab of its own already.
     if (getPanesOf(getShownTab()?.root).length < 2) return;
@@ -784,7 +798,11 @@ $("tabbar").addEventListener("dragover", e => {
   document.querySelectorAll(".wtab.drop-before, .wtab.drop-after").forEach(x => x.classList.remove("drop-before", "drop-after"));
   el.classList.add("drop-" + getTabDropSide(el, e));
 });
-$("tabbar").addEventListener("dragleave", e => { if (!$("tabbar").contains(e.relatedTarget)) $("tabbar").classList.remove("drop-new"); });
+$("tabbar").addEventListener("dragleave", e => {
+  if ($("tabbar").contains(e.relatedTarget)) return;
+  $("tabbar").classList.remove("drop-new");
+  springToTab(null);
+});
 $("tabbar").addEventListener("drop", e => {
   if (draggedPane) {
     e.preventDefault();
