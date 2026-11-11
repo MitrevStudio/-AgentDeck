@@ -594,7 +594,17 @@ $("panes").addEventListener("pointerdown", e => {
 // onto another pane moves the pane there; onto the tab bar, the pane gets a tab of its own. A session dragged from the
 // agents list onto a pane goes to that side of it, or into a tab of its own when dropped in the middle or on the tab
 // bar. A pane or tab of running agent sessions dragged onto the agents list leaves the layout and keeps running.
+// Held over another tab for SPRING_MS while dragging, that tab comes up, so its panes can take the drop.
 let draggedTab = "", draggedPane = "", draggedSession = "";
+let springTab = "", springTimer = null;
+const SPRING_MS = 600;
+function springToTab(el) {
+  const id = el?.dataset.tab || "";
+  if (id === springTab) return;
+  clearTimeout(springTimer);
+  springTab = id;
+  if (id && id !== draggedTab && id !== getShownTab()?.id) springTimer = setTimeout(() => runWorkspace("tab", { tab: id }), SPRING_MS);
+}
 const PANE_SIDES = ["left", "right", "up", "down"];
 const getTabDropSide = (el, e) => (e.clientX > el.getBoundingClientRect().left + el.offsetWidth / 2 ? "after" : "before");
 // The side of the pane the pointer is nearest to.
@@ -620,6 +630,7 @@ function endDrag() {
   draggedTab = "";
   draggedPane = "";
   draggedSession = "";
+  springToTab(null);
   $("sideAgents").classList.remove("drop-hide");
   clearTabDropMarks();
   clearPaneDropMarks();
@@ -650,6 +661,7 @@ function dropSessionAsTab(key, before) {
 }
 // Called by the agents list (renderer.js) when one of its sessions starts being dragged.
 function startSessionDrag(key, e) {
+  endDrag();
   draggedSession = key;
   e.dataTransfer.effectAllowed = "move";
   e.dataTransfer.setData("text/plain", key);
@@ -671,6 +683,7 @@ function dropSession(key, target, place) {
 $("panes").addEventListener("dragstart", e => {
   const pane = e.target.closest?.(".pane-head")?.closest(".pane");
   if (!pane) return;
+  endDrag();
   draggedPane = pane.dataset.term;
   e.dataTransfer.effectAllowed = "move";
   e.dataTransfer.setData("text/plain", draggedPane);
@@ -698,12 +711,14 @@ $("panes").addEventListener("dragend", endDrag);
 $("tabbar").addEventListener("dragstart", e => {
   const el = e.target.closest?.(".wtab");
   if (!el) return;
+  endDrag();
   draggedTab = el.dataset.tab;
   e.dataTransfer.effectAllowed = "move";
   e.dataTransfer.setData("text/plain", draggedTab);
   el.classList.add("dragging");
 });
 $("tabbar").addEventListener("dragover", e => {
+  if (draggedTab || draggedPane || draggedSession) springToTab(e.target.closest?.(".wtab"));
   if (draggedSession) {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
@@ -727,7 +742,11 @@ $("tabbar").addEventListener("dragover", e => {
   document.querySelectorAll(".wtab.drop-before, .wtab.drop-after").forEach(x => x.classList.remove("drop-before", "drop-after"));
   el.classList.add("drop-" + getTabDropSide(el, e));
 });
-$("tabbar").addEventListener("dragleave", e => { if (!$("tabbar").contains(e.relatedTarget)) $("tabbar").classList.remove("drop-new"); });
+$("tabbar").addEventListener("dragleave", e => {
+  if ($("tabbar").contains(e.relatedTarget)) return;
+  $("tabbar").classList.remove("drop-new");
+  springToTab(null);
+});
 $("tabbar").addEventListener("drop", e => {
   if (draggedSession) {
     e.preventDefault();
