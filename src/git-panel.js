@@ -89,16 +89,18 @@
       .sort((a, b) => b.path.length - a.path.length)[0];
     return project ? { key: project.n, name: project.name } : { key: home, name: home.split('/').filter(Boolean).at(-1) || home };
   }
-  // With "Group by Project": the repositories under a heading per project, the projects by name.
+  // With "Group by Project": the repositories in a foldable group per project (open until folded), the projects by name.
   function getRepoRows(items) {
     if (!byProject) return items.map(x => x.html);
     const groups = new Map();
     for (const x of items) {
-      if (!groups.has(x.project.key)) groups.set(x.project.key, { name: x.project.name, rows: [] });
+      if (!groups.has(x.project.key)) groups.set(x.project.key, { key: `project:${x.project.key}`, name: x.project.name, rows: [] });
       groups.get(x.project.key).rows.push(x.html);
     }
-    return [...groups.values()].sort((a, b) => a.name.localeCompare(b.name)).flatMap(g =>
-      [`<div class="git-project-head">${icon('folder')}<span>${esc(g.name)}</span><span class="git-count">${g.rows.length}</span></div>`, ...g.rows]);
+    return [...groups.values()].sort((a, b) => a.name.localeCompare(b.name)).map(g =>
+      `<details class="git-project" data-expand="${esc(g.key)}" ${expanded.get(g.key) !== false ? 'open' : ''}><summary class="git-project-head">`
+      + `<span class="git-chevron">${icon('right')}</span>${icon('folder')}<span>${esc(g.name)}</span><span class="git-count">${g.rows.length}</span>`
+      + `</summary>${g.rows.join('')}</details>`);
   }
   function setByProject(on) {
     byProject = on;

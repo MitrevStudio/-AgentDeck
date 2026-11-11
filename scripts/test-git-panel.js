@@ -103,6 +103,10 @@ element('gitPanelRefresh').onclick().then(async () => {
   const html = element('gitRepositories').innerHTML;
   assert.equal(saved.get('agentdeck.gitByProject'), '1');
   assert.equal(html.match(/git-project-head/g).length, 1, 'the worktree joins the project of its main checkout');
-  assert.match(html, /git-project-head"><span>App<\/span><span class="git-count">3</);
+  assert.match(html, /<details class="git-project" data-expand="project:c:\/app" open><summary class="git-project-head"><span class="git-chevron"><\/span><span>App<\/span><span class="git-count">3</);
+  // A project group folds, and stays folded on the next render.
+  element('gitRepositories').listeners.toggle({ target: { dataset: { expand: 'project:c:/app' }, open: false } });
+  ctx.window.gitPanel.render();
+  assert.match(element('gitRepositories').innerHTML, /<details class="git-project" data-expand="project:c:\/app" >/);
   console.log('Git sidebar tabs, local/remote identity, offline state, filename escaping and refresh passed');
 }).catch(e => { console.error(e); process.exitCode = 1; });
