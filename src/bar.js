@@ -9,12 +9,16 @@ let shownDetail = ""; // the list #detail shows: which opening of the menu, tile
 const st = { tile: "", row: -1, confirm: "", del: "", dir: "", shown: false, opened: 0 };
 const q = $("q");
 const liveOf = s => live.get(sessionKey(s));
-// AgentDeck's own terminals (workspace.js in main): which sessions run in them, and each project's open tabs.
-let deck = { sessions: new Set(), tabs: {} };
+// AgentDeck's own terminals (workspace.js in main): which sessions run in them, each project's open tabs, and the
+// names given to one-pane tabs (by session key), shown for those sessions here too.
+let deck = { sessions: new Set(), tabs: {}, names: new Map() };
 function setDeck(w) {
+  const tabNames = new Map(Object.values(w.tabs).filter(tab => tab.name && tab.root?.term).map(tab => [tab.root.term, tab.name]));
   deck = {
     sessions: new Set(w.terminals.filter(x => x.sessionId && !x.exited).map(x => `${x.agent}:${x.sessionId}`)),
-    tabs: Object.fromEntries(Object.entries(w.spaces).map(([key, s]) => [key, s.tabs.length]))
+    tabs: Object.fromEntries(Object.entries(w.spaces).map(([key, s]) => [key, s.tabs.length])),
+    names: new Map(w.terminals.filter(x => x.sessionId && tabNames.has(x.id))
+      .map(x => [sessionKey({ node: x.node, agent: x.agent, id: x.sessionId }), tabNames.get(x.id)]))
   };
 }
 // Whole conversations, searched in main's index (search.js): a session whose text matches joins the hits even when
@@ -228,13 +232,13 @@ function rowHtml(r, toks) {
       <div class="rmain"><div class="t">${esc(t("bar.dir.new"))}</div>${pathHtml(r.path, [])}</div>
       <div class="ract show">${newButtons(r.path)}</div></div>`;
   }
-  const s = r.s, l = liveOf(s), key = sessionKey(s);
+  const s = r.s, l = liveOf(s), key = sessionKey(s), title = deck.names.get(key) || s.title;
   const confirm = st.confirm === key && l
     ? `<div class="confirm">${esc(t("bar.confirm.openAgain", { pid: l.pid }))}
         <button class="btn warn" data-act="resume-anyway">${esc(t("action.openAgain"))}</button><button class="btn" data-act="cancel">${esc(t("common.cancel"))}</button></div>`
     : "";
   // One line; "delete" ends right under the row's trash button and "cancel" sits under its play button.
-  const delMsg = t(s.agent === "OpenCode" ? "bar.confirm.deleteForever" : "bar.confirm.delete", { title: s.title });
+  const delMsg = t(s.agent === "OpenCode" ? "bar.confirm.deleteForever" : "bar.confirm.delete", { title });
   const del = st.del === key
     ? `<div class="confirm danger del"><span class="msg" title="${esc(delMsg)}">${esc(delMsg)}</span>
         <button class="btn danger" data-act="delete-yes">${icon("trash")}${esc(t("action.delete"))}</button><button class="icon-btn" data-act="cancel" title="${esc(t("common.cancel"))}">${icon("x")}</button></div>`
@@ -245,7 +249,7 @@ function rowHtml(r, toks) {
   // pointed at, so they cost no room otherwise and the state stays the last thing in every row.
   return `${head}<div class="row ${s.concealed ? "concealed" : ""}" data-key="${esc(key)}">
     ${agentMark(s.agent)}
-    <div class="rmain"><div class="t" title="${esc(s.title)}">${hl(s.title, toks)}</div>${r.showPath && s.cwd ? pathHtml(s.cwd, toks) : ""}${snipHtml(s, toks)}</div>
+    <div class="rmain"><div class="t" title="${esc(title)}">${hl(title, toks)}</div>${r.showPath && s.cwd ? pathHtml(s.cwd, toks) : ""}${snipHtml(s, toks)}</div>
     ${deck.sessions.has(key) ? `<span class="in-deck" title="${esc(t("bar.inDeck"))}">${icon("terminal")}</span>` : ""}
     <span class="rend"><span class="rmeta">${getContextChip(s)}${usageCost(s)}<span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span></span>
     <span class="ract">${hideBtn("session", key, hidden.sessions.has(key))}${s.cwd ? `<button class="icon-btn" data-act="terminal" data-path="${esc(s.cwd)}" title="${esc(t("bar.terminalIn", { path: s.cwd }))}">${icon("terminal")}</button>
