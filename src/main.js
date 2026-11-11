@@ -570,6 +570,24 @@ async function launchNewWithPrompt(agent, cwd, prompt) {
     throw e;
   }
 }
+// A Claude session's tab renamed also names the session, as Claude's own /rename does: a custom-title line in its
+// transcript, so the agents menu, the session cards and claude --resume show the name, after a restart too.
+// A cleared name only gives the tab back its automatic title (the session's, so the last name given stays).
+function renameTab(tabId, name) {
+  const before = workspace.snapshot().tabs[tabId]?.name;
+  if (!workspace.renameTab(tabId, name)) return false;
+  const tab = workspace.snapshot().tabs[tabId];
+  if (tab.name && tab.name !== before) nameClaudeSession(tab);
+  return true;
+}
+// Only a tab of one pane: in a split tab the name belongs to no single session.
+function nameClaudeSession(tab) {
+  const term = terminals.getTabs().find(x => x.id === tab.root?.term && x.agent === "Claude" && x.sessionId);
+  const file = term && findTranscript(term.sessionId);
+  if (!file) return;
+  const line = JSON.stringify({ type: "custom-title", customTitle: tab.name, sessionId: term.sessionId });
+  fs.promises.appendFile(file, `${line}\n`).catch(() => {});
+}
 // What the window asks of the layout (workspace-ui.js). A terminal closed here ends; its pane goes once it has.
 async function runWorkspaceCommand(cmd, a) {
   const id = v => text(v ?? "", 64);
@@ -585,7 +603,7 @@ async function runWorkspaceCommand(cmd, a) {
     case "tab": return workspace.activateTab(id(a.tab));
     case "sessions": return workspace.showSessions();
     // "" takes the tab back to its automatic title.
-    case "rename-tab": return workspace.renameTab(id(a.tab), a.name === "" ? "" : text(a.name, 200));
+    case "rename-tab": return renameTab(id(a.tab), a.name === "" ? "" : text(a.name, 200));
     case "reorder-tabs":
       if (!Array.isArray(a.ids) || a.ids.length > 1000) throw new Error(t("errors.invalidData"));
       return workspace.reorderTabs(text(a.space ?? "", 2000), a.ids.map(id));
