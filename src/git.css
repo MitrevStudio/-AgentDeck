@@ -257,5 +257,7 @@ details[open] > summary > .git-chevron { transform: rotate(90deg); }
 }
 @media (max-width: 600px) { .git-review-submit { align-items: stretch; flex-direction: column; } .git-task-form { grid-template-columns: 1fr; } }
 /* "Group by Project" (git-panel.js): the heading over a project's repositories. */
-.git-project-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px 2px; color: var(--muted); font-size: 11px; font-weight: 600; }
+.git-project-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px 2px; color: var(--muted); font-size: 11px; font-weight: 600; cursor: pointer; list-style: none; }
+.git-project-head::-webkit-details-marker { display: none; }
+.git-project-head:hover { color: var(--text); }
 .git-project-head .git-count { margin-left: auto; }
