@@ -30,7 +30,7 @@ vm.runInContext(source.slice(0, source.indexOf('// The same keys when the keyboa
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
 (async () => {
-  const file = 'C:\\Users\\conta\\AppData\\Local\\Temp\\agentdeck-paste\\2026-11-08T08-02-52-140Z-paste-2026-11-08T08-02-51-578Z.png';
+  const file = 'C:\\Users\\alex\\AppData\\Local\\Temp\\agentdeck-paste\\2026-11-08T08-02-52-140Z-paste-2026-11-08T08-02-51-578Z.png';
   image = file;
   vm.runInContext(`globalThis.view = createTermView('tab'); handleTermKey(view.term, { type: 'keydown', ctrlKey: true, code: 'KeyV' }, 'tab');`, ctx);
   await settle();

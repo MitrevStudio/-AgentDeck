@@ -16,7 +16,7 @@ vm.runInContext(read('usage-ui.js'), sandbox);
 vm.runInContext(`
   const local = { agent: 'Claude', id: 'same', status: 'idle' };
   const distant = { ...local, status: 'busy' };
-  nodes = [{ id: 'peer', name: 'DEV-01', data: { sessions: [distant] },
+  nodes = [{ id: 'peer', name: 'WORK-01', data: { sessions: [distant] },
     liveMap: new Map([[sessionKey(distant), distant]]),
     usage: { at: 100, sessions: [{ key: 'Claude:same', context: { tokens: 123, window: 1000, warmUntil: 0 } }] } }];
   const merged = mergeNodes({ sessions: [local] }, new Map([[sessionKey(local), local]]));

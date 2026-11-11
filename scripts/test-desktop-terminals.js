@@ -8,8 +8,8 @@ const { normPath } = require("../src/shared/util");
 
 const SELF = "11111111-1111-4111-8111-111111111111", PEER = "22222222-2222-4222-8222-222222222222", PHONE = "33333333-3333-4333-8333-333333333333";
 const OLD = "44444444-4444-4444-8444-444444444444";
-const names = new Map([[SELF, "DEV-01"], [PEER, "IvanDevPc"], [PHONE, "Pixel 8"], [OLD, "OldBox"]]);
-const self = { id: SELF, name: "DEV-01" };
+const names = new Map([[SELF, "WORK-01"], [PEER, "StudioPc"], [PHONE, "Pixel 8"], [OLD, "OldBox"]]);
+const self = { id: SELF, name: "WORK-01" };
 
 // ---------- the view ----------
 {
@@ -22,9 +22,9 @@ const self = { id: SELF, name: "DEV-01" };
     { id: "l3", cwd: "C:/w", title: "bash", owner: "", exited: false, reopened: true, viewers: [{ id: "", name: "", kind: "desktop" }], driver: "", note: "Compacting…" }
   ];
   const nodes = [
-    { id: PEER, name: "IvanDevPc", online: true, legacy: false, tabs: [
-      { id: "r1", cwd: "D:/src/app/web", title: "zsh", owner: SELF, ownerName: "DEV-01", exited: false, reopened: false, viewers: [{ id: SELF, name: "DEV-01", kind: "desktop" }, { id: PEER, name: "IvanDevPc", kind: "desktop" }], driver: PEER },
-      { id: "r2", cwd: "D:/src/app", title: "Codex", owner: "", ownerName: "", exited: false, reopened: true, viewers: [{ id: PEER, name: "IvanDevPc", kind: "desktop" }], driver: SELF }
+    { id: PEER, name: "StudioPc", online: true, legacy: false, tabs: [
+      { id: "r1", cwd: "D:/src/app/web", title: "zsh", owner: SELF, ownerName: "WORK-01", exited: false, reopened: false, viewers: [{ id: SELF, name: "WORK-01", kind: "desktop" }, { id: PEER, name: "StudioPc", kind: "desktop" }], driver: PEER },
+      { id: "r2", cwd: "D:/src/app", title: "Codex", owner: "", ownerName: "", exited: false, reopened: true, viewers: [{ id: PEER, name: "StudioPc", kind: "desktop" }], driver: SELF }
     ] },
     { id: OLD, name: "OldBox", online: true, legacy: true, tabs: [{ id: "o1", cwd: "/home/x", title: "sh", owner: SELF, exited: false }] },
     { id: "55555555-5555-4555-8555-555555555555", name: "Away", online: false, legacy: false, tabs: [{ id: "a1", cwd: "/x", title: "gone", viewers: [], driver: null }] }
@@ -43,34 +43,34 @@ const self = { id: SELF, name: "DEV-01" };
   assert.equal(l1.paned, true);
   assert.equal(l1.legacy, false);
   assert.equal(l1.ownerName, "", "opened here: no 'opened from'");
-  assert.deepEqual(l1.viewers, [{ id: SELF, name: "DEV-01", kind: "desktop", me: true }, { id: PHONE, name: "Pixel 8", kind: "mobile", me: false }]);
+  assert.deepEqual(l1.viewers, [{ id: SELF, name: "WORK-01", kind: "desktop", me: true }, { id: PHONE, name: "Pixel 8", kind: "mobile", me: false }]);
   assert.deepEqual(l1.driver, { name: "Pixel 8", me: false });
   assert.equal(l1.title, "pwsh", "a local title has no suffix");
 
   const l2 = by("l2");
   assert.equal(l2.paned, false, "no pane here");
-  assert.equal(l2.ownerName, "IvanDevPc", "opened from the peer");
+  assert.equal(l2.ownerName, "StudioPc", "opened from the peer");
   assert.equal(l2.reopened, true);
   assert.equal(l2.note, "", "reopened is a flag, not a note");
   assert.equal(l2.driver, null);
 
   const l3 = by("l3");
-  assert.deepEqual(l3.driver, { name: "DEV-01", me: true });
+  assert.deepEqual(l3.driver, { name: "WORK-01", me: true });
   assert.equal(l3.reopened, false, "typed into here: the reopened note is done");
   assert.equal(l3.note, "Compacting…");
 
   const r1 = by("r1");
   assert.equal(r1.node, PEER);
-  assert.equal(r1.title, "zsh · IvanDevPc", "another computer's title carries its name");
+  assert.equal(r1.title, "zsh · StudioPc", "another computer's title carries its name");
   assert.equal(r1.paned, true);
   assert.equal(r1.ownerName, "", "opened from this computer: no 'opened from'");
-  assert.deepEqual(r1.viewers.map(v => [v.name, v.me]), [["DEV-01", true], ["IvanDevPc", false]]);
-  assert.deepEqual(r1.driver, { name: "IvanDevPc", me: false });
+  assert.deepEqual(r1.viewers.map(v => [v.name, v.me]), [["WORK-01", true], ["StudioPc", false]]);
+  assert.deepEqual(r1.driver, { name: "StudioPc", me: false });
   assert.equal(r1.note, "");
 
   const r2 = by("r2");
   assert.equal(r2.paned, false);
-  assert.deepEqual(r2.driver, { name: "DEV-01", me: true }, "a remote terminal this node drives");
+  assert.deepEqual(r2.driver, { name: "WORK-01", me: true }, "a remote terminal this node drives");
   assert.equal(r2.reopened, true);
 
   const o1 = by("o1");
@@ -86,7 +86,7 @@ const self = { id: SELF, name: "DEV-01" };
   assert.equal(by("a1"), undefined, "an offline computer's terminals without a pane here are not listed");
 
   // A pane of an online computer whose list has not come yet: no "offline".
-  const early = desk.composeView({ self, names, nodes: [{ id: PEER, name: "IvanDevPc", online: true, legacy: false, tabs: null }], remoteTerms: new Map([["r9", { id: "r9", node: PEER, cwd: "/", title: "t" }]]), offline: "offline" });
+  const early = desk.composeView({ self, names, nodes: [{ id: PEER, name: "StudioPc", online: true, legacy: false, tabs: null }], remoteTerms: new Map([["r9", { id: "r9", node: PEER, cwd: "/", title: "t" }]]), offline: "offline" });
   assert.equal(early[0].note, "");
   // The mesh off: no self id, the window still is "me".
   const off = desk.composeView({ local: [local[0]], paned: new Set(["l1"]), self: { id: "", name: "HOST" }, names: new Map() });
@@ -96,11 +96,11 @@ const self = { id: SELF, name: "DEV-01" };
 
 // ---------- sizes ----------
 {
-  const nameOf = who => (who === "" ? "DEV-01" : names.get(who) || "");
+  const nameOf = who => (who === "" ? "WORK-01" : names.get(who) || "");
   assert.deepEqual(desk.sizeView({ cols: 80, rows: 24, driver: null }, "", nameOf), { cols: 80, rows: 24, mine: false, by: "" }, "nobody drives: the pane fits itself");
-  assert.deepEqual(desk.sizeView({ cols: 80, rows: 24, driver: "" }, "", nameOf), { cols: 80, rows: 24, mine: true, by: "DEV-01" });
-  assert.deepEqual(desk.sizeView({ cols: 80, rows: 24, driver: PEER }, "", nameOf), { cols: 80, rows: 24, mine: false, by: "IvanDevPc" });
-  assert.deepEqual(desk.sizeView({ cols: 80, rows: 24, driver: SELF }, SELF, nameOf), { cols: 80, rows: 24, mine: true, by: "DEV-01" }, "on another host the window is this node");
+  assert.deepEqual(desk.sizeView({ cols: 80, rows: 24, driver: "" }, "", nameOf), { cols: 80, rows: 24, mine: true, by: "WORK-01" });
+  assert.deepEqual(desk.sizeView({ cols: 80, rows: 24, driver: PEER }, "", nameOf), { cols: 80, rows: 24, mine: false, by: "StudioPc" });
+  assert.deepEqual(desk.sizeView({ cols: 80, rows: 24, driver: SELF }, SELF, nameOf), { cols: 80, rows: 24, mine: true, by: "WORK-01" }, "on another host the window is this node");
   assert.equal(desk.sizeView({ cols: 1, rows: 1, driver: "x" }, "", () => "").by, "?", "a driver always has a name");
   assert.deepEqual(desk.sizeView({ cols: 1, rows: 1, driver: SELF }, null, nameOf).mine, false, "no self id: never mine");
 }

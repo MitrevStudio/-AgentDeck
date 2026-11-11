@@ -47,8 +47,8 @@ const FIXTURE = `(() => {
     codex: { installed: true } } });
   const stats = name => ({ name, at: now, cpu: 11, cores: 16, memory: { used: 8 * 2 ** 30, total: 32 * 2 ** 30 }, disk: { free: 2 ** 38, total: 2 ** 39, path: 'C:/' } });
   fx.nodes = [
-    { id: 'node-a', name: 'IvanDevPc', kind: 'desktop', status: 'online', limits: limits(15), resources: stats('IvanDevPc'), live: [], git: {},
-      data: { agents: ['Claude'], registry: { projects: [{ name: 'LiberDent', path: 'D:/src/liberdent' }] }, sessions: [] } },
+    { id: 'node-a', name: 'StudioPc', kind: 'desktop', status: 'online', limits: limits(15), resources: stats('StudioPc'), live: [], git: {},
+      data: { agents: ['Claude'], registry: { projects: [{ name: 'ClinicDesk', path: 'D:/src/clinicdesk' }] }, sessions: [] } },
     { id: 'node-b', name: 'WSF0029727', kind: 'desktop', status: 'online', limits: limits(98), resources: stats('WSF0029727'), live: [], git: {}, data: { agents: ['Claude'], registry: { projects: [] }, sessions: [] } },
     { id: 'node-c', name: 'agentdeck-relay', kind: 'host', status: 'offline', live: [], git: {} }
   ];
@@ -57,16 +57,16 @@ const FIXTURE = `(() => {
       files: [{ path: 'src/renderer.js', status: 'M.' }, { path: 'README.md', status: '.M' }] },
     r2: { root: 'C:/work/docs', branch: 'main', at: now, staged: 0, unstaged: 0, untracked: 0, conflicts: 0, ahead: 0, behind: 0, upstream: 'origin/main', fileCount: 0, files: [] } } };
   // The view of docs/SHARED-SESSIONS.md §5.3: x1 is open on two more devices, opened from one of them, whose size it has.
-  const me = { id: 'self', name: 'DEV-01', kind: 'desktop', me: true };
+  const me = { id: 'self', name: 'WORK-01', kind: 'desktop', me: true };
   fx.ws = { activeSpace: 'c:/work/agentdeck', spaces: { 'c:/work/agentdeck': { tabs: ['t1'], active: 't1' } },
     tabs: { t1: { id: 't1', space: 'c:/work/agentdeck', name: '', focus: 'x1', zoom: '', root: { term: 'x1' } } },
     terminals: [{ id: 'x1', node: '', cwd: 'C:/work/agentdeck', agent: 'Claude', sessionId: 's1', title: 'Claude', exited: false, paned: true, createdAt: now - 900000,
-      owner: 'node-a', ownerName: 'IvanDevPc', viewers: [me, { id: 'node-a', name: 'IvanDevPc', kind: 'desktop' }, { id: 'phone-1', name: 'Pixel 8', kind: 'mobile' }],
-      driver: { name: 'IvanDevPc', me: false }, legacy: false, note: '' }] };
-  fx.sizes = { x1: { cols: 120, rows: 32, mine: false, by: 'IvanDevPc' } };
+      owner: 'node-a', ownerName: 'StudioPc', viewers: [me, { id: 'node-a', name: 'StudioPc', kind: 'desktop' }, { id: 'phone-1', name: 'Pixel 8', kind: 'mobile' }],
+      driver: { name: 'StudioPc', me: false }, legacy: false, note: '' }] };
+  fx.sizes = { x1: { cols: 120, rows: 32, mine: false, by: 'StudioPc' } };
   const answers = {
     getData: async () => fx.data, getLive: async () => fx.live, getNodes: async () => fx.nodes, getGit: async () => fx.git,
-    getLimits: async () => limits(16), getResources: async () => stats('DEV-01'), getUsage: async () => null, refreshGit: async () => {},
+    getLimits: async () => limits(16), getResources: async () => stats('WORK-01'), getUsage: async () => null, refreshGit: async () => {},
     copyText: async text => { fx.copied.push(text); }, gitQuery: async () => ({ status: fx.git.repos.r1, branches: ['main'], remotes: ['origin'], worktrees: [], operation: '' })
   };
   // Answers come a moment later, as over IPC: never within the turn that asked.
@@ -175,9 +175,9 @@ app.whenReady().then(async () => {
   assert.equal(await evaluate("document.querySelector('.pane-title').textContent"), 'C:/work/agentdeck', 'a pane alone in its tab shows its folder');
   // A shared terminal's header: who else has it open, who opened it, the size another device set; Stop beside X.
   assert.equal(await evaluate("document.querySelector('.pane-viewers').textContent"), '2', 'the other devices are counted, not this one');
-  assert.equal(await evaluate("document.querySelector('.pane-viewers').title"), 'Also open on: IvanDevPc, Pixel 8');
-  assert.equal(await evaluate("document.querySelector('.pane-title').title.includes('Opened from IvanDevPc')"), true);
-  assert.equal(await evaluate("document.querySelector('.size-chip').textContent"), '120×32 · IvanDevPc');
+  assert.equal(await evaluate("document.querySelector('.pane-viewers').title"), 'Also open on: StudioPc, Pixel 8');
+  assert.equal(await evaluate("document.querySelector('.pane-title').title.includes('Opened from StudioPc')"), true);
+  assert.equal(await evaluate("document.querySelector('.size-chip').textContent"), '120×32 · StudioPc');
   assert.equal(await evaluate("document.querySelector('.pane').classList.contains('sized')"), true);
   assert.deepEqual(await evaluate("(() => { const v = termViews.get('x1').term; return [v.cols, v.rows]; })()"), [120, 32], "the terminal is drawn in the size it has there");
   assert.deepEqual(await evaluate("[...document.querySelectorAll('.pane-tools [data-ws]')].map(b => b.dataset.ws)"), ['split-right', 'split-down', 'take-size', 'stop', 'close-pane']);
@@ -189,24 +189,24 @@ app.whenReady().then(async () => {
   await click('[data-ws=take-size]'); await settle();
   assert.deepEqual(await evaluate('fx.taken'), ['x1'], '"Use my size" asks main for it');
   // The host made this window the one that sets the size: the chip and the button go, the pane fits itself again.
-  await evaluate("fx.cbs.onSize({ id: 'x1', cols: 150, rows: 40, mine: true, by: 'DEV-01' })"); await settle();
+  await evaluate("fx.cbs.onSize({ id: 'x1', cols: 150, rows: 40, mine: true, by: 'WORK-01' })"); await settle();
   assert.equal(await evaluate("document.querySelector('.size-chip')"), null);
   assert.equal(await evaluate("document.querySelector('[data-ws=take-size]')"), null);
   assert.equal(await evaluate("document.querySelector('.pane').classList.contains('sized')"), false);
   assert.notDeepEqual(await evaluate("(() => { const v = termViews.get('x1').term; return [v.cols, v.rows]; })()"), [120, 32], 'the pane fits itself again');
   // Another device typed: its size again.
-  await evaluate("fx.cbs.onSize({ id: 'x1', cols: 120, rows: 32, mine: false, by: 'IvanDevPc' })"); await settle();
-  assert.equal(await evaluate("document.querySelector('.size-chip').textContent"), '120×32 · IvanDevPc');
+  await evaluate("fx.cbs.onSize({ id: 'x1', cols: 120, rows: 32, mine: false, by: 'StudioPc' })"); await settle();
+  assert.equal(await evaluate("document.querySelector('.size-chip').textContent"), '120×32 · StudioPc');
   // A size larger than the pane: the pane scrolls, yet what it wants is what fits it without the scrollbars - and when
   // it drives again, the terminal is resized once, to that.
   const ownFit = "(() => { const p = document.querySelector('.pane[data-term=x1]'), had = p.classList.contains('sized'); p.classList.remove('sized'); const d = termViews.get('x1').fit.proposeDimensions(); if (had) p.classList.add('sized'); return [d.cols, d.rows]; })()";
-  await evaluate("fx.cbs.onSize({ id: 'x1', cols: 400, rows: 200, mine: false, by: 'IvanDevPc' })"); await settle();
+  await evaluate("fx.cbs.onSize({ id: 'x1', cols: 400, rows: 200, mine: false, by: 'StudioPc' })"); await settle();
   assert.equal(await evaluate("(() => { const b = document.querySelector('.pane[data-term=x1] .pane-body'); return b.scrollWidth > b.clientWidth && b.scrollHeight > b.clientHeight; })()"), true, 'the pane scrolls');
   await evaluate("fx.resized.length = 0; fitShown()"); await settle();
   assert.deepEqual(await evaluate("fx.resized.filter(r => r[0] === 'x1').map(r => [r[1], r[2]])"), [await evaluate(ownFit)], "the want is the pane's own fit, not a cell short");
-  await evaluate("fx.resized.length = 0; fx.cbs.onSize({ id: 'x1', cols: 400, rows: 200, mine: true, by: 'DEV-01' })"); await settle(150);
+  await evaluate("fx.resized.length = 0; fx.cbs.onSize({ id: 'x1', cols: 400, rows: 200, mine: true, by: 'WORK-01' })"); await settle(150);
   assert.deepEqual([...new Set(await evaluate("fx.resized.filter(r => r[0] === 'x1').map(r => r[1] + 'x' + r[2])"))], [(await evaluate(ownFit)).join('x')], 'driving again: one size, its own');
-  await evaluate("fx.cbs.onSize({ id: 'x1', cols: 120, rows: 32, mine: false, by: 'IvanDevPc' })"); await settle();
+  await evaluate("fx.cbs.onSize({ id: 'x1', cols: 120, rows: 32, mine: false, by: 'StudioPc' })"); await settle();
   await click('[data-ws=split-right]'); await settle(150);
   assert.deepEqual(await evaluate("fx.wsCommands.filter(c => c.cmd === 'split').map(c => c.dir)"), ['right']);
   assert.equal(await evaluate("document.querySelectorAll('#panes .pane').length"), 2);
@@ -225,7 +225,7 @@ app.whenReady().then(async () => {
   await click('.pane[data-term=x1] [data-ws=stop]'); await settle();
   assert.equal(await evaluate("document.querySelector('dialog.confirm')?.open"), true, 'Stop asks in a dialog');
   assert.equal(await evaluate("document.querySelector('dialog.confirm p').textContent"),
-    'Stop "Polish the manager UI" on this computer? The terminal closes on every device, also open on: IvanDevPc, Pixel 8. The conversation stays and can be resumed.');
+    'Stop "Polish the manager UI" on this computer? The terminal closes on every device, also open on: StudioPc, Pixel 8. The conversation stays and can be resumed.');
   assert.equal(await evaluate("document.querySelector('dialog.confirm button[value=ok]').textContent"), 'Stop');
   await capture('stop-confirm');
   await captureLight('stop-confirm-light');
@@ -241,7 +241,7 @@ app.whenReady().then(async () => {
   await click('dialog.confirm button[value=cancel]'); await settle();
   // A terminal of a host without these rules (legacy): fitted as always, no size of another device, no viewers.
   await evaluate("fx.ws = structuredClone(fx.ws); fx.ws.terminals[0] = { ...fx.ws.terminals[0], legacy: true, viewers: [], driver: null }; fx.cbs.onWorkspace(fx.ws)"); await settle();
-  await evaluate("fx.cbs.onSize({ id: 'x1', cols: 120, rows: 32, mine: false, by: 'IvanDevPc' })"); await settle();
+  await evaluate("fx.cbs.onSize({ id: 'x1', cols: 120, rows: 32, mine: false, by: 'StudioPc' })"); await settle();
   assert.equal(await evaluate("document.querySelector('.pane[data-term=x1] .size-chip, .pane[data-term=x1] .pane-viewers, .pane[data-term=x1] [data-ws=take-size]')"), null);
   assert.equal(await evaluate("document.querySelector('.pane[data-term=x1]').classList.contains('sized')"), false);
   assert.notDeepEqual(await evaluate("(() => { const v = termViews.get('x1').term; return [v.cols, v.rows]; })()"), [120, 32], 'a legacy terminal fits its pane');
@@ -264,7 +264,7 @@ app.whenReady().then(async () => {
     const term = (id, extra) => ({ id, node: '', title: 'pwsh', exited: false, paned: false, createdAt: Date.now(), viewers: [], driver: null, legacy: false, note: '', ...extra });
     fx.ws = structuredClone(fx.ws);
     fx.ws.terminals.push(term('x3', { cwd: 'C:/work/docs', createdAt: Date.now() - 5000 }), term('x5', { cwd: 'C:/work/bdd-web', createdAt: Date.now() - 9000, paned: true }),
-      term('x4', { node: 'node-a', cwd: 'D:/src/liberdent', title: 'bash · IvanDevPc', viewers: [{ id: 'node-a', name: 'IvanDevPc', kind: 'desktop' }] }),
+      term('x4', { node: 'node-a', cwd: 'D:/src/clinicdesk', title: 'bash · StudioPc', viewers: [{ id: 'node-a', name: 'StudioPc', kind: 'desktop' }] }),
       term('x7', { node: 'node-c', cwd: '/srv/app', title: 'bash · agentdeck-relay', note: 'offline' }),
       term('x6', { cwd: 'C:/work/docs', agent: 'Codex', sessionId: 's3', title: 'Codex' }));
     fx.live.push({ agent: 'Codex', id: 's3', cwd: 'C:/work/docs', status: 'idle', pid: 300, startedAt: Date.now() - 50000, activityAt: Date.now() - 9000, statusAt: Date.now() - 9000, term: 'x6' });
@@ -277,7 +277,7 @@ app.whenReady().then(async () => {
   assert.equal(await evaluate("document.querySelector('#terms [data-key=\"term:x3\"] .agent-sub').textContent"), 'docs · This computer · no pane here');
   assert.equal(await evaluate("document.querySelector('#terms [data-key=\"term:x5\"]').classList.contains('here')"), true);
   assert.equal(await evaluate("document.querySelector('#terms [data-key=\"term:x4\"] .agent-title').textContent"), 'bash', "a remote terminal's title leaves its computer to the line below");
-  assert.equal(await evaluate("document.querySelector('#terms [data-key=\"term:x4\"] .agent-sub').textContent"), 'LiberDent · IvanDevPc · no pane here');
+  assert.equal(await evaluate("document.querySelector('#terms [data-key=\"term:x4\"] .agent-sub').textContent"), 'ClinicDesk · StudioPc · no pane here');
   assert.equal(await evaluate("document.querySelector('#terms [data-key=\"term:x4\"] .term-viewers').textContent"), '1');
   // The row with the keyboard shows its Stop button, as a pointed-at one does.
   await evaluate("document.querySelector('#terms [data-key=\"term:x4\"]').focus()");
@@ -287,7 +287,7 @@ app.whenReady().then(async () => {
   assert.deepEqual(await evaluate("fx.wsCommands.filter(c => c.cmd === 'open-term')"), [{ cmd: 'open-term', term: 'x3', place: 'tab' }], 'a terminal with no pane here opens in a new one');
   // Stop on a row: asked, naming the computer it runs on.
   await click('#terms [data-key="term:x4"] [data-action=term-stop]');
-  assert.equal(await evaluate("document.querySelector('dialog.confirm p').textContent"), 'Stop the terminal in D:/src/liberdent on IvanDevPc? It closes on every device, also open on: IvanDevPc.');
+  assert.equal(await evaluate("document.querySelector('dialog.confirm p').textContent"), 'Stop the terminal in D:/src/clinicdesk on StudioPc? It closes on every device, also open on: StudioPc.');
   await click('dialog.confirm button[value=ok]'); await settle();
   assert.deepEqual(await evaluate('fx.stopped'), ['x1', 'x4']);
   // An agent running in a terminal with no pane here: a click opens it here, whoever started it; its menu stops the terminal.
@@ -350,7 +350,7 @@ app.whenReady().then(async () => {
   assert.equal(await evaluate("document.querySelectorAll('#limits [title], #limits [data-tip]').length"), 0, 'the card is the only tooltip of the bar');
   await capture('status-card');
   await evaluate("document.querySelector('#limits [data-card=local]').dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); 0"); await settle();
-  assert.equal(await evaluate("document.querySelector('.machine-card header b').textContent"), 'DEV-01');
+  assert.equal(await evaluate("document.querySelector('.machine-card header b').textContent"), 'WORK-01');
   await capture('status-card-local');
   await evaluate("$('limits').dispatchEvent(new MouseEvent('mouseleave')); 0"); await settle();
   assert.equal(await evaluate("document.querySelector('.machine-card').hidden"), true);
@@ -465,12 +465,12 @@ app.whenReady().then(async () => {
   // ---------- which computer a terminal runs on ----------
   assert.equal(await evaluate("document.querySelectorAll('.term-node').length"), 0, 'no marks while everything runs here');
   // The tab went with the checks above: one with this computer's terminal and one of another computer's.
-  await evaluate(`fx.ws = structuredClone(fx.ws); fx.ws.terminals = [{ ...fx.ws.terminals.find(x => x.id === 'x1'), paned: true }, { id: 'r1', node: 'node-a', cwd: 'D:/src/liberdent', title: 'pwsh', exited: false, paned: true, viewers: [], driver: null }];
+  await evaluate(`fx.ws = structuredClone(fx.ws); fx.ws.terminals = [{ ...fx.ws.terminals.find(x => x.id === 'x1'), paned: true }, { id: 'r1', node: 'node-a', cwd: 'D:/src/clinicdesk', title: 'pwsh', exited: false, paned: true, viewers: [], driver: null }];
     fx.ws.spaces['c:/work/agentdeck'] = { tabs: ['t1'], active: 't1' };
     fx.ws.tabs = { t1: { id: 't1', space: 'c:/work/agentdeck', name: '', focus: 'x1', zoom: '', root: { dir: 'right', ratio: 0.5, a: { term: 'x1' }, b: { term: 'r1' } } } }; fx.cbs.onWorkspace(fx.ws); 0`); await settle(150);
-  assert.equal(await evaluate("document.querySelector('.pane[data-term=r1] .term-node.remote').textContent"), 'IvanDevPc');
-  assert.equal(await evaluate("document.querySelector('.pane[data-term=x1] .term-node.local').textContent"), 'DEV-01');
-  assert.equal(await evaluate("document.querySelector('.wtab .term-node').title"), 'IvanDevPc, DEV-01');
+  assert.equal(await evaluate("document.querySelector('.pane[data-term=r1] .term-node.remote').textContent"), 'StudioPc');
+  assert.equal(await evaluate("document.querySelector('.pane[data-term=x1] .term-node.local').textContent"), 'WORK-01');
+  assert.equal(await evaluate("document.querySelector('.wtab .term-node').title"), 'StudioPc, WORK-01');
   await capture('computers');
 
   // ---------- by device, light theme, narrow ----------
@@ -490,16 +490,16 @@ app.whenReady().then(async () => {
   // Tab t1: y1 | y2, tab t2: y6 - shells here with panes; y3 a shell here and y4 one on another computer, no pane here;
   // a session there running in terminal y9, known only from its live state; s2 here runs outside AgentDeck.
   await evaluate(`(() => {
-    const now = Date.now(), me = { id: 'self', name: 'DEV-01', kind: 'desktop', me: true };
+    const now = Date.now(), me = { id: 'self', name: 'WORK-01', kind: 'desktop', me: true };
     const term = (id, extra) => ({ id, node: '', cwd: 'C:/work/agentdeck', title: 'pwsh', exited: false, paned: false, createdAt: now, viewers: [], driver: null, legacy: false, note: '', ...extra });
     fx.ws = { activeSpace: 'c:/work/agentdeck', spaces: { 'c:/work/agentdeck': { tabs: ['t1', 't2'], active: 't1' } },
       tabs: { t1: { id: 't1', space: 'c:/work/agentdeck', name: '', focus: 'y1', zoom: '', root: { dir: 'right', ratio: 0.5, a: { term: 'y1' }, b: { term: 'y2' } } },
         t2: { id: 't2', space: 'c:/work/agentdeck', name: 'logs', focus: 'y6', zoom: '', root: { term: 'y6' } } },
       terminals: [term('y1', { paned: true, viewers: [me] }), term('y2', { paned: true, viewers: [me], createdAt: now - 1000 }), term('y6', { paned: true, viewers: [me], createdAt: now - 1500 }),
-        term('y3', { cwd: 'C:/work/docs', createdAt: now - 2000 }), term('y4', { node: 'node-a', cwd: 'D:/src/liberdent', title: 'bash · IvanDevPc', createdAt: now - 3000 })] };
+        term('y3', { cwd: 'C:/work/docs', createdAt: now - 2000 }), term('y4', { node: 'node-a', cwd: 'D:/src/clinicdesk', title: 'bash · StudioPc', createdAt: now - 3000 })] };
     fx.nodes = structuredClone(fx.nodes);
-    fx.nodes[0].data.sessions = [{ id: 'rs1', agent: 'Claude', cwd: 'D:/src/liberdent', title: 'Tidy the invoice export', prompt: 'Tidy the invoice export', updatedAt: now - 60000 }];
-    fx.nodes[0].live = [{ agent: 'Claude', id: 'rs1', cwd: 'D:/src/liberdent', status: 'busy', pid: 7, startedAt: now - 90000, activityAt: now, statusAt: now, term: 'y9' }];
+    fx.nodes[0].data.sessions = [{ id: 'rs1', agent: 'Claude', cwd: 'D:/src/clinicdesk', title: 'Tidy the invoice export', prompt: 'Tidy the invoice export', updatedAt: now - 60000 }];
+    fx.nodes[0].live = [{ agent: 'Claude', id: 'rs1', cwd: 'D:/src/clinicdesk', status: 'busy', pid: 7, startedAt: now - 90000, activityAt: now, statusAt: now, term: 'y9' }];
     // fx.cbs keeps one listener per event (the status bar's): the sidebar's own (nodes-ui.js) is called directly.
     fx.cbs.onNodesChanged(fx.nodes); applyNodes(fx.nodes); fx.cbs.onWorkspace(fx.ws);
     // A drag as the browser runs it: dragstart on the row or header, dragover and drop where the pointer is (a share of
