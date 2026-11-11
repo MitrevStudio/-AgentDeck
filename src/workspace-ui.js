@@ -40,9 +40,16 @@ function getTermTheme() {
   for (const name of ANSI_NAMES) theme[name] = v(`--term-ansi-${name.replace(/[A-Z]/g, c => `-${c.toLowerCase()}`)}`);
   return theme;
 }
+// Agents paint their own RGB colours (Claude's question highlight), made for a dark terminal: on a light one xterm
+// darkens any text too faint for its background.
+const getTermMinContrast = () => (getComputedStyle(document.documentElement).colorScheme === "light" ? 4.5 : 1);
 function applyTermTheme() {
   const theme = getTermTheme();
-  termViews.forEach(view => { view.term.options.theme = theme; });
+  const minimumContrastRatio = getTermMinContrast();
+  termViews.forEach(view => {
+    view.term.options.theme = theme;
+    view.term.options.minimumContrastRatio = minimumContrastRatio;
+  });
 }
 function applyTermFont(size) {
   if (!size || size === termFontSize) return;
@@ -81,7 +88,14 @@ async function attachView(id, view) {
 function createTermView(id) {
   const host = document.createElement("div");
   host.className = "term-host";
-  const term = new Terminal({ fontFamily: TERM_FONT, fontSize: termFontSize, cursorBlink: true, scrollback: 10000, theme: getTermTheme() });
+  const term = new Terminal({
+    fontFamily: TERM_FONT,
+    fontSize: termFontSize,
+    cursorBlink: true,
+    scrollback: 10000,
+    theme: getTermTheme(),
+    minimumContrastRatio: getTermMinContrast()
+  });
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
   term.open(host);
