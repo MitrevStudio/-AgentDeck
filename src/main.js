@@ -495,26 +495,30 @@ async function stopTerm(id) {
   await links.call(node, "terminals.close", { id });
   return true;
 }
-// A new pane: a tab of its own in `space`, or beside the shown tab's focused pane (place "right" / "down").
-function placePane(space, id, place) {
-  const shown = workspace.getActiveTab();
-  if (place !== "tab" && shown) workspace.split(shown.id, id, place);
+// Where a terminal with no pane here can open: a tab of its own, or on a side of a pane (a sidebar row dropped on it).
+const PANE_PLACES = ["tab", "left", "right", "up", "down"];
+// A new pane: a tab of its own in `space`, or on that side of the pane of `at` - when it has one here, else of the shown
+// tab's focused pane.
+function placePane(space, id, place, at = "") {
+  const tab = (at && workspace.findTab(at)) || workspace.getActiveTab();
+  if (place !== "tab" && tab) workspace.split(tab.id, id, place, at);
   else workspace.addTab(space, id);
 }
 // A terminal there in a pane here: the one it has (focused), or a new one in `space`.
-async function paneForRemote(node, tab, space, place = "tab") {
+async function paneForRemote(node, tab, space, place = "tab", at = "") {
   await restoring;
   if (workspace.findTab(tab.id)) workspace.focus(tab.id);
   else {
     remoteTerms.set(tab.id, remoteEntry(node, tab));
-    placePane(space, tab.id, place);
+    placePane(space, tab.id, place, at);
   }
   showManager();
   return tab.id;
 }
 // Any terminal, of this computer or another one, comes up here (the sidebar's "Terminals", a session in "Agents", the
-// palette): its pane focused, or a new one in its project's space (`place`: "tab", "right", "down"), the focused pane.
-async function openTerm(id, place = "tab") {
+// palette): its pane focused, or a new one in its project's space (`place`: PANE_PLACES), beside the pane of `at` or
+// the focused one.
+async function openTerm(id, place = "tab", at = "") {
   await restoring;
   if (workspace.findTab(id)) {
     workspace.focus(id);
@@ -525,7 +529,7 @@ async function openTerm(id, place = "tab") {
   if (node === null) throw new HostError("invalidData");
   if (node === "") {
     const x = terminals.getTabs().find(tab => tab.id === id);
-    placePane(getSpaceFor(x.cwd), id, place);
+    placePane(getSpaceFor(x.cwd), id, place, at);
     showManager();
     return true;
   }
@@ -537,7 +541,7 @@ async function openTerm(id, place = "tab") {
     tab = remoteLists.get(node)?.find(x => x.id === id);
   }
   if (!tab) throw new HostError("invalidData");
-  await paneForRemote(node, tab, desk.remoteSpace(readRegistry().projects, node, tab.cwd), place);
+  await paneForRemote(node, tab, desk.remoteSpace(readRegistry().projects, node, tab.cwd), place, at);
   return true;
 }
 // The project's repository cloned on another computer, in a pane here (mesh/serve.js repo.clone): {url, dir, branch,
@@ -979,8 +983,8 @@ async function runWorkspaceCommand(cmd, a) {
     case "close-pane": return hideTerm(id(a.term));
     case "close-tab": workspace.getTabTerms(id(a.tab)).forEach(hideTerm); return true;
     // A terminal with no pane here - this computer's or another's, one known only from a live session's term - in a
-    // new pane (place "tab", "right", "down"); one with a pane gets the focus.
-    case "open-term": return openTerm(id(a.term), PLACES.includes(a.place) ? a.place : "tab");
+    // new pane (PANE_PLACES; `at`: the pane it goes beside, else the focused one); one with a pane gets the focus.
+    case "open-term": return openTerm(id(a.term), PANE_PLACES.includes(a.place) ? a.place : "tab", a.at === undefined ? "" : id(a.at));
     // A shell beside the focused pane, in its folder (or the shown space's).
     case "split": {
       const dir = a.dir === "down" ? "down" : "right";

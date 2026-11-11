@@ -485,6 +485,101 @@ app.whenReady().then(async () => {
   win.setSize(1000, 700); await capture('narrow');
   assert.equal(await evaluate("document.documentElement.scrollWidth <= innerWidth"), true);
 
+  // ---------- dragging sidebar rows and hiding by drag ----------
+  win.setSize(1500, 900); await settle(150);
+  // Tab t1: y1 | y2, tab t2: y6 - shells here with panes; y3 a shell here and y4 one on another computer, no pane here;
+  // a session there running in terminal y9, known only from its live state; s2 here runs outside AgentDeck.
+  await evaluate(`(() => {
+    const now = Date.now(), me = { id: 'self', name: 'DEV-01', kind: 'desktop', me: true };
+    const term = (id, extra) => ({ id, node: '', cwd: 'C:/work/agentdeck', title: 'pwsh', exited: false, paned: false, createdAt: now, viewers: [], driver: null, legacy: false, note: '', ...extra });
+    fx.ws = { activeSpace: 'c:/work/agentdeck', spaces: { 'c:/work/agentdeck': { tabs: ['t1', 't2'], active: 't1' } },
+      tabs: { t1: { id: 't1', space: 'c:/work/agentdeck', name: '', focus: 'y1', zoom: '', root: { dir: 'right', ratio: 0.5, a: { term: 'y1' }, b: { term: 'y2' } } },
+        t2: { id: 't2', space: 'c:/work/agentdeck', name: 'logs', focus: 'y6', zoom: '', root: { term: 'y6' } } },
+      terminals: [term('y1', { paned: true, viewers: [me] }), term('y2', { paned: true, viewers: [me], createdAt: now - 1000 }), term('y6', { paned: true, viewers: [me], createdAt: now - 1500 }),
+        term('y3', { cwd: 'C:/work/docs', createdAt: now - 2000 }), term('y4', { node: 'node-a', cwd: 'D:/src/liberdent', title: 'bash · IvanDevPc', createdAt: now - 3000 })] };
+    fx.nodes = structuredClone(fx.nodes);
+    fx.nodes[0].data.sessions = [{ id: 'rs1', agent: 'Claude', cwd: 'D:/src/liberdent', title: 'Tidy the invoice export', prompt: 'Tidy the invoice export', updatedAt: now - 60000 }];
+    fx.nodes[0].live = [{ agent: 'Claude', id: 'rs1', cwd: 'D:/src/liberdent', status: 'busy', pid: 7, startedAt: now - 90000, activityAt: now, statusAt: now, term: 'y9' }];
+    // fx.cbs keeps one listener per event (the status bar's): the sidebar's own (nodes-ui.js) is called directly.
+    fx.cbs.onNodesChanged(fx.nodes); applyNodes(fx.nodes); fx.cbs.onWorkspace(fx.ws);
+    // A drag as the browser runs it: dragstart on the row or header, dragover and drop where the pointer is (a share of
+    // the target's box), dragend on the source. Answers whether the target took it.
+    window.dragFire = (el, type, dt, at = [0.5, 0.5]) => {
+      const r = el.getBoundingClientRect();
+      const ev = new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientX: r.left + r.width * at[0], clientY: r.top + r.height * at[1] });
+      el.dispatchEvent(ev);
+      return ev.defaultPrevented;
+    };
+    window.dragTo = (from, to, at) => {
+      const dt = new DataTransfer(), src = document.querySelector(from), target = document.querySelector(to);
+      fx.wsCommands.length = 0;
+      dragFire(src, 'dragstart', dt);
+      const over = dragFire(target, 'dragover', dt, at);
+      if (over) dragFire(target, 'drop', dt, at);
+      dragFire(src, 'dragend', dt);
+      return over;
+    };
+  })(); 0`);
+  await poll(); await settle(200);
+  const dragTo = async (from, to, at) => {
+    const over = await evaluate(`dragTo(${JSON.stringify(from)}, ${JSON.stringify(to)}, ${JSON.stringify(at)})`);
+    await settle();
+    return { over, commands: await evaluate('fx.wsCommands') };
+  };
+  const SIDE_AT = { left: [0.05, 0.5], right: [0.95, 0.5], up: [0.5, 0.05], down: [0.5, 0.95], center: [0.5, 0.5] };
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('#terms .agent')].map(el => el.dataset.key)"), ['term:y1', 'term:y2', 'term:y6', 'term:y3', 'term:y4']);
+  assert.equal(await evaluate("[...document.querySelectorAll('#terms .agent')].every(el => el.draggable)"), true, 'every Terminals row can be dragged');
+  // A terminal with no pane here, dropped on a side of a pane: it opens there, beside that pane.
+  for (const side of ['right', 'left', 'up', 'down']) {
+    const r = await dragTo('#terms [data-key="term:y3"]', '.pane[data-term=y2] .pane-body', SIDE_AT[side]);
+    assert.deepEqual(r.commands, [{ cmd: 'open-term', term: 'y3', place: side, at: 'y2' }], `a Terminals row dropped on the ${side} of a pane`);
+  }
+  // While it is over the pane, that side lights up.
+  await evaluate("(() => { const dt = new DataTransfer(); dragFire(document.querySelector('#terms [data-key=\"term:y3\"]'), 'dragstart', dt); dragFire(document.querySelector('.pane[data-term=y1] .pane-body'), 'dragover', dt, [0.05, 0.5]); window.heldDrag = dt; })(); 0");
+  assert.equal(await evaluate("document.querySelector('.pane[data-term=y1]').classList.contains('drop-left')"), true);
+  await capture('drag-row-onto-pane');
+  await evaluate("dragFire(document.querySelector('#terms [data-key=\"term:y3\"]'), 'dragend', heldDrag); 0");
+  assert.equal(await evaluate("document.querySelectorAll('.pane[class*=drop-]').length"), 0, 'the marks go with the drag');
+  // The middle of a pane, or the tab bar: a tab of its own.
+  assert.deepEqual((await dragTo('#terms [data-key="term:y3"]', '.pane[data-term=y1] .pane-body', SIDE_AT.center)).commands, [{ cmd: 'open-term', term: 'y3', place: 'tab' }]);
+  assert.deepEqual((await dragTo('#terms [data-key="term:y3"]', '#tabbar', [0.9, 0.5])).commands, [{ cmd: 'open-term', term: 'y3', place: 'tab' }]);
+  // On another computer: the same command, main finds it there.
+  assert.deepEqual((await dragTo('#terms [data-key="term:y4"]', '.pane[data-term=y1] .pane-body', SIDE_AT.down)).commands, [{ cmd: 'open-term', term: 'y4', place: 'down', at: 'y1' }]);
+  // An agent on another computer, in a terminal known only from its live state.
+  const remoteAgent = '#agents [data-key="node:node-a:Claude:rs1"]';
+  assert.equal(await evaluate(`document.querySelector(${JSON.stringify(remoteAgent)}).draggable`), true);
+  assert.deepEqual((await dragTo(remoteAgent, '.pane[data-term=y2] .pane-body', SIDE_AT.right)).commands, [{ cmd: 'open-term', term: 'y9', place: 'right', at: 'y2' }]);
+  // A terminal with a pane here moves: beside the pane it is dropped on, out of its tab from the tab bar; onto its own
+  // pane nothing happens.
+  assert.deepEqual((await dragTo('#terms [data-key="term:y6"]', '.pane[data-term=y1] .pane-body', SIDE_AT.up)).commands, [{ cmd: 'move-pane', term: 'y6', into: 't1', at: 'y1', side: 'up' }]);
+  assert.deepEqual((await dragTo('#terms [data-key="term:y2"]', '.pane[data-term=y1] .pane-body', SIDE_AT.left)).commands, [{ cmd: 'move-pane', term: 'y2', into: 't1', at: 'y1', side: 'left' }]);
+  assert.deepEqual((await dragTo('#terms [data-key="term:y2"]', '#tabbar', [0.9, 0.5])).commands, [{ cmd: 'detach-pane', term: 'y2' }]);
+  assert.deepEqual((await dragTo('#terms [data-key="term:y6"]', '#tabbar', [0.9, 0.5])).commands, [{ cmd: 'focus', term: 'y6' }], 'alone in its tab: it has a tab of its own');
+  const own = await dragTo('#terms [data-key="term:y2"]', '.pane[data-term=y2] .pane-body', SIDE_AT.left);
+  assert.deepEqual([own.over, own.commands], [false, []], 'its own pane does not take it');
+  // A session running outside AgentDeck cannot be dragged anywhere.
+  assert.equal(await evaluate("document.querySelector('#agents [data-key=\"Claude:s2\"]').draggable"), false);
+  const outside = await dragTo('#agents [data-key="Claude:s2"]', '.pane[data-term=y1] .pane-body', SIDE_AT.right);
+  assert.deepEqual([outside.over, outside.commands], [false, []]);
+  // Held over another tab while dragging a row, that tab comes up so its panes can take the drop.
+  await evaluate("(() => { const dt = new DataTransfer(); fx.wsCommands.length = 0; dragFire(document.querySelector('#terms [data-key=\"term:y3\"]'), 'dragstart', dt); dragFire(document.querySelector('.wtab[data-tab=t2]'), 'dragover', dt); window.heldDrag = dt; })(); 0");
+  await settle(800);
+  assert.deepEqual(await evaluate("fx.wsCommands"), [{ cmd: 'tab', tab: 't2' }], 'a row held over a tab brings it up');
+  await evaluate("dragFire(document.querySelector('#terms [data-key=\"term:y3\"]'), 'dragend', heldDrag); 0");
+  // A pane's header or a tab dragged onto the sidebar: hidden (the terminal keeps running), the sidebar says so first.
+  await evaluate("(() => { const dt = new DataTransfer(); dragFire(document.querySelector('.pane[data-term=y1] .pane-info'), 'dragstart', dt); window.heldOver = dragFire(document.querySelector('#projects'), 'dragover', dt); window.heldDrag = dt; })(); 0");
+  assert.equal(await evaluate("heldOver && $('sideOverview').classList.contains('drop-hide')"), true);
+  assert.equal(await evaluate("getComputedStyle($('sideOverview'), '::after').content"), '"Drop here to hide · the terminal keeps running"');
+  await capture('drag-pane-onto-sidebar');
+  await evaluate("dragFire(document.querySelector('.pane[data-term=y1] .pane-info'), 'dragend', heldDrag); 0");
+  assert.equal(await evaluate("$('sideOverview').classList.contains('drop-hide')"), false);
+  assert.deepEqual((await dragTo('.pane[data-term=y1] .pane-info', '#agents', [0.5, 0.5])).commands, [{ cmd: 'close-pane', term: 'y1' }]);
+  assert.deepEqual((await dragTo('.wtab[data-tab=t1]', '#terms', [0.5, 0.5])).commands, [{ cmd: 'close-tab', tab: 't1' }]);
+  // A project dragged in its list is not a pane: nothing is hidden.
+  assert.equal(await evaluate("(() => { const dt = new DataTransfer(); const p = document.querySelector('#projects .proj[draggable]'); dragFire(p, 'dragstart', dt); dragFire($('agents'), 'dragover', dt); const over = $('sideOverview').classList.contains('drop-hide'); dragFire(p, 'dragend', dt); return over; })()"), false);
+  // Dragging a pane onto another pane still moves it, as before.
+  assert.deepEqual((await dragTo('.pane[data-term=y1] .pane-info', '.pane[data-term=y2] .pane-body', SIDE_AT.down)).commands, [{ cmd: 'move-pane', term: 'y1', into: 't1', at: 'y2', side: 'down' }]);
+
   await settle(3200);
   assert.equal(await evaluate("document.querySelectorAll('.toast-item').length"), 0, 'messages leave by themselves');
   assert.deepEqual(errors, []);

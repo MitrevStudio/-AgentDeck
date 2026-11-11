@@ -2,7 +2,7 @@
 // (xterm.js) of AgentDeck's own. The layout lives in main (workspace.js); this page draws it and sends commands back.
 // Loaded before renderer.js, which provides the session data (data, live, liveOf) and calls showSessionTab,
 // findSessionTab, hasSessionPane, getSessionTerm, isMoveHereOffered, moveSessionHere, openTerm, stopTerm,
-// getViewersHtml, renderWorkspace and runWorkspace.
+// getViewersHtml, startTermDrag, endDrag, renderWorkspace and runWorkspace.
 const ANSI_NAMES = [
   "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
   "brightBlack", "brightRed", "brightGreen", "brightYellow", "brightBlue", "brightMagenta", "brightCyan", "brightWhite"
@@ -706,8 +706,15 @@ $("panes").addEventListener("pointerdown", e => {
 // ---------- dragging: tabs to reorder or to join, panes to move ----------
 // A tab dragged onto another tab takes its place; onto a pane, its panes go beside that one. A pane's header dragged
 // onto another pane moves the pane there; onto the tab bar, the pane gets a tab of its own.
+// A sidebar row (a terminal in "Terminals", a session with a terminal in "Agents") dragged onto a pane opens its
+// terminal on that side of it, or in a tab of its own from the pane's middle or the tab bar; one with a pane here moves.
+// A pane or a tab dragged onto the sidebar is hidden (close-pane / close-tab: the terminal keeps running).
 // Held over another tab for SPRING_MS while dragging, that tab comes up, so its panes can take the drop.
-let draggedTab = "", draggedPane = "";
+let draggedTab = "", draggedPane = "", draggedTerm = "";
+// Marks on the drag's data: what is dragged is told by the drag itself, not only by the variables above, which a
+// dragend lost with its row (the sidebar redraws while a row is dragged) would leave set.
+const DRAG_LAYOUT = "application/x-agentdeck-layout", DRAG_TERM = "application/x-agentdeck-term";
+const isDragOf = (e, type) => Boolean(e.dataTransfer?.types.includes(type));
 let springTab = "", springTimer = null;
 const SPRING_MS = 600;
 function springToTab(el) {
@@ -728,22 +735,56 @@ function getPaneDropSide(el, e) {
 function clearTabDropMarks() {
   document.querySelectorAll(".wtab.drop-before, .wtab.drop-after, .wtab.dragging").forEach(el => el.classList.remove("drop-before", "drop-after", "dragging"));
 }
+// A sidebar row's terminal over a pane: its middle (a fifth of it each way from the centre) means a tab of its own.
+function getTermDropPlace(el, e) {
+  const r = el.getBoundingClientRect();
+  const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+  return Math.abs(x - 0.5) < 0.2 && Math.abs(y - 0.5) < 0.2 ? "center" : getPaneDropSide(el, e);
+}
 function clearPaneDropMarks() {
-  document.querySelectorAll("#panes .pane").forEach(el => el.classList.remove(...PANE_SIDES.map(s => "drop-" + s)));
+  document.querySelectorAll("#panes .pane").forEach(el => el.classList.remove(...[...PANE_SIDES, "center"].map(s => "drop-" + s)));
   $("tabbar").classList.remove("drop-new");
 }
 function endDrag() {
   draggedTab = "";
   draggedPane = "";
+  draggedTerm = "";
   springToTab(null);
   clearTabDropMarks();
   clearPaneDropMarks();
+  $("sideOverview").classList.remove("drop-hide");
 }
-// The pane under the pointer that the dragged tab or pane may land beside: not the dragged pane itself, nor a pane of
-// the dragged tab (the shown one).
+// The terminal a sidebar row drags ("" in any other drag). renderer.js starts it (startTermDrag).
+const getDraggedTerm = e => (draggedTerm && isDragOf(e, DRAG_TERM) ? draggedTerm : "");
+function startTermDrag(term, e) {
+  endDrag();
+  draggedTerm = term;
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData(DRAG_TERM, term);
+}
+// The tab that has a pane of `term` here, if any.
+const getTermTab = term => Object.values(ws.tabs).find(tab => getPanesOf(tab?.root).includes(term)) || null;
+// A row's terminal dropped on `place` of the pane of `at`: one with no pane here opens there (on this or another
+// computer - main finds it), one with a pane moves there.
+function dropTerm(term, at, place) {
+  if (place === "center") return dropTermAsTab(term);
+  focusAfterRender = true;
+  if (getTermTab(term)) return runWorkspace("move-pane", { term, into: getShownTab()?.id, at, side: place });
+  return runWorkspace("open-term", { term, place, at });
+}
+// ... in a tab of its own: a new one in its project's space, or its pane out of its tab (just focused when alone there).
+function dropTermAsTab(term) {
+  focusAfterRender = true;
+  const tab = getTermTab(term);
+  if (!tab) return runWorkspace("open-term", { term, place: "tab" });
+  return runWorkspace(getPanesOf(tab.root).length > 1 ? "detach-pane" : "focus", { term });
+}
+// The pane under the pointer that the dragged tab, pane or row may land beside: not the dragged pane itself (nor the
+// row's own), nor a pane of the dragged tab (the shown one).
 function getDropPane(e) {
-  const el = e.target.closest?.(".pane");
-  if (!el || (!draggedTab && !draggedPane)) return null;
+  const el = e.target.closest?.(".pane"), term = getDraggedTerm(e);
+  if (!el || (!draggedTab && !draggedPane && !term)) return null;
+  if (term) return term === el.dataset.term ? null : el;
   return draggedPane === el.dataset.term || draggedTab === getShownTab()?.id ? null : el;
 }
 $("panes").addEventListener("dragstart", e => {
@@ -753,13 +794,14 @@ $("panes").addEventListener("dragstart", e => {
   draggedPane = pane.dataset.term;
   e.dataTransfer.effectAllowed = "move";
   e.dataTransfer.setData("text/plain", draggedPane);
+  e.dataTransfer.setData(DRAG_LAYOUT, draggedPane);
 });
 $("panes").addEventListener("dragover", e => {
   const el = getDropPane(e);
   if (!el) return;
   e.preventDefault();
   e.dataTransfer.dropEffect = "move";
-  const mark = "drop-" + getPaneDropSide(el, e);
+  const mark = "drop-" + (getDraggedTerm(e) ? getTermDropPlace(el, e) : getPaneDropSide(el, e));
   if (!el.classList.contains(mark)) { clearPaneDropMarks(); el.classList.add(mark); }
 });
 $("panes").addEventListener("dragleave", e => { if (!$("panes").contains(e.relatedTarget)) clearPaneDropMarks(); });
@@ -767,8 +809,9 @@ $("panes").addEventListener("drop", e => {
   const el = getDropPane(e);
   if (!el) return;
   e.preventDefault();
-  const side = getPaneDropSide(el, e), into = getShownTab()?.id, at = el.dataset.term;
-  if (draggedTab) runWorkspace("merge-tab", { tab: draggedTab, into, at, side });
+  const side = getPaneDropSide(el, e), into = getShownTab()?.id, at = el.dataset.term, term = getDraggedTerm(e);
+  if (term) dropTerm(term, at, getTermDropPlace(el, e));
+  else if (draggedTab) runWorkspace("merge-tab", { tab: draggedTab, into, at, side });
   else runWorkspace("move-pane", { term: draggedPane, into, at, side });
   endDrag();
 });
@@ -780,10 +823,19 @@ $("tabbar").addEventListener("dragstart", e => {
   draggedTab = el.dataset.tab;
   e.dataTransfer.effectAllowed = "move";
   e.dataTransfer.setData("text/plain", draggedTab);
+  e.dataTransfer.setData(DRAG_LAYOUT, draggedTab);
   el.classList.add("dragging");
 });
 $("tabbar").addEventListener("dragover", e => {
-  if (draggedTab || draggedPane) springToTab(e.target.closest?.(".wtab"));
+  const term = getDraggedTerm(e);
+  if (draggedTab || draggedPane || term) springToTab(e.target.closest?.(".wtab"));
+  if (term) {
+    // A row's terminal on the tab bar: a tab of its own.
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    $("tabbar").classList.add("drop-new");
+    return;
+  }
   if (draggedPane) {
     // A pane alone in its tab has a tab of its own already.
     if (getPanesOf(getShownTab()?.root).length < 2) return;
@@ -804,6 +856,13 @@ $("tabbar").addEventListener("dragleave", e => {
   springToTab(null);
 });
 $("tabbar").addEventListener("drop", e => {
+  const term = getDraggedTerm(e);
+  if (term) {
+    e.preventDefault();
+    dropTermAsTab(term);
+    endDrag();
+    return;
+  }
   if (draggedPane) {
     e.preventDefault();
     runWorkspace("detach-pane", { term: draggedPane });
@@ -819,6 +878,27 @@ $("tabbar").addEventListener("drop", e => {
   runWorkspace("reorder-tabs", { space: ws.activeSpace, ids });
 });
 $("tabbar").addEventListener("dragend", endDrag);
+// A pane or a tab dragged onto the sidebar (projects, agents, terminals) is hidden: it stays in "Agents" / "Terminals"
+// and opens again from there.
+const isHideDrag = e => Boolean((draggedPane || draggedTab) && isDragOf(e, DRAG_LAYOUT));
+$("sideOverview").addEventListener("dragover", e => {
+  if (!isHideDrag(e)) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "move";
+  const side = $("sideOverview");
+  side.dataset.dropHint = t(draggedTab ? "ws.dropToHideTab" : "ws.dropToHide");
+  side.classList.add("drop-hide");
+});
+$("sideOverview").addEventListener("dragleave", e => {
+  if (!$("sideOverview").contains(e.relatedTarget)) $("sideOverview").classList.remove("drop-hide");
+});
+$("sideOverview").addEventListener("drop", e => {
+  if (!isHideDrag(e)) return;
+  e.preventDefault();
+  const pane = draggedPane, tab = draggedTab;
+  endDrag();
+  if (pane) closePane(pane); else closeTab(tab);
+});
 
 // The headers and tab states follow the live registry and the scan.
 setInterval(() => { renderTabbar(); const tab = getShownTab(); if (tab) renderPaneHeads(tab); syncAnimations(); }, HEADERS_REFRESH_MS);

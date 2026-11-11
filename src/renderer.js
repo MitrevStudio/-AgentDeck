@@ -331,7 +331,9 @@ function agentHtml(s, l, toks) {
   const key = sessionKey(s), here = hasSessionPane(s);
   const project = isCentreSession(s) ? t("centre.title") : data.projects.find(p => inProject(s, p))?.name || s.cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop();
   const where = s.node ? ` · ${esc(s.nodeName || nodeNameOf(s.node))}` : findSessionTab(s) || l.term ? "" : ` · ${esc(t("manager.agents.outside"))}`;
-  return `<div class="agent ${here ? "here" : ""}" data-key="${esc(key)}" tabindex="0" title="${esc(`${s.title}\n${s.cwd}${s.node ? `\n${s.nodeName || ""}` : ""}`)}">${agentMark(s.agent)}
+  // One in a terminal of AgentDeck can be dragged onto a pane (workspace-ui.js); one outside cannot come here.
+  const drag = getAgentTerm(s) ? 'draggable="true"' : "";
+  return `<div class="agent ${here ? "here" : ""}" data-key="${esc(key)}" tabindex="0" ${drag} title="${esc(`${s.title}\n${s.cwd}${s.node ? `\n${s.nodeName || ""}` : ""}`)}">${agentMark(s.agent)}
       <div class="agent-main"><div class="agent-title">${hl(s.title, toks)}</div><div class="agent-sub">${esc(project)}${where}</div></div>
       ${statusMark(l, isLoading(key, l))}
       <span class="agent-tools"><button class="icon-btn" data-action="agent-menu" title="${esc(t("manager.agents.more"))}" aria-haspopup="menu">${icon("more")}</button></span></div>
@@ -359,7 +361,7 @@ function termRowHtml(x) {
   const project = data.projects.find(p => inProject({ cwdN }, p))?.name || (x.node && getNode(x.node)?.view.projects.find(p => inProject({ cwdN: normPath(x.cwd) }, p))?.name)
     || x.cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop();
   const sub = [project, x.node ? nodeNameOf(x.node) : t("manager.devices.local"), here ? "" : t("term.noPane")].filter(Boolean).map(esc).join(" · ");
-  return `<div class="agent term ${here ? "here" : ""}" data-key="term:${esc(x.id)}" tabindex="0" title="${esc(`${title}\n${x.cwd}`)}">
+  return `<div class="agent term ${here ? "here" : ""}" data-key="term:${esc(x.id)}" tabindex="0" draggable="true" title="${esc(`${title}\n${x.cwd}`)}">
       ${x.agent ? agentMark(x.agent) : `<span class="agent-mark">${icon("terminal")}</span>`}
       <div class="agent-main"><div class="agent-title">${esc(title)}</div><div class="agent-sub">${sub}</div></div>
       ${getViewersHtml(x, "term-viewers")}
@@ -372,6 +374,8 @@ function renderTerms(v) {
   patchChildren($("terms"), list.map(termRowHtml).join(""));
 }
 const termOfRow = row => row?.dataset.key?.startsWith("term:") ? row.dataset.key.slice(5) : "";
+// The terminal of AgentDeck a running session is in, on its computer ("" outside one).
+const getAgentTerm = s => (s && (findSessionTab(s)?.id || getSessionTerm(s))) || "";
 // The sidebar lists only the newest few of a session's subagents.
 const SIDEBAR_SUBAGENTS = 3;
 const sessionByKey = key => data.sessions.find(s => sessionKey(s) === key) || null;
@@ -1070,6 +1074,17 @@ $("terms").addEventListener("keydown", e => {
   const term = termOfRow(e.target);
   if (term && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openTerm(term); }
 });
+// A row dragged onto a pane or the tab bar opens its terminal there (workspace-ui.js startTermDrag).
+for (const id of ["agents", "terms"]) {
+  $(id).addEventListener("dragstart", e => {
+    const row = e.target.closest?.(".agent[draggable]");
+    if (!row) return;
+    const term = termOfRow(row) || getAgentTerm(sessionByKey(row.dataset.key));
+    if (term) startTermDrag(term, e);
+    else e.preventDefault(); // its terminal went since the row was drawn
+  });
+  $(id).addEventListener("dragend", endDrag);
+}
 $("centre").addEventListener("click", () => selectProject(CENTRE));
 $("centre").addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectProject(CENTRE); } });
 $("spaceEmpty").addEventListener("click", async e => {

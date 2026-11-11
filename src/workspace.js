@@ -102,19 +102,12 @@ function createWorkspace({ onChange = () => {} } = {}) {
     changed();
     return id;
   }
-  // `term` beside the pane of `target` (the tab's focused one when not given), taking half of it.
-  function split(tabId, term, dir, target = "") {
+  // `term` on `side` ("left", "right", "up", "down") of the pane of `target` (the tab's focused one when not given),
+  // taking half of it.
+  function split(tabId, term, side, target = "") {
     const tab = tabs.get(tabId);
-    if (!tab || !["right", "down"].includes(dir)) return false;
-    const at = target && hasTerm(tab.root, target) ? target : tab.focus;
-    tab.root = replacePane(tab.root, at, pane => ({ dir, ratio: 0.5, a: pane, b: { term } }));
-    tab.focus = term;
-    tab.zoom = "";
-    const s = getSpace(tab.space);
-    s.active = tabId;
-    activeSpace = tab.space;
-    changed();
-    return true;
+    if (!tab) return false;
+    return placeBeside(tabId, target && hasTerm(tab.root, target) ? target : tab.focus, side, { term }, term);
   }
   // The pane of a terminal that ended or was closed goes; an emptied tab goes with it.
   function removeTerm(term) {

@@ -73,6 +73,21 @@ assert.equal(ws.findTab("t5"), null);
 assert.deepEqual(ws.getTabTerms(tab), ["t1", "t3"]);
 assert.ok(changes > 10);
 
+// A terminal dropped on a pane's left or upper side (open-term with place and at): before it, beside that pane and not
+// the focused one; an unknown side changes nothing.
+const sides = createWorkspace();
+const st = sides.addTab("e:/app", "q1");
+sides.split(st, "q2", "right");
+assert.equal(sides.split(st, "q3", "left", "q1"), true);
+assert.deepEqual(sides.snapshot().tabs[st].root, { dir: "right", ratio: 0.5, a: { dir: "right", ratio: 0.5, a: { term: "q3" }, b: { term: "q1" } }, b: { term: "q2" } });
+assert.equal(sides.snapshot().tabs[st].focus, "q3");
+assert.equal(sides.split(st, "q4", "up", "q2"), true);
+assert.deepEqual(sides.snapshot().tabs[st].root.b, { dir: "down", ratio: 0.5, a: { term: "q4" }, b: { term: "q2" } });
+assert.equal(sides.split(st, "q5", "up", "gone"), true, "a target not in the tab: beside the focused pane");
+assert.deepEqual(getPanes(sides.snapshot().tabs[st].root), ["q3", "q1", "q5", "q4", "q2"]);
+assert.equal(sides.split(st, "q6", "middle"), false);
+assert.equal(sides.findTab("q6"), null);
+
 // Saving and restoring. A layout of two tabs in one space: [p1 | (p2 over p3)] zoomed on p2, and p4 alone.
 const saved = createWorkspace();
 const s1 = saved.addTab("e:/app", "p1");

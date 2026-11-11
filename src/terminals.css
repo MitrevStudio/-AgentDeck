@@ -70,6 +70,19 @@
 .pane.drop-right::after { left: 50%; }
 .pane.drop-up::after { bottom: 50%; }
 .pane.drop-down::after { top: 50%; }
+/* A sidebar row over a pane's middle: a tab of its own. */
+.pane.drop-center::after { inset: 20%; border-radius: var(--r-md); }
+/* A pane or tab dragged over the sidebar is hidden when dropped there (workspace-ui.js): the whole overview says so. */
+.side-overview.drop-hide { position: relative; }
+.side-overview.drop-hide::before {
+  content: ""; position: absolute; inset: 6px; z-index: 5; pointer-events: none;
+  border-radius: var(--r-md); background: color-mix(in srgb, var(--panel) 75%, transparent); box-shadow: inset 0 0 0 1px var(--accent);
+}
+.side-overview.drop-hide::after {
+  content: attr(data-drop-hint); position: absolute; left: 50%; top: 50%; z-index: 6; transform: translate(-50%, -50%);
+  width: max-content; max-width: calc(100% - 40px); padding: 8px 12px; pointer-events: none; text-align: center;
+  font-weight: 600; color: var(--accent); border-radius: var(--r-md); background: var(--panel); box-shadow: inset 0 0 0 1px var(--accent-line);
+}
 .pane-head {
   flex: none; display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 4px 0 10px;
   border-bottom: 1px solid var(--line); background: var(--panel); font-size: 12.5px; color: var(--muted);
