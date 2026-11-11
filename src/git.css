@@ -256,3 +256,6 @@ details[open] > summary > .git-chevron { transform: rotate(90deg); }
   .git-history-list, #gitHistoryPatch { flex: none; max-height: 40vh; }
 }
 @media (max-width: 600px) { .git-review-submit { align-items: stretch; flex-direction: column; } .git-task-form { grid-template-columns: 1fr; } }
+/* "Group by Project" (git-panel.js): the heading over a project's repositories. */
+.git-project-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px 2px; color: var(--muted); font-size: 11px; font-weight: 600; }
+.git-project-head .git-count { margin-left: auto; }

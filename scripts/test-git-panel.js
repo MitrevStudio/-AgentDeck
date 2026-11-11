@@ -33,6 +33,7 @@ assert.match(element('gitRepositories').innerHTML, /data-repo-action="commit"/);
 assert.match(element('gitRepositories').innerHTML, /data-repo-menu/);
 assert.match(element('gitRepositories').innerHTML, /data-file-menu/);
 assert.doesNotMatch(element('gitRepositories').innerHTML, /type="checkbox"|data-repo-action="manage"|git-repo-location/);
+assert.doesNotMatch(element('gitRepositories').innerHTML, /class="git-repository[^>]*\sopen>/, 'repositories start folded');
 const repoKey = JSON.stringify(['local', 'C:/app/backend']);
 const fileButton = { dataset: {}, closest: selector => selector === '[data-repo]' ? { dataset: { repo: repoKey } } : selector === '[data-file]' ? { dataset: { file: 'src/<script>.js' } } : { dataset: { group: 'changes' } } };
 element('gitRepositories').listeners.click({ target: { closest: () => fileButton }, preventDefault() {}, stopPropagation() {} });
@@ -88,5 +89,20 @@ element('gitPanelRefresh').onclick().then(async () => {
   state.repos.one.upstream = 'origin/main'; ctx.window.gitPanel.render(); element('gitPanelMenu').onclick();
   await menuItems.find(item => item.label === 'push').run();
   assert.equal(executed.at(-1).action, 'push', 'tracked branches still push directly');
+  // Group by Project: a worktree beside its main checkout goes under that checkout's project.
+  const saved = new Map();
+  ctx.localStorage.setItem = (k, v) => saved.set(k, v);
+  ctx.data.projects[0].name = 'App';
+  state.repos.three = { root: 'C:/app-wt', mainRoot: 'C:/app/backend', branch: 'fix', files: [] };
+  ctx.ws.tabs = { 'local-tab': {}, wt: { root: { term: 'w' } } };
+  ctx.ws.terminals = [{ id: 'w', cwd: 'C:/app-wt' }];
+  ctx.window.gitPanel.render();
+  assert.doesNotMatch(element('gitRepositories').innerHTML, /git-project-head/, 'not grouped unless chosen');
+  element('gitPanelMenu').onclick();
+  await menuItems.find(item => item.label === 'byProject').run();
+  const html = element('gitRepositories').innerHTML;
+  assert.equal(saved.get('agentdeck.gitByProject'), '1');
+  assert.equal(html.match(/git-project-head/g).length, 1, 'the worktree joins the project of its main checkout');
+  assert.match(html, /git-project-head"><span>App<\/span><span class="git-count">3</);
   console.log('Git sidebar tabs, local/remote identity, offline state, filename escaping and refresh passed');
 }).catch(e => { console.error(e); process.exitCode = 1; });
