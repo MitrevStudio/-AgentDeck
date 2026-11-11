@@ -1,7 +1,7 @@
 // Claude Code's background jobs in the live registry (live.js): a job's process is folded into the interactive session
 // that parked it, a spare process is left out, and an orphaned job stays a session of its own.
 const assert = require("node:assert/strict");
-const { foldJobs, leadingEntry } = require("../src/host/live");
+const { foldJobs, leadingEntry, getStatus } = require("../src/host/live");
 
 // As ~/.claude/sessions/<pid>.json on 2026-11-09 (Claude Code 2.1.317): the interactive session, the bg process
 // running its parked turn (a fork with a sessionId of its own) and the spare kept ready.
@@ -19,6 +19,13 @@ assert.equal(folded[1].jobs.length, 0);
 assert.equal(leadingEntry(folded[0]).status, "shell");
 assert.equal(leadingEntry({ ...folded[0], status: "waiting" }).status, "waiting");
 assert.equal(leadingEntry({ ...folded[0], jobs: [] }).status, "idle");
+
+// "shell": the session waits for the user with a background shell running - idle; a job's "shell" is its work - busy.
+assert.equal(getStatus(job), "busy");
+assert.equal(getStatus({ ...parent, status: "shell" }), "idle");
+assert.equal(getStatus({ pid: 3, sessionId: "cccc", status: "shell" }), "idle", "older Claude Code, no kind");
+assert.equal(leadingEntry({ ...folded[0], status: "shell" }).status, "shell", "the working job leads over an idle session");
+assert.equal(getStatus(leadingEntry({ ...folded[0], status: "shell", jobs: [] })), "idle");
 
 // A job whose parent exited is still running work: it stays, as itself.
 const orphan = foldJobs([job, spare]);
