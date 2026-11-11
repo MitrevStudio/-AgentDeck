@@ -97,6 +97,13 @@ assert.deepEqual(b.spaces["e:/app"], { tabs: [s1, s2], active: s1 });
 assert.deepEqual(b.spaces["e:/empty"], { tabs: [], active: "" });
 assert.deepEqual(getPanes(b.tabs[s1].root), ["n1", "n2", "n3"]);
 assert.equal(b.tabs[s1].root.ratio, 0.3);
+
+// A project chosen in the sidebar shows its session picker; its tabs stay.
+const picked = createWorkspace();
+picked.importState(state, term => term);
+picked.activateSpace("e:/app");
+picked.showSessions();
+assert.deepEqual(picked.snapshot().spaces["e:/app"], { tabs: [s1, s2], active: "" });
 assert.equal(b.tabs[s1].focus, "n2");
 assert.equal(b.tabs[s1].zoom, "n2");
 assert.equal(b.tabs[s1].name, "work");

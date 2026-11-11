@@ -936,7 +936,10 @@ async function runWorkspaceCommand(cmd, a) {
     // The root split's path is "" (which text() refuses).
     case "ratio": return workspace.setRatio(id(a.tab), a.path === "" ? "" : text(a.path, 32), Number(a.ratio));
     case "zoom": return workspace.toggleZoom(id(a.tab));
-    case "space": workspace.activateSpace(text(a.space ?? "", 2000)); return true;
+    case "space":
+      workspace.activateSpace(text(a.space ?? "", 2000));
+      if (a.sessions === true) workspace.showSessions();
+      return true;
     // The edge menu: the window comes up showing that project.
     case "show-space": workspace.activateSpace(text(a.space ?? "", 2000)); showManager(); return true;
     case "tab": return workspace.activateTab(id(a.tab));
