@@ -7,8 +7,12 @@ android {
         applicationId "com.mitrevstudio.agentdeck"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // The release workflow passes the version of the GitHub release (the tag is the source of truth, as for the
+        // desktop): AGENTDECK_VERSION=1.23.4 -> versionName "1.23.4", versionCode 1023004. A local build is 0.0.0.
+        def appVersion = System.getenv("AGENTDECK_VERSION") ?: "0.0.0"
+        def (major, minor, patch) = (appVersion.tokenize('-')[0].tokenize('.') + ["0", "0", "0"]).take(3).collect { it.toInteger() }
+        versionCode Math.max(1, major * 1000000 + minor * 1000 + patch)
+        versionName appVersion
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,8 +20,23 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // The release key comes from the environment (GitHub Actions secrets; never from the repository). Every release
+    // must be signed with the same key, or Android refuses to install it over the previous one. Without the key the
+    // release build stays unsigned and the workflow refuses to publish it.
+    def keystoreFile = System.getenv("ANDROID_KEYSTORE_FILE")
+    signingConfigs {
+        release {
+            if (keystoreFile) {
+                storeFile file(keystoreFile)
+                storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
     buildTypes {
         release {
+            if (keystoreFile) signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

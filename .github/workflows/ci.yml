@@ -24,6 +24,13 @@ jobs:
       - run: node scripts/test-project-sessions.js
       - run: npm run test:limits
       - run: npm run test:themes
+      - run: npm run test:noise
+      - run: npm run test:terminal-viewers
+      - run: npm run test:desktop-terminals
+      - run: npm run test:mesh
+      - run: npm run test:pairing
+      - run: npm run test:web-link
+      - run: npm run test:phone-invites
       - name: Package (unpacked, no installer)
         run: npx electron-builder --win --dir --publish never
         env:
@@ -52,6 +59,35 @@ jobs:
       - run: npm run test:audit
       - name: Package (unpacked, no AppImage)
         run: npx electron-builder --linux --dir --publish never
+
+  # The Android app (mobile/): the web bundle and a debug APK, kept for a week to try on a phone. The signed APK is
+  # built by the release workflow.
+  mobile-android:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            mobile/package-lock.json
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+      # The app bundles src/mesh, whose packages live in the root; nothing of the desktop is built here.
+      - run: npm ci --ignore-scripts
+      - run: npm ci
+        working-directory: mobile
+      - run: npm run apk
+        working-directory: mobile
+      - uses: actions/upload-artifact@v7
+        with:
+          name: agentdeck-android-debug
+          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7
 
   # The relay's Docker image builds, starts and answers on its port (it is published by the release workflow).
   docker-relay:

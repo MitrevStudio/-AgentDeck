@@ -13,6 +13,7 @@
     "dev": "node scripts/build.mjs && node scripts/serve.mjs",
     "android": "npm run build && cap sync android",
     "apk": "npm run android && node scripts/gradle.mjs assembleDebug",
+    "apk:release": "npm run android && node scripts/gradle.mjs assembleRelease",
     "open:android": "cap open android"
   },
   "dependencies": {

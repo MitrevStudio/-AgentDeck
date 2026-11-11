@@ -6,6 +6,9 @@
 # The Linux AppImage (experimental) is built alongside and attached to the same release. It does not hold the
 # release back: the app does not update itself on Linux, so a release without it misleads no one.
 # The relay's Docker image (host/Dockerfile) goes to the GitHub Container Registry with the same version, and as latest.
+# The Android app (mobile/) is built with the same version, signed with the release key from the repository's secrets
+# (ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD) and attached to the
+# same release as AgentDeck-<version>.apk. Like the AppImage it does not hold the release back.
 name: Release
 
 on:
@@ -37,6 +40,9 @@ jobs:
       - run: node scripts/test-project-sessions.js
       - run: npm run test:limits
       - run: npm run test:themes
+      - run: npm run test:noise
+      - run: npm run test:terminal-viewers
+      - run: npm run test:desktop-terminals
 
   release:
     needs: check
@@ -110,6 +116,58 @@ jobs:
         run: gh release upload "v$VERSION" dist/*.AppImage dist/latest-linux.yml --clobber
         env:
           GH_TOKEN: ${{ github.token }}
+
+  build-android:
+    needs: release
+    if: needs.release.outputs.published == 'true'
+    runs-on: ubuntu-26.04
+    env:
+      VERSION: ${{ needs.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: v${{ needs.release.outputs.version }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            mobile/package-lock.json
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+      # The app bundles src/mesh, whose packages live in the root; nothing of the desktop is built here.
+      - run: npm ci --ignore-scripts
+      - run: npm ci
+        working-directory: mobile
+      # An update installs only over an app signed with the same key: no key, no release build.
+      - name: Release key
+        run: |
+          [ -n "$ANDROID_KEYSTORE_BASE64" ] || { echo "::error::The ANDROID_KEYSTORE_BASE64 secret is not set"; exit 1; }
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      - name: Build the signed APK
+        working-directory: mobile
+        run: npm run apk:release
+        env:
+          AGENTDECK_VERSION: ${{ needs.release.outputs.version }}
+          ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      - name: Check the signature and attach the APK
+        run: |
+          apk="mobile/android/app/build/outputs/apk/release/app-release.apk"
+          "$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner" verify "$apk"
+          cp "$apk" "AgentDeck-$VERSION.apk"
+          gh release upload "v$VERSION" "AgentDeck-$VERSION.apk" --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks"
 
   docker-relay:
     needs: release

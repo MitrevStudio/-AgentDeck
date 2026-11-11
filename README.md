@@ -363,7 +363,31 @@ Paired projects appear in the shared project list with their machine identity. R
 
 Select a remote project to open a shell, start one of the host's agents or resume a recent session. The process runs **there** while its terminal pane appears **here**, with streamed output, keyboard input and resizing.
 
-Remote panes remain in your saved layout. If a host goes offline, the pane reports that state; reconnecting reattaches to the host's available terminal. Closing the terminal ends it on the host.
+Remote panes remain in your saved layout. If a host goes offline, the pane reports that state; reconnecting reattaches to the host's available terminal.
+
+### One terminal, open everywhere
+
+A terminal belongs to the computer it runs on, whoever started it. Any of your paired devices can open it at the same time — another desktop, the phone, the computer's own window — see where it is and type into it; the pane header shows who else has it open.
+
+- **X hides the pane.** The terminal keeps running and stays listed under **Agents** or **Terminals** in the sidebar, on every device.
+- **Stop** (the red button in the pane header, with a confirmation) ends it for everyone.
+- **One size.** Whoever typed last sets the terminal's size; the others show it at that size and can take it with **Use my size**.
+- Opening a session that is already running attaches to its terminal instead of resuming it a second time.
+- After a restart the computer reopens its terminals, so the panes on your other devices find them again.
+
+Sessions that run outside an AgentDeck terminal (for example in Windows Terminal) cannot be shared this way; **Move here** brings one in. See [docs/SHARED-SESSIONS.md](docs/SHARED-SESSIONS.md).
+
+### AgentDeck on your phone (Android)
+
+The Android app shows the sessions of all your computers in one list — the ones waiting for you on top — lets you reply, start and stop sessions, and opens any terminal. It connects to **your own relay** by address and port: no account, no cloud service, no push provider.
+
+1. Install `AgentDeck-<version>.apk` from the [latest release](https://github.com/MitrevStudio/-AgentDeck/releases/latest) (Android asks to allow installing from your browser or file manager).
+2. On a desktop open **Settings → Computers → Phones → Add phone**, tick the computers the phone should reach and check the relay address as the phone will reach it.
+3. In the app choose **Scan** and point it at the code — or paste the text shown under it. One code pairs the phone with the relay and every ticked computer; it is valid for ten minutes and works once.
+
+Without a desktop at hand, enter the relay's address and its pairing code in the app, then pair each computer behind it with that computer's own code — the same as pairing two desktops. **Forget** on the phone's row in Settings removes it from the relay and from your other computers too.
+
+The phone needs a relay it can reach (see [Relay in Docker](#relay-in-docker)); the link is encrypted end to end between the phone and each computer, so the relay cannot read it. There are no notifications: the app shows what is waiting while it is open. See [docs/MOBILE.md](docs/MOBILE.md).
 
 ### Clone a project onto a host
 
@@ -385,7 +409,7 @@ The paired computer's **Setup** panel checks Git, SSH keys, trusted hosts, Git i
 Install and authenticate agents on the host itself, using a remote terminal for interactive login. Its private SSH key stays on that machine.
 
 > [!IMPORTANT]
-> Pairing grants meaningful control: a paired computer can launch terminals and sessions on the host. Use trusted machines on a LAN or VPN, and keep the mesh port off the public internet.
+> Pairing grants meaningful control: a paired computer or phone can launch terminals and sessions on the host and type into the ones running there. Pair only your own devices, and keep a desktop's mesh port off the public internet — the port meant to be reachable from outside is the relay's.
 
 ## Linux headless host
 
@@ -689,7 +713,9 @@ Automation creates a tag and draft release, builds the Windows installer, upload
 
 Alongside it, a Linux job builds the AppImage from the same tag and attaches `AgentDeck-<version>.AppImage` and `latest-linux.yml`. It does not hold the release back: the app does not update itself on Linux, so a Linux build failure leaves the Windows release as it is.
 
-Pull requests and non-main branches run checks and an unpacked packaging build on both Windows and Linux. The Linux job skips the Electron UI test (`test:git-ui`), which needs a display. See the [CI workflow](.github/workflows/ci.yml) and [release workflow](.github/workflows/release.yml).
+An Android job builds the phone app (`mobile/`) with the same version, signs it with the release key kept in the repository's secrets (`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`) and attaches `AgentDeck-<version>.apk`. It does not hold the release back either. Every release must be signed with the same key, or Android will not install it over the previous one.
+
+Pull requests and non-main branches run checks and an unpacked packaging build on both Windows and Linux, and build a debug APK of the phone app (kept as a workflow artifact for a week). The Linux job skips the Electron UI test (`test:git-ui`), which needs a display. See the [CI workflow](.github/workflows/ci.yml) and [release workflow](.github/workflows/release.yml).
 
 ## Architecture
 
