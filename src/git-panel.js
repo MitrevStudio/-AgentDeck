@@ -5,6 +5,8 @@
   let selected = 'projects', last = '', filter = '', tree = false, activeKey = '', sortMode = 'path';
   try { selected = localStorage.getItem('agentdeck.sidebarTab') || selected; } catch {}
   try { sortMode = localStorage.getItem('agentdeck.gitSort') || sortMode; } catch {}
+  let byProject = false;
+  try { byProject = localStorage.getItem('agentdeck.gitByProject') === '1'; } catch {}
   function select(name) {
     selected = Object.hasOwn(panels, name) ? name : 'projects';
     for (const [id, panel] of Object.entries(panels)) panel.hidden = id !== selected;
@@ -79,6 +81,30 @@
       return `<details class="git-file-group" data-expand="${esc(id)}" data-group="${group}" ${expanded.get(id) !== false ? 'open' : ''}><summary><span class="git-chevron">${icon('right')}</span><span>${esc(gitText(group))}</span><span class="grow"></span><span class="git-hover-actions">${quick('review', 'eye', 'reviewChanges', disabled)}${quick(group === 'staged' ? 'unstage' : 'stage', group === 'staged' ? 'undo' : 'plus', group === 'staged' ? 'unstageAll' : 'stageAll', disabled)}${more('data-group-menu', disabled)}</span><span class="git-count">${files.length}</span></summary>${tree ? renderTree(files) : files.map(f => fileRow(f, node, group, disabled)).join('')}</details>`;
     }).join('');
   }
+  // The project a repository belongs to: the deepest one holding it - a linked worktree by its main checkout - or, in
+  // none, its own folder.
+  function getRepoProject(sourceId, repo) {
+    const home = normPath(repo.mainRoot || repo.root);
+    const project = (data.projects || []).filter(p => (p.node || 'local') === sourceId && within(home, normPath(p.path)))
+      .sort((a, b) => b.path.length - a.path.length)[0];
+    return project ? { key: project.n, name: project.name } : { key: home, name: home.split('/').filter(Boolean).at(-1) || home };
+  }
+  // With "Group by Project": the repositories under a heading per project, the projects by name.
+  function getRepoRows(items) {
+    if (!byProject) return items.map(x => x.html);
+    const groups = new Map();
+    for (const x of items) {
+      if (!groups.has(x.project.key)) groups.set(x.project.key, { name: x.project.name, rows: [] });
+      groups.get(x.project.key).rows.push(x.html);
+    }
+    return [...groups.values()].sort((a, b) => a.name.localeCompare(b.name)).flatMap(g =>
+      [`<div class="git-project-head">${icon('folder')}<span>${esc(g.name)}</span><span class="git-count">${g.rows.length}</span></div>`, ...g.rows]);
+  }
+  function setByProject(on) {
+    byProject = on;
+    try { localStorage.setItem('agentdeck.gitByProject', on ? '1' : '0'); } catch {}
+    render();
+  }
   function render() {
     if (selected !== 'git') return;
     const sources = [{ id: 'local', name: t('git.panel.local'), status: 'online', git }, ...nodes], rows = [], open = openFolders();
@@ -88,19 +114,21 @@
       const paths = open.filter(p => (p.node || 'local') === source.id).map(p => normPath(p.path));
       if (!paths.length) continue;
       const shown = openRoots(paths, Object.values(source.git?.repos || {}).map(repo => normPath(repo.root)));
+      const items = [];
       for (const repo of Object.values(source.git?.repos || {}).sort((a, b) => a.root.localeCompare(b.root))) {
         if (!shown.has(normPath(repo.root))) continue;
         const key = JSON.stringify([source.id, repo.root]), node = { key, node: source.id === 'local' ? '' : source.id, repo, offline: source.status !== 'online', source: source.name, error: errors.get(key) || source.gitError || repo.error };
         repositories.set(key, node);
         const offline = source.status !== 'online', disabled = offline || busy.has(key), files = repo.files || [], staged = files.some(f => accepts('staged', f));
         tips.set(key, `${source.name}\n${repo.root}\n${gitText('checked')}: ${repo.at ? new Date(repo.at).toLocaleTimeString() : '—'}${offline || Date.now() - (repo.at || 0) > 150000 ? '\n' + gitText('stale') : ''}`);
-        rows.push(`<details class="git-repository ${offline ? 'offline' : ''}" data-repo="${esc(key)}" data-expand="${esc(key)}" ${expanded.get(key) !== false ? 'open' : ''}>
+        items.push({ project: getRepoProject(source.id, repo), html: `<details class="git-repository ${offline ? 'offline' : ''}" data-repo="${esc(key)}" data-expand="${esc(key)}" ${expanded.get(key) === true ? 'open' : ''}>
           <summary><span class="git-chevron">${icon('right')}</span><strong>${esc(repo.root.split(/[\\/]/).at(-1))}</strong><span class="git-repo-branch">${icon('branch')}${esc(repo.error ? '' : gitHead(repo))}</span>${gitAb(repo)}${source.id === 'local' ? '' : `<span class="proj-node ${offline ? 'offline' : 'online'}">${icon('nodes')}${esc(source.name)}</span>`}${offline ? `<span class="git-offline">${icon('alert')}</span>` : ''}<span class="grow"></span><span class="git-hover-actions">${quick('preview', 'eye', 'commit', disabled)}${quick('commit', 'check', 'commitMenu', disabled || !staged || !(drafts.get(key) || '').trim())}${quick('branches', 'branch', 'branches', disabled)}${quick('refresh', 'refresh', 'refresh', disabled)}${more('data-repo-menu', disabled)}</span><span class="git-count">${repo.fileCount ?? files.length}</span></summary>
           <div class="git-commit-box"><textarea class="textarea" data-commit-message="${esc(key)}" rows="1" spellcheck="false" aria-label="${esc(gitText('message'))}" placeholder="${esc(gitText('commitHint'))}" ${disabled ? 'disabled' : ''}>${esc(drafts.get(key) || '')}</textarea><div class="git-commit-split"><button type="button" class="btn sm primary git-commit-button" data-repo-action="commit" ${disabled || !staged || !(drafts.get(key) || '').trim() ? 'disabled' : ''}>${icon('check')}<span>${esc(gitText(busy.has(key) ? 'loading' : 'commitMenu'))}</span></button><button type="button" class="btn sm primary git-commit-options" data-commit-menu aria-label="${esc(gitText('commitOptions'))}" title="${esc(gitText('commitOptions'))}" aria-haspopup="menu" ${disabled ? 'disabled' : ''}>${icon('down')}</button></div></div>
           ${errors.has(key) || repo.error || source.gitError ? `<p class="git-panel-error" role="status">${esc(errors.get(key) || repo.error || source.gitError)}</p>` : ''}
           ${grouped(node, disabled)}${!files.length && !repo.error ? `<p class="git-clean">${esc(gitText('empty'))}</p>` : filter && !files.some(f => f.path.toLocaleLowerCase().includes(filter)) ? `<p class="git-clean">${esc(gitText('noMatches'))}</p>` : ''}
-          ${repo.filesTruncated ? `<p class="git-panel-note">${esc(t('git.panel.truncated'))}</p>` : ''}</details>`);
+          ${repo.filesTruncated ? `<p class="git-panel-note">${esc(t('git.panel.truncated'))}</p>` : ''}</details>` });
       }
+      rows.push(...getRepoRows(items));
       if (source.git?.missing) rows.push(`<p class="git-panel-note">${esc(source.name)}: ${esc(t('git.panel.missing'))}</p>`);
       if (source.git?.discoveryTruncated) rows.push(`<p class="git-panel-note">${esc(source.name)}: ${esc(t('git.panel.scanLimit'))}</p>`);
     }
@@ -185,6 +213,7 @@
     const toggleTree = () => { tree = !tree; $('gitTreeToggle').setAttribute('aria-pressed', String(tree)); render(); };
     const view = [
       item('asTree', 'folder', toggleTree, { checked: tree }),
+      item('byProject', 'stack', () => setByProject(!byProject), { checked: byProject }),
       { label: gitText('viewSort'), icon: 'sliders', items: [
         item('sortPath', 'history', () => setSort('path'), { checked: sortMode === 'path' }),
         item('sortName', 'terminal', () => setSort('name'), { checked: sortMode === 'name' }),

@@ -120,6 +120,18 @@ async function findRoot(dir) {
     d = up;
   }
 }
+// A linked worktree's main checkout: its .git is a file naming <main>/.git/worktrees/<name>. Else the root itself.
+async function getMainRoot(root) {
+  let text = "";
+  try {
+    text = await fs.promises.readFile(path.join(root, ".git"), "utf8");
+  } catch {
+    return root;
+  }
+  const gitdir = (/^gitdir:\s*(.+?)\s*$/m.exec(text)?.[1] || "").replace(/\\/g, "/");
+  const at = gitdir.search(/\/\.git\/worktrees\//);
+  return at > 0 ? path.resolve(root, gitdir.slice(0, at)) : root;
+}
 async function rootOf(dir, now) {
   const k = norm(dir), known = roots.get(k);
   if (known && now - known.at < ROOT_TTL_MS) return known.root;
@@ -169,7 +181,7 @@ async function pass(force) {
       const root = todo[next++];
       const r = await runGit(root);
       if (r.missing) { missing = true; break; }
-      repos.set(norm(root), { root, at: Date.now(), ...(r.status || { error: r.error }) });
+      repos.set(norm(root), { root, mainRoot: await getMainRoot(root), at: Date.now(), ...(r.status || { error: r.error }) });
     }
   };
   await Promise.all(Array.from({ length: Math.min(PARALLEL, todo.length) }, work));
