@@ -318,6 +318,10 @@ textarea { resize: none; line-height: 1.35; }
 .trow-open .agent-mark { color: var(--muted); }
 .trow.ended .row-title { color: var(--muted); }
 .trow .row-end { min-width: 0; }
+/* Other devices that have the terminal open: an eye and their number (the desktop's pane title has the same). */
+.viewers { display: inline-flex; align-items: center; gap: 3px; color: var(--muted); font-size: 11.5px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.viewers .ic { width: 14px; height: 14px; }
+.row-note { font-size: 11.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---------- a session ---------- */
 .screen-session .screen { overflow: hidden; }
@@ -363,6 +367,12 @@ textarea { resize: none; line-height: 1.35; }
 /* ---------- terminal ---------- */
 .screen-terminal .screen { background: var(--term-bg); position: relative; }
 .term-head .top { background: var(--bg); border-bottom: 1px solid var(--line); }
+/* "Also open on: …" under the size line. */
+.term-viewers { display: flex; align-items: center; gap: 4px; margin-top: 1px; }
+.term-viewers .ic { flex: none; width: 12px; height: 12px; }
+.term-viewers > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* After the name of the device whose size the terminal has. */
+.term-viewers .ic.drives { width: 11px; height: 11px; margin: 0 0 0 3px; vertical-align: -1px; color: var(--accent); }
 /* The terminal keeps the host's size and is panned inside the wrap by script (screens/terminal.js): no native
    scrolling, zooming or scrollbars here. */
 .term-wrap { flex: 1; min-height: 0; position: relative; overflow: hidden; background: var(--term-bg); padding: 4px; touch-action: none; overscroll-behavior: contain; }

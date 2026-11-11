@@ -19,6 +19,8 @@ const NEW_SESSION = { Claude: "claude", OpenCode: "opencode", Codex: "codex" };
 const SESSION_ID = /^[\w.:-]{1,200}$/;
 const STOP_SCRIPT = path.join(__dirname, "stop-session.ps1");
 const HANDOFF_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
+// How many terminals may run on this host at once, whoever opens them (docs/SHARED-SESSIONS.md 4.5).
+const MAX_TERMINALS = 64;
 
 // Every launcher checks its own arguments, whoever calls it (IPC, voice commands, a peer): an inherited key such as
 // "constructor" is no agent, and a ";" in a session id would split wt.exe's command line.
@@ -149,15 +151,27 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
   // ---------- the host's own terminals ----------
   // A terminal of the host's own with the command in it (null: a shell): on Windows the PowerShell line `command`
   // (DockPty, terminals.js), elsewhere the program of `argv` (terminals-pty.js). env: already prepared by
-  // terminal-env.js. how: for the launch log.
+  // terminal-env.js. how: for the launch log. Refused (tooManyTerminals) once MAX_TERMINALS run here.
+  // meta: { title, agent, sessionId, codexLog, owner }, and from the host's restore only (never from a peer's params):
+  // id, createdAt, reopened - the terminal opened anew under the id it had (host/index.js restoreTerminals).
   async function openTerminal(cwd, command, meta, env, how, argv = null) {
     if (!isDir(cwd)) fail("folderMissing");
+    if ((terminals.countRunning?.() ?? 0) >= MAX_TERMINALS) fail("tooManyTerminals");
     const encoded = command ? Buffer.from(command, "utf16le").toString("base64") : "";
     // Agent terminals must end with their command, never fall back to a shell that could consume a queued prompt.
     const commandLine = command ? `powershell.exe -NoLogo ${meta.agent ? "" : "-NoExit "}-EncodedCommand ${encoded}` : "powershell.exe -NoLogo";
-    const id = await terminals.open({ cwd, commandLine, argv, title: meta.title || path.basename(cwd), agent: meta.agent, agentOnly: Boolean(meta.agent), sessionId: meta.sessionId, codexLog: meta.codexLog, owner: meta.owner, env });
+    const id = await terminals.open({
+      cwd, commandLine, argv, title: meta.title || path.basename(cwd), agent: meta.agent, agentOnly: Boolean(meta.agent), sessionId: meta.sessionId, codexLog: meta.codexLog, owner: meta.owner, env,
+      ...(meta.id ? { id: meta.id, createdAt: meta.createdAt, reopened: meta.reopened === true } : {})
+    });
     log(`agentdeck ${how}`, `cwd="${cwd}" cmd=${command ? `"${command.slice(0, 120)}"` : "-"}`);
     return id;
+  }
+  // The running terminal here a session is in (its agent and session id; tab-links.js and codex-live.js link them),
+  // or null. A second resume of it would run the agent twice on one conversation: the callers show this one instead.
+  function runningTab(agent, sessionId) {
+    if (typeof agent !== "string" || !agent || typeof sessionId !== "string" || !sessionId) return null;
+    return terminals.getTabs().find(x => x.agent === agent && x.sessionId === sessionId && !x.exited) || null;
   }
   // Prompts of launches whose terminal never started (a start that was cut short).
   function sweepPrompts() {
@@ -181,6 +195,9 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
   async function takeOverSession(agent, id) {
     checkAgent(agent);
     checkSessionId(id);
+    // In a terminal of AgentDeck's own (here, maybe a pane on another device): that is the place to show it, never one
+    // to stop it from.
+    if (runningTab(agent, id)) fail("sessionRunning");
     const entry = (await liveSessions()).find(l => l.agent === agent && l.id === id);
     if (!entry) fail("moveNotRunning");
     if (entry.status === "busy") fail("moveBusy");
@@ -270,8 +287,8 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
   return {
     NEW_SESSION, SESSION_ID, isAgent, checkAgent, checkSessionId, checkResumable, agentCommand, getSessionTitle, isDir,
     shellCommand, newCommand, resumeCommand, promptCommand, handoffCommand, cloneCommand, commandFor,
-    openTerminal, sweepPrompts, takeOverSession, stopSession, deleteSession
+    openTerminal, runningTab, sweepPrompts, takeOverSession, stopSession, deleteSession, MAX_TERMINALS
   };
 }
 
-module.exports = { createLaunch, NEW_SESSION, SESSION_ID, isAgent, agentCommand };
+module.exports = { createLaunch, NEW_SESSION, SESSION_ID, MAX_TERMINALS, isAgent, agentCommand };

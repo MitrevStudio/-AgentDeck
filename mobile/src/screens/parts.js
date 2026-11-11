@@ -73,23 +73,33 @@ export function wireConn(el, store, ctx) {
 }
 
 // A terminal in a list (the inbox's Terminals, a computer's screen): its title, then computer · folder · who opened
-// it, "ended" / "lost" at the end; the row opens it (an agent's terminal: its session), the X at the end closes it.
-// wireTerminals(el, ctx) handles both.
+// it, "reopened after a restart" under that when the host opened it anew; at the end "ended" / "lost", or an eye with
+// the number of other devices that have it open. The row opens it (an agent's terminal: its session), the X at the
+// end closes it. wireTerminals(el, ctx) handles both.
 export function terminalRow(x, { showNode = true } = {}) {
   const by = x.owner === "phone" ? t("terms.byPhone") : x.owner === "here" ? t("terms.byHere") : x.ownerName ? t("terms.byPeer", { name: x.ownerName }) : t("terms.byOther");
   const ended = x.exited ? "exited" : x.lost ? "lost" : "";
   const glyph = x.agent ? agentIcon(x.agent) || icon("terminal") : icon("terminal");
   const meta = [showNode ? nodeTag(x.nodeName) : "", projectTag(x.project), `<span>${esc(by)}</span>`].filter(Boolean).join('<i class="sep">·</i>');
+  const others = !ended && x.viewers?.length ? t("term.viewers", { names: x.viewers.map(v => v.name).join(", ") }) : "";
+  const end = ended ? `<span class="tag">${esc(t(`terms.${ended}`))}</span>`
+    : others ? `<span class="viewers" role="img" aria-label="${esc(others)}" title="${esc(others)}">${icon("eye")}${x.viewers.length}</span>` : "";
   return `<div class="trow${ended ? " ended" : ""}">
     <button class="trow-open" data-node="${esc(x.node)}" data-term="${esc(x.id)}" data-title="${esc(x.title)}"${x.item ? ` data-agent="${esc(x.item.agent)}" data-sid="${esc(x.item.id)}"` : ""}>
       <span class="row-main">
         <span class="row-title">${esc(x.title)}</span>
         <span class="row-meta"><span class="agent-mark" role="img" aria-label="${esc(x.agent || t("new.shell"))}" title="${esc(x.agent || t("new.shell"))}">${glyph}</span>${meta}</span>
+        ${x.reopened && !ended ? `<span class="row-note">${esc(t("term.reopened"))}</span>` : ""}
       </span>
-      ${ended ? `<span class="row-end"><span class="tag">${esc(t(`terms.${ended}`))}</span></span>` : ""}
+      ${end ? `<span class="row-end">${end}</span>` : ""}
     </button>
     ${iconBtn("x", t("terms.close", { title: x.title }), `data-close-term="${esc(x.id)}" data-node="${esc(x.node)}" data-ended="${ended ? 1 : ""}"`, "danger")}
   </div>`;
+}
+// "Close this terminal?" - saying who else has it open: it ends for them too.
+export function closeAsk(store, node, id) {
+  const name = store.nodeName(node), others = store.viewers(node, id).map(v => v.name);
+  return others.length ? t("term.closeAskSeen", { name, names: others.join(", ") }) : t("term.closeAsk", { name });
 }
 export function wireTerminals(el, ctx) {
   el.addEventListener("click", async e => {
@@ -99,7 +109,7 @@ export function wireTerminals(el, ctx) {
       const { node, closeTerm: id } = close.dataset;
       const title = close.closest(".trow")?.querySelector(".trow-open")?.dataset.title || "";
       const name = ctx.store.nodeName(node);
-      const ask = close.dataset.ended ? t("terms.removeAsk", { title, name }) : t("term.closeAsk", { name });
+      const ask = close.dataset.ended ? t("terms.removeAsk", { title, name }) : closeAsk(ctx.store, node, id);
       if (!await ctx.confirm(ask, t("term.close"), { danger: true })) return;
       try { await ctx.store.closeTerminal(node, id); ctx.toast(t("terms.closed")); } catch (err) { ctx.fail(err); }
       return;

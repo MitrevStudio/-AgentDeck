@@ -58,6 +58,8 @@ function wsPipe(ws) {
   const pipe = {
     onmessage: null, onclose: null,
     send(message) { if (!closed && ws.readyState === 1) ws.send(message); },
+    // Bytes waiting to go out (protocol.js buffered).
+    buffered: () => Number(ws.bufferedAmount) || 0,
     close(hard) {
       try { if (hard && ws.terminate) ws.terminate(); else ws.close(); } catch {}
       gone();
@@ -87,6 +89,8 @@ function framedPipe(io) {
       new DataView(head.buffer).setUint32(0, message.length);
       io.send(concatBytes(head, message));
     },
+    // Bytes waiting to go out, as far as the stream can say (a relay tunnel's: what it passes on to; otherwise 0).
+    buffered: () => Number(io.buffered?.()) || 0,
     close() { if (closed) return; io.close(); gone(); }
   };
   function input(chunk) {
@@ -203,6 +207,8 @@ function createSocket(pipe, { send: out, recv: inn }, { wrapBinary = b => b } = 
   const socket = {
     OPEN, CLOSED,
     get readyState() { return state; },
+    // What the pipe below has waiting to go out (protocol.js buffered: a sender of much output holds back).
+    get bufferedAmount() { return state === OPEN ? pipe.buffered?.() || 0 : 0; },
     on(name, fn) { ev.on(name, fn); return socket; },
     once(name, fn) { ev.once(name, fn); return socket; },
     off(name, fn) { ev.off(name, fn); return socket; },

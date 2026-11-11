@@ -28,25 +28,36 @@ function findTabPid(pid, parents, tabPids) {
   return 0;
 }
 
+// A tab linked already is looked at again once its session is no longer live while the tab runs: Claude Code's /clear
+// (and the like) starts a new session id in the same process, and the tab takes it over (link with replace), so the
+// session shows in its terminal and a restart resumes the newest conversation (docs/SHARED-SESSIONS.md 4.8). Only a
+// session of the tab's own agent replaces its session; Codex tabs are linked by their log (codex-live.js) instead.
+//
 // terminals: terminals.js; liveSessions(): live.js.
-function createTabLinks({ terminals, liveSessions }) {
+function createTabLinks({ terminals, liveSessions, parentMap = getParentMap }) {
   // A session resumed again runs in a new process, which is checked anew: the key holds the pid.
   const checked = new Map(); // `${agent}:${id}:${pid}` -> the tab set it was checked against
   const checkKey = l => `${l.agent}:${l.id}:${l.pid}`;
   let timer = null, polling = false;
 
   async function linkTabs() {
-    const tabs = terminals.getUnlinkedTabs();
+    const running = terminals.getTabs().filter(tab => !tab.exited);
+    if (!running.length) {
+      return;
+    }
+    const live = await liveSessions();
+    const liveKeys = new Set(live.map(l => `${l.agent}:${l.id}`));
+    // Unlinked tabs, and linked ones whose session is gone while they run (stale).
+    const tabs = running.filter(tab => !tab.sessionId || (tab.agent !== "Codex" && !liveKeys.has(`${tab.agent}:${tab.sessionId}`)));
     if (!tabs.length) {
       return;
     }
-    const tabSet = tabs.map(tab => tab.pid).sort().join(",");
-    const linked = new Set(terminals.getTabs().filter(tab => tab.sessionId).map(tab => `${tab.agent}:${tab.sessionId}`));
-    const live = await liveSessions();
+    const tabSet = tabs.map(tab => `${tab.pid}:${tab.sessionId}`).sort().join(",");
+    const linked = new Set(running.filter(tab => tab.sessionId).map(tab => `${tab.agent}:${tab.sessionId}`));
     // Processes that ended are forgotten.
-    const running = new Set(live.map(checkKey));
+    const alive = new Set(live.map(checkKey));
     for (const key of checked.keys()) {
-      if (!running.has(key)) {
+      if (!alive.has(key)) {
         checked.delete(key);
       }
     }
@@ -54,22 +65,31 @@ function createTabLinks({ terminals, liveSessions }) {
     if (!candidates.length) {
       return;
     }
-    const parents = await getParentMap();
+    const parents = await parentMap();
     if (!parents) {
       return;
     }
-    const tabByPid = new Map(tabs.map(tab => [tab.pid, tab.id]));
+    const tabByPid = new Map(tabs.map(tab => [tab.pid, tab]));
     for (const l of candidates) {
       checked.set(checkKey(l), tabSet);
       const tabPid = findTabPid(l.pid, parents, tabByPid);
-      if (tabPid) {
-        terminals.link(tabByPid.get(tabPid), l.agent, l.id);
-        tabByPid.delete(tabPid);
+      const tab = tabPid && tabByPid.get(tabPid);
+      if (!tab) {
+        continue;
       }
+      if (!tab.sessionId) {
+        terminals.link(tab.id, l.agent, l.id);
+      } else if (tab.agent === l.agent && l.agent !== "Codex") {
+        terminals.link(tab.id, l.agent, l.id, { replace: true });
+      } else {
+        continue;
+      }
+      tabByPid.delete(tabPid);
     }
   }
 
   return {
+    linkTabs,
     start() {
       timer ||= setInterval(async () => {
         if (polling) {

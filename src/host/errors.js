@@ -17,6 +17,11 @@ const MESSAGES = {
   moveHostsAgentDeck: "AgentDeck itself runs inside this session.",
   stopUnsupported: "Only Claude sessions can be stopped from here.",
   stopFailed: "The session could not be stopped.",
+  // Shared terminals (viewers.js, launch.js, mesh/serve.js; docs/SHARED-SESSIONS.md 4).
+  tooManyViewers: "Too many devices have this terminal open.",
+  tooManyTerminals: "Too many terminals run on this computer. Stop some first.",
+  sessionRunningOutside: "The session runs outside AgentDeck there.",
+  notViewing: "This device does not have the terminal open (yet). Try again in a moment.",
   // Typing into a session (send-text.js); the command centre shows these texts as they are.
   agentNotReady: "The agent is not ready; nothing was sent.",
   agentStopped: "The agent stopped before the message could be submitted.",

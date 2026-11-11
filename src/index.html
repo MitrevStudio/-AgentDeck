@@ -53,6 +53,11 @@
         <div class="side-sec-head"><h2 data-i18n="manager.agents.title"></h2><span class="count" id="agentCount">0</span></div>
         <div class="side-list" id="agents"></div>
       </section>
+      <!-- Every running terminal of this and the online computers that Agents does not show (renderer.js renderTerms). -->
+      <section class="side-sec terms-sec" id="sideTerms" hidden>
+        <div class="side-sec-head"><h2 data-i18n="manager.terms.title"></h2><span class="count" id="termCount">0</span></div>
+        <div class="side-list" id="terms"></div>
+      </section>
       </div>
       <section class="side-sec git-sec" id="sideGit" role="tabpanel" aria-labelledby="sideTabGit" hidden>
         <div class="side-sec-head git-panel-head"><h2 id="gitPanelTitle"></h2><span class="count" id="gitRepoCount">0</span><span class="side-tools"><button class="icon-btn" id="gitPanelRefresh" data-i18n-title="git.panel.refresh"><span data-icon="refresh"></span></button><button class="icon-btn" id="gitPanelMenu" type="button" aria-haspopup="menu"><span data-icon="more"></span></button></span></div>

@@ -113,7 +113,10 @@ function createRelay({ self, neighbors, leaves = () => new Map(), changed, accep
         else s.push(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength));
       },
       // Ends after what is buffered went out (the "end" below destroys it then).
-      close: () => { if (!s.destroyed && !ended) { ended = true; s.push(null); } }
+      close: () => { if (!s.destroyed && !ended) { ended = true; s.push(null); } },
+      // What waits here for the tunnel to take it: the phone's link reports it (web-link.js bufferedAmount), so a
+      // terminal's output to a phone that falls behind is held back (mesh/serve.js) before MAX_WEB_BUFFER closes it.
+      buffered: () => s.readableLength
     }, via, origin);
     return s;
   }

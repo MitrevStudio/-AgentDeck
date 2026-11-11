@@ -1,7 +1,8 @@
 // The centre of the manager window: the shown project's tabs, and the shown tab split into panes, each a terminal
 // (xterm.js) of AgentDeck's own. The layout lives in main (workspace.js); this page draws it and sends commands back.
-// Loaded before renderer.js, which provides the session data (data, live) and calls showSessionTab, findSessionTab,
-// isMoveHereOffered, moveSessionHere, renderWorkspace and runWorkspace.
+// Loaded before renderer.js, which provides the session data (data, live, liveOf) and calls showSessionTab,
+// findSessionTab, hasSessionPane, getSessionTerm, isMoveHereOffered, moveSessionHere, openTerm, stopTerm,
+// getViewersHtml, renderWorkspace and runWorkspace.
 const ANSI_NAMES = [
   "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
   "brightBlack", "brightRed", "brightGreen", "brightYellow", "brightBlue", "brightMagenta", "brightCyan", "brightWhite"
@@ -19,6 +20,13 @@ let focusAfterRender = false;
 
 const runWorkspace = (cmd, args = {}) => window.terminals.command(cmd, args).catch(e => toast(e.message, true));
 const getTerminal = id => ws.terminals.find(x => x.id === id) || null;
+// A terminal belongs to the computer it runs on and every device may have it open (docs/SHARED-SESSIONS.md): X only
+// hides a pane, Stop ends the terminal for everyone.
+// The view lists every terminal of this and the online computers; `paned` tells those with a pane here.
+const isPaned = x => Boolean(x?.paned);
+// The other devices that have the terminal open (this window is one of the viewers too).
+const getOtherViewers = x => (x?.viewers || []).filter(v => !v.me);
+const getViewerNames = list => list.map(v => v.name).filter(Boolean).join(", ");
 const getShownSpace = () => ws.spaces[ws.activeSpace] || { tabs: [], active: "" };
 const getShownTab = () => ws.tabs[getShownSpace().active] || null;
 function getPanesOf(node, out = []) {
@@ -72,7 +80,9 @@ function writeAfter(view, data, end) {
 }
 async function attachView(id, view) {
   const a = await window.terminals.attach(id);
-  if (!a) return;
+  if (!a || termViews.get(id) !== view) return; // its pane went meanwhile, and the view with it
+  // The terminal's size first, so the scrollback wraps as it was written.
+  setTermSize(id, a);
   view.term.write(a.scrollback);
   view.attachedEnd = a.end;
   view.queue.forEach(chunk => writeAfter(view, chunk.data, chunk.end));
@@ -129,7 +139,9 @@ function createTermView(id) {
   });
   // Clicking into a terminal makes its pane the focused one.
   term.textarea?.addEventListener("focus", () => { if (getShownTab()?.focus !== id) runWorkspace("focus", { term: id }); });
-  const view = { host, term, fit, attachedEnd: null, queue: [] };
+  // size: the terminal's size on its computer and who sets it ({cols, rows, mine, by}), null until attached or when
+  // main does not say.
+  const view = { host, term, fit, attachedEnd: null, queue: [], size: null, sized: false };
   termViews.set(id, view);
   attachView(id, view).catch(e => toast(e.message, true));
   return view;
@@ -140,13 +152,59 @@ function disposeTermView(id) {
   view.host.remove();
   termViews.delete(id);
 }
+// One size per terminal: the one of the device that typed last (the host decides, docs/SHARED-SESSIONS.md §4.3). A pane
+// always tells what fits it (a "want"); it takes that size itself only while it sets the size or nobody does, and
+// otherwise shows the terminal in the size it has there, from the top left (the pane scrolls when that is larger). A
+// terminal of a host without these rules (legacy), or a main that does not say, is fitted as always.
+function isForeignSize(id) {
+  const size = termViews.get(id)?.size;
+  return Boolean(size && !size.mine && size.by && !getTerminal(id)?.legacy);
+}
 function fitTerm(id) {
   const view = termViews.get(id);
   if (!view || !view.host.isConnected || !view.host.offsetWidth) return;
   try {
-    view.fit.fit();
-    window.terminals.resize(id, view.term.cols, view.term.rows);
+    // What fits the pane itself: measured without the scrollbars it has while the size is another's (.sized), which
+    // would make the want a cell short - and the terminal resized twice once this pane drives.
+    const pane = view.host.closest(".pane"), sized = pane?.classList.contains("sized"), body = view.host.parentElement;
+    const scroll = sized && body ? [body.scrollLeft, body.scrollTop] : null;
+    if (sized) pane.classList.remove("sized");
+    const want = view.fit.proposeDimensions();
+    if (sized) {
+      pane.classList.add("sized");
+      if (scroll) [body.scrollLeft, body.scrollTop] = scroll;
+    }
+    if (!want?.cols || !want?.rows) return;
+    window.terminals.resize(id, want.cols, want.rows);
+    const size = isForeignSize(id) ? view.size : want;
+    if (view.term.cols !== size.cols || view.term.rows !== size.rows) view.term.resize(size.cols, size.rows);
   } catch {}
+}
+// The terminal drawn in the size it has to have now: another device's, or its pane's own - fitted again when it just
+// stopped being another's (or `refit`).
+function applyTermSize(id, refit = false) {
+  const view = termViews.get(id);
+  if (!view) return;
+  const foreign = isForeignSize(id), was = view.sized;
+  view.sized = foreign;
+  // The pane scrolls only while the size is another's: its scrollbars go before it measures what fits it, else the
+  // first fit is a cell short and a second one follows (two resizes of the terminal for one change).
+  view.host.closest(".pane")?.classList.toggle("sized", foreign);
+  if (!foreign) { if (refit || was) fitTerm(id); return; }
+  if (view.term.cols !== view.size.cols || view.term.rows !== view.size.rows) view.term.resize(view.size.cols, view.size.rows);
+}
+// The size main reported (attach, onSize), drawn: the terminal in that size or in its own, the header's chip with it.
+function setTermSize(id, s) {
+  const view = termViews.get(id);
+  if (!view) return;
+  view.size = Number(s?.cols) > 0 && Number(s?.rows) > 0 ? { cols: s.cols, rows: s.rows, mine: Boolean(s.mine), by: s.by || "" } : null;
+  applyTermSize(id, true);
+  const tab = getShownTab();
+  if (tab && getPanesOf(tab.zoom ? { term: tab.zoom } : tab.root).includes(id)) renderPaneHeads(tab);
+}
+// "Use my size": this pane's size for the terminal, on every device (until another one types).
+function takeSize(id) {
+  window.terminals.takeSize(id).catch(e => toast(e.message, true));
 }
 const fitShown = () => document.querySelectorAll("#panes .pane[data-term]").forEach(el => fitTerm(el.dataset.term));
 
@@ -242,16 +300,27 @@ document.addEventListener("keydown", e => {
 });
 
 // ---------- actions ----------
-// A terminal running an agent asks first; a plain shell closes at once.
-async function closePane(term) {
-  const x = getTerminal(term);
-  if (x?.agent && !(await confirmDialog({ title: t("confirm.closePane"), body: t("ws.closeConfirm"), danger: true }))) return;
-  runWorkspace("close-pane", { term });
+// X (and Ctrl+Shift+W, a tab's X or middle click) hides the pane: the terminal keeps running and can be opened again
+// from the sidebar, so nothing is asked.
+const closePane = term => runWorkspace("close-pane", { term });
+const closeTab = tabId => runWorkspace("close-tab", { tab: tabId });
+// Stop: the terminal ends on its computer, for every device that has it open - asked first, naming them. x: the
+// terminal as the view lists it, or what is known of it ({id, cwd, agent, sessionId, title, node}) when it is not listed.
+function confirmStop(x) {
+  const names = getViewerNames(getOtherViewers(x));
+  const vars = { title: getTermTitle(x), cwd: x.cwd || "", where: x.node ? nodeNameOf(x.node) : t("term.thisComputer"), viewers: names ? t("term.viewersSuffix", { names }) : "" };
+  return confirmDialog({ title: t("term.stopAll"), body: t(x.agent ? "term.stopAgentConfirm" : "term.stopShellConfirm", vars), confirmLabel: t("term.stop"), danger: true });
 }
-async function closeTab(tabId) {
-  const terms = getPanesOf(ws.tabs[tabId]?.root);
-  if (terms.some(id => getTerminal(id)?.agent) && !(await confirmDialog({ title: t("ws.closeTab"), body: t("ws.closeTabConfirm", { n: terms.length }), danger: true }))) return;
-  runWorkspace("close-tab", { tab: tabId });
+async function stopTerm(id, known = null) {
+  const x = getTerminal(id) || (known && { ...known, id });
+  if (!x || !(await confirmStop(x))) return;
+  try { await window.terminals.stop(id); } catch (e) { toast(e.message, true); }
+}
+// A terminal comes up here: its pane focused, or - with no pane here - a new one (a tab of its project unless `place`
+// says beside the focused pane).
+function openTerm(id, place = "tab") {
+  focusAfterRender = true;
+  return isPaned(getTerminal(id)) ? runWorkspace("focus", { term: id }) : runWorkspace("open-term", { term: id, place });
 }
 // what: "terminal" or an agent's name; a new tab in the shown space's folder.
 async function openInSpace(what, place = "tab") {
@@ -264,19 +333,29 @@ async function openInSpace(what, place = "tab") {
 }
 
 // ---------- sessions <-> terminals (main links a new session's terminal: tab-links.js) ----------
+// The terminal of AgentDeck a session runs in, on its computer - with a pane here or not, whichever device opened it:
+// linked to the session, or the one its live state names (`term`, the host's own word for it).
 function findSessionTab(s) {
-  return ws.terminals.find(x => x.agent === s.agent && x.sessionId === s.id && (x.node || "") === (s.node || "") && !x.exited) || null;
+  if (!s) return null;
+  const term = getSessionTerm(s);
+  return ws.terminals.find(x => (x.node || "") === (s.node || "") && !x.exited && ((x.agent === s.agent && x.sessionId === s.id) || (term && x.id === term))) || null;
 }
-// Brings up the session's pane when it has one; false otherwise.
-function showSessionTab(s) {
-  const x = s && findSessionTab(s);
-  if (!x) return false;
-  focusAfterRender = true;
-  runWorkspace("focus", { term: x.id });
+// The terminal id a running session's live state names ("" outside a terminal of AgentDeck; undefined from a host
+// that does not say).
+const getSessionTerm = s => (s ? liveOf(s)?.term : undefined);
+// Brings up the session's terminal - its pane, or a new one (placed as openTerm's) when it has none here; false when it
+// runs in none.
+function showSessionTab(s, place = "tab") {
+  const term = s && (findSessionTab(s)?.id || getSessionTerm(s));
+  if (!term) return false;
+  openTerm(term, place);
   return true;
 }
+// Has a pane here (the agents list marks it).
+const hasSessionPane = s => isPaned(findSessionTab(s));
+// "Move here" ends a session elsewhere and resumes it here: only for one that runs outside AgentDeck's terminals.
 function isMoveHereOffered(s) {
-  return s.agent === "Claude" && !findSessionTab(s);
+  return s.agent === "Claude" && !findSessionTab(s) && !getSessionTerm(s);
 }
 async function moveSessionHere(s) {
   toast(t("term.moving"));
@@ -307,7 +386,7 @@ function renderTabbar() {
     return `<div class="wtab ${tab.id === space.active ? "active" : ""}" data-tab="${esc(tab.id)}" role="tab" draggable="true" title="${esc(label)}">
       ${l ? statusMark(l, false) : ""}<span class="wtab-name">${esc(label)}</span>
       <button class="wtab-close wtab-rename-btn" data-ws="rename-tab" title="${esc(t("action.rename"))}" aria-label="${esc(t("action.rename"))}">${icon("pencil")}</button>
-      <button class="wtab-close" data-ws="close-tab" title="${esc(t("ws.closeTab"))}">${icon("x")}</button></div>`;
+      <button class="wtab-close" data-ws="close-tab" title="${esc(t("ws.hideTab"))}">${icon("x")}</button></div>`;
   }).join("") + `<button class="icon-btn wtab-new ${!space.active ? "active" : ""}" data-ws="sessions" title="${esc(t("ws.sessions"))}" aria-label="${esc(t("ws.sessions"))}">${icon("plus")}</button>`;
   // Rebuilt only when something shows differently, and not while a tab is dragged: a click or a drag in progress is
   // not lost.
@@ -334,6 +413,8 @@ function renderPanes() {
   $("spaceEmpty").hidden = Boolean(tab);
   if (!tab) {
     layoutSig = sig;
+    // The last tab of the space went: its panes go from the page too (not only out of sight).
+    $("panes").replaceChildren();
     renderSpaceEmpty($("spaceEmpty"), ws.activeSpace);
     return;
   }
@@ -408,38 +489,66 @@ function renderPaneHeads(tab) {
   if (draggedPane) return; // the header being dragged stays the same element until it is let go
   const many = getPanesOf(tab.root).length > 1;
   document.querySelectorAll("#panes .pane").forEach(el => {
-    const x = getTerminal(el.dataset.term);
+    const id = el.dataset.term, x = getTerminal(id);
     const s = getTermSession(x), l = getTermLive(x);
-    const title = many ? `<span class="pane-title" title="${esc(x?.cwd || "")}">${esc(getTermTitle(x))}</span>`
-      : `<span class="pane-title pane-dir" title="${esc(getTermTitle(x))}">${esc(x?.cwd || getTermTitle(x))}</span>`;
+    // Opened from another device: said in the title's tooltip.
+    const from = x?.ownerName ? `\n${t("term.openedBy", { name: x.ownerName })}` : "";
+    const title = many ? `<span class="pane-title" title="${esc((x?.cwd || "") + from)}">${esc(getTermTitle(x))}</span>`
+      : `<span class="pane-title pane-dir" title="${esc(getTermTitle(x) + from)}">${esc(x?.cwd || getTermTitle(x))}</span>`;
+    const note = x?.note || (x?.reopened ? t("term.reopened") : "");
+    const foreign = isForeignSize(id);
+    el.classList.toggle("sized", foreign);
     setHtml(el.querySelector(".pane-info"), `${x?.agent ? agentMark(x.agent) : `<span class="agent-mark">${icon("terminal")}</span>`}${title}
-      ${x?.note ? `<span class="pane-note">${esc(x.note)}</span>` : ""}
-      ${s ? getContextChip(s) : ""}${l ? statusMark(l, isLoading(sessionKey(l), l)) : ""}`);
+      ${note ? `<span class="pane-note">${esc(note)}</span>` : ""}
+      ${s ? getContextChip(s) : ""}${l ? statusMark(l, isLoading(sessionKey(l), l)) : ""}${getViewersHtml(x, "pane-viewers")}${foreign ? getSizeChipHtml(termViews.get(id).size) : ""}`);
     setHtml(el.querySelector(".pane-tools"), `<button class="icon-btn" data-ws="split-right" title="${esc(t("ws.splitRight"))}">${icon("splitRight")}</button>
         <button class="icon-btn" data-ws="split-down" title="${esc(t("ws.splitDown"))}">${icon("splitDown")}</button>
         ${many ? `<button class="icon-btn" data-ws="reset-panes" title="${esc(t("ws.resetPanes"))}" aria-label="${esc(t("ws.resetPanes"))}">${icon("equal")}</button>` : ""}
         ${many ? `<button class="icon-btn ${tab.zoom ? "on" : ""}" data-ws="zoom" title="${esc(t(tab.zoom ? "ws.unzoom" : "ws.zoom"))}">${icon("maximize")}</button>` : ""}
-        <button class="icon-btn" data-ws="close-pane" title="${esc(t("ws.closePane"))}">${icon("x")}</button>`);
+        ${foreign ? `<button class="icon-btn on" data-ws="take-size" title="${esc(t("term.useMySize"))}" aria-label="${esc(t("term.useMySize"))}">${icon("fit")}</button>` : ""}
+        <button class="icon-btn danger" data-ws="stop" title="${esc(t("term.stopAll"))}" aria-label="${esc(t("term.stopAll"))}">${icon("stop")}</button>
+        <button class="icon-btn" data-ws="close-pane" title="${esc(t("ws.closePane"))}" aria-label="${esc(t("ws.closePane"))}">${icon("x")}</button>`);
   });
 }
+// The other devices that have a terminal open: an eye and how many, their names in the tooltip ("" when none).
+function getViewersHtml(x, cls) {
+  const others = getOtherViewers(x);
+  return others.length ? `<span class="${cls}" title="${esc(t("term.viewers", { names: getViewerNames(others) }))}">${icon("eye")}${others.length}</span>` : "";
+}
+// The size another device set: small, with who it is; what to do about it in the tooltip.
+function getSizeChipHtml(size) {
+  return `<span class="size-chip" title="${esc(t("term.sizeBy", { cols: size.cols, rows: size.rows, name: size.by }))}">${size.cols}×${size.rows} · ${esc(size.by)}</span>`;
+}
+// The terminals with a pane in the layout (any tab of any space): the window keeps a view of these only.
+const getPanedIds = () => new Set(Object.values(ws.tabs).flatMap(tab => getPanesOf(tab?.root)));
 function renderWorkspace() {
-  // Terminals that went: their views go too.
-  const ids = new Set(ws.terminals.map(x => x.id));
-  [...termViews.keys()].filter(id => !ids.has(id)).forEach(disposeTermView);
+  // A terminal whose pane went (hidden, or the terminal ended) loses its view: main sends no output for it any more,
+  // and a pane shown again later attaches anew with the whole scrollback (main.js panesChanged).
+  const paned = getPanedIds();
+  [...termViews.keys()].filter(id => !paned.has(id)).forEach(disposeTermView);
+  // A terminal can turn legacy or plain again (its computer was updated, reconnected): its size follows.
+  termViews.forEach((_view, id) => applyTermSize(id));
   renderTabbar();
   renderPanes();
   syncAnimations();
 }
 
 // ---------- events ----------
+// Output of a terminal with a pane (main sends no other; the layout that adds a pane comes before its output). One
+// that arrives after its pane went (hidden just now) has nothing to go to.
 window.terminals.onData(({ id, data, end }) => {
-  const view = termViews.get(id) || createTermView(id);
+  const view = termViews.get(id) || (getPanedIds().has(id) ? createTermView(id) : null);
+  if (!view) return;
   if (view.attachedEnd === null) view.queue.push({ data, end });
   else writeAfter(view, data, end);
 });
 // Another viewer (a phone) sized the terminal and let go of it: its pane, when shown, gives it its own size back (a
-// hidden one does when it is shown next).
+// hidden one does when it is shown next). Only older hosts send this; newer ones hand the size back themselves.
 window.terminals.onRefit(id => fitTerm(id));
+// The terminal's size there changed, or who sets it.
+window.terminals.onSize(s => setTermSize(s?.id, s));
+// A terminal with a pane here ended, or was stopped from another device: its pane goes (the layout says so), this says why.
+window.terminals.onEnded(e => toast(t("term.ended", { title: e?.title || getTermTitle(getTerminal(e?.id)) })));
 // The drawing reads renderer.js's session data, and the page may hear from main between two of its scripts (a layout
 // restored on start arrives at once): nothing is drawn before every script ran.
 const isPageLoading = () => document.readyState === "loading";
@@ -528,6 +637,8 @@ $("panes").addEventListener("click", e => {
     if (btn.dataset.ws === "reset-panes") return resetRatios(tab.id);
     if (btn.dataset.ws === "zoom") return runWorkspace("zoom", { tab: tab.id });
     if (btn.dataset.ws === "close-pane") return closePane(term);
+    if (btn.dataset.ws === "take-size") return takeSize(term);
+    if (btn.dataset.ws === "stop") return stopTerm(term);
   };
   // A pane's buttons act on that pane: it is focused first.
   if (tab?.focus !== term) runWorkspace("focus", { term }).then(run); else run();

@@ -76,7 +76,8 @@
   }
 
   // ---------- acting ----------
-  // beside: Alt+Enter - a session not running yet is resumed in a pane beside the focused one.
+  // beside: Alt+Enter - a session not running yet is resumed in a pane beside the focused one, and a running one with
+  // no pane here (its terminal on any computer) opens there too.
   async function choose(i, beside = false) {
     const item = st.items[i];
     if (!item) return;
@@ -84,7 +85,7 @@
     try {
       if (item.p) return selectProject(item.p.n);
       const s = item.s;
-      if (liveOf(s)) return await showTerminal(s);
+      if (liveOf(s)) return await showTerminal(s, beside ? "right" : "tab");
       await resume(s, beside ? "right" : "tab");
     } catch (e) { toast(e.message, true); }
   }

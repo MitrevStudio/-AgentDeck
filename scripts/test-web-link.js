@@ -121,6 +121,8 @@ const phoneOf = (keypair, peers = []) => {
     const out = Buffer.alloc(3 * 1024 * 1024 + 7, 7);
     const binPhone = until(phone, "binary", e => e.node === selfA.id, 60000);
     a.sendBinary(phone.id, out);
+    // What waits at the tunnel's end here counts as the phone's link's buffer (mesh/serve.js holds output back on it).
+    assert.ok(a.buffered(phone.id) > 0, "a phone behind a relay reports what waits for it");
     const gotPhone = (await binPhone).data;
     assert.ok(gotPhone instanceof Uint8Array && !Buffer.isBuffer(gotPhone), "the phone gets plain bytes");
     assert.ok(Buffer.from(gotPhone).equals(out));

@@ -140,7 +140,11 @@ function createTerminals({ userDataDir, onData, onExit, onChange, onResize = () 
     const entry = { id: terminal.id, pid: terminal.pid, token: terminal.token, createdAt: terminal.createdAt, meta: getMeta(terminal) };
     atomicFile.write(getEntryFile(terminal.id), JSON.stringify(entry)).catch(e => console.error("Saving a terminal failed:", e.message));
   }
+  // Gone at once as well as in turn: a terminal stopped just before quitting ("Stop all terminals and quit") must not
+  // be opened anew on the next start (host/index.js restoreTerminals) because its file outlived the process. The
+  // queued removal still follows any write queued before it.
   function removeEntry(id) {
+    try { fs.rmSync(getEntryFile(id), { force: true }); } catch {}
     atomicFile.remove(getEntryFile(id)).catch(e => console.error("Removing a terminal failed:", e.message));
   }
 
@@ -258,18 +262,21 @@ function createTerminals({ userDataDir, onData, onExit, onChange, onResize = () 
     }
   }
   // owner: the id of the peer that opened it (mesh), "" for this computer's own. cols, rows: its size as last set here
-  // (one attached again after a restart counts as the default until a pane sizes it).
-  function createTerminal({ id, pid, token, cwd, title, agent = "", sessionId = "", agentOnly = false, codexLog = "", owner = "", createdAt = Date.now() }) {
+  // (one attached again after a restart counts as the default until a pane sizes it). reopened: opened anew by the
+  // host after its DockPty was gone (host/index.js restoreTerminals).
+  function createTerminal({ id, pid, token, cwd, title, agent = "", sessionId = "", agentOnly = false, codexLog = "", owner = "", createdAt = Date.now(), reopened = false }) {
     return {
-      id, pid, token, cwd, title, agent, sessionId, agentOnly, codexLog, owner, createdAt, socket: null, chunks: [], chunkChars: 0, modes: new Map(), end: 0,
+      id, pid, token, cwd, title, agent, sessionId, agentOnly, codexLog, owner, createdAt, reopened, socket: null, chunks: [], chunkChars: 0, modes: new Map(), end: 0,
       exitCode: null, lost: false, closed: false, lastInputAt: 0, note: "", cols: DEFAULT_COLS, rows: DEFAULT_ROWS
     };
   }
 
-  // commandLine: what runs in the pseudo console. env: already prepared by terminal-env.js.
-  async function open({ cwd, commandLine, title, agent = "", sessionId = "", agentOnly = false, codexLog = "", owner = "", env = process.env }) {
+  // commandLine: what runs in the pseudo console. env: already prepared by terminal-env.js. id: given only to open a
+  // terminal anew under the id it had (restoreTerminals: its DockPty is gone), with its createdAt and reopened.
+  async function open({ cwd, commandLine, title, agent = "", sessionId = "", agentOnly = false, codexLog = "", owner = "", env = process.env, id: wanted = "", createdAt, reopened = false }) {
+    if (wanted && (!TERMINAL_ID.test(wanted) || terminals.has(wanted))) throw new Error("The terminal could not start: that id is taken");
     const exe = await getBridge();
-    const id = crypto.randomUUID(), token = crypto.randomBytes(16).toString("hex");
+    const id = wanted || crypto.randomUUID(), token = crypto.randomBytes(16).toString("hex");
     // This DockPty only starts the real one - detached, inheriting none of AgentDeck's handles - and prints its process
     // id. The token travels in the environment (not on a command line other processes can read); DockPty drops it
     // before the program starts.
@@ -284,7 +291,12 @@ function createTerminals({ userDataDir, onData, onExit, onChange, onResize = () 
         else resolve(started);
       });
     });
-    const terminal = createTerminal({ id, pid, token, cwd, title, agent, sessionId, agentOnly, codexLog, owner });
+    // Taken while DockPty started (a second open of the same id): this one goes.
+    if (terminals.has(id)) {
+      try { process.kill(pid); } catch {}
+      throw new Error("The terminal could not start: that id is taken");
+    }
+    const terminal = createTerminal({ id, pid, token, cwd, title, agent, sessionId, agentOnly, codexLog, owner, reopened, ...(createdAt ? { createdAt } : {}) });
     // In the list before attaching: output can come right behind the hello.
     terminals.set(id, terminal);
     try {
@@ -298,29 +310,44 @@ function createTerminals({ userDataDir, onData, onExit, onChange, onResize = () 
     onChange(getTabs());
     return id;
   }
-  // The terminals the last AgentDeck left running, attached again with the output their DockPty kept. An entry whose
-  // DockPty is gone is dropped. Answers the ids attached, and as `kept` those whose DockPty still runs but could not be
-  // attached this time (no hello in time, the pipe busy, another protocol): their entries stay for a later start, and
-  // the caller must not open them anew.
+  // The terminals the last AgentDeck left running, attached again with the output their DockPty kept. Answers the ids
+  // attached, and as `kept` those whose DockPty still runs but could not be attached this time (no hello in time, the
+  // pipe busy, another protocol): their entries stay for a later start, and the caller must not open them anew.
+  // An entry whose DockPty is gone (the machine restarted, DockPty was killed) is kept and answered in `dead` ({ id,
+  // createdAt, meta }) for the host to open anew under the same id (host/index.js restoreTerminals), which then
+  // rewrites or drops it (forgetEntry). Gone means: its pid runs no more, or runs a process that is not a DockPty (a
+  // pid used again after a restart). A DockPty that runs under that pid but has no pipe of this id, or a pipe that
+  // answers for another terminal, is never taken for gone: opening the terminal anew could run its agent twice. Such
+  // entries are dropped.
   async function restore() {
     let names = [];
-    const kept = [];
+    const kept = [], dead = [];
     try {
       names = fs.readdirSync(registryDir).filter(name => name.endsWith(".json"));
     } catch {}
+    const str = v => (typeof v === "string" ? v : "");
     const attached = await Promise.all(names.map(async name => {
       const file = path.join(registryDir, name);
       const entry = parseJson(await atomicFile.readText(file).catch(() => null));
       const meta = entry?.meta && typeof entry.meta === "object" ? entry.meta : {};
-      if (!entry || !TERMINAL_ID.test(entry.id) || name !== `${entry.id}.json` || terminals.has(entry.id) || !isAlive(entry.pid)
+      if (!entry || !TERMINAL_ID.test(entry.id) || name !== `${entry.id}.json` || terminals.has(entry.id)
         || typeof entry.token !== "string" || typeof meta.cwd !== "string") {
         await atomicFile.remove(file).catch(() => {});
         return "";
       }
-      const str = v => (typeof v === "string" ? v : "");
+      const createdAt = Number(entry.createdAt) || Date.now();
+      const gone = () => {
+        dead.push({ id: entry.id, createdAt, meta: {
+          cwd: meta.cwd, title: str(meta.title), agent: str(meta.agent), sessionId: str(meta.sessionId), agentOnly: meta.agentOnly === true, codexLog: str(meta.codexLog), owner: str(meta.owner)
+        } });
+      };
+      if (!isAlive(entry.pid)) {
+        gone();
+        return "";
+      }
       const terminal = createTerminal({
         id: entry.id, pid: entry.pid, token: entry.token, cwd: meta.cwd, title: str(meta.title) || path.basename(meta.cwd),
-        agent: str(meta.agent), sessionId: str(meta.sessionId), agentOnly: meta.agentOnly === true, codexLog: str(meta.codexLog), owner: str(meta.owner), createdAt: Number(entry.createdAt) || Date.now()
+        agent: str(meta.agent), sessionId: str(meta.sessionId), agentOnly: meta.agentOnly === true, codexLog: str(meta.codexLog), owner: str(meta.owner), createdAt
       });
       terminals.set(entry.id, terminal);
       try {
@@ -328,7 +355,10 @@ function createTerminals({ userDataDir, onData, onExit, onChange, onResize = () 
         return entry.id;
       } catch (e) {
         terminals.delete(entry.id);
-        if (e.code === "ENOENT" || e.code === "EPROTO") {
+        if (e.code === "ENOENT" && await isOtherProcess(entry.pid)) {
+          // The pid belongs to another process now: the DockPty is gone.
+          gone();
+        } else if (e.code === "ENOENT" || e.code === "EPROTO") {
           // No pipe (the pid belongs to another process now), or not this terminal's.
           await atomicFile.remove(file).catch(() => {});
         } else {
@@ -340,7 +370,23 @@ function createTerminals({ userDataDir, onData, onExit, onChange, onResize = () 
       }
     }));
     onChange(getTabs());
-    return { attached: attached.filter(Boolean), kept };
+    return { attached: attached.filter(Boolean), kept, dead };
+  }
+  // Whether pid runs something other than a DockPty (its image name, from tasklist). Unsure (tasklist failed): no.
+  function isOtherProcess(pid) {
+    return new Promise(resolve => {
+      execFile("tasklist.exe", ["/FI", `PID eq ${Number(pid)}`, "/FO", "CSV", "/NH"], { windowsHide: true, timeout: 10000 }, (err, stdout) => {
+        const name = /^"([^"]*)","(\d+)"/m.exec(String(stdout || ""));
+        if (err) return resolve(false);
+        // No such process any more: gone too.
+        if (!name) return resolve(!/"/.test(String(stdout)));
+        resolve(Number(name[2]) === Number(pid) && !/^DockPty/i.test(name[1]));
+      });
+    });
+  }
+  // An entry restore answered as dead that is not opened anew (no room, its folder gone, the caller skips it).
+  function forgetEntry(id) {
+    if (TERMINAL_ID.test(id) && !terminals.has(id)) removeEntry(id);
   }
 
   // Typed by AgentDeck itself (autopilot.js): unlike input(), not counted as the user's typing.
@@ -388,6 +434,11 @@ function createTerminals({ userDataDir, onData, onExit, onChange, onResize = () 
     const terminal = terminals.get(id);
     return terminal ? { scrollback: getScrollback(terminal), end: terminal.end, exitCode: terminal.exitCode, cols: terminal.cols, rows: terminal.rows } : null;
   }
+  // Its size as last set (viewers.js), or null for no such terminal.
+  function size(id) {
+    const terminal = terminals.get(id);
+    return terminal ? { cols: terminal.cols, rows: terminal.rows } : null;
+  }
   // Ends the terminal (its program tree with it) and forgets it.
   function close(id) {
     const terminal = terminals.get(id);
@@ -424,10 +475,11 @@ function createTerminals({ userDataDir, onData, onExit, onChange, onResize = () 
     terminals.forEach(terminal => terminal.socket?.destroy());
   }
   // A new session's id is known only once it runs (tab-links.js finds it); DockPty and the registry keep it, so the
-  // terminal still knows its session after a restart.
-  function link(id, agent, sessionId) {
+  // terminal still knows its session after a restart. replace: the terminal's agent started another session in the
+  // same process (/clear), which takes the place of the one it had.
+  function link(id, agent, sessionId, { replace = false } = {}) {
     const terminal = terminals.get(id);
-    if (terminal && !terminal.sessionId) {
+    if (terminal && (!terminal.sessionId || (replace && terminal.sessionId !== sessionId))) {
       terminal.agent = agent;
       terminal.sessionId = sessionId;
       saveEntry(terminal);
@@ -436,7 +488,7 @@ function createTerminals({ userDataDir, onData, onExit, onChange, onResize = () 
   }
   function getTabs() {
     return [...terminals.values()].map(x => ({
-      id: x.id, cwd: x.cwd, title: x.title, agent: x.agent, sessionId: x.sessionId, agentOnly: x.agentOnly, codexLog: x.codexLog, pid: x.pid, owner: x.owner, exited: x.exitCode !== null, lost: x.lost, createdAt: x.createdAt, note: x.note
+      id: x.id, cwd: x.cwd, title: x.title, agent: x.agent, sessionId: x.sessionId, agentOnly: x.agentOnly, codexLog: x.codexLog, pid: x.pid, owner: x.owner, exited: x.exitCode !== null, lost: x.lost, createdAt: x.createdAt, note: x.note, reopened: x.reopened
     }));
   }
   // Running tabs not linked to a session yet, with their DockPty's process id.
@@ -447,7 +499,7 @@ function createTerminals({ userDataDir, onData, onExit, onChange, onResize = () 
   const countRunning = () => [...terminals.values()].filter(x => x.exitCode === null).length + others.size;
 
   return {
-    open, restore, input, type, getLastInputAt, setNote, resize, attach, close, stopAll, detachAll, link, getTabs,
+    open, restore, forgetEntry, input, type, getLastInputAt, setNote, resize, size, attach, close, stopAll, detachAll, link, getTabs,
     getUnlinkedTabs, countRunning
   };
 }

@@ -72,15 +72,25 @@ contextBridge.exposeInMainWorld("manager", {
   voiceCommandState: () => ipcRenderer.invoke("voice:command-state"),
   onVoiceCommand: cb => ipcRenderer.on("voice:command-state", (_e, s) => cb(s))
 });
-// AgentDeck's own terminals and their layout (manager window; terminals.js and workspace.js in main).
+// AgentDeck's own terminals and their layout (manager window; terminals.js and workspace.js in main). A terminal
+// belongs to the computer it runs on (docs/SHARED-SESSIONS.md 5.3): the window attaches those it has a pane of, a
+// closed pane or tab only hides it, and stop() ends it for every device.
 contextBridge.exposeInMainWorld("terminals", {
   getWorkspace: () => ipcRenderer.invoke("workspace:get"),
   setView: patch => ipcRenderer.invoke("prefs:set-view", patch),
+  // Also "open-term" { term, place }: a terminal with no pane here in a new one.
   command: (cmd, args) => ipcRenderer.invoke("workspace:command", cmd, args),
+  // -> { scrollback, end, exitCode, cols, rows, mine, by }: mine - this window sets the size; by - the name of the
+  // device that does ("" for nobody: the pane fits itself).
   attach: id => ipcRenderer.invoke("terminal:attach", id),
   move: (agent, id) => ipcRenderer.invoke("terminal:move", agent, id),
   input: (id, data) => ipcRenderer.send("terminal:input", id, data),
+  // The pane's fit: the size it wants (the terminal takes it while this window sets its size, or nobody does).
   resize: (id, cols, rows) => ipcRenderer.send("terminal:resize", id, cols, rows),
+  // "Use my size": the pane's last fit for the terminal, on every device.
+  takeSize: id => ipcRenderer.invoke("terminal:take-size", id),
+  // Stop: the terminal ends on its computer, for every device (main finds the computer).
+  stop: id => ipcRenderer.invoke("terminal:stop", id),
   // A clipboard picture saved as a PNG (its path, "" when the clipboard holds text or no picture), and a dropped
   // file's path.
   saveClipboardImage: id => ipcRenderer.invoke("clipboard:image-file", id),
@@ -88,8 +98,13 @@ contextBridge.exposeInMainWorld("terminals", {
   // A dropped file for a terminal on another computer: its bytes go there, its path there comes back.
   uploadFile: (id, name, bytes) => ipcRenderer.invoke("terminal:upload", id, name, new Uint8Array(bytes)),
   onData: cb => ipcRenderer.on("terminal:data", (_e, d) => cb(d)),
-  // A terminal whose size another viewer (a phone) set and gave back: its pane sends its own size again.
+  // A terminal whose size another viewer (a phone) set and gave back: its pane sends its own size again. Only from a
+  // computer whose host does not share its terminals yet (no terminals: 2).
   onRefit: cb => ipcRenderer.on("terminal:refit", (_e, id) => cb(id)),
+  // { id, cols, rows, mine, by }: the size of a terminal with a pane here, or who sets it, changed.
+  onSize: cb => ipcRenderer.on("terminal:size", (_e, s) => cb(s)),
+  // { id, title }: a terminal with a pane here ended, or was stopped from another device (its pane goes).
+  onEnded: cb => ipcRenderer.on("terminal:ended", (_e, e) => cb(e)),
   onWorkspace: cb => ipcRenderer.on("workspace:changed", (_e, w) => cb(w))
 });
 // UI language and theme, read before the page renders; i18n.js applies them.

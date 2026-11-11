@@ -62,6 +62,10 @@ const ICONS = {
   splitDown: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 12h18"/>',
   equal: '<rect x="3" y="5" width="7.5" height="14" rx="1"/><rect x="13.5" y="5" width="7.5" height="14" rx="1"/>',
   maximize: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
+  // A shared terminal sized by another device: back to this pane's own size. Corners turned inward (maximize's point
+  // out), so the two read apart beside each other; the pane shows it in the accent colour, only while another device
+  // has the size.
+  fit: '<path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/>',
   groupAdd: '<rect x="3" y="8" width="13" height="12" rx="2"/><path d="M8 4h11a2 2 0 0 1 2 2v9"/><path d="M9.5 11v6M6.5 14h6"/>',
   sortActivity: '<path d="M4 6h10M4 12h7M4 18h4"/><path d="M18 5v14"/><path d="m15 16 3 3 3-3"/>',
   sortCustom: '<circle cx="9" cy="6" r="1.2" fill="currentColor"/><circle cx="15" cy="6" r="1.2" fill="currentColor"/><circle cx="9" cy="12" r="1.2" fill="currentColor"/><circle cx="15" cy="12" r="1.2" fill="currentColor"/><circle cx="9" cy="18" r="1.2" fill="currentColor"/><circle cx="15" cy="18" r="1.2" fill="currentColor"/>',

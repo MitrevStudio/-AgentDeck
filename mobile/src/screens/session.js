@@ -170,7 +170,8 @@ export function render(el, ctx, p) {
   async function resume() {
     try {
       const tab = await store.launch(p.node, { cwd: item.cwd, kind: "resume", agent: p.agent, sessionId: p.id });
-      ctx.toast(t("session.resumed", { name: item.nodeName }));
+      // Already running in a terminal there (opened elsewhere meanwhile): that terminal is opened, nothing new ran.
+      ctx.toast(t(tab?.already ? "session.alreadyRunning" : "session.resumed", { name: item.nodeName }));
       if (tab?.id) ctx.go("terminal", { node: p.node, term: tab.id, title: item.title });
     } catch (e) { ctx.fail(e); }
   }

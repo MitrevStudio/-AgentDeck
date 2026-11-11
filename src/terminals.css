@@ -78,8 +78,17 @@
 .pane-tools .icon-btn .i { width: 14px; height: 14px; }
 .pane-tools .icon-btn.on { color: var(--accent); }
 .pane-head .ctx-chip { height: 20px; line-height: 18px; font-size: 11px; }
+/* The size another device set (workspace-ui.js): a quiet chip, what to do about it in its tooltip. */
+.size-chip {
+  flex: none; height: 18px; padding: 0 6px; border-radius: var(--r-pill); border: 1px solid var(--line-2);
+  font: 10.5px/16px var(--mono); color: var(--muted); white-space: nowrap; cursor: help;
+}
 .pane-body { position: relative; flex: 1; min-height: 0; }
 .term-host { position: absolute; inset: 0; padding: 6px 4px 4px 10px; }
+/* In another device's size the terminal keeps it, from the top left: an empty margin when smaller, the pane scrolls
+   when larger. The host keeps the pane's own size, so what fits the pane can still be measured. */
+.pane.sized .pane-body { overflow: auto; background: color-mix(in srgb, var(--term-bg) 50%, var(--panel-2)); }
+.pane.sized .term-host .xterm { width: max-content; height: max-content; }
 
 /* ---------- a project with no tabs ---------- */
 .space-empty { flex: 1; min-height: 0; overflow: auto; padding: 48px 24px; }

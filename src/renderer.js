@@ -1,5 +1,6 @@
-// The manager window's sidebar - the projects (each a space with its own terminals, workspace-ui.js) and the agents
-// running now - and what the centre shows for a project with no terminals open.
+// The manager window's sidebar - the projects (each a space with its own terminals, workspace-ui.js), the agents
+// running now and the other terminals running on any computer - and what the centre shows for a project with no
+// terminals open.
 let raw = { registry: { projects: [] }, sessions: [] };
 let data = { projects: [], sessions: [], groups: [] };
 // Every project's path in the order shown, hidden ones too: a drag or a pin is placed within it.
@@ -51,6 +52,7 @@ function render() {
   renderCentre();
   renderProjects(v);
   renderAgents(v);
+  renderTerms(v);
   window.gitPanel?.render();
   renderTitle(v);
   if (!getShownTab()) renderSpaceEmpty($("spaceEmpty"), ws.activeSpace);
@@ -325,15 +327,51 @@ function renderAgents(v) {
   patchChildren($("agents"), html);
 }
 function agentHtml(s, l, toks) {
-  const key = sessionKey(s), here = findSessionTab(s);
+  // .here: a pane of it is in this window. "in another terminal": only one outside AgentDeck's terminals.
+  const key = sessionKey(s), here = hasSessionPane(s);
   const project = isCentreSession(s) ? t("centre.title") : data.projects.find(p => inProject(s, p))?.name || s.cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop();
-  const where = s.node ? ` · ${esc(s.nodeName || nodeNameOf(s.node))}` : here ? "" : ` · ${esc(t("manager.agents.outside"))}`;
+  const where = s.node ? ` · ${esc(s.nodeName || nodeNameOf(s.node))}` : findSessionTab(s) || l.term ? "" : ` · ${esc(t("manager.agents.outside"))}`;
   return `<div class="agent ${here ? "here" : ""}" data-key="${esc(key)}" tabindex="0" title="${esc(`${s.title}\n${s.cwd}${s.node ? `\n${s.nodeName || ""}` : ""}`)}">${agentMark(s.agent)}
       <div class="agent-main"><div class="agent-title">${hl(s.title, toks)}</div><div class="agent-sub">${esc(project)}${where}</div></div>
       ${statusMark(l, isLoading(key, l))}
       <span class="agent-tools"><button class="icon-btn" data-action="agent-menu" title="${esc(t("manager.agents.more"))}" aria-haspopup="menu">${icon("more")}</button></span></div>
     ${l.subagents?.length ? subagentsHtml(key, l.subagents, "data-action", SIDEBAR_SUBAGENTS) : ""}`;
 }
+// ---------- terminals ----------
+// The terminals running on this and every online computer that the agents list does not show - shells, clones, an
+// agent whose session is not live - whichever device opened them: this computer first, then the others in their
+// order, the newest first in each. A click brings one up here (its pane, or a new one); Stop ends it for everyone.
+function getSideTerms(v) {
+  const shown = new Set(v.running.flatMap(s => [findSessionTab(s)?.id, liveOf(s)?.term]).filter(Boolean));
+  const rank = x => (x.node ? 1 + nodes.findIndex(n => n.id === x.node) : 0);
+  return ws.terminals.filter(x => !x.exited && !shown.has(x.id) && (!x.node || getNode(x.node)?.status === "online"))
+    .sort((a, b) => rank(a) - rank(b) || (b.createdAt || 0) - (a.createdAt || 0));
+}
+// A remote terminal's title carries its computer's name (main adds it); the row says the computer below.
+function getBareTermTitle(x) {
+  const title = getTermTitle(x), suffix = x.node ? ` · ${nodeNameOf(x.node)}` : "";
+  return (suffix && title.endsWith(suffix) ? title.slice(0, -suffix.length) : title) || x.cwd;
+}
+function termRowHtml(x) {
+  const here = isPaned(x), title = getBareTermTitle(x);
+  // Its project in the list, or as its computer lists it, else its folder's name.
+  const cwdN = x.node ? remoteKey(x.node, normPath(x.cwd)) : normPath(x.cwd);
+  const project = data.projects.find(p => inProject({ cwdN }, p))?.name || (x.node && getNode(x.node)?.view.projects.find(p => inProject({ cwdN: normPath(x.cwd) }, p))?.name)
+    || x.cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop();
+  const sub = [project, x.node ? nodeNameOf(x.node) : t("manager.devices.local"), here ? "" : t("term.noPane")].filter(Boolean).map(esc).join(" · ");
+  return `<div class="agent term ${here ? "here" : ""}" data-key="term:${esc(x.id)}" tabindex="0" title="${esc(`${title}\n${x.cwd}`)}">
+      ${x.agent ? agentMark(x.agent) : `<span class="agent-mark">${icon("terminal")}</span>`}
+      <div class="agent-main"><div class="agent-title">${esc(title)}</div><div class="agent-sub">${sub}</div></div>
+      ${getViewersHtml(x, "term-viewers")}
+      <span class="agent-tools"><button class="icon-btn danger" data-action="term-stop" title="${esc(t("term.stopAll"))}" aria-label="${esc(t("term.stopAll"))}">${icon("stop")}</button></span></div>`;
+}
+function renderTerms(v) {
+  const list = getSideTerms(v);
+  $("sideTerms").hidden = !list.length;
+  $("termCount").textContent = list.length;
+  patchChildren($("terms"), list.map(termRowHtml).join(""));
+}
+const termOfRow = row => row?.dataset.key?.startsWith("term:") ? row.dataset.key.slice(5) : "";
 // The sidebar lists only the newest few of a session's subagents.
 const SIDEBAR_SUBAGENTS = 3;
 const sessionByKey = key => data.sessions.find(s => sessionKey(s) === key) || null;
@@ -522,7 +560,7 @@ function selectProject(key) {
 
 // place: "tab" (a new tab of its project) or "right" (beside the focused pane).
 async function resume(s, place = "tab") {
-  if (showSessionTab(s)) return;
+  if (showSessionTab(s, place)) return;
   if (!s?.cwd) return toast(t("errors.sessionNoDir"), true);
   // A session of another computer resumes there, in a pane here.
   if (s.node) {
@@ -534,9 +572,11 @@ async function resume(s, place = "tab") {
   await window.manager.launchAgent(s.agent, s.id, s.cwd, place);
   toast(t("manager.toast.resuming", { agent: s.agent, cwd: s.cwd }));
 }
-async function showTerminal(s) {
-  if (!s || showSessionTab(s)) return;
-  if (s.node) return toast(t("manager.node.sessionThere", { node: s.nodeName || nodeNameOf(s.node) }));
+// A running session's terminal: in AgentDeck (on any computer) its pane here; outside it, this computer's window that
+// has it - one on another computer cannot come here (a host that tells says so, an older one does not know).
+async function showTerminal(s, place = "tab") {
+  if (!s || showSessionTab(s, place)) return;
+  if (s.node) return toast(t(getSessionTerm(s) === "" ? "manager.agents.outsideOn" : "manager.node.sessionThere", { node: s.nodeName || nodeNameOf(s.node) }));
   const r = await window.manager.focusTerminal(s.agent, s.id);
   const note = focusNote(r);
   if (note) toast(note, !r.ok);
@@ -643,6 +683,7 @@ async function runAction(action, btn) {
     case "group-menu": return openOwnedMenu(btn, path, getGroupMenuItems(path));
     case "project-menu": return openProjectMenu(btn, path);
     case "agent-menu": return openRowMenu(btn, session());
+    case "term-stop": return stopTerm(termOfRow(btn.closest("[data-key]")));
     case "ungroup": return applyRegistry(await window.manager.deleteGroup(groupId));
     case "fold": return toggleCollapsed(groupId);
     case "fold-device": return toggleDeviceFold(btn.closest("[data-device]").dataset.device);
@@ -726,7 +767,7 @@ function onListArrows(e) {
   e.preventDefault();
   next?.focus();
 }
-for (const id of ["projects", "agents", "spaceEmpty"]) $(id).addEventListener("keydown", onListArrows);
+for (const id of ["projects", "agents", "terms", "spaceEmpty"]) $(id).addEventListener("keydown", onListArrows);
 $("projectOrder").addEventListener("click", () => toggleOrder().catch(err => toast(err.message, true)));
 $("newGroup").addEventListener("click", () => createGroup().catch(err => toast(err.message, true)));
 $("projectView").addEventListener("click", toggleDeviceMode);
@@ -777,9 +818,15 @@ function openProjectMenu(btn, path) {
     { label: t("action.remove"), icon: "trash", danger: true, run: () => runAction("remove", btn) }
   ]);
 }
-// "Stop": a Claude session that runs without a terminal in AgentDeck (in another terminal, or left behind by one that
+// "Stop": a session in a terminal of AgentDeck (any agent, on any computer) stops that terminal, for every device
+// (workspace-ui.js stopTerm). A Claude session that runs without one (in another terminal, or left behind by one that
 // died, or a background job whose parent is gone) - here or on another computer - is ended there (launch.stopSession).
-const isStopOffered = s => s.agent === "Claude" && Boolean(liveOf(s)) && !findSessionTab(s);
+const getStopTerm = s => getSessionTerm(s) || findSessionTab(s)?.id || "";
+const isStopOffered = s => Boolean(liveOf(s)) && (Boolean(getStopTerm(s)) || s.agent === "Claude");
+function stopRunning(s) {
+  const term = getStopTerm(s);
+  return term ? stopTerm(term, { cwd: s.cwd, agent: s.agent, sessionId: s.id, title: s.title, node: s.node }) : stopSession(s);
+}
 async function stopSession(s) {
   const where = s.node ? s.nodeName || nodeNameOf(s.node) : t("term.thisComputer");
   if (!(await confirmDialog({ title: t("term.stop"), body: t("term.stopConfirm", { title: s.title, where }), danger: true }))) return;
@@ -794,14 +841,13 @@ function openRowMenu(btn, s) {
   const copy = (text, msg) => async () => { await window.manager.copyText(text); toast(msg); };
   openMenu(btn, "", [
     { label: t("term.show"), icon: "raise", run: () => showTerminal(s) },
-    ...(!s.node && liveOf(s) && isMoveHereOffered(s) ? [{ label: t("term.moveHere"), icon: "download", run: () => moveSessionHere(s) }] : []),
-    { label: t("manager.session.copyId"), icon: "copy", run: copy(s.id, t("manager.toast.copiedId", { id: s.id })) },
+    ...(!s.node && liveOf(s) && isMoveHereOffered(s) ? [{ label: t("term.moveHere"), icon: "download", run: () => moveSessionHere(s) }] : []),    { label: t("manager.session.copyId"), icon: "copy", run: copy(s.id, t("manager.toast.copiedId", { id: s.id })) },
     ...(s.cwd && !s.node ? [
       { label: t("action.copyPath"), icon: "copy", run: copy(s.cwd, t("toast.copied", { path: s.cwd })) },
       { label: t("action.terminalHere"), icon: "terminal", run: async () => { await window.manager.launchFolder(s.cwd); toast(t("manager.toast.terminal", { path: s.cwd })); } },
       { label: t("action.explorerTitle"), icon: "open", run: async () => { const err = await window.manager.openPath(s.cwd); if (err) throw new Error(err); } }
     ] : []),
-    ...(isStopOffered(s) ? [{ separator: true }, { label: t("term.stop"), icon: "stop", danger: true, run: () => stopSession(s) }] : [])
+    ...(isStopOffered(s) ? [{ separator: true }, { label: t("term.stop"), icon: "stop", danger: true, run: () => stopRunning(s) }] : [])
   ]);
 }
 function getGroupMenuItems(path) {
@@ -1007,6 +1053,16 @@ $("agents").addEventListener("keydown", e => {
   const s = sessionByKey(e.target.dataset.key);
   if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showTerminal(s).catch(err => toast(err.message, true)); }
   if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) { e.preventDefault(); openRowMenu(e.target, s); }
+});
+// A terminal row: brought up here (its pane, or a new one); its Stop button ends it for everyone.
+$("terms").addEventListener("click", async e => {
+  if (await onAction(e)) return;
+  const term = termOfRow(e.target.closest(".agent"));
+  if (term) openTerm(term);
+});
+$("terms").addEventListener("keydown", e => {
+  const term = termOfRow(e.target);
+  if (term && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openTerm(term); }
 });
 $("centre").addEventListener("click", () => selectProject(CENTRE));
 $("centre").addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectProject(CENTRE); } });

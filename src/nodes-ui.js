@@ -77,14 +77,26 @@ function renderRemoteSpace(el, key) {
       ${agentMark(s.agent)}<span class="se-title" title="${esc(s.title)}">${esc(s.title)}</span>
       ${getContextChip({ ...s, node: r.id })}
       <span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span>
-      ${n?.liveMap.has(sessionKey(s)) ? statusMark(n.liveMap.get(sessionKey(s)), false) : online && s.cwd ? `<span class="se-acts"><button class="btn sm" data-rresume="${esc(sessionKey(s))}">${icon("play")}${esc(t("action.resume"))}</button></span>` : ""}</div>`).join("")}` : ""}
+      ${remoteSessionActs(n, s, online)}</div>`).join("")}` : ""}
   </div>`);
   el.onclick = e => n && onRemoteSpaceClick(e, n, p).catch(err => toast(err.message || err, true));
   return true;
 }
+// A session's state and what can be done with it there: a running one in a terminal of AgentDeck there comes up in a
+// pane here (whichever device opened it); one that runs nowhere is resumed there.
+function remoteSessionActs(n, s, online) {
+  const l = n?.liveMap.get(sessionKey(s));
+  if (l) return `${l.term ? `<span class="se-acts"><button class="btn sm" data-rshow="${esc(sessionKey(s))}">${icon("raise")}${esc(t("term.show"))}</button></span>` : ""}${statusMark(l, false)}`;
+  return online && s.cwd ? `<span class="se-acts"><button class="btn sm" data-rresume="${esc(sessionKey(s))}">${icon("play")}${esc(t("action.resume"))}</button></span>` : "";
+}
 // A terminal, a new agent session or a resumed one on the node, placed in a new tab of this space (main does both).
 async function onRemoteSpaceClick(e, n, p) {
-  const make = e.target.closest("[data-rnew]"), resumeBtn = e.target.closest("[data-rresume]");
+  const make = e.target.closest("[data-rnew]"), resumeBtn = e.target.closest("[data-rresume]"), showBtn = e.target.closest("[data-rshow]");
+  if (showBtn) {
+    const s = p.sessions.find(x => sessionKey(x) === showBtn.dataset.rshow);
+    if (s) showSessionTab({ ...s, node: n.id, nodeName: n.name });
+    return;
+  }
   if (make) {
     const kind = make.dataset.rnew;
     await window.manager.remoteLaunch(n.id, kind === "shell" ? { kind: "shell", cwd: p.path } : { kind: "new", cwd: p.path, agent: kind });

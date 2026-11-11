@@ -618,6 +618,8 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
     links.get(id)?.link.sendBinary(buffer);
   }
   const online = id => links.has(id);
+  // How many bytes wait to go out to node `id` (protocol.js buffered); 0 when it is not connected.
+  const buffered = id => links.get(id)?.link.buffered() || 0;
 
   // ---------- this node ----------
   function setSelf(patch) {
@@ -679,7 +681,7 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
   }
 
   return Object.assign(out, {
-    start, stop, self, setSelf, regenerateCode, nodes, discovered, pair, forget, forgetPhone, invite, call, notify, notifyAll, sees, sendBinary, online,
+    start, stop, self, setSelf, regenerateCode, nodes, discovered, pair, forget, forgetPhone, invite, call, notify, notifyAll, sees, sendBinary, online, buffered,
     peers: () => peers, identity: () => identity
   });
 }

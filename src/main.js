@@ -55,7 +55,19 @@ function broadcast(channel, payload) {
 // Where each terminal is on screen (workspace.js): spaces (projects), their tabs, and the panes a tab is split into.
 // The window gets the layout and the terminals' list together, as one picture.
 const { createWorkspace, getPanes } = require("./workspace");
-const workspace = createWorkspace({ onChange: () => { sendWorkspace(); scheduleWorkspaceSave(); } });
+const desk = require("./desktop-terminals");
+const { isReport } = require("./host/viewers");
+// The terminals belong to the computer they run on (docs/SHARED-SESSIONS.md): the window views those it has a pane of
+// - this computer's as the viewer "" of its host (host/viewers.js), the others' as this node there - and hiding a pane
+// only stops viewing. panedIds: the terminals with a pane in the layout; localViewing: this computer's terminals the
+// window is a viewer of (syncLocalViewers); wants: the size each pane last fitted (a want; "Use my size" takes it);
+// sentEnd: the end of the output the window got of each terminal, so a pane shown again gets only what it missed;
+// shownTitles: the titles of the panes' terminals as last shown (for "ended"); stoppedHere: terminals this window
+// stopped (no "ended" for them); reopenSeen: terminals typed into here, whose "reopened after a restart" is done.
+let panedIds = new Set();
+const localViewing = new Set(), wants = new Map(), sentEnd = new Map(), stoppedHere = new Set(), reopenSeen = new Set();
+let shownTitles = new Map(), stoppingAll = false;
+const workspace = createWorkspace({ onChange: snap => { panesChanged(snap); sendWorkspace(); scheduleWorkspaceSave(); } });
 // The host (host/index.js): the sessions, the terminals, the launches, the git status and the usage of this computer.
 // Its events go to the windows; the command centre's own folder is left out of the user's projects and sessions.
 const host = createHost({
@@ -74,37 +86,132 @@ host.on("resources", r => broadcast("resources:changed", r));
 host.on("data", data => broadcast("data:changed", data));
 host.on("usage", u => broadcast("usage:changed", u));
 host.on("git", g => broadcast("git:changed", g));
-host.on("terminal:data", d => sendToManager("terminal:data", d));
-// A peer (a phone) that sized one of this computer's terminals let go of it: the pane sends its own size again.
-host.on("terminal:refit", ({ id }) => sendToManager("terminal:refit", id));
+// Output goes to the window only for the terminals it has a pane of: it draws no other (one shown again gets what it
+// missed from the scrollback, shownAgain).
+host.on("terminal:data", d => {
+  if (!panedIds.has(d.id)) return;
+  noteSent(d.id, d.end);
+  sendToManager("terminal:data", d);
+});
+// A terminal's size or driver changed (host/viewers.js): its pane draws it in that size, or fits itself.
+host.on("terminal:size", s => { if (panedIds.has(s.id)) sendToManager("terminal:size", { id: s.id, ...desk.sizeView(s, "", localNameOf) }); });
 // A program that ends takes its pane with it, as in Herdr. A terminal lost with its DockPty (killed, or Windows
 // shutting down first) keeps its pane, which opens anew on the next start.
 host.on("terminal:exit", ({ id, lost }) => { if (lost) terminals.setNote(id, t("term.lost")); else terminals.close(id); });
-host.on("terminals", () => { prunePanes(); sendWorkspace(); scheduleWorkspaceSave(); updateTrayCount(); orchestrator.terminalsChanged(); });
-// Panes whose terminal is gone (closed, or ended) leave the layout.
+host.on("terminals", () => { syncLocalViewers(); prunePanes(); sendWorkspace(); scheduleWorkspaceSave(); updateTrayCount(); orchestrator.terminalsChanged(); });
+const noteSent = (id, end) => { if (Number.isFinite(end)) sentEnd.set(id, Math.max(sentEnd.get(id) ?? 0, end)); };
+// Panes whose terminal is gone (closed, or ended) leave the layout; the window says which ended - unless this window
+// stopped it, or everything is being stopped on the way out.
 function prunePanes() {
   const alive = new Set([...terminals.getTabs().map(x => x.id), ...remoteTerms.keys()]);
+  // The titles as last shown, taken before the layout changes (each view made after has the gone terminals no more).
+  const titles = shownTitles;
   for (const tab of Object.values(workspace.snapshot().tabs)) {
-    getPanes(tab.root).filter(term => !alive.has(term)).forEach(term => workspace.removeTerm(term));
+    for (const term of getPanes(tab.root).filter(term => !alive.has(term))) {
+      const title = titles.get(term);
+      workspace.removeTerm(term);
+      sentEnd.delete(term);
+      wants.delete(term);
+      if (!stoppedHere.delete(term) && !stoppingAll && title !== undefined) sendToManager("terminal:ended", { id: term, title });
+    }
   }
 }
+// The layout changed: the window views this computer's terminals it now has a pane of (and no other), and a pane shown
+// again catches up. A terminal whose pane left the layout has no view in the window any more (workspace-ui.js
+// renderWorkspace disposes it): what the window got of it is forgotten, and a pane shown again later attaches anew,
+// with the whole scrollback - no gap to fill then.
+function panesChanged(snap) {
+  const next = new Set(Object.values(snap.tabs).flatMap(tab => getPanes(tab.root)));
+  const added = [...next].filter(id => !panedIds.has(id));
+  for (const id of panedIds) if (!next.has(id)) sentEnd.delete(id);
+  panedIds = next;
+  syncLocalViewers();
+  added.forEach(shownAgain);
+}
+// This computer's terminals with a pane here have the window as their viewer "" (host/viewers.js); the others not. The
+// pane's last fit goes with it, so the size follows at once when nobody else drives.
+function syncLocalViewers() {
+  const wanted = new Set(terminals.getTabs().filter(x => !x.exited && panedIds.has(x.id)).map(x => x.id));
+  const { attach, detach } = desk.viewerDiff(localViewing, wanted);
+  for (const id of detach) {
+    localViewing.delete(id);
+    host.viewers.detach(id, "");
+  }
+  for (const id of attach) {
+    localViewing.add(id);
+    try {
+      host.viewers.attach(id, "", { kind: "desktop" });
+      const w = wants.get(id);
+      if (w) host.viewers.want(id, "", w.cols, w.rows);
+    } catch (e) {
+      localViewing.delete(id); // too many viewers: tried again with the next change
+      launchLog(`viewing ${id.slice(0, 8)} failed (${e.code || e.message})`);
+    }
+  }
+}
+// A pane that came (back) into the layout. Its view in the window went with its pane, so the window attaches it itself
+// (sentEnd was forgotten); what is left here is a view that outlived a short absence - the pane moved and came back
+// within one change of the layout, or the window attached it before the layout said so -, which gets the output it
+// missed meanwhile and the size the terminal has now.
+function shownAgain(id) {
+  const x = remoteTerms.get(id);
+  if (x) {
+    if (sentEnd.has(id) && links.online(x.node)) attachRemote(x).catch(e => meshLog(`attaching ${id.slice(0, 8)} on ${nodeName(x.node)} failed: ${e.message}`));
+    return;
+  }
+  if (sentEnd.has(id)) fillGap(id, terminals.attach(id));
+  const s = host.viewers.state(id);
+  if (s) sendToManager("terminal:size", { id, ...desk.sizeView(s, "", localNameOf) });
+}
+// The output the window missed of a terminal it got output of before, from an attach's scrollback.
+function fillGap(id, a) {
+  if (!sentEnd.has(id) || !isObj(a)) return;
+  const data = desk.missedOutput(a.scrollback, a.end, sentEnd.get(id));
+  if (data) sendToManager("terminal:data", { id, data, end: a.end });
+  noteSent(id, a.end);
+}
+// Who is who in the names the window shows: this computer, the paired nodes (phones too).
+const selfName = () => links.self()?.name || os.hostname();
+function nodeNames() {
+  const names = new Map(links.nodes().map(n => [n.id, n.name]));
+  const self = links.self();
+  if (self) names.set(self.id, self.name);
+  return names;
+}
+const localNameOf = who => (who === "" ? selfName() : desk.nameOr(nodeNames(), who));
 function getWorkspaceView() {
-  return { ...workspace.snapshot(), terminals: [...terminals.getTabs().filter(x => !x.owner), ...remoteTabs()] };
+  const self = links.self();
+  const list = desk.composeView({
+    local: host.tabs(), paned: panedIds, self: { id: self?.id || "", name: selfName() }, names: nodeNames(),
+    nodes: computers().map(n => ({ id: n.id, name: n.name, online: links.online(n.id), legacy: isLegacy(n.id), tabs: remoteLists.get(n.id) || null })),
+    remoteTerms, offline: t("manager.node.offline"), cleared: reopenSeen
+  });
+  // The bare titles of the panes' terminals, for the "ended" of one that goes.
+  shownTitles = new Map([
+    ...host.tabs().filter(x => panedIds.has(x.id)).map(x => [x.id, x.title]),
+    ...[...remoteTerms.values()].map(x => [x.id, x.title])
+  ]);
+  return { ...workspace.snapshot(), terminals: list };
 }
 // Quitting leaves AgentDeck's own terminals running (the next start attaches to them again); the tray's "Stop all
 // terminals and quit" ends them, asked first while any runs.
 async function stopAllAndQuit() {
   const running = terminals.countRunning();
   if (running) {
+    // They end for every device that has them open: the devices that do are named.
+    const names = nodeNames();
+    const others = [...new Set(host.tabs().filter(x => !x.exited).flatMap(x => x.viewers.filter(v => v.id !== "").map(v => desk.nameOr(names, v.id))))];
     const options = {
       type: "warning", buttons: [t("quit.stopAll.confirm"), t("common.cancel")], defaultId: 1, cancelId: 1, noLink: true,
-      title: t("app.name"), message: tn("quit.stopAll.message", running), detail: t("quit.stopAll.detail")
+      title: t("app.name"), message: tn("quit.stopAll.message", running),
+      detail: t("quit.stopAll.detail") + (others.length ? `\n\n${t("term.viewers", { names: others.join(", ") })}` : "")
     };
     const owner = managerWin && !managerWin.isDestroyed() && managerWin.isVisible() ? managerWin : null;
     if ((owner ? dialog.showMessageBoxSync(owner, options) : dialog.showMessageBoxSync(options)) !== 0) return;
   }
   // The layout stays as it is: the next start opens its panes anew (agents resume their sessions).
   await saveWorkspaceFinal();
+  stoppingAll = true;
   terminals.stopAll();
   app.quit();
 }
@@ -114,9 +221,10 @@ async function stopAllAndQuit() {
 const WORKSPACE_FILE = path.join(app.getPath("userData"), "workspace.json");
 const WORKSPACE_SAVE_MS = 1000;
 let workspaceSaveTimer = null, workspaceSaving = false;
+// What runs in each pane: this computer's terminals with a pane here (whoever opened them), and the other computers'.
 function getSavedWorkspace() {
   const terms = Object.fromEntries([
-    ...terminals.getTabs().filter(x => !x.owner).map(x => [x.id, { cwd: x.cwd, title: x.title, agent: x.agent, sessionId: x.sessionId }]),
+    ...terminals.getTabs().filter(x => panedIds.has(x.id)).map(x => [x.id, { cwd: x.cwd, title: x.title, agent: x.agent, sessionId: x.sessionId }]),
     ...[...remoteTerms.values()].map(x => [x.id, { node: x.node, cwd: x.cwd, title: x.title, agent: x.agent, sessionId: x.sessionId }])
   ]);
   return JSON.stringify({ version: 1, layout: { ...workspace.exportState(), pathKeyVersion: 2 }, terms });
@@ -165,41 +273,39 @@ async function reopenTerminal(meta, env) {
     return "";
   });
 }
-// The saved layout, each pane with its terminal: the one still running when there is one (attached again), else one
-// opened anew (after a reboot, or a stop). Shown space, tabs and focus as they were. All spaces at once: a space shown
-// later finds its panes ready, and the edge menu counts them. A running terminal the layout does not know (saved
-// before it opened) gets a tab of its own.
+// The saved layout, each pane with its terminal (docs/SHARED-SESSIONS.md 5.4): the host first puts its terminals back -
+// those still running attached again, those a restart took opened anew under the same id (host.restoreTerminals) -,
+// then each pane keeps its terminal, waits for its computer, or gets one opened anew here (desk.restorePlan). Shown
+// space, tabs and focus as they were. All spaces at once: a space shown later finds its panes ready, and the edge menu
+// counts them. A running terminal with no pane here stays without one: it is listed under "Terminals" (putting it in
+// a tab would undo the X that hid it).
 async function restoreWorkspace() {
   const saved = readSavedWorkspace();
   let restored = !saved; // with no layout to put back, there is nothing a save could spoil
   try {
-    const { attached, kept } = await terminals.restore();
-    const running = new Set(attached), held = new Set(kept);
+    // Not waited for long: without it the terminals open as they would with the option off.
+    const proxy = await Promise.race([network.terminalProxy().catch(() => null), new Promise(resolve => setTimeout(resolve, 10000, null))]);
+    const env = terminalEnv(process.env, proxy);
+    // The command centre's terminal is never opened anew by the host: it comes back with its own command
+    // (reopenTerminal -> orchestrator.open), its session resumed.
+    const { attached, kept, reopened } = await host.restoreTerminals({ skip: meta => orchestrator.isOwn(meta?.cwd), env });
+    if (reopened.length) launchLog(`reopened after a restart: ${reopened.map(id => id.slice(0, 8)).join(", ")}`);
     const panes = saved ? new Set(Object.values(saved.layout.tabs || {}).flatMap(tab => getPanes(tab?.root))) : new Set();
+    const plan = desk.restorePlan({ panes, terms: saved?.terms || {}, attached, reopened, kept, isId: id => frames.UUID.test(id) });
     // A pane of a terminal on another computer keeps its place: once that computer is connected again, the terminal
     // is found there (or the pane goes).
-    for (const [old, meta] of Object.entries(saved?.terms || {})) {
-      if (isObj(meta) && typeof meta.node === "string" && meta.node && panes.has(old) && frames.UUID.test(old)) {
-        remoteTerms.set(old, { id: old, node: meta.node, cwd: String(meta.cwd || ""), title: String(meta.title || ""), agent: String(meta.agent || ""), sessionId: String(meta.sessionId || ""), exited: false, pending: true });
-        running.add(old);
-      }
+    for (const old of plan.remote) {
+      const meta = saved.terms[old];
+      remoteTerms.set(old, { id: old, node: meta.node, cwd: String(meta.cwd || ""), title: String(meta.title || ""), agent: String(meta.agent || ""), sessionId: String(meta.sessionId || ""), exited: false, pending: true });
     }
-    const ids = new Map([...panes].filter(old => running.has(old)).map(old => [old, old]));
-    // A pane whose terminal still runs but could not be attached goes: opened anew, its agent would run a second time
-    // on the same session. The terminal gets a tab of its own once a start attaches it.
-    const gone = [...panes].filter(old => !running.has(old) && !held.has(old));
-    if (gone.length) {
-      const proxy = await network.terminalProxy().catch(() => null);
-      const env = terminalEnv(process.env, proxy);
-      for (const old of gone) {
-        ids.set(old, await reopenTerminal(saved.terms[old], env));
-      }
+    const ids = new Map([...plan.keep, ...plan.remote].map(old => [old, old]));
+    // A pane whose terminal still runs but could not be attached (plan.drop) goes: opened anew, its agent would run a
+    // second time on the same session. One with nothing left of it opens anew here, under a new id.
+    for (const old of plan.reopen) {
+      ids.set(old, await reopenTerminal(saved.terms[old], env));
     }
     if (saved) workspace.importState(require("./shared/path-keys").migrateLayout(saved.layout, readRegistry().projects, keyOf), old => ids.get(old) || "");
     restored = true;
-    const unplaced = terminals.getTabs().filter(x => !x.owner && !workspace.findTab(x.id));
-    unplaced.forEach(x => workspace.addTab(getSpaceFor(x.cwd), x.id));
-    if (unplaced.length && saved?.layout.activeSpace) workspace.activateSpace(saved.layout.activeSpace);
     prunePanes();
   } catch (e) {
     console.error("Restoring the layout failed:", e);
@@ -268,24 +374,35 @@ const { isAgent, SESSION_ID } = launch;
 // status. What changes here is pushed to every connected peer.
 const writeMeshLog = createLog("mesh.log");
 const meshLog = line => writeMeshLog(`${new Date().toISOString()} ${line}`);
-// The terminals of other computers that have a pane here: what they are, by the terminal's id (a UUID both sides
-// use). Their output arrives as frames and goes to the window like a local terminal's; input and sizes go back the
-// same way. One whose computer is away keeps its pane (note "offline"); one gone there loses its pane.
-const remoteTerms = new Map(); // id -> { id, node, cwd, title, agent, sessionId, exited, pending }
+// The terminals of other computers (docs/SHARED-SESSIONS.md 5.1). remoteLists: each computer's whole list (every
+// terminal it has, whoever opened it; only this node's own from a host without terminals: 2), as terminals.list and
+// its "terminals" event tell it. remoteTerms: those with a pane here, by the terminal's id (a UUID both sides use) -
+// where input, sizes and attaches go. Their output arrives as frames and goes to the window like a local terminal's.
+// One whose computer is away keeps its pane (note "offline"); one gone there loses its pane.
+const remoteLists = new Map(); // node id -> [Tab]
+const remoteTerms = new Map(); // id -> { id, node, cwd, title, agent, sessionId, exited, createdAt, pending }
+const attachWaits = new Map(); // id -> [resolve]: the window's attaches of a pane whose computer is away
 const nodeName = id => links.nodes().find(n => n.id === id)?.name || id.slice(0, 8);
-function remoteTabs() {
-  return [...remoteTerms.values()].map(x => ({
-    id: x.id, node: x.node, cwd: x.cwd, title: `${x.title} · ${nodeName(x.node)}`, agent: x.agent, sessionId: x.sessionId, exited: x.exited, lost: false,
-    createdAt: x.createdAt || 0, note: links.online(x.node) ? "" : t("manager.node.offline")
-  }));
+// A host that does not share its terminals yet (no terminals: 2 in host.info, docs/SHARED-SESSIONS.md 6): only this
+// node's own terminals, no viewers, no sizes of another device; X detaches.
+const isLegacy = node => remote.get(node)?.info?.terminals !== 2;
+const remoteEntry = (node, tab) => ({ id: tab.id, node, cwd: String(tab.cwd || ""), title: String(tab.title || ""), agent: String(tab.agent || ""), sessionId: String(tab.sessionId || ""), exited: Boolean(tab.exited), createdAt: tab.createdAt });
+// Names of the viewers of a terminal there: as its computer named them in its list, else as paired here.
+const remoteNameOf = (node, id) => who => remoteLists.get(node)?.find(x => x.id === id)?.viewers?.find(v => v.id === who)?.name || desk.nameOr(nodeNames(), who);
+// A size there ({ cols, rows, driver }) as the window gets it: this window drives when this node does.
+function remoteSize(node, id, s) {
+  if (isLegacy(node)) return { cols: s?.cols, rows: s?.rows, mine: false, by: "" };
+  return desk.sizeView(s, links.self()?.id ?? null, remoteNameOf(node, id));
 }
+const cleanTabs = data => (Array.isArray(data) ? data.filter(x => isObj(x) && frames.UUID.test(x.id)) : []);
 function remoteTermsChanged() {
   prunePanes();
   sendWorkspace();
   scheduleWorkspaceSave();
 }
-// The peer's list of our terminals there: titles and states follow, and a terminal gone there takes its pane.
+// A computer's list of its terminals: the panes' titles and states follow, and a terminal gone there takes its pane.
 function reconcileRemote(node, tabs) {
+  remoteLists.set(node, tabs);
   const there = new Map(tabs.map(x => [x.id, x]));
   for (const [id, x] of remoteTerms) {
     if (x.node !== node) continue;
@@ -295,20 +412,132 @@ function reconcileRemote(node, tabs) {
   }
   remoteTermsChanged();
 }
-// Attaching to a terminal: local, or on its computer (which then sends its output here) - null while that computer
-// is away.
+// The window attaches a terminal it shows: this computer's (its viewer "" follows the layout, syncLocalViewers), or
+// one on another computer, which makes this node a viewer there and sends its output here. -> { scrollback, end,
+// exitCode, cols, rows, mine, by } (docs/SHARED-SESSIONS.md 5.3). A pane whose computer is away waits for it; one
+// hidden meanwhile gets null.
 async function attachTerm(id) {
   const x = remoteTerms.get(id);
-  if (!x) return terminals.attach(id);
-  if (!links.online(x.node)) return null;
-  return links.call(x.node, "terminals.attach", { id });
+  if (!x) {
+    const a = terminals.attach(id);
+    if (!a) return null;
+    syncLocalViewers();
+    if (panedIds.has(id)) noteSent(id, a.end); // a pane hidden meanwhile: its view is gone, nothing was sent
+    const s = host.viewers.state(id);
+    return { ...a, ...(s ? desk.sizeView(s, "", localNameOf) : { mine: false, by: "" }) };
+  }
+  if (!links.online(x.node)) return new Promise(resolve => attachWaits.set(id, [...(attachWaits.get(id) || []), resolve]));
+  const a = await links.call(x.node, "terminals.attach", { id });
+  if (!isObj(a)) return null;
+  if (panedIds.has(id)) noteSent(id, a.end);
+  sendWant(x);
+  return { ...a, ...remoteSize(x.node, id, a) };
 }
-function closeTerm(id) {
+// The window's attaches that waited for a computer: answered once it is back (null for a pane hidden meanwhile).
+function answerAttachWaits(node) {
+  for (const [id, waits] of attachWaits) {
+    const x = remoteTerms.get(id);
+    if (x && x.node !== node) continue;
+    attachWaits.delete(id);
+    const answer = x ? attachTerm(id).catch(() => null) : Promise.resolve(null);
+    waits.forEach(resolve => resolve(answer));
+  }
+}
+// Attaching again to a terminal there whose pane the window already shows (its computer came back, a resync, the
+// pane shown again): the output it missed, the size there, and this pane's want.
+async function attachRemote(x) {
+  const a = await links.call(x.node, "terminals.attach", { id: x.id });
+  if (remoteTerms.get(x.id) !== x) {
+    // Hidden meanwhile: not viewing it after all.
+    links.call(x.node, "terminals.detach", { id: x.id }).catch(() => {});
+    return;
+  }
+  if (!isObj(a)) return;
+  fillGap(x.id, a);
+  sendToManager("terminal:size", { id: x.id, ...remoteSize(x.node, x.id, a) });
+  sendWant(x);
+}
+// The size the pane last fitted, told to the terminal's computer (a want there, docs/SHARED-SESSIONS.md 4.3).
+function sendWant(x) {
+  const w = wants.get(x.id);
+  if (w && links.online(x.node)) links.sendBinary(x.node, frames.encodeResize(x.id, w.cols, w.rows));
+}
+// Hide (X, a tab's X, Ctrl+Shift+W): the pane goes and the window stops viewing the terminal, which goes on running
+// - listed under "Terminals", to be opened again.
+function hideTerm(id) {
   const x = remoteTerms.get(id);
-  if (!x) return terminals.close(id);
+  workspace.removeTerm(id); // this computer's: syncLocalViewers detaches the window
+  wants.delete(id);
+  if (!x) return true;
   remoteTerms.delete(id);
-  if (links.online(x.node)) links.call(x.node, "terminals.close", { id }).catch(e => meshLog(`closing ${id.slice(0, 8)} on ${nodeName(x.node)} failed: ${e.message}`));
+  attachWaits.get(id)?.forEach(resolve => resolve(null));
+  attachWaits.delete(id);
+  if (links.online(x.node)) links.call(x.node, "terminals.detach", { id }).catch(e => meshLog(`detaching ${id.slice(0, 8)} on ${nodeName(x.node)} failed: ${e.message}`));
   remoteTermsChanged();
+  return true;
+}
+// The computer a terminal runs on: "" this one, a node id, or null when it is known nowhere (also one known only from a
+// live session's `term` there).
+function nodeOfTerm(id) {
+  return desk.nodeOf(id, {
+    local: new Set(terminals.getTabs().map(x => x.id)), remoteTerms, lists: remoteLists,
+    lives: new Map([...remote].filter(([node]) => links.online(node)).map(([node, r]) => [node, r.live]))
+  });
+}
+// Stop: the terminal ends on its computer, for every device that has it open.
+async function stopTerm(id) {
+  const node = nodeOfTerm(id);
+  if (node === null) throw new HostError("invalidData");
+  if (node !== "" && !links.online(node)) throw new HostError("offline");
+  stoppedHere.add(id);
+  setTimeout(() => stoppedHere.delete(id), 60000).unref?.();
+  if (node === "") return terminals.close(id) || true;
+  await links.call(node, "terminals.close", { id });
+  return true;
+}
+// A new pane: a tab of its own in `space`, or beside the shown tab's focused pane (place "right" / "down").
+function placePane(space, id, place) {
+  const shown = workspace.getActiveTab();
+  if (place !== "tab" && shown) workspace.split(shown.id, id, place);
+  else workspace.addTab(space, id);
+}
+// A terminal there in a pane here: the one it has (focused), or a new one in `space`.
+async function paneForRemote(node, tab, space, place = "tab") {
+  await restoring;
+  if (workspace.findTab(tab.id)) workspace.focus(tab.id);
+  else {
+    remoteTerms.set(tab.id, remoteEntry(node, tab));
+    placePane(space, tab.id, place);
+  }
+  showManager();
+  return tab.id;
+}
+// Any terminal, of this computer or another one, comes up here (the sidebar's "Terminals", a session in "Agents", the
+// palette): its pane focused, or a new one in its project's space (`place`: "tab", "right", "down"), the focused pane.
+async function openTerm(id, place = "tab") {
+  await restoring;
+  if (workspace.findTab(id)) {
+    workspace.focus(id);
+    showManager();
+    return true;
+  }
+  const node = nodeOfTerm(id);
+  if (node === null) throw new HostError("invalidData");
+  if (node === "") {
+    const x = terminals.getTabs().find(tab => tab.id === id);
+    placePane(getSpaceFor(x.cwd), id, place);
+    showManager();
+    return true;
+  }
+  if (!links.online(node)) throw new HostError("offline");
+  let tab = remoteLists.get(node)?.find(x => x.id === id);
+  if (!tab) {
+    // Known only from a live session's term: the computer's list now.
+    reconcileRemote(node, cleanTabs(await links.call(node, "terminals.list")));
+    tab = remoteLists.get(node)?.find(x => x.id === id);
+  }
+  if (!tab) throw new HostError("invalidData");
+  await paneForRemote(node, tab, desk.remoteSpace(readRegistry().projects, node, tab.cwd), place);
   return true;
 }
 // The project's repository cloned on another computer, in a pane here (mesh/serve.js repo.clone): {url, dir, branch,
@@ -317,11 +546,7 @@ async function remoteClone(node, args) {
   if (!links.online(node)) throw new HostError("offline");
   const tab = await links.call(node, "repo.clone", args, { timeout: 60000 });
   if (!isObj(tab) || !frames.UUID.test(tab.id)) throw new HostError("invalidData");
-  remoteTerms.set(tab.id, { id: tab.id, node, cwd: tab.cwd, title: tab.title, agent: tab.agent, sessionId: tab.sessionId, exited: false, createdAt: tab.createdAt });
-  await restoring;
-  workspace.addTab(`node:${node}:${normPath(tab.dir || tab.cwd)}`, tab.id);
-  showManager();
-  return tab.id;
+  return paneForRemote(node, tab, `node:${node}:${normPath(tab.dir || tab.cwd)}`);
 }
 // A local project's origin and current branch, for the clone dialog.
 function gitInfo(dir) {
@@ -329,15 +554,14 @@ function gitInfo(dir) {
   return Promise.all([git("remote", "get-url", "origin"), git("rev-parse", "--abbrev-ref", "HEAD")]).then(([url, branch]) => ({ url, branch }));
 }
 // A terminal on another computer, in a new tab of that project's space here: {cwd, kind, agent, sessionId, prompt}.
+// A resume of a session that runs in a terminal there already opens nothing there: that terminal comes up here
+// (already: true).
 async function remoteLaunch(node, args) {
   if (!links.online(node)) throw new HostError("offline");
   const tab = await links.call(node, "terminals.open", args);
   if (!isObj(tab) || !frames.UUID.test(tab.id)) throw new HostError("invalidData");
-  remoteTerms.set(tab.id, { id: tab.id, node, cwd: tab.cwd, title: tab.title, agent: tab.agent, sessionId: tab.sessionId, exited: false, createdAt: tab.createdAt });
-  await restoring;
-  workspace.addTab(`node:${node}:${normPath(args.cwd)}`, tab.id);
-  showManager();
-  return tab.id;
+  const space = tab.already ? desk.remoteSpace(readRegistry().projects, node, tab.cwd) : `node:${node}:${normPath(args.cwd)}`;
+  return paneForRemote(node, tab, space);
 }
 // What the peers may ask of this computer, and what it pushes to them (mesh/serve.js).
 const served = createServed({ host, env: async () => terminalEnv(process.env, await network.terminalProxy().catch(() => null)) });
@@ -395,8 +619,20 @@ function syncRemoteProjects() {
 links.on("nodes", nodesChanged);
 links.on("layout", nodesChanged);
 links.on("event", ({ node, name, data }) => {
-  if (name === "terminals") return reconcileRemote(node, Array.isArray(data) ? data.filter(x => isObj(x) && frames.UUID.test(x.id)) : []);
-  // Our terminal there was sized by another peer (a phone) that let go of it: its pane here sends its size again.
+  if (name === "terminals") return reconcileRemote(node, cleanTabs(data));
+  // The size of a terminal there, or who drives it, changed: its pane here draws it so.
+  if (name === "terminal.size") {
+    if (isObj(data) && remoteTerms.get(data.id)?.node === node) sendToManager("terminal:size", { id: data.id, ...remoteSize(node, data.id, data) });
+    return;
+  }
+  // This node fell behind on a terminal's output there (mesh/serve.js): attaching again brings what it missed.
+  if (name === "terminal.resync") {
+    const x = remoteTerms.get(data?.id);
+    if (x?.node === node) attachRemote(x).catch(e => meshLog(`attaching ${x.id.slice(0, 8)} again on ${nodeName(node)} failed: ${e.message}`));
+    return;
+  }
+  // From a host without terminals: 2 only: another peer (a phone) that sized our terminal there let go of it - its pane
+  // here sends its size again. Newer hosts hand the size back themselves.
   if (name === "terminal.refit") return void (remoteTerms.get(data?.id)?.node === node && sendToManager("terminal:refit", data.id));
   if (!["data", "live", "git", "usage", "limits", "resources"].includes(name)) return;
   remote.set(node, { ...remote.get(node), [name]: data, ...(name === 'git' ? { gitError: '' } : {}) });
@@ -406,7 +642,9 @@ links.on("event", ({ node, name, data }) => {
 // mesh/serve.js's).
 links.on("binary", ({ node, data }) => {
   const f = frames.decode(data);
-  if (f?.type === "output" && remoteTerms.get(f.id)?.node === node) sendToManager("terminal:data", { id: f.id, data: f.data, end: f.end });
+  if (f?.type !== "output" || remoteTerms.get(f.id)?.node !== node) return;
+  noteSent(f.id, f.end);
+  sendToManager("terminal:data", { id: f.id, data: f.data, end: f.end });
 });
 // A link that just came up: everything the peer has, at once; one that went: its last picture stays, marked offline.
 links.on("link", async ({ node, up }) => {
@@ -421,13 +659,14 @@ links.on("link", async ({ node, up }) => {
     const [data, live, git, tabs, info, usage, limits, resources] = await Promise.all([links.call(node, "sessions.list"), links.call(node, "live.list"), links.call(node, "git.status"), links.call(node, "terminals.list"), links.call(node, "host.info").catch(() => null), links.call(node, "usage.get").catch(() => null), links.call(node, "limits.get").catch(() => null), links.call(node, "resources.get").catch(() => null)]);
     remote.set(node, { ...remote.get(node), data, live, git, info, usage, limits, resources });
     nodesChanged();
-    reconcileRemote(node, Array.isArray(tabs) ? tabs.filter(x => isObj(x) && frames.UUID.test(x.id)) : []);
-    // The output missed while it was away: attaching again brings the scrollback, of which the window writes only
-    // what it does not have (workspace-ui.js writeAfter).
-    for (const x of remoteTerms.values()) {
-      if (x.node !== node) continue;
-      const a = await links.call(node, "terminals.attach", { id: x.id }).catch(() => null);
-      if (a?.scrollback) sendToManager("terminal:data", { id: x.id, data: a.scrollback, end: a.end });
+    reconcileRemote(node, cleanTabs(tabs));
+    // The panes the window could not attach while it was away are attached now; the others get the output they missed
+    // (its link dropped, the host forgot this node as a viewer: attaching again makes it one).
+    const waiting = new Set(attachWaits.keys());
+    answerAttachWaits(node);
+    for (const x of [...remoteTerms.values()]) {
+      if (x.node !== node || waiting.has(x.id)) continue;
+      await attachRemote(x).catch(e => meshLog(`attaching ${x.id.slice(0, 8)} on ${nodeName(node)} again failed: ${e.message}`));
     }
   } catch (e) {
     meshLog(`reading ${node.slice(0, 8)} failed: ${e.message}`);
@@ -574,17 +813,25 @@ async function openTab(cwd, command, meta, env, place = "tab", argv = null) {
   else workspace.addTab(getSpaceFor(cwd), id);
   showManager();
 }
-function showTab(id) {
+// One of this computer's terminals comes up in the window: its pane, or a new tab in its project's space when it has
+// none here (hidden, or opened from another device).
+async function showTab(id) {
+  await restoring;
+  if (!workspace.findTab(id)) {
+    const x = terminals.getTabs().find(tab => tab.id === id);
+    if (x) workspace.addTab(getSpaceFor(x.cwd), id);
+  }
   workspace.focus(id);
   showManager();
 }
-// "Show terminal", a notification's click, a voice command: a session in one of AgentDeck's tabs comes up there, any
-// other in its own terminal (terminal-focus.js; same answer).
-function focusSessionAnywhere(opts) {
+// "Show terminal", a notification's click, a voice command, the command centre's show_session: a session in one of
+// this computer's terminals comes up there - whoever opened it, with a pane here or not -, any other in its own
+// terminal (terminal-focus.js; same answer).
+async function focusSessionAnywhere(opts) {
   const tab = terminals.getTabs().find(x => x.agent === opts.agent && x.sessionId === opts.id && !x.exited);
   if (!tab) return focusSession(opts);
-  showTab(tab.id);
-  return Promise.resolve({ ok: true, how: "tab", reason: "", ms: 0 });
+  await showTab(tab.id);
+  return { ok: true, how: "tab", reason: "", ms: 0 };
 }
 // meta: {title, agent, sessionId} of what runs, for the tab; inTab: an AgentDeck terminal whatever the setting ("Move
 // here", a split); place: where in the window (PLACES).
@@ -635,6 +882,12 @@ async function launchTerminal(cwd, command = null, meta = {}, inTab = false, pla
   }
 }
 async function launchAgent(agent, id, cwd, inTab = false, place = "tab") {
+  // A session that runs in one of this computer's terminals already is shown there: never resumed a second time.
+  const running = launch.runningTab(agent, id);
+  if (running) {
+    await openTerm(running.id, PLACES.includes(place) ? place : "tab");
+    return;
+  }
   const { command, argv, meta } = launch.resumeCommand(agent, id, cwd);
   await launchTerminal(cwd, command, meta, inTab, place, argv);
   // Only Claude reports when it is ready (live.js), which ends the windows' "Loading".
@@ -673,7 +926,8 @@ async function launchNewWithPrompt(agent, cwd, prompt) {
     throw e;
   }
 }
-// What the window asks of the layout (workspace-ui.js). A terminal closed here ends; its pane goes once it has.
+// What the window asks of the layout (workspace-ui.js). Closing a pane or a tab hides it: the terminal goes on, for
+// every device (Stop is terminal:stop).
 async function runWorkspaceCommand(cmd, a) {
   const id = v => text(v ?? "", 64);
   switch (cmd) {
@@ -696,8 +950,11 @@ async function runWorkspaceCommand(cmd, a) {
     case "merge-tab": return workspace.mergeTab(id(a.tab), id(a.into), id(a.at), text(a.side, 8));
     case "move-pane": return workspace.movePane(id(a.term), id(a.into), id(a.at), text(a.side, 8));
     case "detach-pane": return workspace.detachPane(id(a.term));
-    case "close-pane": return closeTerm(id(a.term));
-    case "close-tab": workspace.getTabTerms(id(a.tab)).forEach(closeTerm); return true;
+    case "close-pane": return hideTerm(id(a.term));
+    case "close-tab": workspace.getTabTerms(id(a.tab)).forEach(hideTerm); return true;
+    // A terminal with no pane here - this computer's or another's, one known only from a live session's term - in a
+    // new pane (place "tab", "right", "down"); one with a pane gets the focus.
+    case "open-term": return openTerm(id(a.term), PLACES.includes(a.place) ? a.place : "tab");
     // A shell beside the focused pane, in its folder (or the shown space's).
     case "split": {
       const dir = a.dir === "down" ? "down" : "right";
@@ -1027,16 +1284,53 @@ function registerIpc() {
     if (!links.online(text(node, 64))) throw new HostError("offline");
     return links.call(text(node, 64), "sessions.stop", { agent: text(agent), id: text(id) });
   });
+  // A person's keystrokes: on the terminal's computer they make this window the one whose size it has (after the
+  // other's HOLD, host/viewers.js). A "reopened after a restart" note is done with once typed into. The terminal's own
+  // answers (isReport, host/viewers.js: xterm.js answers a program's questions, replayed ones too) are passed on, but
+  // are no one's typing - here, and on another computer's host, which tells them apart itself (mesh/serve.js).
   ipcMain.on("terminal:input", (e, id, data) => {
-    if (!trusted(e) || typeof data !== "string" || data.length > 1_000_000) return;
-    const node = remoteTerms.get(id)?.node;
-    if (node) links.sendBinary(node, frames.encodeInput(id, data)); else terminals.input(id, data);
+    if (!trusted(e) || typeof id !== "string" || typeof data !== "string" || data.length > 1_000_000) return;
+    const node = remoteTerms.get(id)?.node, typed = !isReport(data);
+    if (node) links.sendBinary(node, frames.encodeInput(id, data));
+    else {
+      if (typed) {
+        host.viewers.input(id, "");
+        terminals.input(id, data);
+      } else terminals.type(id, data);
+    }
+    if (typed && !reopenSeen.has(id)) {
+      reopenSeen.add(id);
+      sendWorkspace();
+    }
   });
+  // A pane's fit: the size it wants (a want, host/viewers.js) - the terminal takes it while this window drives or
+  // nobody does. Remembered for "Use my size" and for attaching again.
   ipcMain.on("terminal:resize", (e, id, cols, rows) => {
-    if (!trusted(e)) return;
+    if (!trusted(e) || typeof id !== "string") return;
+    const c = Number(cols), r = Number(rows);
+    if (!Number.isInteger(c) || !Number.isInteger(r) || c < 1 || r < 1 || c > 1000 || r > 1000) return;
+    wants.set(id, { cols: c, rows: r });
     const node = remoteTerms.get(id)?.node;
-    if (node) links.sendBinary(node, frames.encodeResize(id, Number(cols), Number(rows))); else terminals.resize(id, Number(cols), Number(rows));
+    if (node) links.sendBinary(node, frames.encodeResize(id, c, r));
+    else if (localViewing.has(id)) host.viewers.want(id, "", c, r);
   });
+  // "Use my size": the pane's last fit becomes the terminal's size, for every device (until another one types).
+  handle("terminal:take-size", async id => {
+    const term = text(id, 64), w = wants.get(term);
+    if (!w) throw new HostError("invalidData");
+    const x = remoteTerms.get(term);
+    if (!x) {
+      syncLocalViewers();
+      host.viewers.take(term, "", w.cols, w.rows);
+      return true;
+    }
+    if (!links.online(x.node)) throw new HostError("offline");
+    const s = await links.call(x.node, "terminals.resize", { id: term, cols: w.cols, rows: w.rows });
+    if (isObj(s) && remoteTerms.has(term)) sendToManager("terminal:size", { id: term, ...remoteSize(x.node, term, s) });
+    return true;
+  });
+  // Stop: the terminal ends on its computer, for every device (asked first in the window).
+  handle("terminal:stop", id => stopTerm(text(id, 64)));
   // Tokens and API-equivalent cost (usage.js): the last result at once, or a fresh pass over the transcripts.
   handle("usage:get", () => usage.get());
   // The shortcuts as set now: the menu's hotkey and the voice ones (labels such as "Ctrl + Shift + Space").
@@ -1127,7 +1421,7 @@ function registerIpc() {
   handle("voice:command", () => voice?.command.toggle() ?? { ok: false });
   handle("voice:command-state", () => voice?.command.state() ?? { enabled: false, state: "idle" });
   // The command centre (orchestrator.js): its terminal, and what the edge menu's command field says to it.
-  handle("centre:start", async () => { showTab(await orchestrator.open()); return true; });
+  handle("centre:start", async () => { await showTab(await orchestrator.open()); return true; });
   // The other computers (mesh/links.js) with what they show.
   handle("mesh:nodes", () => nodesView());
   handle("mesh:launch", (node, args) => remoteLaunch(text(node, 64), isObj(args) ? args : {}));
@@ -1216,7 +1510,9 @@ if (!app.requestSingleInstanceLock()) {
     autostart.applyDefault().catch(err => console.error("Could not set up starting with Windows:", err.message));
     launch.sweepPrompts(); // prompts of voice commands whose terminal never started
     host.start(); // the scans, the usage figures, the git status, the tabs' links to their sessions
-    startMesh();
+    // The mesh once the terminals are back: a peer connecting earlier would get a list without those still being
+    // opened anew, and its panes of them would go (docs/SHARED-SESSIONS.md 4.6, as the headless host does).
+    restoring.finally(startMesh);
     answerPopup = require("./answer-popup").createAnswerPopup({ preload: PRELOAD, background: prefs.background, copy: async s => clipboard.writeText(s), icon: makeIcon(64) });
     voiceContext.start();
     // Started once the windows are up: the first run copies VoiceTray's history first, and a voice part that cannot

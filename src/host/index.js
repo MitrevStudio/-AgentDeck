@@ -5,16 +5,22 @@
 // the computer it runs on and shows it in its windows; the headless host (host/) creates the same and serves it to
 // peers. Nothing here needs Electron or the pages' language: errors carry codes (errors.js).
 //
+// The terminals belong to the host (docs/SHARED-SESSIONS.md): every device attaches to them and detaches - this
+// computer's own window (who "") and the peers (who: their node id; mesh/serve.js) - and viewers.js keeps who has each
+// one open and whose size it has. host.tabs() lists them with their viewers and driver, host.liveSessions() tells the
+// terminal each live session runs in (term), host.restoreTerminals() opens those a restart took anew under their ids.
+//
 // Events (an EventEmitter): "data" (the scan's cache), "terminal:data" ({id, data, end}), "terminal:exit" ({id,
-// code, lost}), "terminal:size" ({id, cols, rows}: a size changed), "terminal:refit" ({id}: a peer that sized one of
-// this computer's own terminals let go of it - its pane here sends its own size again; mesh/serve.js), "terminals"
-// (the tabs), "usage" (the summary), "git" (the snapshot).
+// code, lost}), "terminal:size" ({id, cols, rows, driver}: the size or the driver changed), "terminals" (host.tabs():
+// the tabs changed, or their viewers or driver), "usage" (the summary), "git" (the snapshot).
 const path = require("node:path");
 const { EventEmitter } = require("node:events");
 const { createSessions } = require("./sessions");
 // Windows: a DockPty per terminal, which outlives the host; elsewhere node-pty, children of the host.
 const { createTerminals } = require(process.platform === "win32" ? "./terminals" : "./terminals-pty");
-const { createLaunch } = require("./launch");
+const { createViewers } = require("./viewers");
+const { terminalEnv } = require("./terminal-env");
+const { createLaunch, MAX_TERMINALS } = require("./launch");
 const { createTabLinks } = require("./tab-links");
 const { createSetup } = require("./setup");
 const { liveSessions: claudeLiveSessions, findTranscript } = require("./live");
@@ -35,6 +41,106 @@ function createSearch(dbFile) {
     return { index() {}, query: () => Promise.resolve([]) };
   }
   return require("./search").createSearch({ dbFile });
+}
+
+// The callbacks a terminal backend (terminals.js, terminals-pty.js) is made with for a host that equipTerminals then
+// equips: output and exits go out as the host's events, changes as its tabs, sizes through its viewers.
+function terminalEvents(host) {
+  return {
+    onData: (id, data, end) => host.emit("terminal:data", { id, data, end }),
+    onExit: (id, code, lost) => host.emit("terminal:exit", { id, code, lost }),
+    onChange: () => host.tabsChanged?.(),
+    onResize: id => host.viewers?.sized(id)
+  };
+}
+
+const REOPEN_AT_ONCE = 4;
+
+// Gives a host (an EventEmitter) its terminals as docs/SHARED-SESSIONS.md 4.7 describes them: host.terminals,
+// host.launch, host.viewers (viewers.js), host.tabs(), host.liveSessions() (each with `term`), host.restoreTerminals()
+// and host.tabsChanged(). terminals: a backend made with terminalEvents(host); launch: launch.js over it;
+// liveSessions(): the live status as live.js and codex-live.js read it; log(...parts): the launch log. createHost does
+// this, and tests make their hosts the same way.
+function equipTerminals(host, { terminals, launch, liveSessions, log = () => {} }) {
+  const viewers = createViewers({
+    resize: (id, cols, rows) => terminals.resize(id, cols, rows), size: id => terminals.size(id),
+    onSize: e => host.emit("terminal:size", e), onChange: () => tabsChanged()
+  });
+  // The tabs with their viewers ([{ id, name, kind }]: id the viewer's who, "" for this computer's own window) and
+  // driver (a who, or null). Names are the caller's to fill in (mesh/serve.js, main.js): ownerName and name are "".
+  function tabs() {
+    return terminals.getTabs().map(x => ({
+      ...x, ownerName: "", reopened: x.reopened === true,
+      viewers: viewers.list(x.id).map(v => ({ id: v.who, name: "", kind: v.kind })), driver: viewers.driverOf(x.id)
+    }));
+  }
+  // A terminal that ended or went takes its viewers with it; everyone hears of the tabs.
+  function tabsChanged() {
+    viewers.prune(new Set(terminals.getTabs().filter(x => !x.exited).map(x => x.id)));
+    host.emit("terminals", tabs());
+  }
+  // The live sessions, each with the terminal here it runs in ("" when none: it runs elsewhere, or in none).
+  async function liveWithTerm() {
+    const live = await liveSessions();
+    const running = new Map(terminals.getTabs().filter(x => !x.exited && x.sessionId).map(x => [`${x.agent}:${x.sessionId}`, x.id]));
+    return live.map(l => ({ ...l, term: running.get(`${l.agent}:${l.id}`) || "" }));
+  }
+
+  // ---------- after a restart (4.6) ----------
+  // A terminal the restart took, opened anew under its id: an agent resumes its session (a resume that cannot be
+  // done becomes a shell), anything else is a shell in its folder - no other command runs again. "" when nothing
+  // could open; its entry goes then.
+  async function reopen({ id, createdAt, meta }, env) {
+    const again = { id, createdAt, reopened: true, owner: meta.owner };
+    if (meta.agent && meta.sessionId) {
+      try {
+        const spec = launch.resumeCommand(meta.agent, meta.sessionId, meta.cwd);
+        return await launch.openTerminal(meta.cwd, spec.command, { ...spec.meta, title: meta.title || spec.meta.title, ...again }, env, "reopen resume", spec.argv);
+      } catch (e) {
+        log(`reopening ${id.slice(0, 8)} with its session failed (${e.message}), a shell instead`, `cwd="${meta.cwd}"`);
+      }
+    }
+    try {
+      return await launch.openTerminal(meta.cwd, null, again, env, "reopen", null);
+    } catch (e) {
+      log(`reopening ${id.slice(0, 8)} failed (${e.message})`, `cwd="${meta.cwd}"`);
+      terminals.forgetEntry(id);
+      return "";
+    }
+  }
+  // The terminals the last run of the host left: those still running attached (Windows: DockPty outlives the host),
+  // those a restart took opened anew under their ids, newest first while there is room (MAX_TERMINALS), marked
+  // reopened. skip(meta): entries the caller brings back its own way (main.js: the command centre) - not opened anew,
+  // and their entries go. env: the environment for the terminals opened anew (default: this process's, no proxy).
+  // A terminal "Stop all terminals and quit" stopped left no entry: nothing opens. -> { attached, kept, reopened }.
+  async function restoreTerminals({ skip = () => false, env = null } = {}) {
+    const { attached, kept, dead = [] } = await terminals.restore();
+    let room = Math.max(0, MAX_TERMINALS - terminals.countRunning());
+    const todo = [];
+    for (const entry of [...dead].sort((a, b) => b.createdAt - a.createdAt)) {
+      let skipped = true;
+      try { skipped = Boolean(skip(entry.meta)); } catch {}
+      if (skipped || room <= 0 || !launch.isDir(entry.meta.cwd)) {
+        terminals.forgetEntry(entry.id);
+        continue;
+      }
+      room--;
+      todo.push(entry);
+    }
+    const reopened = [];
+    const theEnv = env || terminalEnv(process.env);
+    const next = async () => {
+      for (let entry; (entry = todo.shift());) {
+        const id = await reopen(entry, theEnv);
+        if (id) reopened.push(id);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(REOPEN_AT_ONCE, todo.length) }, next));
+    if (reopened.length) tabsChanged();
+    return { attached, kept, reopened };
+  }
+
+  return Object.assign(host, { terminals, launch, viewers, tabs, tabsChanged, liveSessions: liveWithTerm, restoreTerminals });
 }
 
 // dataDir: the host's own files (registry, caches, terminals, prompts); home: the user's home (the agents' folders);
@@ -65,16 +171,11 @@ function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () 
       if (full) gitStatus.refresh().catch(err => console.error("Git status failed:", err.message));
     }
   });
-  const terminals = createTerminals({
-    userDataDir: dataDir,
-    onData: (id, data, end) => host.emit("terminal:data", { id, data, end }),
-    onExit: (id, code, lost) => host.emit("terminal:exit", { id, code, lost }),
-    onChange: tabs => host.emit("terminals", tabs),
-    onResize: (id, cols, rows) => host.emit("terminal:size", { id, cols, rows })
-  });
+  const terminals = createTerminals({ userDataDir: dataDir, ...terminalEvents(host) });
   const codexLive = createCodexLive({ sessions: () => sessions.get()?.sessions || [], tabs: () => terminals.getTabs(), link: terminals.link });
   const liveSessions = async () => (await Promise.all([claudeLiveSessions(), codexLive()])).flat();
   const launch = createLaunch({ dataDir, terminals, sessions, liveSessions, findTranscript, log, noLauncher });
+  equipTerminals(host, { terminals, launch, liveSessions, log });
   const sendText = require("./send-text").createSendText({ terminals, liveSessions });
   const tabLinks = createTabLinks({ terminals, liveSessions });
   const setup = createSetup({ agents: () => sessions.agents });
@@ -124,10 +225,11 @@ function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () 
     sessions.stop();
   }
 
+  // terminals, launch, viewers, tabs, liveSessions (with term) and restoreTerminals come from equipTerminals.
   return Object.assign(host, {
-    dataDir, home, sessions, terminals, launch, sendText, setup, liveSessions, findTranscript, preview, search,
+    dataDir, home, sessions, sendText, setup, findTranscript, preview, search,
     git: gitStatus, usage, limits, resources, start, flush, stop
   });
 }
 
-module.exports = { createHost };
+module.exports = { createHost, equipTerminals, terminalEvents };

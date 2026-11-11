@@ -99,8 +99,11 @@ function createLink(ws, { onRequest = () => { throw new HostError("unknownMethod
     finish(code, reason);
     try { ws.close(code, reason); } catch {}
   }
+  // How many bytes wait to go out on this link (the WebSocket's bufferedAmount; a web link's, web-link.js), 0 when it
+  // cannot say: what a sender of much output looks at before sending more (mesh/serve.js).
+  const buffered = () => (isOpen() && Number(ws.bufferedAmount)) || 0;
 
-  return { call, notify, sendBinary, close, isOpen, ws };
+  return { call, notify, sendBinary, close, isOpen, buffered, ws };
 }
 
 module.exports = { createLink, PROTOCOL };

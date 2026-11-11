@@ -1,7 +1,9 @@
 // The Demo: a provider (see data.js) with three made-up computers behind it, answering the host's protocol the way
 // serve.js does - snapshots, live status, terminals, previews - and changing over time, so every screen has
 // something to show: a session turns to "waiting" now and then (the in-app banner), answers come back, terminals
-// draw an agent-like screen at the host's 120x30 and take keys.
+// draw an agent-like screen at the host's 120x30 and take keys. The terminals are shared as a host with terminals: 2
+// shares them (docs/SHARED-SESSIONS.md): some are open on the computer's own window and on another desktop
+// (Office-PC), one of which drives the size until the phone takes it; one came back after a restart.
 import { emitter } from "./util.js";
 
 const MIN = 60 * 1000, HOUR = 60 * MIN, DAY = 24 * HOUR;
@@ -12,6 +14,8 @@ const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : "xxxxxxxx-xxxx-4xx
 const nodeId = seed => [...Array(64)].map((_, i) => ((seed.charCodeAt(i % seed.length) * (i + 7)) % 16).toString(16)).join("");
 // The Demo's phone: the owner of the terminals it opens (and of one it left running on devws).
 const PHONE = nodeId("demo-phone");
+// Another desktop that has some of the terminals open (a viewer, docs/SHARED-SESSIONS.md 4.3).
+const OFFICE = { id: nodeId("office-pc"), name: "Office-PC", kind: "desktop" };
 
 // ---------- the computers ----------
 function sampleHosts(now) {
@@ -25,7 +29,7 @@ function sampleHosts(now) {
     ],
     sessions: [
       { agent: "Claude", title: "Mobile app skeleton in Capacitor", cwd: "E:\\AIWorkTool\\ai-session-manager", ago: 2 * MIN,
-        live: { status: "waiting", waitingFor: "permission to run Bash: npm run apk" }, term: "agent", screen: "permission",
+        live: { status: "waiting", waitingFor: "permission to run Bash: npm run apk" }, term: "agent", screen: "permission", seen: [OFFICE],
         messages: [
           ["user", "Направи скелета на мобилното приложение в mobile/ – Capacitor, esbuild, xterm.js. Първо Android."],
           ["assistant", "I'll scaffold `mobile/` with its own package.json, an esbuild build into `www/` and the Android project from `cap add android`. Then the data layer with a mock provider, and the screens."],
@@ -53,7 +57,9 @@ function sampleHosts(now) {
       { agent: "OpenCode", title: "README in Bulgarian", cwd: "E:\\Work\\notify", ago: 3 * DAY,
         messages: [["user", "Преведи README-то на български."], ["assistant", "Translated; the code samples are left as they were."]] }
     ],
-    shells: [{ cwd: "E:\\Work\\bgr-erp", title: "bgr-erp" }]
+    // Its own window has its terminals open (the host's own id as their viewer); the shell came back after a restart.
+    own: true,
+    shells: [{ cwd: "E:\\Work\\bgr-erp", title: "bgr-erp", reopened: true }]
   };
   const devws = {
     node: { id: nodeId("devws-host"), name: "devws", kind: "headless", version: "1.12.0", status: "online", via: [], lastSeen: now, error: "" },
@@ -64,7 +70,7 @@ function sampleHosts(now) {
     ],
     sessions: [
       { agent: "Claude", title: "Flaky e2e test on checkout", cwd: "/home/ivan/bdd-web", ago: 5 * MIN,
-        live: { status: "waiting", waitingFor: "a question: which branch should the fix go on?" }, term: "agent", screen: "question",
+        live: { status: "waiting", waitingFor: "a question: which branch should the fix go on?" }, term: "agent", screen: "question", seen: [OFFICE],
         messages: [
           ["user", "e2e тестът за checkout пада на CI всеки трети път."],
           ["assistant", "The cart is read before the session cookie is set: a race in `useCart`. I have a fix. Which branch should it go on - `dev` or a new `fix/checkout-race`?"]
@@ -77,7 +83,10 @@ function sampleHosts(now) {
       { agent: "Claude", title: "Docker image size", cwd: "/home/ivan/bdd-web", ago: 2 * DAY,
         messages: [["user", "Образът е 1.2 GB. Смали го."], ["assistant", "Multi-stage build on node:24-alpine: 186 MB."]] }
     ],
-    shells: [{ cwd: "/home/ivan/bdd-web", title: "bdd-web", owner: PHONE }]
+    shells: [
+      { cwd: "/home/ivan/bdd-web", title: "bdd-web", owner: PHONE },
+      { cwd: "/home/ivan/notify-api", title: "notify-api logs", owner: OFFICE.id, ownerName: OFFICE.name, seen: [OFFICE] }
+    ]
   };
   const laptop = {
     node: { id: nodeId("laptop-ivan"), name: "Laptop", kind: "desktop", version: "1.11.0", status: "offline", via: [], lastSeen: now - 2 * DAY, error: "" },
@@ -268,15 +277,18 @@ export function createMockProvider() {
       if (s.live) {
         h.liveMap.set(s.id, { status: s.live.status, waitingFor: s.live.waitingFor || "", statusAt: s.updatedAt, activityAt: s.updatedAt, startedAt: s.updatedAt - 40 * MIN, pid: 4000 + Math.floor(Math.random() * 5000) });
       }
-      if (s.term === "agent") openTab(h, { cwd: s.cwd, title: s.title, agent: s.agent, sessionId: s.id, session: s });
+      if (s.term === "agent") openTab(h, { cwd: s.cwd, title: s.title, agent: s.agent, sessionId: s.id, session: s, seen: s.seen });
     }
-    for (const sh of h.shells) openTab(h, { cwd: sh.cwd, title: sh.title, owner: sh.owner || "" });
+    for (const sh of h.shells) openTab(h, { cwd: sh.cwd, title: sh.title, owner: sh.owner || "", ownerName: sh.ownerName || "", reopened: sh.reopened, seen: sh.seen });
   }
 
-  // owner: "" - the computer's own (a pane on its desktop); PHONE - opened from this phone.
-  function openTab(h, { cwd, title, agent = "", sessionId = "", session = null, owner = "" }) {
+  // owner: "" - the computer's own (a pane on its desktop); PHONE - opened from this phone. seen: other devices that
+  // have it open (besides the computer's own window, when it has one: h.own). The first of them drives its size.
+  function openTab(h, { cwd, title, agent = "", sessionId = "", session = null, owner = "", ownerName = "", reopened = false, seen = [] }) {
     const id = uuid();
-    const tab = { id, cwd, title, agent, sessionId, agentOnly: Boolean(agent), codexLog: "", pid: 10000 + Math.floor(Math.random() * 20000), owner, exited: false, lost: false, createdAt: Date.now(), note: "" };
+    const viewers = [...(h.own && owner !== PHONE ? [{ id: h.node.id, name: h.node.name, kind: "desktop" }] : []), ...seen.map(v => ({ ...v }))];
+    const tab = { id, cwd, title, agent, sessionId, agentOnly: Boolean(agent), codexLog: "", pid: 10000 + Math.floor(Math.random() * 20000), owner, ownerName,
+      exited: false, lost: false, createdAt: Date.now() - (reopened ? 20 * MIN : 0), note: "", reopened: Boolean(reopened), viewers, driver: viewers[0]?.id || null };
     const t = { end: 0, watchers: 0 };
     const emitOut = data => {
       t.end += data.length;
@@ -287,7 +299,31 @@ export function createMockProvider() {
     h.terms.set(id, t);
     return tab;
   }
-  const tabOut = (h, tab) => ({ ...tab, cols: h.terms.get(tab.id)?.impl.cols, rows: h.terms.get(tab.id)?.impl.rows });
+  const tabOut = (h, tab) => ({ ...tab, viewers: tab.viewers.map(v => ({ ...v })) });
+  const tabsChanged = h => ev.emit("notify", { node: h.node.id, event: "terminals", payload: h.tabs.map(x => tabOut(h, x)) });
+
+  // ---------- viewers and the size (serve.js, host/viewers.js, made simple) ----------
+  // The other devices' panes want the host's 120x30; the phone wants what it took.
+  function setSize(h, tab, cols, rows, driver) {
+    const t = h.terms.get(tab.id);
+    if (t.impl.cols !== cols || t.impl.rows !== rows) t.impl.resize(cols, rows);
+    const driverChanged = tab.driver !== driver;
+    tab.driver = driver;
+    ev.emit("notify", { node: h.node.id, event: "terminal.size", payload: { id: tab.id, cols, rows, driver } });
+    if (driverChanged) tabsChanged(h);
+    return { cols, rows, driver };
+  }
+  // The phone gave the size back or left: the first other device with a pane has it again.
+  function handBack(h, tab) {
+    const next = tab.viewers.find(v => v.id !== PHONE && v.kind === "desktop");
+    const t = h.terms.get(tab.id);
+    return next ? setSize(h, tab, COLS, ROWS, next.id) : setSize(h, tab, t.impl.cols, t.impl.rows, null);
+  }
+  const tabById = (h, id) => {
+    const tab = h.tabs.find(x => x.id === id);
+    if (!tab) throw Object.assign(new Error("No such terminal here."), { code: "invalidData" });
+    return tab;
+  };
 
   function snapshot(h) {
     return {
@@ -301,7 +337,8 @@ export function createMockProvider() {
     return [...h.liveMap].map(([id, l]) => {
       const s = h.sessions.find(x => x.id === id);
       return { agent: s.agent, id, pid: l.pid || 0, procStart: "", cwd: s.cwd, name: "", kind: "", jobId: "", status: l.status, waitingFor: l.waitingFor || "",
-        statusAt: l.statusAt, startedAt: l.startedAt || l.statusAt, activityAt: l.activityAt, subagents: [], jobs: [] };
+        statusAt: l.statusAt, startedAt: l.startedAt || l.statusAt, activityAt: l.activityAt, subagents: [], jobs: [],
+        term: h.tabs.find(x => x.sessionId === id && !x.exited)?.id || "" };
     });
   }
   function preview(h, agent, id) {
@@ -326,21 +363,42 @@ export function createMockProvider() {
     h.tabs = h.tabs.filter(x => x.id !== id);
     const s = h.sessions.find(x => x.id === tab.sessionId);
     if (s) h.setLive(s, null);
-    ev.emit("notify", { node: h.node.id, event: "terminals", payload: h.tabs.map(x => tabOut(h, x)) });
+    tabsChanged(h);
   }
 
   const METHODS = {
-    "host.info": h => ({ ...h.node, platform: h.platform, home: h.home, agents: h.agents }),
+    // terminals: 2 - the demo shares its terminals as a new host does (viewers, a driver, terminals.resize).
+    "host.info": h => ({ ...h.node, platform: h.platform, home: h.home, agents: h.agents, terminals: 2 }),
     "sessions.list": h => snapshot(h),
     "live.list": h => liveList(h),
     "terminals.list": h => h.tabs.map(x => tabOut(h, x)),
     "sessions.preview": (h, p) => preview(h, p.agent, p.id),
     "terminals.attach": (h, p) => {
-      const t = termOf(h, p.id);
+      const t = termOf(h, p.id), tab = tabById(h, p.id);
       t.watchers++;
-      return { scrollback: t.impl.paint(), end: t.end, exitCode: null, cols: t.impl.cols, rows: t.impl.rows };
+      if (!tab.viewers.some(v => v.id === PHONE)) {
+        tab.viewers.push({ id: PHONE, name: "", kind: "mobile" });
+        tabsChanged(h);
+      }
+      return { scrollback: t.impl.paint(), end: t.end, exitCode: null, cols: t.impl.cols, rows: t.impl.rows, driver: tab.driver };
     },
-    "terminals.detach": (h, p) => { const t = h.terms.get(p.id); if (t) t.watchers = Math.max(0, t.watchers - 1); return true; },
+    "terminals.detach": (h, p) => {
+      const t = h.terms.get(p.id), tab = h.tabs.find(x => x.id === p.id);
+      if (t) t.watchers = Math.max(0, t.watchers - 1);
+      if (tab?.viewers.some(v => v.id === PHONE)) {
+        tab.viewers = tab.viewers.filter(v => v.id !== PHONE);
+        if (tab.driver === PHONE) handBack(h, tab);
+        tabsChanged(h);
+      }
+      return true;
+    },
+    // { id, cols, rows }: the phone takes the size; { id, release: true }: gives it back.
+    "terminals.resize": (h, p) => {
+      const tab = tabById(h, p.id);
+      if (!tab.viewers.some(v => v.id === PHONE)) throw Object.assign(new Error("Attach to the terminal first."), { code: "invalidData" });
+      if (p.release === true) return tab.driver === PHONE ? handBack(h, tab) : { cols: h.terms.get(tab.id).impl.cols, rows: h.terms.get(tab.id).impl.rows, driver: tab.driver };
+      return setSize(h, tab, p.cols, p.rows, PHONE);
+    },
     "terminals.close": (h, p) => { closeTab(h, p.id); return true; },
     "terminals.send": (h, p) => { termOf(h, p.id).impl.send(String(p.text || "")); return true; },
     "sessions.stop": (h, p) => {
@@ -353,9 +411,12 @@ export function createMockProvider() {
       const cwd = p.cwd;
       if (p.kind === "shell") {
         const tab = openTab(h, { cwd, title: cwd.split(/[\\/]/).pop(), owner: PHONE });
-        ev.emit("notify", { node: h.node.id, event: "terminals", payload: h.tabs.map(x => tabOut(h, x)) });
+        tabsChanged(h);
         return tabOut(h, tab);
       }
+      // A session that runs in a terminal here already: that one, nothing new.
+      const running = p.kind === "resume" ? h.tabs.find(x => x.agent === p.agent && x.sessionId === p.sessionId && !x.exited) : null;
+      if (running) return { ...tabOut(h, running), already: true };
       let s = p.kind === "resume" ? h.sessions.find(x => x.agent === p.agent && x.id === p.sessionId) : null;
       if (!s) {
         s = { id: uuid(), agent: p.agent || "Claude", cwd, title: (p.prompt || "").slice(0, 60) || `${p.agent} session`, updatedAt: Date.now(), messages: [] };
@@ -364,7 +425,7 @@ export function createMockProvider() {
       const tab = openTab(h, { cwd, title: s.title, agent: s.agent, sessionId: s.id, session: s, owner: PHONE });
       h.setLive(s, { status: "idle", startedAt: Date.now(), pid: 20000 + Math.floor(Math.random() * 9999) });
       h.touch(s);
-      ev.emit("notify", { node: h.node.id, event: "terminals", payload: h.tabs.map(x => tabOut(h, x)) });
+      tabsChanged(h);
       if (p.prompt) setTimeout(() => h.terms.get(tab.id)?.impl.send(p.prompt), 600);
       return tabOut(h, tab);
     }

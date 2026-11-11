@@ -4,16 +4,18 @@
 // a double tap switches between the whole width and the readable size, a single tap brings up the keyboard. While
 // typing, the cursor is kept in view. Dragging down at the top scrolls back through the terminal's history.
 // Landscape fits more: the whole width gets a bigger font, the readable size shows more columns.
-// "Fit to phone" is the one thing that resizes the host's terminal - to what fits here at the readable size - and
-// pressing it again gives the host its size back; so does leaving (the view detaches, the host refits its pane).
+// "Fit to phone" is the one thing that resizes the host's terminal - it takes the size, to what fits here at the
+// readable size - and pressing it again gives the size back; so does leaving (the view detaches, and the host hands
+// the size to the device that had it: docs/SHARED-SESSIONS.md 4.3). Under the title: the computer, the size and
+// whose it is when not this phone's, and on a second line the other devices that have the terminal open.
 // Leaving ends nothing: a shell this phone opened keeps running, and the toast says where it is listed (Terminals);
 // only the X in the header closes the terminal, after a confirmation.
 // The view outlives a lost link: it says so, and draws the screen again once it is attached anew.
 import { Terminal } from "@xterm/xterm";
 import { t } from "../i18n.js";
 import { esc, KEYS } from "../util.js";
-import { iconBtn } from "../icons.js";
-import { header, wireBack } from "./parts.js";
+import { icon, iconBtn } from "../icons.js";
+import { header, wireBack, closeAsk } from "./parts.js";
 import { keyStrip } from "./keys.js";
 
 const READ_PX = 12;           // a readable font on a phone; also what "Fit to phone" sizes the host's terminal for
@@ -67,16 +69,37 @@ export function render(el, ctx, p) {
   // Private field (xterm 6 CoreService); without it the view merely shows no cursor.
   try { term._core.coreService.isCursorInitialized = true; } catch {}
 
-  let handle = null, ctrl = false, fitted = null; // fitted: the host's own size while "Fit to phone" is on
+  let handle = null, ctrl = false, fitted = null; // fitted (an older host): its own size while "Fit to phone" is on
   let hostCols = 120, hostRows = 30, closed = false, closedHere = false;
   let zoom = lastZoom;                            // "read" | "fit" | a font size (px)
   let overState = "";                             // what the overlay says: "" | "exited" | "reconnecting" | "gone"
 
+  // The terminal has this phone's size: on a host that shares its terminals, the host says so (the driver);
+  // on an older one, while the phone's own "Fit to phone" is on.
+  const isMine = () => (handle?.shared ? handle.mine : Boolean(fitted));
+  // The other devices that have it open, on the line under the size: an eye and their names, the one whose size the
+  // terminal has marked with the fit glyph (the button's); the whole sentence in its tooltip and label.
+  function viewersLine() {
+    const others = store.viewers(p.node, p.term);
+    if (!others.length) return "";
+    const driver = handle?.shared && !handle.mine ? handle.driver : null;
+    const names = others.map(v => `${esc(v.name)}${v.id === driver ? icon("fit", "drives") : ""}`).join(", ");
+    let label = t("term.viewers", { names: others.map(v => v.name).join(", ") });
+    if (driver) label += ` · ${t("term.sizeBy", { cols: hostCols, rows: hostRows, name: store.sizeOwner(p.node, p.term, driver) })}`;
+    return `<span class="term-viewers" role="img" aria-label="${esc(label)}" title="${esc(label)}">${icon("eye")}<span>${names}</span></span>`;
+  }
+  let headSig = "";
   function drawHead() {
+    const mine = isMine(), seen = viewersLine();
+    const size = t("term.hostSize", { cols: hostCols, rows: hostRows });
+    // Redrawn only when something it shows changed (the store changes every few seconds).
+    const sig = JSON.stringify([size, seen, mine]);
+    if (sig === headSig) return;
+    headSig = sig;
     head.innerHTML = header(p.title || t("session.terminal"), {
       back: true,
-      sub: `${esc(nodeName)} · ${esc(t("term.hostSize", { cols: hostCols, rows: hostRows }))}`,
-      actions: iconBtn("fit", t(fitted ? "term.unfit" : "term.fit"), 'data-act="fit"', fitted ? "on" : "")
+      sub: `${esc(nodeName)} · ${esc(size)}${seen}`,
+      actions: iconBtn("fit", t(mine ? "term.unfit" : "term.fit"), 'data-act="fit"', mine ? "on" : "")
         + iconBtn("keyboard", t("term.keyboard"), 'data-act="kb"')
         + iconBtn("x", t("term.close"), 'data-act="close"', "danger")
     });
@@ -88,7 +111,7 @@ export function render(el, ctx, p) {
       if (keyboardUp()) input.blur(); else showKeyboard();
     };
     head.querySelector("[data-act='close']").onclick = async () => {
-      if (!await ctx.confirm(t("term.closeAsk", { name: nodeName }), t("term.close"), { danger: true })) return;
+      if (!await ctx.confirm(closeAsk(store, p.node, p.term), t("term.close"), { danger: true })) return;
       try { await store.closeTerminal(p.node, p.term); closedHere = true; ctx.back(); } catch (e) { ctx.fail(e); }
     };
   }
@@ -158,25 +181,37 @@ export function render(el, ctx, p) {
     drawHead();
   }
 
+  // "Fit to phone": takes the size; when the terminal has the phone's size already, gives it back (the host hands it
+  // to the device that had it; an older host is sent the size it had before).
+  let fitting = false;
   async function toggleFit() {
-    if (!handle) return;
-    if (fitted) {
-      const { cols, rows } = fitted;
-      fitted = null;
-      handle.resize(cols, rows);
-      setHostSize(cols, rows);
-      ctx.toast(t("term.fitted", { cols, rows }));
-      return;
+    if (!handle || fitting) return;
+    fitting = true;
+    try {
+      if (isMine()) {
+        const before = fitted;
+        fitted = null;
+        const s = await handle.release(before);
+        if (closed) return;
+        setHostSize(s.cols, s.rows);
+        ctx.toast(t("term.released", { cols: s.cols, rows: s.rows }));
+        return;
+      }
+      // What fits here at the readable font.
+      const c = cell(), k = READ_PX / term.options.fontSize;
+      const cols = Math.max(20, Math.floor(availW() / (c.w * k))), rows = Math.max(5, Math.floor(availH() / (c.h * k)));
+      if (!handle.shared) fitted = { cols: hostCols, rows: hostRows };
+      zoom = "fit";
+      const s = await handle.take(cols, rows);
+      if (closed) return;
+      setHostSize(s.cols, s.rows);
+      home();
+      ctx.toast(t("term.fitted", { cols: s.cols, rows: s.rows }));
+    } catch (e) {
+      ctx.fail(e);
+    } finally {
+      fitting = false;
     }
-    // What fits here at the readable font.
-    const c = cell(), k = READ_PX / term.options.fontSize;
-    const cols = Math.max(20, Math.floor(availW() / (c.w * k))), rows = Math.max(5, Math.floor(availH() / (c.h * k)));
-    fitted = { cols: hostCols, rows: hostRows };
-    zoom = "fit";
-    handle.resize(cols, rows);
-    setHostSize(cols, rows);
-    home();
-    ctx.toast(t("term.fitted", { cols, rows }));
   }
 
   // ---------- touch: pan, pinch, taps ----------
@@ -374,6 +409,7 @@ export function render(el, ctx, p) {
     offs.push(handle.onSize(({ cols, rows }) => setHostSize(cols, rows)));
     offs.push(handle.onState(({ online }) => { if (!online) say("reconnecting"); else if (overState === "reconnecting") say(""); }));
     offs.push(handle.onReset(({ scrollback, cols, rows }) => {
+      fitted = null; // a size the phone set on an older host went back to its pane with the link
       term.reset();
       setHostSize(cols, rows);
       term.write(scrollback, () => home());
@@ -382,6 +418,7 @@ export function render(el, ctx, p) {
     if (handle.exitCode != null) say("exited");
     // The tab gone or exited on the host: say so.
     offs.push(store.on("change", () => {
+      drawHead(); // who else has it open
       if (overState === "reconnecting" || overState === "gone") return;
       const tab = store.tab(p.node, p.term);
       if (!store.node(p.node)?.loaded) return;

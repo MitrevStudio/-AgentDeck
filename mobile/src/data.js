@@ -15,21 +15,32 @@
 //        A "relay" serves nothing (no sessions): it is only shown in the Computers screen.
 //   provider.request(node, method, params) -> Promise   a request to that node's serve.js METHODS (a failure carries
 //        .code: the host's error code, or "offline" / "timeout" / "closed" / "unknownMethod" for an older host):
-//        "host.info"         -> { id, name, kind, version, platform, home, agents: ["Claude", "Codex", "OpenCode"] }
+//        "host.info"         -> { id, name, kind, version, platform, home, agents: ["Claude", "Codex", "OpenCode"],
+//                                 terminals: 2 } - terminals: 2 marks a host that shares its terminals
+//                                 (docs/SHARED-SESSIONS.md 4): viewers, a driver, terminals.resize. Without it the
+//                                 phone keeps the older way (a resize frame for "Fit to phone").
 //        "sessions.list"     -> Snapshot (projects.js localSnapshot):
 //                               { registry: { projects: [{ name, path }] },
 //                                 sessions: [{ id, agent, cwd, title, prompt?, recap?, projectName?, updatedAt }],
 //                                 agents: [...], at }
 //        "live.list"         -> Live[] (host/live.js + codex-live.js):
 //                               [{ agent, id, pid, cwd, name, kind: "" | "bg", status: "busy" | "waiting" | "idle" | ...,
-//                                  waitingFor, statusAt, startedAt, activityAt, subagents: [], jobs: [] }]
-//        "terminals.list"    { all: true } -> Tab[] (host/terminals.js getTabs), every terminal of the host - the
-//                               "wide view", asked again after every (re)connect before any attach:
-//                               [{ id, cwd, title, agent, sessionId, agentOnly, pid, owner, exited, lost, createdAt, note }]
-//                               (no size: a terminal's size comes with attach and "terminal.size")
+//                                  waitingFor, statusAt, startedAt, activityAt, subagents: [], jobs: [],
+//                                  term }]   term: the terminal there the session runs in, or "" (older hosts: missing)
+//        "terminals.list"    { all: true } -> Tab[], every terminal of the host (a host before terminals: 2 needs
+//                               `all` for that - the "wide view"; a newer one lists all of them anyway), asked again
+//                               after every (re)connect before any attach:
+//                               [{ id, cwd, title, agent, sessionId, agentOnly, pid, owner, exited, lost, createdAt, note,
+//                                  ownerName, reopened, viewers: [{ id, name, kind }], driver }]
+//                               (the last four from terminals: 2 hosts; viewers' ids and driver are node ids, the host's
+//                               own window is the host's id. No size: it comes with attach and "terminal.size")
 //        "terminals.open"    { cwd, kind: "shell" | "new" | "resume" | "prompt", agent, sessionId, prompt } -> Tab
-//        "terminals.attach"  { id } -> { scrollback, end, exitCode, cols, rows }
-//        "terminals.detach"  { id } -> true          (a size the phone set goes back to the desktop's pane)
+//                               (a resume of a session that runs in a terminal there: that tab, with already: true)
+//        "terminals.attach"  { id } -> { scrollback, end, exitCode, cols, rows, driver }   the phone is a viewer now
+//        "terminals.detach"  { id } -> true          the phone stops viewing (a size it took is handed back)
+//        "terminals.resize"  { id, cols, rows } | { id, release: true } -> { cols, rows, driver }   (terminals: 2)
+//                               "Fit to phone" takes the size; pressing it again gives it back. Only as a viewer:
+//                               notViewing otherwise (the handle attaches and asks once more)
 //        "terminals.close"   { id }
 //        "terminals.send"    { id, text } -> true    typed into the agent and submitted; refused with agentNotReady
 //                                                     while the agent works (or when no agent runs there)
@@ -44,7 +55,9 @@
 //   provider.on(event, fn)            -> off()
 //        "nodes"  Node[]                             the list or a status changed
 //        "notify" { node, event, payload }           a host's push (serve.js attach): event "data" (Snapshot),
-//                                                    "live" (Live[]), "terminals" (Tab[]), "terminal.size" ({ id, cols, rows })
+//                                                    "live" (Live[]), "terminals" (Tab[]), "terminal.size" ({ id, cols,
+//                                                    rows, driver }), "terminal.resync" ({ id }: the phone missed output
+//                                                    there and attaches again)
 //        "frame"  { node, frame: { type: "output", id, data, end } }   terminal output
 //   provider.demo                     true for the mock (the UI says so)
 //   provider.id                       the phone's own node id (the owner of the terminals it opens)
@@ -69,6 +82,8 @@ const LOST = new Set(["unpaired", "wrongNode", "noHub"]);
 // "Type it into the terminal" after terminals.send was refused: the text, then Enter a moment later (an agent's
 // input box takes text and Enter in one write as a pasted line break).
 const ENTER_AFTER_MS = 150;
+// How long "Fit to phone" waits for the terminal to be attached again after a lost link before it says "offline".
+const READY_MS = 15000;
 
 export function createStore(provider) {
   const out = emitter();
@@ -156,8 +171,11 @@ export function createStore(provider) {
     else if (event === "live") setLive(node, payload || []);
     else if (event === "terminals") e.terminals = payload || [];
     else if (event === "terminal.size") {
-      const h = attached.get(`${node}:${payload?.id}`);
-      if (h) { h.cols = payload.cols; h.rows = payload.rows; h.emit("size", { cols: payload.cols, rows: payload.rows }); }
+      attached.get(`${node}:${payload?.id}`)?.sized(payload);
+      return;
+    } else if (event === "terminal.resync") {
+      // Output to the phone was skipped while its link lagged: what it missed comes with a fresh attach.
+      attached.get(`${node}:${payload?.id}`)?.reattach();
       return;
     } else return;
     changed(event);
@@ -176,11 +194,25 @@ export function createStore(provider) {
   const nodeName = id => entry(id).node?.name || entry(id).info?.name || id.slice(0, 8);
   const isOnline = id => entry(id).node?.status === "online";
 
-  // The terminal a session runs in: the snapshot's `term` once the host sends it, else the tab that carries its agent
-  // and sessionId (with the wide view: the desktop's own tabs too).
-  function termOf(id, agent, sessionId, s) {
-    if (s?.term) return s.term;
+  // A host that shares its terminals (docs/SHARED-SESSIONS.md 4): viewers, a driver, terminals.resize.
+  const shared = id => entry(id).info?.terminals === 2;
+  const liveOf = (id, agent, sessionId) => (isOnline(id) ? entry(id).live.find(l => l.agent === agent && l.id === sessionId) : null) || null;
+  // The terminal a session runs in: the live status's `term` where the host sends it, else the tab that carries its
+  // agent and sessionId (an older host).
+  function termOf(id, agent, sessionId, live = liveOf(id, agent, sessionId)) {
+    if (live?.term) return live.term;
     return entry(id).terminals.find(x => x.agent === agent && x.sessionId === sessionId && !x.exited)?.id || "";
+  }
+  // The other devices that have a tab open: [{ id, name, kind }] without this phone, names filled in where the host
+  // left them out.
+  const othersOn = (id, tab) => (Array.isArray(tab?.viewers) ? tab.viewers : [])
+    .filter(v => v?.id && v.id !== provider.id)
+    .map(v => ({ id: v.id, name: v.name || nodeName(v.id), kind: v.kind || "" }));
+  // Whose size a terminal has: "" nobody's (or an older host), "phone" this phone's, else that device's name.
+  function driverName(id, tab, driver) {
+    if (!driver) return "";
+    if (driver === provider.id) return "phone";
+    return (tab?.viewers || []).find(v => v.id === driver)?.name || nodeName(driver);
   }
   function statusOf(live) {
     if (!live) return "stopped";
@@ -203,7 +235,7 @@ export function createStore(provider) {
       title: s?.title || live?.name || `${agent} ${sid.slice(0, 8)}`,
       updatedAt: Math.max(s?.updatedAt || 0, live?.activityAt || 0, live?.statusAt || 0),
       live: status === "stopped" ? null : live, status, waitingFor: live?.status === "waiting" ? live.waitingFor || "" : "",
-      term: termOf(id, agent, sid, s),
+      term: termOf(id, agent, sid, (isOnline(id) && live) || null),
       group: status === "waiting" ? "waiting" : status === "stopped" ? "recent" : "working"
     };
   }
@@ -243,9 +275,12 @@ export function createStore(provider) {
   // Every terminal of the computers that are online, from the wide view (terminals.list { all: true }): the
   // computer's own (a shell pane on its desktop, an agent's terminal), those this phone opened, those other peers
   // opened. One row each, newest first:
-  //   { key, node, nodeName, id, title, cwd, project, agent, sessionId, item, owner, ownerName, exited, lost, createdAt }
+  //   { key, node, nodeName, id, title, cwd, project, agent, sessionId, item, owner, ownerName, exited, lost, createdAt,
+  //     reopened, viewers, driver }
   //   item: the session's inbox row, for an agent's terminal whose session is known (open it there); owner: "here" (the
-  //   computer itself), "phone" (this phone), "peer" (another computer or phone; ownerName when this phone knows it).
+  //   computer itself), "phone" (this phone), "peer" (another computer or phone; ownerName as the host names it, else
+  //   when this phone knows it); reopened: the host opened it anew after a restart; viewers: the other devices that
+  //   have it open ([{ id, name, kind }], not this phone); driver: whose size it has ("" nobody's, "phone", a name).
   // node: that computer's only; query: a filter as the inbox's; running: without the exited and lost ones; loose:
   // without those whose session runs and is listed in the inbox anyway (what the inbox lists under Terminals).
   function terminals({ node = "", query = "", running = false, loose = false } = {}) {
@@ -262,8 +297,9 @@ export function createStore(provider) {
         const row = {
           key: `${id}:${tab.id}`, node: id, nodeName: nodeName(id), id: tab.id, cwd: tab.cwd || "", project: projectOf(e, tab.cwd || ""),
           title: item?.title || tab.title || baseName(tab.cwd || "") || tab.id.slice(0, 8), agent: tab.agent || "", sessionId: tab.sessionId || "", item,
-          owner, ownerName: owner === "peer" && nodes.has(tab.owner) ? nodeName(tab.owner) : "",
-          exited: Boolean(tab.exited), lost: Boolean(tab.lost), createdAt: Number(tab.createdAt) || 0
+          owner, ownerName: owner !== "peer" ? "" : tab.ownerName || (nodes.has(tab.owner) ? nodeName(tab.owner) : ""),
+          exited: Boolean(tab.exited), lost: Boolean(tab.lost), createdAt: Number(tab.createdAt) || 0,
+          reopened: tab.reopened === true, viewers: othersOn(id, tab), driver: driverName(id, tab, tab.driver)
         };
         if (q && !`${row.title} ${row.project} ${row.cwd} ${row.nodeName} ${row.agent}`.toLowerCase().includes(q)) continue;
         out.push(row);
@@ -272,11 +308,14 @@ export function createStore(provider) {
     return out.sort((a, b) => Number(a.exited || a.lost) - Number(b.exited || b.lost) || b.createdAt - a.createdAt);
   }
 
-  // A view's hold on a host terminal. It survives a lost link: "state" { online: false } when the link drops, then,
-  // once the node is loaded again, a fresh attach and "reset" { scrollback, cols, rows, exitCode } (the view draws
-  // the screen again from it) and "state" { online: true }; "gone" when the terminal is no longer there.
+  // A view's hold on a host terminal: the phone is one of its viewers. It survives a lost link: "state" { online:
+  // false } when the link drops, then, once the node is loaded again, a fresh attach and "reset" { scrollback, cols,
+  // rows, exitCode } (the view draws the screen again from it) and "state" { online: true }; "gone" when the terminal
+  // is no longer there. The same fresh attach when the host says the phone missed output ("terminal.resync").
   // Output that arrives while an attach is on its way is held (it may be newer than the scrollback the answer
   // carries) and handed on after it, minus what the scrollback already had.
+  // "size" { cols, rows, driver } whenever the host's size or its driver changes; driver is the node id whose size it
+  // is (null: nobody's), handle.mine says whether it is this phone's.
   function deliver(h, frame) {
     if (frame.end <= h.end) return;
     const skip = frame.data.length - (frame.end - h.end);
@@ -287,19 +326,39 @@ export function createStore(provider) {
     const key = `${id}:${termId}`;
     if (attached.has(key)) throw new Error("already attached");
     const ev = emitter();
-    const h = { node: id, termId, end: 0, cols: 120, rows: 30, online: false, attaching: 0, held: [], emit: ev.emit, closed: false };
+    const h = { node: id, termId, end: 0, cols: 120, rows: 30, driver: null, online: false, attaching: 0, held: [], emit: ev.emit, closed: false };
     attached.set(key, h);
     const ask = async () => {
       h.attaching++;
       try { return await provider.request(id, "terminals.attach", { id: termId }); } finally { h.attaching--; }
     };
+    const setSize = s => {
+      if (s?.cols && s?.rows) { h.cols = s.cols; h.rows = s.rows; }
+      // An older host's driver (if any) means nothing to the phone: it has no take / release.
+      if (s && "driver" in s) h.driver = shared(id) ? s.driver || null : null;
+    };
     const apply = r => {
       h.end = r.end || 0;
-      if (r.cols && r.rows) { h.cols = r.cols; h.rows = r.rows; }
+      setSize(r);
       h.online = true;
     };
+    // The host's size or driver changed ("terminal.size", or the answer to a take or a release).
+    h.sized = s => {
+      setSize(s);
+      ev.emit("size", { cols: h.cols, rows: h.rows, driver: h.driver });
+    };
     const flush = () => { for (const f of h.held.splice(0)) deliver(h, f); };
-    h.lost = () => { h.online = false; h.held = []; ev.emit("state", { online: false }); };
+    // Settles once the phone is a viewer again after a lost link (or the terminal is gone): a take or a release waits
+    // for it - asked before the attach, the host would not know the phone as a viewer yet (notViewing).
+    let settle = () => {};
+    h.ready = Promise.resolve();
+    h.lost = () => {
+      h.online = false;
+      h.held = [];
+      settle();
+      h.ready = new Promise(r => { settle = r; });
+      ev.emit("state", { online: false });
+    };
     h.reattach = async () => {
       if (h.closed) return;
       try {
@@ -307,12 +366,29 @@ export function createStore(provider) {
         if (h.closed) return;
         if (!again) { ev.emit("gone"); return; }
         apply(again);
-        ev.emit("reset", { scrollback: again.scrollback || "", cols: h.cols, rows: h.rows, exitCode: again.exitCode ?? null });
+        ev.emit("reset", { scrollback: again.scrollback || "", cols: h.cols, rows: h.rows, driver: h.driver, exitCode: again.exitCode ?? null });
         flush();
         ev.emit("state", { online: true });
       } catch (err) {
         if (err?.code === "invalidData") ev.emit("gone");
         else console.warn("re-attach failed", err);
+      } finally {
+        settle(); // attached again, or it will not be: a take waiting for it goes on (or fails) now
+      }
+    };
+    // A take or a release (terminals.resize) as a viewer: after the attach that follows a lost link (up to READY_MS,
+    // then "offline"); and when the host does not know the phone as a viewer even so (the link dropped and came back
+    // before the phone noticed), attached again and asked once more.
+    const asViewer = async params => {
+      if (!h.online) await Promise.race([h.ready, new Promise(r => setTimeout(r, READY_MS))]);
+      if (!h.online || h.closed) throw Object.assign(new Error("offline"), { code: "offline" });
+      try {
+        return await provider.request(id, "terminals.resize", { id: termId, ...params });
+      } catch (err) {
+        if (err?.code !== "notViewing") throw err;
+        await h.reattach();
+        if (!h.online || h.closed) throw err;
+        return provider.request(id, "terminals.resize", { id: termId, ...params });
       }
     };
     let r;
@@ -332,21 +408,46 @@ export function createStore(provider) {
       get cols() { return h.cols; },
       get rows() { return h.rows; },
       get online() { return h.online; },
+      // The host shares its terminals (terminals: 2): take / release ask it, and it says whose size the terminal has.
+      get shared() { return shared(id); },
+      // The node id whose size the terminal has (null: nobody's, or an older host).
+      get driver() { return h.driver; },
+      // The terminal has this phone's size (taken with "Fit to phone").
+      get mine() { return Boolean(h.driver) && h.driver === provider.id; },
       onData: fn => ev.on("data", fn),
       onSize: fn => ev.on("size", fn),
       onReset: fn => ev.on("reset", fn),
       onState: fn => ev.on("state", fn),
       onGone: fn => ev.on("gone", fn),
       write: data => { if (h.online) provider.sendFrame(id, { type: "input", id: termId, data }); },
-      // Only "Fit to phone" resizes: the phone looks at the host's size otherwise (MOBILE.md §6).
-      resize(cols, rows) {
-        h.cols = cols; h.rows = rows;
-        provider.sendFrame(id, { type: "resize", id: termId, cols, rows });
+      // "Fit to phone": the terminal takes this size (the phone looks at the host's size otherwise, MOBILE.md §6) and
+      // keeps it until it is given back, someone else takes it, or the phone leaves. An older host gets a resize
+      // frame. -> { cols, rows, driver }
+      async take(cols, rows) {
+        if (shared(id)) {
+          h.sized(await asViewer({ cols, rows }));
+        } else {
+          provider.sendFrame(id, { type: "resize", id: termId, cols, rows });
+          h.sized({ cols, rows });
+        }
+        return { cols: h.cols, rows: h.rows, driver: h.driver };
       },
-      // Leaving the view: the host hears it (and gives a size the phone set back to the desktop's pane).
+      // The size given back: the host hands it to the device that had it (a desktop's pane). An older host is sent
+      // `before` (the size it had before the take) as a resize frame. -> { cols, rows, driver }
+      async release(before = null) {
+        if (shared(id)) {
+          h.sized(await asViewer({ release: true }));
+        } else if (before?.cols && before?.rows) {
+          provider.sendFrame(id, { type: "resize", id: termId, cols: before.cols, rows: before.rows });
+          h.sized({ cols: before.cols, rows: before.rows });
+        }
+        return { cols: h.cols, rows: h.rows, driver: h.driver };
+      },
+      // Leaving the view: the host hears it (and hands a size the phone took back to the device that had it).
       detach() {
         if (attached.get(key) !== h) return;
         h.closed = true;
+        settle();
         attached.delete(key);
         if (isOnline(id)) provider.request(id, "terminals.detach", { id: termId }).catch(() => {});
       }
@@ -413,6 +514,12 @@ export function createStore(provider) {
     tab: (id, termId) => entry(id).terminals.find(x => x.id === termId) || null,
     // The terminals as rows (see terminals above).
     terminals,
+    // The other devices that have the terminal open (not this phone): [{ id, name, kind }].
+    viewers: (id, termId) => othersOn(id, entry(id).terminals.find(x => x.id === termId)),
+    // Whose size a terminal has, for its driver (a node id, handle.driver): "" nobody's, "phone", or a device's name.
+    sizeOwner: (id, termId, driver) => driverName(id, entry(id).terminals.find(x => x.id === termId), driver),
+    // The host shares its terminals (docs/SHARED-SESSIONS.md 4: viewers, a driver, terminals.resize).
+    shared,
 
     // ---------- actions ----------
     preview: (id, agent, sid) => provider.request(id, "sessions.preview", { agent, id: sid }),
@@ -430,14 +537,15 @@ export function createStore(provider) {
     // knows for sure); "" - it cannot be stopped from here (a Codex or OpenCode session outside an AgentDeck
     // terminal: no process the host could stop without risking another one), so no Stop is offered.
     stopKind(id, agent, sid) {
-      if (termOf(id, agent, sid, (entry(id).data?.sessions || []).find(s => s.agent === agent && s.id === sid))) return "terminal";
+      if (termOf(id, agent, sid)) return "terminal";
       return agent === "Claude" ? "session" : "";
     },
     stop(id, agent, sid) {
-      const termId = termOf(id, agent, sid, (entry(id).data?.sessions || []).find(s => s.agent === agent && s.id === sid));
+      const termId = termOf(id, agent, sid);
       return termId ? provider.request(id, "terminals.close", { id: termId }) : provider.request(id, "sessions.stop", { agent, id: sid });
     },
-    // { cwd, kind: "shell" | "new" | "resume" | "prompt", agent, sessionId, prompt } -> Tab
+    // { cwd, kind: "shell" | "new" | "resume" | "prompt", agent, sessionId, prompt } -> Tab; a resume of a session
+    // that runs in a terminal there already answers that terminal's tab with already: true (open it, nothing new ran).
     launch: (id, spec) => provider.request(id, "terminals.open", spec),
     attach,
     closeTerminal: (id, termId) => provider.request(id, "terminals.close", { id: termId }),

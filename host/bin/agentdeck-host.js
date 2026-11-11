@@ -194,6 +194,15 @@ async function run() {
     // A program that ends takes its terminal with it, as on a desktop.
     host.on("terminal:exit", ({ id, lost }) => { if (!lost) host.terminals.close(id); });
     served = createServed({ host, info: () => ({ headless: true, dataDir }) });
+    // The terminals the last run left (docs/SHARED-SESSIONS.md 4.6): on Linux every one opens anew under its id (an
+    // agent resumes its session), so the panes of every device find it again; on Windows those still running are
+    // attached and only those a restart took open anew.
+    try {
+      const r = await host.restoreTerminals();
+      if (r.attached.length || r.reopened.length || r.kept.length) log(`terminals: ${r.attached.length} attached, ${r.reopened.length} opened anew, ${r.kept.length} left for later`);
+    } catch (e) {
+      log(`restoring the terminals failed: ${e.message}`);
+    }
   }
   // --listen 127.0.0.1: reached only through the relay on this machine, so no port of its own is open to the network.
   const links = createLinks({
@@ -246,11 +255,13 @@ async function run() {
     console.log(`Pairing code now: ${shownCode}`);
   });
 
+  // Stopping (the service restarted, `agentdeck-host update`) lets go of the terminals rather than stopping them: their
+  // entries stay, and the next start opens them anew (restoreTerminals above).
   const stop = () => {
     log("stopping");
     links.stop();
     host?.stop();
-    host?.terminals.stopAll();
+    host?.terminals.detachAll();
     process.exit(0);
   };
   process.on("SIGTERM", stop);
