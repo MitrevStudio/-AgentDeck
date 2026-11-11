@@ -82,6 +82,7 @@ function findNeighbour(root, term, direction) {
 function createWorkspace({ onChange = () => {} } = {}) {
   const spaces = new Map(); // space key -> { tabs: [tab id], active: tab id }
   const tabs = new Map();   // tab id -> { id, space, name, root, focus: term, zoom: term | "" }
+  const hidden = new Set(); // terminals running without a pane (dragged onto the agents list)
   let activeSpace = "";
 
   const changed = () => onChange(snapshot());
@@ -93,6 +94,7 @@ function createWorkspace({ onChange = () => {} } = {}) {
 
   // A new tab in `space` with `term` as its only pane; it becomes the shown one.
   function addTab(space, term, name = "") {
+    hidden.delete(term);
     const id = crypto.randomUUID();
     tabs.set(id, { id, space, name, root: { term }, focus: term, zoom: "" });
     const s = getSpace(space);
@@ -106,6 +108,7 @@ function createWorkspace({ onChange = () => {} } = {}) {
   function split(tabId, term, dir, target = "") {
     const tab = tabs.get(tabId);
     if (!tab || !SIDES[dir]) return false;
+    hidden.delete(term);
     const at = target && hasTerm(tab.root, target) ? target : tab.focus;
     const first = dir === "left" || dir === "up";
     tab.root = replacePane(tab.root, at, pane => ({ dir: SIDES[dir], ratio: 0.5, a: first ? { term } : pane, b: first ? pane : { term } }));
@@ -126,6 +129,7 @@ function createWorkspace({ onChange = () => {} } = {}) {
   // The pane of `term` out of its tab (which goes once empty), as a node to put elsewhere; null when it is in no tab.
   // No "changed" of its own: the caller's move ends with one.
   function takeTerm(term) {
+    if (hidden.delete(term)) return { term };
     const tab = findTab(term);
     if (!tab) return null;
     const panes = getPanes(tab.root);
@@ -186,6 +190,28 @@ function createWorkspace({ onChange = () => {} } = {}) {
     s.tabs.splice(at + 1, 0, id);
     s.active = id;
     activeSpace = tab.space;
+    changed();
+    return true;
+  }
+  // A terminal out of the layout, still running: it comes back by being placed again (placeTab, movePane, split).
+  function hideTerm(term) {
+    if (!findTab(term) || !takeTerm(term)) return false;
+    hidden.add(term);
+    changed();
+    return true;
+  }
+  const isHidden = term => hidden.has(term);
+  // `term` (from a pane, hidden, or not placed yet) in a tab of its own in `space`, before the tab `before` (at the
+  // end without one); it becomes the shown one.
+  function placeTab(term, space, before = "") {
+    takeTerm(term);
+    const id = crypto.randomUUID();
+    tabs.set(id, { id, space, name: "", root: { term }, focus: term, zoom: "" });
+    const s = getSpace(space);
+    const at = s.tabs.indexOf(before);
+    s.tabs.splice(at < 0 ? s.tabs.length : at, 0, id);
+    s.active = id;
+    activeSpace = space;
     changed();
     return true;
   }
@@ -282,6 +308,7 @@ function createWorkspace({ onChange = () => {} } = {}) {
   function importState(state, remap) {
     spaces.clear();
     tabs.clear();
+    hidden.clear();
     activeSpace = "";
     const mapNode = node => {
       if (!node || typeof node !== "object") return null;
@@ -315,6 +342,10 @@ function createWorkspace({ onChange = () => {} } = {}) {
       }
       space.active = s.active === "" ? "" : space.tabs.includes(s.active) ? s.active : space.tabs[0] || "";
     }
+    for (const old of Array.isArray(saved.hidden) ? saved.hidden : []) {
+      const term = typeof old === "string" ? remap(old) : "";
+      if (term && !findTab(term)) hidden.add(term);
+    }
     if (typeof saved.activeSpace === "string" && spaces.has(saved.activeSpace)) activeSpace = saved.activeSpace;
     changed();
   }
@@ -323,13 +354,15 @@ function createWorkspace({ onChange = () => {} } = {}) {
     return {
       activeSpace,
       spaces: Object.fromEntries([...spaces].map(([key, s]) => [key, { tabs: [...s.tabs], active: s.active }])),
-      tabs: Object.fromEntries([...tabs].map(([id, tab]) => [id, { ...tab }]))
+      tabs: Object.fromEntries([...tabs].map(([id, tab]) => [id, { ...tab }])),
+      hidden: [...hidden]
     };
   }
 
   return {
     addTab, split, removeTerm, mergeTab, movePane, detachPane, getTabTerms, focus, focusDirection, setRatio, toggleZoom,
-    activateSpace, activateTab, showSessions, renameTab, reorderTabs, getActiveTab, findTab, snapshot, exportState, importState
+    activateSpace, activateTab, showSessions, renameTab, reorderTabs, getActiveTab, findTab, snapshot, exportState, importState,
+    hideTerm, isHidden, placeTab
   };
 }
 

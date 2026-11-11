@@ -327,7 +327,8 @@ function renderAgents(v) {
 function agentHtml(s, l, toks) {
   const key = sessionKey(s), here = findSessionTab(s);
   const project = isCentreSession(s) ? t("centre.title") : data.projects.find(p => inProject(s, p))?.name || s.cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop();
-  const where = s.node ? ` · ${esc(s.nodeName || nodeNameOf(s.node))}` : here ? "" : ` · ${esc(t("manager.agents.outside"))}`;
+  const where = s.node ? ` · ${esc(s.nodeName || nodeNameOf(s.node))}` : !here ? ` · ${esc(t("manager.agents.outside"))}`
+    : ws.hidden?.includes(here.id) ? ` · ${esc(t("manager.agents.hidden"))}` : "";
   const drag = !s.node && !isCentreSession(s) && (here || isMoveHereOffered(s)) ? 'draggable="true"' : "";
   return `<div class="agent ${here ? "here" : ""}" data-key="${esc(key)}" tabindex="0" ${drag} title="${esc(`${s.title}\n${s.cwd}${s.node ? `\n${s.nodeName || ""}` : ""}`)}">${agentMark(s.agent)}
       <div class="agent-main"><div class="agent-title">${hl(s.title, toks)}</div><div class="agent-sub">${esc(project)}${where}</div></div>
@@ -1002,6 +1003,23 @@ $("agents").addEventListener("dragstart", e => {
   if (row) startSessionDrag(row.dataset.key, e);
 });
 $("agents").addEventListener("dragend", endDrag);
+// A pane or tab of running sessions dragged onto the agents: out of the layout, still running (workspace-ui.js).
+$("sideAgents").addEventListener("dragover", e => {
+  if (!getHideableTerms().length) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "move";
+  $("sideAgents").classList.add("drop-hide");
+});
+$("sideAgents").addEventListener("dragleave", e => {
+  if (!$("sideAgents").contains(e.relatedTarget)) $("sideAgents").classList.remove("drop-hide");
+});
+$("sideAgents").addEventListener("drop", e => {
+  const terms = getHideableTerms();
+  if (!terms.length) return;
+  e.preventDefault();
+  terms.forEach(term => runWorkspace("hide-pane", { term }));
+  endDrag();
+});
 $("agents").addEventListener("contextmenu", e => {
   const row = e.target.closest(".agent");
   if (!row) return;

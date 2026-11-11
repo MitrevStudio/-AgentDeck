@@ -27,6 +27,8 @@ main {
 .projects-sec { flex: 1 1 0; }
 .agents-sec { flex: 0 1 auto; max-height: 50%; border-top: 1px solid var(--line); }
 .agents-sec .side-list { flex: 0 1 auto; }
+/* A pane or tab dragged here leaves the layout and keeps running (renderer.js). */
+.agents-sec.drop-hide { background: var(--accent-weak); box-shadow: inset 0 0 0 1px var(--accent); }
 .side-sec-head { flex: none; display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 8px 0 14px; }
 .side-sec-head h2 { margin: 0; font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
 .side-sec-head .count { border-color: transparent; font-size: 11px; }

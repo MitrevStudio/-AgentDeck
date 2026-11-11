@@ -572,7 +572,8 @@ $("panes").addEventListener("pointerdown", e => {
 // ---------- dragging: tabs to reorder or to join, panes to move ----------
 // A tab dragged onto another tab takes its place; onto a pane, its panes go beside that one. A pane's header dragged
 // onto another pane moves the pane there; onto the tab bar, the pane gets a tab of its own. A session dragged from the
-// agents list onto a pane goes to that side of it, or into a tab of its own when dropped in the middle.
+// agents list onto a pane goes to that side of it, or into a tab of its own when dropped in the middle or on the tab
+// bar. A pane or tab of running agent sessions dragged onto the agents list leaves the layout and keeps running.
 let draggedTab = "", draggedPane = "", draggedSession = "";
 const PANE_SIDES = ["left", "right", "up", "down"];
 const getTabDropSide = (el, e) => (e.clientX > el.getBoundingClientRect().left + el.offsetWidth / 2 ? "after" : "before");
@@ -599,6 +600,7 @@ function endDrag() {
   draggedTab = "";
   draggedPane = "";
   draggedSession = "";
+  $("sideAgents").classList.remove("drop-hide");
   clearTabDropMarks();
   clearPaneDropMarks();
 }
@@ -609,6 +611,22 @@ function getDropPane(e) {
   if (!el || (!draggedTab && !draggedPane && !draggedSession)) return null;
   if (draggedSession) return findSessionTab(sessionByKey(draggedSession))?.id === el.dataset.term ? null : el;
   return draggedPane === el.dataset.term || draggedTab === getShownTab()?.id ? null : el;
+}
+// The terminals of the dragged pane or tab when every one runs an agent session of this computer (the agents list
+// keeps showing it, so it can be brought back); none otherwise.
+function getHideableTerms() {
+  const terms = draggedPane ? [draggedPane] : draggedTab ? getPanesOf(ws.tabs[draggedTab]?.root) : [];
+  return terms.length && terms.every(isHideableTerm) ? terms : [];
+}
+function isHideableTerm(term) {
+  const x = ws.terminals.find(y => y.id === term), s = getTermSession(x);
+  return Boolean(s && !x.node && liveOf(s) && !isCentreSession(s));
+}
+// Dropped on the tab bar: before the tab `before` ("" at the end) of the shown space.
+function dropSessionAsTab(key, before) {
+  const s = sessionByKey(key), x = s && findSessionTab(s);
+  if (x) runWorkspace("place-tab", { term: x.id, space: ws.activeSpace, before });
+  else if (s) moveSessionHere(s, "tab");
 }
 // Called by the agents list (renderer.js) when one of its sessions starts being dragged.
 function startSessionDrag(key, e) {
@@ -666,6 +684,15 @@ $("tabbar").addEventListener("dragstart", e => {
   el.classList.add("dragging");
 });
 $("tabbar").addEventListener("dragover", e => {
+  if (draggedSession) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const el = e.target.closest?.(".wtab");
+    document.querySelectorAll(".wtab.drop-before, .wtab.drop-after").forEach(x => x.classList.remove("drop-before", "drop-after"));
+    $("tabbar").classList.toggle("drop-new", !el);
+    if (el) el.classList.add("drop-" + getTabDropSide(el, e));
+    return;
+  }
   if (draggedPane) {
     // A pane alone in its tab has a tab of its own already.
     if (getPanesOf(getShownTab()?.root).length < 2) return;
@@ -682,6 +709,14 @@ $("tabbar").addEventListener("dragover", e => {
 });
 $("tabbar").addEventListener("dragleave", e => { if (!$("tabbar").contains(e.relatedTarget)) $("tabbar").classList.remove("drop-new"); });
 $("tabbar").addEventListener("drop", e => {
+  if (draggedSession) {
+    e.preventDefault();
+    const el = e.target.closest?.(".wtab"), list = getShownSpace().tabs;
+    const at = el ? list.indexOf(el.dataset.tab) + (getTabDropSide(el, e) === "after" ? 1 : 0) : list.length;
+    dropSessionAsTab(draggedSession, list[at] || "");
+    endDrag();
+    return;
+  }
   if (draggedPane) {
     e.preventDefault();
     runWorkspace("detach-pane", { term: draggedPane });

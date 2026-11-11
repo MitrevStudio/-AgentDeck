@@ -82,9 +82,11 @@ host.on("terminals", () => { prunePanes(); sendWorkspace(); scheduleWorkspaceSav
 // Panes whose terminal is gone (closed, or ended) leave the layout.
 function prunePanes() {
   const alive = new Set([...terminals.getTabs().map(x => x.id), ...remoteTerms.keys()]);
-  for (const tab of Object.values(workspace.snapshot().tabs)) {
+  const view = workspace.snapshot();
+  for (const tab of Object.values(view.tabs)) {
     getPanes(tab.root).filter(term => !alive.has(term)).forEach(term => workspace.removeTerm(term));
   }
+  view.hidden.filter(term => !alive.has(term)).forEach(term => workspace.removeTerm(term));
 }
 function getWorkspaceView() {
   return { ...workspace.snapshot(), terminals: [...terminals.getTabs().filter(x => !x.owner), ...remoteTabs()] };
@@ -195,7 +197,7 @@ async function restoreWorkspace() {
     }
     if (saved) workspace.importState(require("./shared/path-keys").migrateLayout(saved.layout, readRegistry().projects, keyOf), old => ids.get(old) || "");
     restored = true;
-    const unplaced = terminals.getTabs().filter(x => !x.owner && !workspace.findTab(x.id));
+    const unplaced = terminals.getTabs().filter(x => !x.owner && !workspace.findTab(x.id) && !workspace.isHidden(x.id));
     unplaced.forEach(x => workspace.addTab(getSpaceFor(x.cwd), x.id));
     if (unplaced.length && saved?.layout.activeSpace) workspace.activateSpace(saved.layout.activeSpace);
     prunePanes();
@@ -471,8 +473,14 @@ async function openTab(cwd, command, meta, env, place = "tab", argv = null) {
   else workspace.addTab(getSpaceFor(cwd), id);
   showManager();
 }
+// A terminal's pane gets the focus; a hidden one first gets a tab of its own in its project's space.
+function focusTerm(id) {
+  if (!workspace.isHidden(id)) return workspace.focus(id);
+  const x = terminals.getTabs().find(y => y.id === id);
+  return Boolean(x?.cwd) && workspace.placeTab(id, getSpaceFor(x.cwd));
+}
 function showTab(id) {
-  workspace.focus(id);
+  focusTerm(id);
   showManager();
 }
 // "Show terminal", a notification's click, a voice command: a session in one of AgentDeck's tabs comes up there, any
@@ -574,7 +582,10 @@ async function launchNewWithPrompt(agent, cwd, prompt) {
 async function runWorkspaceCommand(cmd, a) {
   const id = v => text(v ?? "", 64);
   switch (cmd) {
-    case "focus": return workspace.focus(id(a.term));
+    case "focus": return focusTerm(id(a.term));
+    // A pane dragged onto the agents list: out of the layout, still running.
+    case "hide-pane": return workspace.hideTerm(id(a.term));
+    case "place-tab": return workspace.placeTab(id(a.term), text(a.space ?? "", 2000), a.before ? id(a.before) : "");
     case "focus-dir": return workspace.focusDirection(text(a.direction, 8));
     // The root split's path is "" (which text() refuses).
     case "ratio": return workspace.setRatio(id(a.tab), a.path === "" ? "" : text(a.path, 32), Number(a.ratio));
