@@ -62,6 +62,7 @@ function createAutopilot({ terminals, liveSessions, getContext, getPrefs, t }) {
   }
   function isReadyToStart(tab, l, tokens, threshold) {
     return l.status === "idle"
+      && !l.hasBackgroundShell
       && tokens >= threshold
       && !disarmed.has(tab.id)
       && Date.now() - l.statusAt >= QUIET_AFTER_TURN_MS
