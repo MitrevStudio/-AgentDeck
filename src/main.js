@@ -936,13 +936,18 @@ function renameTab(tabId, name) {
   if (tab.name && tab.name !== before) nameClaudeSession(tab);
   return true;
 }
-// Only a tab of one pane: in a split tab the name belongs to no single session.
+// Only a tab of one pane: in a split tab the name belongs to no single session. Only a terminal of this computer
+// (terminals.getTabs() has no others): the transcript of a session running elsewhere is that computer's to write.
+// The two lines are what /rename writes (checked against Claude Code 2.1.317): the title, and the name its prompt shows.
 function nameClaudeSession(tab) {
   const term = terminals.getTabs().find(x => x.id === tab.root?.term && x.agent === "Claude" && x.sessionId);
   const file = term && findTranscript(term.sessionId);
   if (!file) return;
-  const line = JSON.stringify({ type: "custom-title", customTitle: tab.name, sessionId: term.sessionId });
-  fs.promises.appendFile(file, `${line}\n`).catch(() => {});
+  const lines = [
+    { type: "custom-title", customTitle: tab.name, sessionId: term.sessionId },
+    { type: "agent-name", agentName: tab.name, sessionId: term.sessionId },
+  ];
+  fs.promises.appendFile(file, lines.map(x => `${JSON.stringify(x)}\n`).join("")).catch(() => {});
 }
 // What the window asks of the layout (workspace-ui.js). Closing a pane or a tab hides it: the terminal goes on, for
 // every device (Stop is terminal:stop).
