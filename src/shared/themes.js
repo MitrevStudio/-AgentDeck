@@ -16,7 +16,13 @@ const LIST = [
   { id: "nord", base: "dark", bg: "#2e3440", group: "vscode" },
   { id: "ayu-mirage", base: "dark", bg: "#1f2430", group: "vscode" },
   { id: "gruvbox-dark", base: "dark", bg: "#1d2021", group: "vscode" },
-  { id: "solarized-dark", base: "dark", bg: "#00212b", group: "vscode" }
+  { id: "solarized-dark", base: "dark", bg: "#00212b", group: "vscode" },
+  { id: "one-light", base: "light", bg: "#eaeaeb", group: "vscode" },
+  { id: "tokyo-night-light", base: "light", bg: "#cbccd1", group: "vscode" },
+  { id: "night-owl-light", base: "light", bg: "#f0f0f0", group: "vscode" },
+  { id: "ayu-light", base: "light", bg: "#f3f4f5", group: "vscode" },
+  { id: "catppuccin-latte", base: "light", bg: "#e6e9ef", group: "vscode" },
+  { id: "solarized-light", base: "light", bg: "#eee8d5", group: "vscode" }
 ];
 const BY_ID = new Map(LIST.map(th => [th.id, th]));
 
