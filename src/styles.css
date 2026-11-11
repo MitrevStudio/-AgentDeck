@@ -23,13 +23,15 @@ main {
 .side-head .icon-btn.on { color: var(--accent); background: var(--accent-weak); }
 .side-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .side-sec { min-height: 0; display: flex; flex-direction: column; }
-/* The agents take what they need, up to half the sidebar (or the height dragged on the splitter); the projects have the
-   rest. */
-.projects-sec { flex: 1 1 0; }
-.agents-sec { flex: 0 1 var(--agents-h, auto); max-height: 50%; }
+/* The agents take what they need, up to half the sidebar, the terminals up to 30% (styles below) - or the height dragged
+   on the line above them; the projects have the rest, never less than 120px (MIN_PROJECTS_H_PX in renderer.js): when a
+   dragged height no longer fits (a smaller window), the agents and the terminals give way instead. */
+.projects-sec { flex: 1 1 0; min-height: 120px; }
+.agents-sec { flex: 0 1 var(--agents-h, auto); max-height: var(--agents-h, 50%); }
 .agents-sec .side-list { flex: 0 1 auto; }
-/* Between the projects and the agents (renderer.js): the line between them, dragged up or down. */
+/* Above the agents and above the terminals (renderer.js): the line between two sections, dragged up or down. */
 .side-splitter { position: relative; z-index: 1; flex: none; height: 7px; margin: -3px 0; cursor: row-resize; outline: none; touch-action: none; }
+.side-splitter:has(+ .side-sec[hidden]) { display: none; }
 .side-splitter::after { content: ""; position: absolute; inset: 3px 0; background: var(--line); transition: background .15s; }
 .side-splitter:hover::after, .side-splitter:focus-visible::after, .side-splitter:active::after { inset: 2px 0; background: var(--accent); }
 .side-sec-head { flex: none; display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 8px 0 14px; }
@@ -208,7 +210,7 @@ main {
 
 /* ---------- terminals ---------- */
 /* Running terminals the agents list does not show (renderer.js renderTerms): rows as the agents', below them. */
-.terms-sec { flex: 0 1 auto; max-height: 30%; border-top: 1px solid var(--line); }
+.terms-sec { flex: 0 1 var(--terms-h, auto); max-height: var(--terms-h, 30%); }
 .terms-sec .side-list { flex: 0 1 auto; }
 /* The other devices that have it open: an eye and how many (the names in the tooltip). */
 .term-viewers, .pane-viewers { flex: none; display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }

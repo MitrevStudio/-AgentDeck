@@ -369,6 +369,99 @@ app.whenReady().then(async () => {
   await capture('status-hot');
   await evaluate("fx.nodes = structuredClone(fx.nodes); fx.nodes[0].resources.cpu = 11; fx.cbs.onNodesChanged(fx.nodes); 0"); await settle();
 
+  // ---------- sidebar splitters ----------
+  // Projects / Agents / Terminals: each line resizes only the section below it, the projects keep at least 120px, the
+  // dragged heights are kept and restored, and the Agents | Terminals line is there only with the Terminals section.
+  {
+    const box = id => evaluate(`(() => { const r = $('${id}').getBoundingClientRect(); return { top: r.top, bottom: r.bottom, height: r.height }; })()`);
+    const shown = id => evaluate(`getComputedStyle($('${id}')).display !== 'none'`);
+    const near = (actual, expected, message) => assert.ok(Math.abs(actual - expected) <= 2, `${message}: ${actual} is not ~${expected}`);
+    const stored = () => evaluate("[localStorage.getItem('agentdeck.agentsHeight'), localStorage.getItem('agentdeck.termsHeight')]");
+    // A real pointer: down on the line's middle, moved to toY, up.
+    const drag = async (id, toY) => {
+      const [x, y] = await evaluate(`(() => { const r = $('${id}').getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)]; })()`);
+      toY = Math.round(toY);
+      win.webContents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 }); await settle(30);
+      for (const at of [Math.round((y + toY) / 2), toY]) { win.webContents.sendInputEvent({ type: 'mouseMove', x, y: at, button: 'left', modifiers: ['leftButtonDown'] }); await settle(30); }
+      win.webContents.sendInputEvent({ type: 'mouseUp', x, y: toY, button: 'left', clickCount: 1 }); await settle();
+    };
+    const key = async (id, name) => { await evaluate(`$('${id}').dispatchEvent(new KeyboardEvent('keydown', { key: '${name}', bubbles: true })); 0`); await settle(); };
+    const dblclick = async id => { await evaluate(`$('${id}').dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); 0`); await settle(); };
+    await evaluate("window.keptTerms = fx.ws.terminals; fx.ws = structuredClone(fx.ws); fx.ws.terminals = []; fx.cbs.onWorkspace(fx.ws); 0"); await poll(); await settle(150);
+
+    // No Terminals section: one line, which sizes the agents.
+    assert.equal(await evaluate("$('sideTerms').hidden"), true);
+    assert.equal(await shown('sideSplitter'), true);
+    assert.equal(await shown('termsSplitter'), false, 'no line above a hidden Terminals section');
+    assert.equal(await evaluate("[$('sideSplitter'), $('termsSplitter')].every(el => el.getAttribute('role') === 'separator' && el.getAttribute('aria-orientation') === 'horizontal' && el.tabIndex === 0 && el.title === 'Drag to resize. Double-click: default height.')"), true);
+    let agents = await box('sideAgents');
+    await drag('sideSplitter', agents.bottom - 250);
+    near((await box('sideAgents')).height, 250, 'the agents take the dragged height');
+    near((await box('sideAgents')).bottom, agents.bottom, "the agents' bottom stays");
+    assert.equal(Number((await stored())[0]), Math.round((await box('sideAgents')).height));
+    const dragged = (await box('sideAgents')).height;
+    await key('sideSplitter', 'ArrowUp');
+    near((await box('sideAgents')).height, dragged + 16, 'ArrowUp: taller');
+    await key('sideSplitter', 'ArrowDown'); await key('sideSplitter', 'ArrowDown');
+    near((await box('sideAgents')).height, dragged - 16, 'ArrowDown: shorter');
+    await drag('sideSplitter', (await box('sideProjects')).top);
+    near((await box('sideProjects')).height, 120, 'dragged to the top, the projects keep their minimum');
+    await drag('sideSplitter', (await box('sideAgents')).bottom + 50);
+    near((await box('sideAgents')).height, 80, 'dragged to the bottom, the agents keep their minimum');
+    await dblclick('sideSplitter');
+    assert.equal(await evaluate("$('sideOverview').style.getPropertyValue('--agents-h')"), '', 'a double-click: the default height again');
+    assert.deepEqual(await stored(), [null, null]);
+
+    // With terminals: two lines, each resizes only its own section.
+    await evaluate(`(() => {
+      const shell = (id, cwd, ago) => ({ id, node: '', cwd, title: 'pwsh', exited: false, paned: false, createdAt: Date.now() - ago, viewers: [], driver: null, legacy: false, note: '' });
+      fx.ws = structuredClone(fx.ws); fx.ws.terminals = [shell('y1', 'C:/work/docs', 1000), shell('y2', 'C:/work/bdd-web', 2000), shell('y3', 'C:/work/agentdeck', 3000)]; fx.cbs.onWorkspace(fx.ws);
+    })(); 0`); await poll(); await settle(150);
+    assert.equal(await evaluate("$('sideTerms').hidden"), false);
+    assert.equal(await shown('termsSplitter'), true, 'a line above the Terminals section');
+    assert.equal(await evaluate("getComputedStyle($('sideTerms')).borderTopWidth"), '0px', 'the line, not a border too');
+    const terms = await box('sideTerms');
+    agents = await box('sideAgents');
+    await drag('sideSplitter', agents.bottom - 200);
+    near((await box('sideAgents')).height, 200, 'the agents take the dragged height above the terminals');
+    near((await box('sideTerms')).height, terms.height, 'the terminals keep theirs');
+    const overview = await box('sideOverview');
+    await drag('termsSplitter', terms.bottom - overview.height * 0.4);
+    near((await box('sideTerms')).height, overview.height * 0.4, 'the terminals take the dragged height, more than 30% too');
+    near((await box('sideAgents')).height, 200, 'the agents keep theirs');
+    await key('termsSplitter', 'ArrowDown');
+    near((await box('sideTerms')).height, overview.height * 0.4 - 16, 'ArrowDown: shorter terminals');
+    await drag('termsSplitter', overview.top);
+    near((await box('sideProjects')).height, 120, 'the terminals stop where the projects keep their minimum');
+    near((await box('sideAgents')).height, 200, 'and the agents keep theirs');
+    await key('termsSplitter', 'ArrowUp'); await key('sideSplitter', 'ArrowUp');
+    near((await box('sideProjects')).height, 120, 'nor the keys take the projects below it');
+    const [agentsH, termsH] = (await stored()).map(Number);
+    near(agentsH, 200, 'the agents height is kept'); assert.ok(termsH > overview.height * 0.4, 'the terminals height is kept');
+    await drag('termsSplitter', (await box('sideTerms')).top + 150);
+    const kept = await evaluate("[$('sideAgents').getBoundingClientRect().height, $('sideTerms').getBoundingClientRect().height]");
+    await capture('sidebar-splitters');
+    // Restored as the window opens: the stored heights again.
+    await evaluate("$('sideOverview').style.removeProperty('--agents-h'); $('sideOverview').style.removeProperty('--terms-h'); restoreSplit(AGENTS_SPLIT); restoreSplit(TERMS_SPLIT); 0"); await settle();
+    assert.deepEqual(await evaluate("[$('sideAgents').getBoundingClientRect().height, $('sideTerms').getBoundingClientRect().height]"), kept, 'the stored heights are restored');
+    // A smaller window than they were dragged in: the projects keep their minimum, nothing spills out of the sidebar.
+    win.setSize(1500, 600); await settle(200);
+    assert.ok((await box('sideProjects')).height >= 119, 'a small window: the projects keep their minimum');
+    assert.ok((await box('sideTerms')).bottom <= (await box('sideOverview')).bottom + 1, 'a small window: the terminals stay inside');
+    win.setSize(1500, 900); await settle(200);
+    // The Git tab hides the overview with its lines; back, the heights are as they were.
+    await click('#sideTabGit');
+    assert.equal(await evaluate("$('sideOverview').hidden"), true);
+    await click('#sideTabProjects'); await settle();
+    assert.deepEqual(await evaluate("[$('sideAgents').getBoundingClientRect().height, $('sideTerms').getBoundingClientRect().height]"), kept);
+    await dblclick('termsSplitter');
+    assert.equal(await evaluate("$('sideOverview').style.getPropertyValue('--terms-h')"), '');
+    near((await box('sideAgents')).height, 200, "the terminals' reset leaves the agents");
+    await dblclick('sideSplitter');
+    assert.deepEqual(await stored(), [null, null]);
+    await evaluate("fx.ws = structuredClone(fx.ws); fx.ws.terminals = keptTerms; fx.cbs.onWorkspace(fx.ws); 0"); await poll(); await settle(150);
+  }
+
   // ---------- which computer a terminal runs on ----------
   assert.equal(await evaluate("document.querySelectorAll('.term-node').length"), 0, 'no marks while everything runs here');
   // The tab went with the checks above: one with this computer's terminal and one of another computer's.

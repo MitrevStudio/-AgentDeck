@@ -1113,13 +1113,14 @@ window.manager.onDataChanged(d => {
 watchGit(() => { if (!ui.loaded) return; if (ui.renaming) pendingRender = true; else render(); });
 
 // ---------- dividers: dragged, moved with the arrow keys, reset by a double-click ----------
-// projects | sessions sets --projects-w on <main>; projects / agents sets --agents-h on the overview. Kept in localStorage.
-// MAX_AGENTS_SHARE: the agents section's CSS max-height (styles.css).
-const MIN_PROJECTS_PX = 200, MIN_SESSIONS_PX = 420, MIN_AGENTS_PX = 80, MAX_AGENTS_SHARE = 0.5, SPLITTER_STEP_PX = 16;
+// projects | sessions sets --projects-w on <main>; projects / agents sets --agents-h and agents / terminals --terms-h on
+// the overview. Kept in localStorage. MIN_PROJECTS_H_PX: the projects section's CSS min-height (styles.css).
+const MIN_PROJECTS_PX = 200, MIN_SESSIONS_PX = 420, MIN_PROJECTS_H_PX = 120, MIN_AGENTS_PX = 80, MIN_TERMS_PX = 80, SPLITTER_STEP_PX = 16;
 const getMain = () => document.querySelector("main");
 const getOverview = () => $("sideOverview");
 const PROJECTS_SPLIT = { getHost: getMain, prop: "--projects-w", key: "agentdeck.projectsWidth" };
 const AGENTS_SPLIT = { getHost: getOverview, prop: "--agents-h", key: "agentdeck.agentsHeight" };
+const TERMS_SPLIT = { getHost: getOverview, prop: "--terms-h", key: "agentdeck.termsHeight" };
 function setSplit(split, px) {
   split.getHost().style.setProperty(split.prop, `${px}px`);
   try {
@@ -1167,15 +1168,20 @@ const resetProjectsWidth = () => resetSplit(PROJECTS_SPLIT);
 watchSplitter($("splitter"), getProjectsWidth, setProjectsWidth, resetProjectsWidth, { ArrowLeft: -SPLITTER_STEP_PX, ArrowRight: SPLITTER_STEP_PX });
 restoreSplit(PROJECTS_SPLIT);
 
-function getAgentsHeight(ev, step = 0) {
-  const overview = getOverview().getBoundingClientRect();
-  const height = ev ? overview.bottom - ev.clientY : $("sideAgents").getBoundingClientRect().height + step;
-  return Math.round(Math.max(MIN_AGENTS_PX, Math.min(height, overview.height * MAX_AGENTS_SHARE)));
+// A section below the projects (agents, terminals) and the line above it: the line moves only the section's top - its
+// bottom stays, the sections below keep their heights and the projects give or take the difference, so it grows at
+// most by what the projects have above their minimum.
+function watchSectionSplitter(splitter, section, split, min) {
+  const getHeight = (ev, step = 0) => {
+    const rect = section.getBoundingClientRect(), projects = $("sideProjects").getBoundingClientRect().height;
+    const height = ev ? rect.bottom - ev.clientY : rect.height + step;
+    return Math.round(Math.max(min, Math.min(height, rect.height + projects - MIN_PROJECTS_H_PX)));
+  };
+  watchSplitter(splitter, getHeight, px => setSplit(split, px), () => resetSplit(split), { ArrowUp: SPLITTER_STEP_PX, ArrowDown: -SPLITTER_STEP_PX });
+  restoreSplit(split);
 }
-const setAgentsHeight = px => setSplit(AGENTS_SPLIT, px);
-const resetAgentsHeight = () => resetSplit(AGENTS_SPLIT);
-watchSplitter($("sideSplitter"), getAgentsHeight, setAgentsHeight, resetAgentsHeight, { ArrowUp: SPLITTER_STEP_PX, ArrowDown: -SPLITTER_STEP_PX });
-restoreSplit(AGENTS_SPLIT);
+watchSectionSplitter($("sideSplitter"), $("sideAgents"), AGENTS_SPLIT, MIN_AGENTS_PX);
+watchSectionSplitter($("termsSplitter"), $("sideTerms"), TERMS_SPLIT, MIN_TERMS_PX);
 
 load();
 setInterval(pollLive, 2000);
