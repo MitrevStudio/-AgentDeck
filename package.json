@@ -39,6 +39,7 @@
     "test:context": "node scripts/test-session-context.js && node scripts/test-opencode-sessions.js",
     "test:audit": "node scripts/test-audit-regressions.js",
     "test:themes": "node scripts/test-themes.js",
+    "test:prefs": "node scripts/test-prefs-compact.js",
     "dist": "electron-builder --win --publish never",
     "dist:dir": "electron-builder --win --dir --publish never",
     "dist:linux": "electron-builder --linux --publish never"

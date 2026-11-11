@@ -53,13 +53,14 @@ function createLimits({ fetch, onChange = () => {} }) {
     if (refusedAt && mtime(CREDENTIALS) === refusedAt) return { error: "expired" };
     try {
       const o = JSON.parse(fs.readFileSync(CREDENTIALS, "utf8"))?.claudeAiOauth;
-      return o?.accessToken ? { value: o.accessToken } : { error: "noLogin" };
+      return o?.accessToken ? { value: o.accessToken, plan: String(o.subscriptionType || "") } : { error: "noLogin" };
     } catch { return { error: "noLogin" }; }
   }
 
   async function poll() {
     const tk = token();
     if (tk.error) { state = { at: 0, checkedAt: Date.now(), error: tk.error, windows: [], scoped: [] }; return; }
+    state = { ...state, plan: tk.plan };
     let res;
     try {
       res = await fetch(URL, { headers: { Authorization: `Bearer ${tk.value}`, "anthropic-beta": "oauth-2025-04-20" } });
@@ -77,7 +78,7 @@ function createLimits({ fetch, onChange = () => {} }) {
     const scoped = (Array.isArray(data?.limits) ? data.limits : [])
       .filter(l => l?.kind === "weekly_scoped" && l.scope?.model?.display_name)
       .map(l => ({ name: l.scope.model.display_name, util: Number(l.percent) || 0, resetsAt: Date.parse(l.resets_at) || 0 }));
-    state = { at: now, checkedAt: now, error: "", windows, scoped };
+    state = { at: now, checkedAt: now, error: "", windows, scoped, plan: tk.plan };
   }
 
   function refresh(force = false) {

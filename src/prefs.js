@@ -17,17 +17,15 @@ const themes = require("./shared/themes");
 const LANGUAGES = Object.keys(i18n.LANGUAGES);
 const THEMES = themes.THEMES; // "system", then every theme in shared/themes.js
 const SESSIONS_IN = ["windows", "tabs"];
-// Context sizes from which a session in an AgentDeck tab is remembered and compacted (autopilot.js). The largest
-// value is effectively "max": the session keeps its full context and only Claude Code's own compaction steps in.
-const AUTO_COMPACT_TOKENS = [100000, 150000, 200000, 300000, 500000, 1000000];
-const AUTO_COMPACT_MAX = 1000000;
+// Context sizes from which a session in an AgentDeck tab is remembered and compacted (autopilot.js), when switched on.
+const AUTO_COMPACT_TOKENS = [100000, 150000, 200000, 300000, 500000];
 // The text of AgentDeck's own terminals, px before the window's scale; the manager window's scale (its zoom). The
 // defaults: 16 px text at 100%.
 const TERMINAL_FONT_SIZES = [11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24];
 const UI_SCALES = [0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5];
 
 const prefs = new EventEmitter();
-const state = { language: "bg", theme: themes.DEFAULT, edgeHandle: process.platform === "win32", autoUpdate: true, newWindow: true, sessionsIn: "tabs", autoCompact: true, autoCompactTokens: AUTO_COMPACT_MAX, dayView: false, notify: null, terminalFontSize: 16, uiScale: 1 };
+const state = { language: "bg", theme: themes.DEFAULT, edgeHandle: process.platform === "win32", autoUpdate: true, newWindow: true, sessionsIn: "tabs", autoCompact: false, autoCompactTokens: 150000, dayView: false, notify: null, terminalFontSize: 16, uiScale: 1 };
 let sessionsInChosen = false; // the user picked where sessions open (settings or the tray menu)
 let autoCompactTokensChosen = false; // the user picked a compaction threshold, so a stale old default is ignored
 let handleX = 0.5; // the edge handle's centre, as a fraction of the display width
@@ -45,7 +43,8 @@ const themeId = () => (themes.get(state.theme) ? state.theme : resolvedTheme());
 const get = () => ({
   ...state, resolvedTheme: resolvedTheme(), themeId: themeId(), dev: !app.isPackaged,
   themes: THEMES.map(id => ({ id, group: themes.get(id)?.group ?? "app" })),
-  terminalFontSizes: TERMINAL_FONT_SIZES, uiScales: UI_SCALES
+  terminalFontSizes: TERMINAL_FONT_SIZES, uiScales: UI_SCALES, autoCompactSizes: AUTO_COMPACT_TOKENS,
+  autoCompactChosen: autoCompactTokensChosen
 });
 // The theme's --bg, for windows until their page paints.
 const background = () => (themes.get(themeId()) || themes.get(themes.DEFAULT)).bg;
@@ -72,12 +71,12 @@ function load() {
     sessionsInChosen = true;
   }
   const auto = isObj(root.terminal) && isObj(root.terminal.autoCompact) ? root.terminal.autoCompact : {};
-  state.autoCompact = auto.on !== false;
-  // A stored threshold counts only once the user has picked one (chosen). An older AgentDeck wrote 150000 as the
-  // default into settings.json; without this, that stale value keeps overriding the current default (the max).
+  // A stored threshold counts only once the user has picked one (chosen): older versions wrote a default of 150000, and
+  // were "on" at an unchosen or 1M threshold, which compacted nothing - those stay off.
   if (auto.chosen === true && AUTO_COMPACT_TOKENS.includes(auto.tokens)) {
     state.autoCompactTokens = auto.tokens;
     autoCompactTokensChosen = true;
+    state.autoCompact = auto.on !== false;
   }
   if (TERMINAL_FONT_SIZES.includes(term.fontSize)) state.terminalFontSize = term.fontSize;
   if (UI_SCALES.includes(ui.scale)) state.uiScale = ui.scale;
@@ -123,6 +122,7 @@ async function set(patch) {
   }
   if (typeof patch.autoCompact === "boolean" && patch.autoCompact !== state.autoCompact) {
     state.autoCompact = patch.autoCompact;
+    autoCompactTokensChosen ||= patch.autoCompact;
     keys.push("autoCompact");
   }
   if (AUTO_COMPACT_TOKENS.includes(patch.autoCompactTokens) && patch.autoCompactTokens !== state.autoCompactTokens) {
@@ -182,4 +182,4 @@ function save() {
   }).catch(e => console.error("Could not save settings:", e.message));
 }
 
-module.exports = Object.assign(prefs, { load, get, set, handlePosition, handleDisplayId, setHandlePosition, background, LANGUAGES, THEMES, SESSIONS_IN, AUTO_COMPACT_TOKENS, TERMINAL_FONT_SIZES, UI_SCALES });
+module.exports = Object.assign(prefs, { load, get, set, handlePosition, handleDisplayId, setHandlePosition, background, LANGUAGES, THEMES, SESSIONS_IN, TERMINAL_FONT_SIZES, UI_SCALES });

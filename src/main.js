@@ -1045,13 +1045,6 @@ function buildTrayMenu() {
     { label: t("tray.language"), submenu: radio("language", Object.keys(LANGUAGES), l => LANGUAGES[l]) },
     { label: t("tray.theme"), submenu: radio("theme", prefs.THEMES, th => t(`theme.${th}`)) },
     { label: t("tray.sessionsIn"), submenu: radio("sessionsIn", prefs.SESSIONS_IN, m => t(`tray.sessionsIn.${m}`)) },
-    {
-      label: t("tray.autoCompact"), submenu: [
-        { label: t("tray.autoCompact.on"), type: "checkbox", checked: p.autoCompact, click: item => prefs.set({ autoCompact: item.checked }) },
-        { type: "separator" },
-        ...radio("autoCompactTokens", prefs.AUTO_COMPACT_TOKENS, n => n >= 1000000 ? t("tray.autoCompact.max") : t("tray.autoCompact.from", { n: `${n / 1000}k` }))
-      ]
-    },
     { label: t("tray.settings"), enabled: Boolean(voice), click: () => voice?.openSettings() },
     updateMenuItem(),
     { type: "separator" },
@@ -1429,7 +1422,9 @@ function registerIpc() {
   handle("project:git-info", p => (isDir(p) ? gitInfo(p) : { url: "", branch: "" }));
   handle("centre:send", s => orchestrator.send(text(s, 20000)));
   // Every page, voice ones included, reads the language and theme from its preload before it renders.
-  ipcMain.on("prefs:get", e => { e.returnValue = prefs.get(); });
+  ipcMain.on("prefs:get", e => {
+    e.returnValue = { ...prefs.get(), claudePlan: limits.get().providers.claude.plan || "" };
+  });
 }
 
 // ---------- preferences ----------
