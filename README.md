@@ -169,7 +169,7 @@ The profile has its own settings, registry and single-instance lock. Source runs
 
 ### Projects and session discovery
 
-The sidebar is a catalog of the repositories and folders you work in. Add directories, rename their display names, pin frequent projects, organize groups and reorder items with drag and drop.
+The sidebar is a catalog of the repositories and folders you work in. Add directories, rename their display names, pin frequent projects, organize groups and reorder items with drag and drop. Clicking a project shows the list of its sessions, with the state of the running ones; its open tabs stay in the tab strip. Drag the lines between **Projects**, **Agents** and **Terminals** (or move them with ↑/↓) to resize the sections; a double-click resets a line.
 
 AgentDeck combines sessions from three sources:
 
@@ -192,8 +192,9 @@ Each project has its own workspace, with tabs containing one or more terminal pa
 - Split panes **right** or **down** and resize their dividers.
 - Move between panes with directional shortcuts.
 - Zoom the focused pane and return to the full arrangement.
-- Rename and reorder tabs.
-- Drag pane headers to move terminals; drag tabs onto panes to combine their layouts.
+- Rename and reorder tabs. A renamed one-pane tab of a Claude session on this computer also names the session, as `/rename` does, so the name shows in the agents list, on the session cards and in `claude --resume`.
+- Drag pane headers to move terminals; drag tabs onto panes to combine their layouts. A tab held over while dragging comes up to take the drop.
+- Drag a row from **Agents** or **Terminals** onto a pane to open that terminal on that side of it (or onto the tab strip for a tab of its own), from any of your computers. Drag a pane or a tab onto the sidebar to hide it; the terminal keeps running.
 - Detach a pane into its own tab.
 - Change terminal text size and overall interface scale independently.
 - Paste clipboard images or drop files into terminals through the application's file handling.
@@ -209,7 +210,7 @@ If you prefer external terminals, select **Windows Terminal** as the destination
 
 For large Claude Code sessions in AgentDeck tabs, automatic compaction can issue `/remember:remember`, followed by `/compact`, after a completed turn and a quiet period.
 
-Available context thresholds are **100k, 150k, 200k and 300k tokens**; the default is **150k**, with the feature enabled. Change it or turn it off through the terminal preferences/tray menu.
+It is **off by default**. Switch it on and pick a threshold (**100k, 150k, 200k, 300k or 500k tokens**) in **Settings → Terminal**; the recommended threshold follows your Claude plan (Max: 300k, otherwise 150k). A threshold you had already chosen stays on after the update.
 
 The workflow watches for intervening user input and avoids repeatedly compacting until the context falls below the threshold. The remember step depends on that command being available in your Claude Code setup.
 
@@ -870,7 +871,7 @@ Project presentation is shared between paired nodes: names, groups, pins, saved 
 
 Presentation edits use persisted Lamport versions. Edits to different projects merge independently; conflicting edits to the same project, group list or order choose one deterministic version (counter, then node identity). Files and session contents remain on their owning computers. `npm run test:layout` checks convergence, offline removal, restart persistence and restoring manual order.
 
-The sidebar keeps Projects and AI agents together in one tab, with a separate Git tab. Git shows repositories belonging to projects with open workspace tabs or attached terminals, including nested repositories. Closing the last tab/terminal removes that project from the overview. Local and remote computers remain separate. The compact Source Control panel has a commit message field, a Commit button and 24-pixel file rows. Changes are grouped into staged, changes (including untracked files) and conflicts. A partially staged file appears in both relevant groups. Hover or keyboard-focus a repository, group or file to reveal its ellipsis menu. File/group menus stage or unstage changes; repository menus open a Git dialog with navigation between commit review, branches, sync, history, comparison and worktrees. The file filter and folder-tree toggle are directly above the repository list. Repository paths and last-check times are available in the header tooltip. Commit drafts and cursor position survive status refreshes.
+The sidebar keeps Projects and AI agents together in one tab, with a separate Git tab. Git shows repositories belonging to projects with open workspace tabs or attached terminals, including nested repositories. Closing the last tab/terminal removes that project from the overview. Local and remote computers remain separate. The compact Source Control panel has a commit message field, a Commit button and 24-pixel file rows. Changes are grouped into staged, changes (including untracked files) and conflicts. A partially staged file appears in both relevant groups. Hover or keyboard-focus a repository, group or file to reveal its ellipsis menu. File/group menus stage or unstage changes; repository menus open a Git dialog with navigation between commit review, branches, sync, history, comparison and worktrees. The file filter and folder-tree toggle are directly above the repository list. **Group by Project** in the view menu puts the repositories under their projects (a linked worktree under the project of its main checkout); the groups and the repositories inside them start folded. Repository paths and last-check times are available in the header tooltip. Commit drafts and cursor position survive status refreshes.
 
 Project discovery includes `.git` worktree files, skips dependency/build directories, and does not traverse symlinks. Discovery is bounded to five levels and 3,000 folders. Each repository displays up to 2,000 changed paths, with the full total and a truncation notice. Add deeper folders as projects to include them explicitly. Recursive filesystem watchers debounce status updates for up to 32 repositories while the UI is active; periodic refresh remains the fallback. Each repo shows its last check time and a stale indicator. Manual Refresh rechecks discovery and status without fetching; remote errors remain visible.
 
