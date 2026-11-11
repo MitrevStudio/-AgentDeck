@@ -1050,52 +1050,70 @@ window.manager.onDataChanged(d => {
 // Git branches beside projects and session folders, and a session's last messages on hover (git-ui.js, preview-ui.js).
 watchGit(() => { if (!ui.loaded) return; if (ui.renaming) pendingRender = true; else render(); });
 
-// ---------- projects | sessions divider: dragged, moved with the arrow keys, reset by a double-click ----------
-const PROJECTS_WIDTH_KEY = "agentdeck.projectsWidth";
-const MIN_PROJECTS_PX = 200, MIN_SESSIONS_PX = 420, SPLITTER_STEP_PX = 16;
-function getProjectsWidth(left) {
-  const main = document.querySelector("main").getBoundingClientRect();
-  const projects = left - document.querySelector("main > .side").getBoundingClientRect().left;
-  return Math.round(Math.max(MIN_PROJECTS_PX, Math.min(projects, main.width - MIN_SESSIONS_PX)));
-}
-function setProjectsWidth(px) {
-  document.querySelector("main").style.setProperty("--projects-w", `${px}px`);
+// ---------- dividers: dragged, moved with the arrow keys, reset by a double-click ----------
+// projects | sessions sets --projects-w on <main>; projects / agents sets --agents-h on the overview. Kept in localStorage.
+// MAX_AGENTS_SHARE: the agents section's CSS max-height (styles.css).
+const MIN_PROJECTS_PX = 200, MIN_SESSIONS_PX = 420, MIN_AGENTS_PX = 80, MAX_AGENTS_SHARE = 0.5, SPLITTER_STEP_PX = 16;
+const getMain = () => document.querySelector("main");
+const getOverview = () => $("sideOverview");
+const PROJECTS_SPLIT = { getHost: getMain, prop: "--projects-w", key: "agentdeck.projectsWidth" };
+const AGENTS_SPLIT = { getHost: getOverview, prop: "--agents-h", key: "agentdeck.agentsHeight" };
+function setSplit(split, px) {
+  split.getHost().style.setProperty(split.prop, `${px}px`);
   try {
-    localStorage.setItem(PROJECTS_WIDTH_KEY, String(px));
+    localStorage.setItem(split.key, String(px));
   } catch {}
 }
-function resetProjectsWidth() {
-  document.querySelector("main").style.removeProperty("--projects-w");
+function resetSplit(split) {
+  split.getHost().style.removeProperty(split.prop);
   try {
-    localStorage.removeItem(PROJECTS_WIDTH_KEY);
+    localStorage.removeItem(split.key);
   } catch {}
 }
-function restoreProjectsWidth() {
+function restoreSplit(split) {
   let px = 0;
   try {
-    px = Number(localStorage.getItem(PROJECTS_WIDTH_KEY));
+    px = Number(localStorage.getItem(split.key));
   } catch {}
-  if (px > 0) {
-    document.querySelector("main").style.setProperty("--projects-w", `${px}px`);
-  }
+  if (px > 0) split.getHost().style.setProperty(split.prop, `${px}px`);
 }
-$("splitter").addEventListener("pointerdown", e => {
-  const el = e.currentTarget;
-  const move = ev => setProjectsWidth(getProjectsWidth(ev.clientX));
-  e.preventDefault();
-  el.setPointerCapture(e.pointerId);
-  el.addEventListener("pointermove", move);
-  el.addEventListener("lostpointercapture", () => el.removeEventListener("pointermove", move), { once: true });
-});
-$("splitter").addEventListener("dblclick", resetProjectsWidth);
-$("splitter").addEventListener("keydown", e => {
-  const step = { ArrowLeft: -SPLITTER_STEP_PX, ArrowRight: SPLITTER_STEP_PX }[e.key];
-  if (step) {
+function watchSplitter(splitter, getSize, setSize, reset, keySteps) {
+  splitter.addEventListener("pointerdown", e => {
+    const move = ev => setSize(getSize(ev));
     e.preventDefault();
-    setProjectsWidth(getProjectsWidth(document.querySelector("main > .side").getBoundingClientRect().right + step));
-  }
-});
-restoreProjectsWidth();
+    splitter.setPointerCapture(e.pointerId);
+    splitter.addEventListener("pointermove", move);
+    splitter.addEventListener("lostpointercapture", () => splitter.removeEventListener("pointermove", move), { once: true });
+  });
+  splitter.addEventListener("dblclick", reset);
+  splitter.addEventListener("keydown", e => {
+    const step = keySteps[e.key];
+    if (step) {
+      e.preventDefault();
+      setSize(getSize(null, step));
+    }
+  });
+}
+
+function getProjectsWidth(ev, step = 0) {
+  const side = document.querySelector("main > .side").getBoundingClientRect();
+  const projects = (ev ? ev.clientX : side.right + step) - side.left;
+  return Math.round(Math.max(MIN_PROJECTS_PX, Math.min(projects, getMain().getBoundingClientRect().width - MIN_SESSIONS_PX)));
+}
+const setProjectsWidth = px => setSplit(PROJECTS_SPLIT, px);
+const resetProjectsWidth = () => resetSplit(PROJECTS_SPLIT);
+watchSplitter($("splitter"), getProjectsWidth, setProjectsWidth, resetProjectsWidth, { ArrowLeft: -SPLITTER_STEP_PX, ArrowRight: SPLITTER_STEP_PX });
+restoreSplit(PROJECTS_SPLIT);
+
+function getAgentsHeight(ev, step = 0) {
+  const overview = getOverview().getBoundingClientRect();
+  const height = ev ? overview.bottom - ev.clientY : $("sideAgents").getBoundingClientRect().height + step;
+  return Math.round(Math.max(MIN_AGENTS_PX, Math.min(height, overview.height * MAX_AGENTS_SHARE)));
+}
+const setAgentsHeight = px => setSplit(AGENTS_SPLIT, px);
+const resetAgentsHeight = () => resetSplit(AGENTS_SPLIT);
+watchSplitter($("sideSplitter"), getAgentsHeight, setAgentsHeight, resetAgentsHeight, { ArrowUp: SPLITTER_STEP_PX, ArrowDown: -SPLITTER_STEP_PX });
+restoreSplit(AGENTS_SPLIT);
 
 load();
 setInterval(pollLive, 2000);
