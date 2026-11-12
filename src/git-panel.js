@@ -2,11 +2,17 @@
 (() => {
   const list = $('gitRepositories'), footer = $('gitFooter'), expanded = new Map(), drafts = new Map(), busy = new Set(), errors = new Map(), repositories = new Map();
   const buttons = [...document.querySelectorAll('[data-side-tab]')], panels = { projects: $('sideOverview'), git: $('sideGit') };
-  let selected = 'projects', last = '', filter = '', tree = false, activeKey = '', sortMode = 'path';
+  let selected = 'projects', last = '', filter = '', activeKey = '', sortMode = 'path';
   try { selected = localStorage.getItem('agentdeck.sidebarTab') || selected; } catch {}
   try { sortMode = localStorage.getItem('agentdeck.gitSort') || sortMode; } catch {}
   let byProject = false;
   try { byProject = localStorage.getItem('agentdeck.gitByProject') === '1'; } catch {}
+  // How each repository (by its key) lists its changes, chosen in its own menu: by folders (tree) or as a flat list. Either
+  // way as IntelliJ's commit view: a checkbox on every file and folder, checked being staged.
+  const REPO_VIEWS_KEY = 'agentdeck.gitRepoViews';
+  let repoViews = {};
+  try { repoViews = JSON.parse(localStorage.getItem(REPO_VIEWS_KEY)) || {}; } catch {}
+  const getRepoView = key => repoViews[key] || {};
   function select(name) {
     selected = Object.hasOwn(panels, name) ? name : 'projects';
     for (const [id, panel] of Object.entries(panels)) panel.hidden = id !== selected;
@@ -62,24 +68,77 @@
   }
   const more = (attributes, disabled = false) => `<button class="icon-btn git-more" type="button" ${attributes} title="${esc(gitText('manage'))}" aria-label="${esc(gitText('manage'))}" aria-haspopup="menu" ${disabled ? 'disabled' : ''}>${icon('more')}</button>`;
   const quick = (action, glyph, label, disabled = false) => `<button type="button" class="icon-btn git-quick" data-quick="${action}" title="${esc(gitText(label))}" aria-label="${esc(gitText(label))}" ${disabled ? 'disabled' : ''}>${icon(glyph)}</button>`;
-  function fileRow(f, node, group, disabled) {
+  function fileRow(f, node, group, disabled, check = '') {
     const filename = f.path.split(/[\\/]/).at(-1), folder = f.path.slice(0, f.path.length - filename.length).replace(/[\\/]$/, '');
     const extension = filename.split('.').at(-1).toLowerCase(), known = /^(js|ts|json|css|md|html|yml|yaml|py)$/.test(extension);
-    const status = conflict(f) ? '!' : f.status === '??' ? 'U' : f.status[group === 'staged' ? 0 : 1];
-    return `<div class="git-file-row" data-file="${esc(f.path)}" data-group="${group}"><button type="button" class="git-file" data-diff-node="${esc(node.node)}" data-diff-root="${esc(node.repo.root)}" data-diff-file="${esc(f.path)}" ${disabled ? 'disabled' : ''} title="${esc(f.original ? `${f.original} → ${f.path}` : f.path)}"><span class="git-file-icon ext-${known ? extension : 'file'}" aria-hidden="true">${icon('file')}</span><span class="git-file-name">${esc(filename)}</span><small>${esc(folder)}</small></button>${more('data-file-menu', disabled)}<code class="git-file-status status-${status === '!' ? 'conflict' : status}">${esc(status)}</code></div>`;
+    const change = group === 'all' ? (f.status[1] !== '.' ? f.status[1] : f.status[0]) : f.status[group === 'staged' ? 0 : 1];
+    const status = conflict(f) ? '!' : f.status === '??' ? 'U' : change;
+    return `<div class="git-file-row" data-file="${esc(f.path)}" data-group="${group}">${check}<button type="button" class="git-file" data-diff-node="${esc(node.node)}" data-diff-root="${esc(node.repo.root)}" data-diff-file="${esc(f.path)}" ${disabled ? 'disabled' : ''} title="${esc(f.original ? `${f.original} → ${f.path}` : f.path)}"><span class="git-file-icon ext-${known ? extension : 'file'}" aria-hidden="true">${icon('file')}</span><span class="git-file-name">${esc(filename)}</span><small>${esc(folder)}</small></button>${group === 'conflicts' || !node.node ? more('data-file-menu', disabled) : ''}<code class="git-file-status status-${status === '!' ? 'conflict' : status}">${esc(status)}</code></div>`;
   }
   function grouped(node, disabled) {
-    return ['conflicts', 'staged', 'changes'].map(group => {
-      const files = sortFiles((node.repo.files || []).filter(f => accepts(group, f) && f.path.toLocaleLowerCase().includes(filter)));
-      if (!files.length) return '';
-      const renderTree = (items, depth = 0) => {
-        const folders = new Map(), leaves = [];
-        for (const f of items) { const parts = f.path.split('/'); if (parts.length <= depth + 1) leaves.push(f); else { const folder = parts[depth]; if (!folders.has(folder)) folders.set(folder, []); folders.get(folder).push(f); } }
-        return [...folders].map(([folder, children]) => `<details class="git-folder" open><summary>${esc(folder)}</summary>${renderTree(children, depth + 1)}</details>`).join('') + leaves.map(f => fileRow(f, node, group, disabled)).join('');
-      };
-      const id = JSON.stringify([node.key, group]);
-      return `<details class="git-file-group" data-expand="${esc(id)}" data-group="${group}" ${expanded.get(id) !== false ? 'open' : ''}><summary><span class="git-chevron">${icon('right')}</span><span>${esc(gitText(group))}</span><span class="grow"></span><span class="git-hover-actions">${quick('review', 'eye', 'reviewChanges', disabled)}${quick(group === 'staged' ? 'unstage' : 'stage', group === 'staged' ? 'undo' : 'plus', group === 'staged' ? 'unstageAll' : 'stageAll', disabled)}${more('data-group-menu', disabled)}</span><span class="git-count">${files.length}</span></summary>${tree ? renderTree(files) : files.map(f => fileRow(f, node, group, disabled)).join('')}</details>`;
-    }).join('');
+    return getGroupHtml(node, disabled, 'conflicts') + getCheckTreeHtml(node, disabled);
+  }
+  // A file's part in the next commit: "all" staged, "none", or "part" (changed again since it was staged).
+  function getStaged(f) {
+    if (f.status === '??' || f.status[0] === '.') {
+      return 'none';
+    }
+    return f.status[1] === '.' ? 'all' : 'part';
+  }
+  // A checkbox for these files: checked when all are staged, mixed (data-mixed, set as indeterminate after render) when
+  // some are.
+  function getCheckHtml(files, label, disabled) {
+    const states = files.map(getStaged);
+    const all = states.every(s => s === 'all'), none = states.every(s => s === 'none');
+    return `<input type="checkbox" class="git-check" data-paths="${esc(JSON.stringify(files.map(f => f.path)))}" aria-label="${esc(label)}" ${all ? 'checked' : ''} ${all || none ? '' : 'data-mixed="1"'} ${disabled ? 'disabled' : ''}>`;
+  }
+  const getCountText = n => gitText(n === 1 ? 'oneFile' : 'fileCount').replace('{n}', n);
+  // The changes as one tree, as IntelliJ groups them by directory: a folder with a single subfolder and no files of
+  // its own shares that subfolder's row ("src\main\java\bg"), and every row has its file count and a checkbox.
+  function getCheckTreeHtml(node, disabled) {
+    const files = sortFiles((node.repo.files || []).filter(f => !conflict(f) && f.path.toLocaleLowerCase().includes(filter)));
+    if (!files.length) {
+      return '';
+    }
+    const separator = node.repo.root.includes('\\') ? '\\' : '/';
+    const root = { path: '', folders: new Map(), files: [] };
+    for (const f of files) {
+      let folder = root;
+      for (const part of f.path.split('/').slice(0, -1)) {
+        if (!folder.folders.has(part)) folder.folders.set(part, { name: part, path: folder.path ? `${folder.path}/${part}` : part, folders: new Map(), files: [] });
+        folder = folder.folders.get(part);
+      }
+      folder.files.push(f);
+    }
+    const getAll = folder => [...folder.files, ...[...folder.folders.values()].flatMap(getAll)];
+    const renderFolder = folder => {
+      let name = folder.name;
+      while (folder.folders.size === 1 && !folder.files.length) {
+        folder = [...folder.folders.values()][0];
+        name += separator + folder.name;
+      }
+      const all = getAll(folder), id = JSON.stringify([node.key, 'folder', folder.path]);
+      return `<details class="git-folder git-check-folder" data-expand="${esc(id)}" ${expanded.get(id) === true ? 'open' : ''}><summary><span class="git-chevron">${icon('right')}</span>${getCheckHtml(all, name, disabled)}${icon('folder')}<span class="git-folder-name">${esc(name)}</span><small class="git-folder-count">${esc(getCountText(all.length))}</small></summary>${renderChildren(folder)}</details>`;
+    };
+    const renderChildren = folder => [...folder.folders.values()].sort((a, b) => a.name.localeCompare(b.name)).map(renderFolder).join('')
+      + folder.files.map(f => fileRow(f, node, 'all', disabled, getCheckHtml([f], f.path, disabled))).join('');
+    const id = JSON.stringify([node.key, 'all']);
+    const rows = getRepoView(node.key).tree ? renderChildren(root) : files.map(f => fileRow(f, node, 'all', disabled, getCheckHtml([f], f.path, disabled))).join('');
+    return `<details class="git-file-group git-check-tree" data-expand="${esc(id)}" data-group="changes" ${expanded.get(id) !== false ? 'open' : ''}><summary><span class="git-chevron">${icon('right')}</span>${getCheckHtml(files, gitText('changes'), disabled)}<span>${esc(gitText('changes'))}</span><small class="git-folder-count">${esc(getCountText(files.length))}</small><span class="grow"></span><span class="git-count">${files.length}</span></summary>${rows}</details>`;
+  }
+  function getGroupHtml(node, disabled, group) {
+    const files = sortFiles((node.repo.files || []).filter(f => accepts(group, f) && f.path.toLocaleLowerCase().includes(filter)));
+    if (!files.length) return '';
+    const renderTree = (items, depth = 0) => {
+      const folders = new Map(), leaves = [];
+      for (const f of items) { const parts = f.path.split('/'); if (parts.length <= depth + 1) leaves.push(f); else { const folder = parts[depth]; if (!folders.has(folder)) folders.set(folder, []); folders.get(folder).push(f); } }
+      return [...folders].map(([folder, children]) => {
+        const id = JSON.stringify([node.key, group, children[0].path.split('/').slice(0, depth + 1).join('/')]);
+        return `<details class="git-folder" data-expand="${esc(id)}" ${expanded.get(id) === true ? 'open' : ''}><summary><span class="git-chevron">${icon('right')}</span>${esc(folder)}</summary>${renderTree(children, depth + 1)}</details>`;
+      }).join('') + leaves.map(f => fileRow(f, node, group, disabled)).join('');
+    };
+    const id = JSON.stringify([node.key, group]);
+    return `<details class="git-file-group" data-expand="${esc(id)}" data-group="${group}" ${expanded.get(id) !== false ? 'open' : ''}><summary><span class="git-chevron">${icon('right')}</span><span>${esc(gitText(group))}</span><span class="grow"></span><span class="git-hover-actions">${quick('review', 'eye', 'reviewChanges', disabled)}${quick(group === 'staged' ? 'unstage' : 'stage', group === 'staged' ? 'undo' : 'plus', group === 'staged' ? 'unstageAll' : 'stageAll', disabled)}${more('data-group-menu', disabled)}</span><span class="git-count">${files.length}</span></summary>${getRepoView(node.key).tree ? renderTree(files) : files.map(f => fileRow(f, node, group, disabled)).join('')}</details>`;
   }
   // The project a repository belongs to: the deepest one holding it - a linked worktree by its main checkout, else by
   // its own folder (a worktree added as a project of its own) - or, in none, its own folder.
@@ -114,6 +173,11 @@
     try { localStorage.setItem('agentdeck.gitByProject', on ? '1' : '0'); } catch {}
     render();
   }
+  function setRepoView(key, name, on) {
+    repoViews[key] = { ...getRepoView(key), [name]: on };
+    try { localStorage.setItem(REPO_VIEWS_KEY, JSON.stringify(repoViews)); } catch {}
+    render();
+  }
   function render() {
     if (selected !== 'git') return;
     const sources = [{ id: 'local', name: t('git.panel.local'), status: 'online', git }, ...nodes], rows = [], open = openFolders();
@@ -132,7 +196,7 @@
         tips.set(key, `${source.name}\n${repo.root}\n${gitText('checked')}: ${repo.at ? new Date(repo.at).toLocaleTimeString() : '—'}${offline || Date.now() - (repo.at || 0) > 150000 ? '\n' + gitText('stale') : ''}`);
         items.push({ project: getRepoProject(source.id, repo), html: `<details class="git-repository ${offline ? 'offline' : ''}" data-repo="${esc(key)}" data-expand="${esc(getRepoExpandId(key))}" ${isRepoOpen(key) ? 'open' : ''}>
           <summary><span class="git-chevron">${icon('right')}</span><strong>${esc(repo.root.split(/[\\/]/).at(-1))}</strong><span class="git-repo-branch">${icon('branch')}${esc(repo.error ? '' : gitHead(repo))}</span>${gitAb(repo)}${source.id === 'local' ? '' : `<span class="proj-node ${offline ? 'offline' : 'online'}">${icon('nodes')}${esc(source.name)}</span>`}${offline ? `<span class="git-offline">${icon('alert')}</span>` : ''}<span class="grow"></span><span class="git-hover-actions">${quick('preview', 'eye', 'commit', disabled)}${quick('commit', 'check', 'commitMenu', disabled || !staged || !(drafts.get(key) || '').trim())}${quick('branches', 'branch', 'branches', disabled)}${quick('refresh', 'refresh', 'refresh', disabled)}${more('data-repo-menu', disabled)}</span><span class="git-count">${repo.fileCount ?? files.length}</span></summary>
-          <div class="git-commit-box"><textarea class="textarea" data-commit-message="${esc(key)}" rows="1" spellcheck="false" aria-label="${esc(gitText('message'))}" placeholder="${esc(gitText('commitHint'))}" ${disabled ? 'disabled' : ''}>${esc(drafts.get(key) || '')}</textarea><div class="git-commit-split"><button type="button" class="btn sm primary git-commit-button" data-repo-action="commit" ${disabled || !staged || !(drafts.get(key) || '').trim() ? 'disabled' : ''}>${icon('check')}<span>${esc(gitText(busy.has(key) ? 'loading' : 'commitMenu'))}</span></button><button type="button" class="btn sm primary git-commit-options" data-commit-menu aria-label="${esc(gitText('commitOptions'))}" title="${esc(gitText('commitOptions'))}" aria-haspopup="menu" ${disabled ? 'disabled' : ''}>${icon('down')}</button></div></div>
+          <div class="git-commit-box"><textarea class="textarea" data-commit-message="${esc(key)}" rows="1" spellcheck="false" aria-label="${esc(gitText('message'))}" placeholder="${esc(gitText('commitHint'))}" ${disabled ? 'disabled' : ''}>${esc(drafts.get(key) || '')}</textarea><div class="git-commit-split"><button type="button" class="btn sm primary git-commit-button" data-repo-action="commit" ${disabled || !staged || !(drafts.get(key) || '').trim() ? 'disabled' : ''}>${icon('check')}<span>${esc(gitText(busy.has(key) ? 'loading' : 'commitMenu'))}</span></button></div></div>
           ${errors.has(key) || repo.error || source.gitError ? `<p class="git-panel-error" role="status">${esc(errors.get(key) || repo.error || source.gitError)}</p>` : ''}
           ${grouped(node, disabled)}${!files.length && !repo.error ? `<p class="git-clean">${esc(gitText('empty'))}</p>` : filter && !files.some(f => f.path.toLocaleLowerCase().includes(filter)) ? `<p class="git-clean">${esc(gitText('noMatches'))}</p>` : ''}
           ${repo.filesTruncated ? `<p class="git-panel-note">${esc(t('git.panel.truncated'))}</p>` : ''}</details>` });
@@ -148,6 +212,7 @@
     if (html !== last) {
       const active = document.activeElement, focused = active?.dataset, scroll = list.scrollTop, selection = focused?.commitMessage ? [active.selectionStart, active.selectionEnd] : null;
       list.innerHTML = html; last = html; list.scrollTop = scroll;
+      for (const box of list.querySelectorAll?.('.git-check[data-mixed]') || []) box.indeterminate = true;
       if (focused?.commitMessage) {
         const input = [...list.querySelectorAll('[data-commit-message]')].find(b => b.dataset.commitMessage === focused.commitMessage);
         input?.focus({ preventScroll: true }); if (input && selection) input.setSelectionRange(...selection);
@@ -181,6 +246,9 @@
       const args = { root: node.repo.root, action };
       if (action === 'commit') {
         const message = (drafts.get(node.key) || '').trim(); if (!message) return;
+        // Checked goes in whole: a checked file changed again since is staged again first.
+        const again = (node.repo.files || []).filter(f => !conflict(f) && getStaged(f) === 'part').map(f => f.path);
+        if (again.length) await window.manager.gitExecute(node.node, { root: node.repo.root, action: 'stage', files: again });
         const review = await window.manager.gitQuery(node.node, { root: node.repo.root, kind: 'preview' });
         Object.assign(args, { message, token: review.token });
       } else if (files) args.files = files;
@@ -198,30 +266,22 @@
   // The repository's actions, grouped the way Source Control does it.
   function repoMenuItems(node) {
     const disabled = node.offline || busy.has(node.key);
-    const changes = () => (node.repo.files || []).filter(f => accepts('changes', f) || conflict(f)).map(f => f.path);
-    const staged = () => (node.repo.files || []).filter(f => accepts('staged', f)).map(f => f.path);
-    const sync = item('sync', 'refresh', openFor(node, 'sync'), { disabled });
     const pull = item('pull', 'download', () => mutate(node, 'pull'), { disabled });
     const push = item('push', 'upload', () => mutate(node, 'push'), { disabled });
     const fetch = item('fetch', 'download', () => mutate(node, 'fetch'), { disabled });
-    const stage = item('stageAll', 'plus', () => mutate(node, 'stage', changes()), { disabled: disabled || !changes().length });
-    const unstage = item('unstageAll', 'undo', () => mutate(node, 'unstage', staged()), { disabled: disabled || !staged().length });
+    const view = getRepoView(node.key);
     return [
-      sync, pull, push, fetch,
+      item('asTree', 'folder', () => setRepoView(node.key, 'tree', !view.tree), { checked: Boolean(view.tree) }),
       sep(),
-      item('commit', 'eye', openFor(node, 'commit'), { disabled }), stage, unstage,
+      pull, push, fetch,
       sep(),
-      item('branches', 'branch', openFor(node, 'branches'), { disabled }), item('compare', 'splitRight', openFor(node, 'compare'), { disabled }),
-      item('history', 'history', openFor(node, 'history'), { disabled }), item('worktrees', 'layers', openFor(node, 'worktrees'), { disabled }),
+      item('compare', 'splitRight', openFor(node, 'compare'), { disabled }), item('worktrees', 'layers', openFor(node, 'worktrees'), { disabled }),
       sep(),
       item('showOutput', 'terminal', () => window.gitWorkflow.openOutput(node.node, node.repo.root), { disabled })
     ];
   }
   function panelMenuItems() {
-    const node = repositories.get(activeKey);
-    const toggleTree = () => { tree = !tree; $('gitTreeToggle').setAttribute('aria-pressed', String(tree)); render(); };
     const view = [
-      item('asTree', 'folder', toggleTree, { checked: tree }),
       item('byProject', 'stack', () => setByProject(!byProject), { checked: byProject }),
       { label: gitText('viewSort'), icon: 'sliders', items: [
         item('sortPath', 'history', () => setSort('path'), { checked: sortMode === 'path' }),
@@ -232,8 +292,7 @@
       ] },
       sep()
     ];
-    return node ? [...view, ...repoMenuItems(node), sep(), item('refresh', 'refresh', () => $('gitPanelRefresh').onclick())]
-      : [...view, item('refresh', 'refresh', () => $('gitPanelRefresh').onclick())];
+    return view.slice(0, -1);
   }
   function menu(button, node, group, file) {
     if (!file && !group) {
@@ -241,7 +300,7 @@
       groupMenu.classList.add('git-context-menu'); return;
     }
     const files = group ? (node.repo.files || []).filter(f => accepts(group, f) && f.path.toLocaleLowerCase().includes(filter)).map(f => f.path) : [];
-    const items = [item(file ? (group === 'staged' ? 'unstageFile' : 'stageFile') : (group === 'staged' ? 'unstageAll' : 'stageAll'), group === 'staged' ? 'undo' : 'plus', () => mutate(node, group === 'staged' ? 'unstage' : 'stage', file ? [file] : files))];
+    const items = group !== 'conflicts' && file ? [] : [item(file ? (group === 'staged' ? 'unstageFile' : 'stageFile') : (group === 'staged' ? 'unstageAll' : 'stageAll'), group === 'staged' ? 'undo' : 'plus', () => mutate(node, group === 'staged' ? 'unstage' : 'stage', file ? [file] : files))];
     if (file && !node.node) items.push(item('editor', 'open', () => window.manager.gitOpenFile(node.node, node.repo.root, file)));
     openGroupMenu(button, node.repo.root, items);
     groupMenu.classList.add('git-context-menu');
@@ -256,6 +315,17 @@
     const headerCommit = e.target.closest('[data-repo]').querySelector('[data-quick="commit"]');
     if (headerCommit) headerCommit.disabled = commit.disabled;
   });
+  // A checkbox stages what it stands for, or takes it out of the commit. Only the files that change are sent: an
+  // untracked file cannot be unstaged, a staged one need not be staged again.
+  list.addEventListener('change', e => {
+    const box = e.target.closest('.git-check');
+    if (!box) return;
+    const node = repositories.get(box.closest('[data-repo]')?.dataset.repo);
+    if (!node) return;
+    const paths = new Set(JSON.parse(box.dataset.paths));
+    const files = (node.repo.files || []).filter(f => paths.has(f.path) && getStaged(f) !== (box.checked ? 'all' : 'none')).map(f => f.path);
+    mutate(node, box.checked ? 'stage' : 'unstage', files);
+  });
   list.addEventListener('keydown', e => {
     if (e.target.dataset.commitMessage && (e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault(); const button = e.target.parentElement.querySelector('[data-repo-action="commit"]'); if (!button.disabled) button.click();
@@ -265,14 +335,10 @@
   list.addEventListener('click', e => {
     const clickedRepo = e.target.closest('[data-repo]');
     if (clickedRepo) { activeKey = clickedRepo.dataset.repo; window.gitFooter?.render(); }
-    const button = e.target.closest('[data-repo-menu], [data-group-menu], [data-file-menu], [data-repo-action], [data-quick], [data-commit-menu]');
+    const button = e.target.closest('[data-repo-menu], [data-group-menu], [data-file-menu], [data-repo-action], [data-quick]');
     if (!button || button.disabled) return;
     e.preventDefault(); e.stopPropagation();
     const node = repositories.get(button.closest('[data-repo]').dataset.repo); if (!node) return;
-    if (button.dataset.commitMenu !== undefined) {
-      openGroupMenu(button, node.repo.root, [item('commit', 'eye', () => window.gitWorkflow.open(node.node, node.repo.root, 'commit', drafts.get(node.key) || '')), item('stageAll', 'plus', () => mutate(node, 'stage', (node.repo.files || []).filter(f => accepts('changes', f)).map(f => f.path)))]);
-      groupMenu.classList.add('git-context-menu'); return;
-    }
     if (button.dataset.quick) {
       const action = button.dataset.quick, group = button.closest('[data-group]');
       if (action === 'refresh') return $('gitPanelRefresh').onclick();
@@ -291,7 +357,7 @@
   $('gitPanelTitle').textContent = gitText('sourceControl');
   $('gitPanelMenu').title = gitText('panelActions');
   $('gitFilter').oninput = e => { filter = e.target.value.toLocaleLowerCase(); render(); };
-  $('gitTreeToggle').onclick = () => { tree = !tree; $('gitTreeToggle').setAttribute('aria-pressed', String(tree)); render(); };
+  $('gitTreeToggle').hidden = true; // the folder tree is chosen per repository, in its menu
   $('gitPanelMenu').onclick = () => { openGroupMenu($('gitPanelMenu'), '', panelMenuItems()); groupMenu.classList.add('git-context-menu'); };
   $('gitPanelRefresh').onclick = async () => {
     const button = $('gitPanelRefresh'); button.disabled = true;
