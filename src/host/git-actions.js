@@ -26,8 +26,11 @@ const value = (s, max = 4096) => {
   if (typeof s !== 'string' || !s || s.length > max || s.includes('\0')) throw new Error('Invalid Git argument');
   return s;
 };
+// Actions that change only the repository's own index: the status of that repository is all there is to refresh.
+const INDEX_ONLY = new Set(['stage', 'unstage']);
 const ref = s => { value(s, 512); if (s.startsWith('-') || /[\s\x00-\x1f]/.test(s)) throw new Error('Invalid reference'); return s; };
-function createGitActions({ status, refresh, parseStatus, context = () => ({}) }) {
+// refreshRepo(root): that repository's status only - after an action that changed nothing but its index.
+function createGitActions({ status, refresh, refreshRepo = () => refresh({ force: true }), parseStatus, context = () => ({}) }) {
   const queues = new Map();
   const rootOf = root => {
     const repo = status().repos[normPath(value(root))];
@@ -133,7 +136,7 @@ function createGitActions({ status, refresh, parseStatus, context = () => ({}) }
     const key = normPath(common), previous = queues.get(key) || Promise.resolve();
     const pending = previous.catch(() => {}).then(async () => {
       try { return await mutate(root, p); }
-      finally { await refresh({ force: true }).catch(() => {}); }
+      finally { await (INDEX_ONLY.has(p.action) ? refreshRepo(root) : refresh({ force: true })).catch(() => {}); }
     });
     queues.set(key, pending);
     try { return await pending; } finally { if (queues.get(key) === pending) queues.delete(key); }
