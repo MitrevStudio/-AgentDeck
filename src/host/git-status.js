@@ -80,7 +80,7 @@ async function discoverRepositories(dirs, { maxDepth = 5, maxDirs = 3000 } = {})
 }
 
 // ---------- state ----------
-let opts = null, timer = null, running = null, again = false;
+let opts = null, timer = null, running = null, again = null; // the options of one more pass after the running one
 let missingAt = 0;                 // when git was last found missing
 const roots = new Map();           // norm(dir) -> { root: absolute path | null, at }
 const repos = new Map();           // norm(root) -> status (with root, at, error?)
@@ -88,6 +88,11 @@ let discovery = { key: "", at: 0, repos: [], truncated: false };
 let snapshot = { at: 0, missing: false, dirs: {}, repos: {} };
 const watchers = new Map();
 let watchTimer = null;
+const changedRoots = new Set();    // norm(root) of the repositories a watcher saw change since the last pass
+const WATCH_DELAY_MS = 2000;
+// Build output, IDE state and the agents' worktrees (repositories of their own, with watchers of their own) change all
+// the time without changing what `git status` reports here.
+const WATCH_NOISE = new RegExp(`(^|/)(${[...SKIP].filter(d => d !== ".git").map(d => d.replace(".", "\\.")).join("|")}|\\.idea|\\.gradle|\\.claude/worktrees)(/|$)`, "i");
 function syncWatchers() {
   const wanted = new Set(Object.values(snapshot.repos).map(r => r.root));
   for (const [root, watcher] of watchers) if (!wanted.has(root)) { watcher.close(); watchers.delete(root); }
@@ -96,12 +101,14 @@ function syncWatchers() {
     try {
       const watcher = fs.watch(root, { recursive: true, persistent: false }, (_event, filename) => {
         const name = String(filename || '').replaceAll('\\', '/');
-        if (/(^|\/)(node_modules|dist|build|\.next|vendor)(\/|$)/.test(name) || /\.git\/(objects|logs)\//.test(name) || name.endsWith('.lock')) return;
+        if (WATCH_NOISE.test(name) || /\.git\/(objects|logs)\//.test(name) || name.endsWith('.lock')) return;
         if (!opts?.active?.()) return;
-        clearTimeout(watchTimer);
-        const cached = repos.get(norm(root));
-        if (cached) cached.at = 0;
-        watchTimer = setTimeout(() => refresh().catch(() => {}), 1200);
+        changedRoots.add(norm(root));
+        // At most one pass per WATCH_DELAY_MS, and only for the repositories that changed.
+        watchTimer ??= setTimeout(() => {
+          watchTimer = null;
+          refresh({ changedOnly: true }).catch(() => {});
+        }, WATCH_DELAY_MS);
         watchTimer.unref?.();
       });
       watcher.on('error', () => { watcher.close(); watchers.delete(root); });
@@ -162,16 +169,25 @@ function runGit(root) {
 // ---------- refreshing ----------
 // Brings every folder that opts.dirs() lists up to date (repositories checked within TTL_MS are kept, unless forced),
 // then reports the result through opts.onChange. A refresh asked for while one runs is folded into one more after it.
-function refresh({ force = false } = {}) {
+// changedOnly: only the repositories a watcher saw change, not every one past TTL_MS.
+function refresh({ force = false, changedOnly = false } = {}) {
   if (!opts) return Promise.resolve(snapshot);
-  if (running) { if (force) return running.then(() => refresh({ force: true })); again = true; return running; }
-  running = pass(force).finally(() => {
+  if (running) {
+    if (force) return running.then(() => refresh({ force: true }));
+    again = !again || again.changedOnly ? { changedOnly } : again;
+    return running;
+  }
+  running = pass(force, changedOnly).finally(() => {
     running = null;
-    if (again) { again = false; refresh(); }
+    if (again) {
+      const next = again;
+      again = null;
+      refresh(next);
+    }
   });
   return running;
 }
-async function pass(force) {
+async function pass(force, changedOnly = false) {
   const t0 = Date.now();
   if (!force && missingAt && t0 - missingAt < MISSING_RETRY_MS) return snapshot;
   const dirs = [...new Set((opts.dirs() || []).filter(Boolean))];
@@ -180,7 +196,10 @@ async function pass(force) {
   if (force || discovery.key !== discoveryKey || t0 - discovery.at > ROOT_TTL_MS) discovery = { ...await discoverRepositories(projects), key: discoveryKey, at: t0 };
   const dirRoot = {};
   for (const d of [...dirs, ...discovery.repos]) { if (force) roots.delete(norm(d)); const r = await rootOf(d, t0); if (r) dirRoot[norm(d)] = r; }
-  const todo = [...new Set(Object.values(dirRoot))].filter(r => force || !(t0 - (repos.get(norm(r))?.at || 0) < TTL_MS));
+  const changed = new Set(changedRoots);
+  changedRoots.clear();
+  const isStale = r => !(t0 - (repos.get(norm(r))?.at || 0) < TTL_MS);
+  const todo = [...new Set(Object.values(dirRoot))].filter(r => force || changed.has(norm(r)) || (!changedOnly && isStale(r)));
   let missing = false, next = 0;
   const work = async () => {
     while (next < todo.length && !missing) {
@@ -264,6 +283,6 @@ async function diff({ root, file } = {}) {
 
 let actionContext = () => ({});
 const actions = require('./git-actions').createGitActions({ status: () => snapshot, refresh, parseStatus, context: () => actionContext() });
-function stop() { clearInterval(timer); clearTimeout(watchTimer); for (const w of watchers.values()) w.close(); watchers.clear(); }
-module.exports = { start, stop, refresh, get: () => snapshot, parseStatus, norm, discoverRepositories, diff,
+function stop() { clearInterval(timer); clearTimeout(watchTimer); watchTimer = null; changedRoots.clear(); for (const w of watchers.values()) w.close(); watchers.clear(); }
+module.exports = { start, stop, refresh, get: () => snapshot, parseStatus, norm, discoverRepositories, diff, WATCH_NOISE,
   query: actions.query, execute: actions.execute, configure: context => { actionContext = context; } };
