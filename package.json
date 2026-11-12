@@ -41,6 +41,8 @@
     "test:themes": "node scripts/test-themes.js",
     "test:prefs": "node scripts/test-prefs-compact.js",
     "test:editors": "node scripts/test-editors.js",
+    "test:taskbar": "node scripts/test-taskbar-monitor.js && node scripts/test-resources.js && node scripts/test-prefs-taskbar.js",
+    "test:taskbar-ui": "node scripts/test-taskbar-ui-electron.cjs",
     "dist": "electron-builder --win --publish never",
     "dist:dir": "electron-builder --win --dir --publish never",
     "dist:linux": "electron-builder --linux --publish never"

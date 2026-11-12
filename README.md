@@ -328,6 +328,8 @@ Costs are **API-equivalent estimates** using the application's price table in [`
 
 **Machine resources** show whole-computer CPU, memory and home-volume disk readings. Paired hosts publish resource, usage and limit information over their direct connection as well.
 
+**On the taskbar** (Windows): a small strip beside the tray icons can show this computer's network traffic (up/down), CPU and memory, updated every second; 90% and above turns red, and the tooltip adds today's traffic total. It is **off by default**, with nothing chosen: switch it on and pick what it shows in **Settings → General → Taskbar**. Clicks pass through it to the taskbar, and it steps aside for full-screen apps.
+
 ### Git awareness and daily activity
 
 Git indicators show a project's branch, staged/modified/untracked counts, conflicts and commits ahead of or behind its upstream. They appear in relevant project and session views, including the edge launcher.
@@ -535,7 +537,7 @@ Agent-launch shortcuts require the corresponding CLI. In the search palette, arr
 
 | Area | What you can change |
 | --- | --- |
-| **General** | English/Bulgarian, colour theme, window scale, notifications, startup and updates |
+| **General** | English/Bulgarian, colour theme, window scale, notifications, the taskbar strip, startup and updates |
 | **Terminal** | Built-in tabs or Windows Terminal, external window behavior, font size and automatic compaction |
 | **Source control** | The editor the Git screens open a changed file in: VS Code or IntelliJ IDEA |
 | **Dictation** | Provider, model, language, microphone, recording length, delivery, text mode and push-to-talk |
@@ -620,6 +622,7 @@ The active profile contains the encryption context associated with its `Local St
 | `terminals/` | Metadata for reconnecting to Windows terminal processes |
 | `search.db` | Local transcript full-text index |
 | `usage-cache.json` | Cached usage calculations |
+| `taskbar-traffic.json` | Today's network traffic total for the taskbar strip |
 | `voice/records/` | Audio files and per-record JSON metadata |
 | `node/` | Mesh identity and pairing state |
 | `orchestrator/` | Command-centre instructions, MCP configuration and state |
