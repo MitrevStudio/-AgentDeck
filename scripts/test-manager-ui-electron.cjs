@@ -326,6 +326,41 @@ app.whenReady().then(async () => {
   assert.equal(await evaluate("termViews.size"), 0);
   assert.equal(await evaluate("$('spaceEmpty').hidden"), false);
 
+  // ---------- Project sessions: hiding and the age filter ----------
+  // Two more sessions of the project: two days old and forty days old. s1 runs, so it is always listed.
+  await evaluate("fx.data.sessions.push({ id: 'old2', agent: 'Claude', cwd: 'C:/work/agentdeck', title: 'Two days ago', prompt: '', updatedAt: Date.now() - 2 * 86400000 }, { id: 'old40', agent: 'Claude', cwd: 'C:/work/agentdeck', title: 'Forty days ago', prompt: '', updatedAt: Date.now() - 40 * 86400000 })");
+  // The sessions as a new scan brings them (the fixture keeps only the last onDataChanged subscriber).
+  const rescanSessions = () => evaluate('raw = structuredClone(fx.data); prepare(); render()');
+  await rescanSessions(); await settle();
+  const seRows = "[...document.querySelectorAll('#spaceEmpty .se-row')].map(r => r.dataset.key).join()";
+  const seClick = selector => evaluate(`document.querySelector(${JSON.stringify('#spaceEmpty ' + selector)}).click()`);
+  assert.equal(await evaluate(seRows), 'Claude:s1,Claude:old2,Claude:old40');
+  await seClick('[data-se="age"][data-days="7"]'); await settle();
+  assert.equal(await evaluate(seRows), 'Claude:s1,Claude:old2', 'a week: the older session is left out');
+  assert.match(await evaluate("document.querySelector('#spaceEmpty .se-notes').textContent"), /1/, 'and counted');
+  assert.equal(await evaluate("document.querySelector('#spaceEmpty .se-row[data-key=\"Claude:s1\"] [data-se]')"), null, 'a running session has no eye');
+  await seClick('.se-row[data-key="Claude:old2"] [data-se="hide"]'); await settle();
+  assert.equal(await evaluate(seRows), 'Claude:s1', 'a hidden session leaves the list');
+  await seClick('[data-se="show-hidden"]'); await settle();
+  assert.equal(await evaluate("document.querySelector('#spaceEmpty .se-row.concealed').dataset.key"), 'Claude:old2', 'shown dimmed on request');
+  // The custom field: focused when opened, and a number being typed survives a redraw of the view.
+  await seClick('[data-se="custom"]'); await settle();
+  assert.equal(await evaluate("document.activeElement.dataset.se"), 'days', 'Custom puts the cursor in its field');
+  await evaluate("document.activeElement.value = '12'; fx.data.sessions.find(s => s.id === 'old2').title = 'Renamed meanwhile'");
+  await rescanSessions(); await settle();
+  assert.equal(await evaluate("document.activeElement.dataset.se + document.activeElement.value"), 'days12', 'typing survives a redraw');
+  await evaluate("document.activeElement.value = '60'; document.activeElement.dispatchEvent(new Event('change', { bubbles: true }))"); await settle();
+  assert.equal(await evaluate(seRows), 'Claude:s1,Claude:old2,Claude:old40', 'sixty days: all three');
+  // Hidden items revealed everywhere: nothing to switch here.
+  await evaluate("writeHidden({ ...readHidden(), reveal: true }); prepare(); render()"); await settle();
+  assert.equal(await evaluate("document.querySelector('#spaceEmpty [data-se=\"show-hidden\"]')"), null, 'no switch while hidden items are revealed');
+  await evaluate("writeHidden({ ...readHidden(), reveal: false }); prepare(); render()"); await settle();
+  await seClick('.se-row[data-key="Claude:old2"] [data-se="unhide"]'); await settle();
+  await seClick('[data-se="age"][data-days="0"]'); await settle();
+  await evaluate("fx.data.sessions = fx.data.sessions.filter(s => !s.id.startsWith('old'))");
+  await rescanSessions(); await settle();
+  assert.equal(await evaluate(seRows), 'Claude:s1');
+
   // ---------- keyboard ----------
   await evaluate("document.querySelector('#agents .agent').focus(); document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))");
   assert.equal(await evaluate("document.activeElement === document.querySelectorAll('#agents .agent')[1]"), true, 'the arrows walk the agents');

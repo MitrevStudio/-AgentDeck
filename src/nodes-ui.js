@@ -65,21 +65,27 @@ function renderRemoteSpace(el, key) {
     return true;
   }
   const online = n?.status === "online";
-  const recent = [...p.sessions].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-  setHtml(el, `<div class="se-box">
+  // The project as the lists have it (hidden sessions too, each marked), so its sessions hide and filter by age as
+  // this computer's do; until the lists have it, as the computer sent it.
+  const listedProject = typeof built !== "undefined" ? built.projects.find(x => x.n === key) : null;
+  const view = getSessionView(key, (listedProject || p).sessions, s => Boolean(liveOf(s) || n?.liveMap.get(sessionKey(s))));
+  setSpaceHtml(el, `<div class="se-box">
     <div class="se-head"><span class="pmono" style="--h:${hue(p.n)}">${esc(initials(p.name))}</span>
       <div><h2>${esc(p.name)}</h2>${pathHtml(p.path, [])}<p class="se-body">${esc(t(online ? "manager.node.on" : "manager.node.offlineBody", { node: n?.name || r.id.slice(0, 8) }))}</p></div></div>
     ${online ? `<div class="se-new">
       <button class="btn" data-rnew="shell" title="${esc(t("ws.newTerminalTitle"))}">${icon("terminal")}${esc(t("ws.newTerminal"))}</button>
       ${remoteAgents(n).map(a => `<button class="btn" data-rnew="${esc(a)}">${icon(`agent${a}`)}${esc(a)}</button>`).join("")}
     </div>` : ""}
-    ${recent.length ? `<p class="se-label">${esc(t("ws.sessions"))}</p>${recent.map(s => `<div class="se-row remote" data-rkey="${esc(sessionKey(s))}">
+    ${view.all.length ? `<p class="se-label">${esc(t("ws.sessions"))}</p>
+    ${view.filterHtml}
+    ${view.listed.map(s => `<div class="se-row remote ${view.isHidden(s) ? "concealed" : ""}" data-rkey="${esc(sessionKey(s))}">
       ${agentMark(s.agent)}<span class="se-title" title="${esc(s.title)}">${esc(s.title)}</span>
       ${getContextChip({ ...s, node: r.id })}
       <span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span>
-      ${remoteSessionActs(n, s, online)}</div>`).join("")}` : ""}
+      ${listedProject && !liveOf(s) && !n?.liveMap.get(sessionKey(s)) ? `<span class="se-acts">${getHideButtonHtml(view.isHidden(s))}</span>` : ""}${remoteSessionActs(n, s, online)}</div>`).join("")}
+    ${view.notesHtml}` : ""}
   </div>`);
-  el.onclick = e => n && onRemoteSpaceClick(e, n, p).catch(err => toast(err.message || err, true));
+  el.onclick = e => n && onRemoteSpaceClick(e, n, listedProject || p).catch(err => toast(err.message || err, true));
   return true;
 }
 // A session's state and what can be done with it there: a running one in a terminal of AgentDeck there comes up in a
@@ -91,6 +97,7 @@ function remoteSessionActs(n, s, online) {
 }
 // A terminal, a new agent session or a resumed one on the node, placed in a new tab of this space (main does both).
 async function onRemoteSpaceClick(e, n, p) {
+  if (e.target.closest("[data-se]")) return; // the age filter and a row's eye: renderer.js runSessionFilter
   const make = e.target.closest("[data-rnew]"), resumeBtn = e.target.closest("[data-rresume]"), showBtn = e.target.closest("[data-rshow]");
   if (showBtn) {
     const s = p.sessions.find(x => sessionKey(x) === showBtn.dataset.rshow);

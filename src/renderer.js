@@ -414,31 +414,57 @@ function renderSpaceEmpty(el, key) {
     setHtml(el, `<div class="se-box empty"><div class="empty-ico">${icon("terminal")}</div><h3>${esc(t("ws.pick.title"))}</h3><p>${esc(t("ws.pick.body"))}</p></div>`);
     return;
   }
-  const all = [...(built.projects.find(x => x.n === key) || p).sessions].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-  const days = getSessionAge(key);
-  const since = days ? Date.now() - days * DAY_MS : 0;
-  const isHidden = s => s.concealed && !liveOf(s);
-  const showHidden = readHidden().reveal || hiddenShownIn.has(key);
-  const inAge = s => Boolean(liveOf(s)) || (s.updatedAt || 0) >= since;
-  const listed = all.filter(s => inAge(s) && (showHidden || !isHidden(s)));
-  const older = all.filter(s => !inAge(s) && (showHidden || !isHidden(s))).length;
-  const hiddenCount = all.filter(isHidden).length;
-  setHtml(el, `<div class="se-box">
+  const view = getSessionView(key, (built.projects.find(x => x.n === key) || p).sessions);
+  setSpaceHtml(el, `<div class="se-box">
     <div class="se-head"><span class="pmono" style="--h:${hue(p.n)}">${esc(initials(p.name))}</span>
       <div><h2>${esc(p.name)}</h2>${pathHtml(p.path, [])}</div></div>
     <div class="se-new">
       <button class="btn" data-new="terminal" title="${esc(t("ws.newTerminalTitle"))}">${icon("terminal")}${esc(t("ws.newTerminal"))}</button>
       ${getInstalledAgents().map(a => `<button class="btn" data-new="${esc(a)}" title="${esc(t("ws.newAgentTitle", { agent: a, key: getNewAgentKey(a) }))}">${icon(`agent${a}`)}${esc(a)}</button>`).join("")}
     </div>
-    ${all.length ? `<p class="se-label">${esc(t("ws.sessions"))}<span class="se-hint">${esc(t("ws.sessionsHint"))}</span></p>
-    ${getAgeFilterHtml(key, days)}
-    ${listed.map(getSessionRowHtml).join("")}
-    ${getListNotesHtml(older, hiddenCount, hiddenShownIn.has(key))}` : ""}
+    ${view.all.length ? `<p class="se-label">${esc(t("ws.sessions"))}<span class="se-hint">${esc(t("ws.sessionsHint"))}</span></p>
+    ${view.filterHtml}
+    ${view.listed.map(getSessionRowHtml).join("")}
+    ${view.notesHtml}` : ""}
   </div>`);
+}
+// What the Project sessions view lists of a project's sessions, newest first: those within the project's age filter,
+// the hidden ones only when they are shown. A running session (isLive) is always listed. Also the view of a project
+// of another computer (nodes-ui.js).
+function getSessionView(key, sessions, isLive = s => Boolean(liveOf(s))) {
+  const all = [...sessions].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  const days = getSessionAge(key);
+  const since = days ? Date.now() - days * DAY_MS : 0;
+  const reveal = readHidden().reveal;
+  const showHidden = reveal || hiddenShownIn.has(key);
+  const isHidden = s => Boolean(s.concealed) && !isLive(s);
+  const inAge = s => isLive(s) || (s.updatedAt || 0) >= since;
+  const shown = all.filter(s => showHidden || !isHidden(s));
+  return {
+    all, isHidden,
+    listed: shown.filter(inAge),
+    filterHtml: getAgeFilterHtml(key, days),
+    // With the hidden items revealed everywhere (the edge menu's eye) there is nothing to switch here.
+    notesHtml: getListNotesHtml(shown.length - shown.filter(inAge).length, reveal ? 0 : all.filter(isHidden).length, hiddenShownIn.has(key))
+  };
+}
+// The eye of a session's row, as the edge menu draws it: crossed out on a hidden one. None for a running session.
+function getHideButtonHtml(hidden) {
+  return `<button class="icon-btn" data-se="${hidden ? "unhide" : "hide"}" title="${esc(t(hidden ? "ws.unhide" : "ws.hide"))}">${icon(hidden ? "eyeOff" : "eye")}</button>`;
+}
+// Draws the view. A number being typed into the custom days field survives a redraw (a row's age or state changed).
+function setSpaceHtml(el, html) {
+  const field = el.querySelector('[data-se="days"]');
+  const typed = field && document.activeElement === field ? field.value : null;
+  if (!setHtml(el, html) || typed === null) return;
+  const next = el.querySelector('[data-se="days"]');
+  if (!next) return;
+  next.value = typed;
+  next.focus();
 }
 function getSessionRowHtml(s) {
   const hidden = s.concealed && !liveOf(s);
-  const hideButton = liveOf(s) ? "" : `<button class="icon-btn" data-se="${hidden ? "unhide" : "hide"}" title="${esc(t(hidden ? "ws.unhide" : "ws.hide"))}">${icon(hidden ? "eye" : "eyeOff")}</button>`;
+  const hideButton = liveOf(s) ? "" : getHideButtonHtml(hidden);
   return `<div class="se-row ${hidden ? "concealed" : ""}" data-key="${esc(sessionKey(s))}" tabindex="0">
       ${agentMark(s.agent)}<span class="se-title" title="${esc(s.title)}">${esc(s.title)}</span>${getContextChip(s)}${getLiveMark(s)}
       <span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span>
@@ -504,12 +530,13 @@ function setSessionHidden(key, on) {
 }
 // A click in the view's filters or on a row's eye; false when it was none of them.
 function runSessionFilter(el, key) {
-  const row = el.closest("[data-key]")?.dataset.key;
+  const rowEl = el.closest("[data-key], [data-rkey]");
+  const row = rowEl?.dataset.key || rowEl?.dataset.rkey;
   switch (el.dataset.se) {
     case "hide": setSessionHidden(row, true); return true;
     case "unhide": setSessionHidden(row, false); return true;
     case "age": customAgeIn.delete(key); setSessionAge(key, Number(el.dataset.days)); return true;
-    case "custom": customAgeIn.add(key); render(); return true;
+    case "custom": customAgeIn.add(key); render(); $("spaceEmpty").querySelector('[data-se="days"]')?.focus(); return true;
     case "show-hidden": if (!hiddenShownIn.delete(key)) hiddenShownIn.add(key); render(); return true;
     default: return false;
   }
