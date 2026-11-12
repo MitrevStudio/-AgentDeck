@@ -107,6 +107,9 @@ function renderGeneral() {
   $("autoCompactTokens").title = getAutoCompactTip(general.autoCompactTokens);
   $("autoCompactTokens").disabled = !general.autoCompact;
   $("dayView").checked = general.dayView === true;
+  $("taskbarSection").hidden = general.windows !== true; // the Windows taskbar only
+  $("taskbarMonitor").checked = general.taskbarMonitor === true;
+  for (const id of ["taskbarNet", "taskbarCpu", "taskbarMemory"]) { $(id).checked = general[id] === true; $(id).disabled = general.taskbarMonitor !== true; }
   $("notify").checked = general.notify !== false;
   if (["uiLanguage", "sessionsIn"].includes(focused)) $(focused).querySelector(".on")?.focus();
 }
@@ -178,6 +181,8 @@ $("termFont").addEventListener("change", e => setPref("terminalFontSize", Number
 $("editor").addEventListener("change", e => setPref("editor", e.target.value));
 $("uiScale").addEventListener("change", e => setPref("uiScale", Number(e.target.value)));
 $("dayView").addEventListener("change", e => setPref("dayView", e.target.checked));
+$("taskbarMonitor").addEventListener("change", e => setPref("taskbarMonitor", e.target.checked));
+for (const id of ["taskbarNet", "taskbarCpu", "taskbarMemory"]) $(id).addEventListener("change", e => setPref(id, e.target.checked));
 $("notify").addEventListener("change", e => setPref("notify", e.target.checked));
 // Start with Windows, applied at once: the installed app only - a copy run from source shows it off and says why.
 function renderAutostart(a) {

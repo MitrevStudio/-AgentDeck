@@ -6,7 +6,8 @@
 // page needs to hear about.
 //
 // events: "changed" (snapshot, keys) - keys lists what changed: "language", "theme", "edgeHandle", "autoUpdate",
-// "newWindow", "sessionsIn", "autoCompact", "autoCompactTokens", "terminalFontSize", "uiScale", "editor".
+// "newWindow", "sessionsIn", "autoCompact", "autoCompactTokens", "terminalFontSize", "uiScale", "editor",
+// "taskbarMonitor", "taskbarNet", "taskbarCpu", "taskbarMemory".
 const { app, nativeTheme } = require("electron");
 const { EventEmitter } = require("node:events");
 const settings = require("./voice/settings");
@@ -27,7 +28,7 @@ const UI_SCALES = [0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5];
 const EDITORS = ["vscode", "idea"];
 
 const prefs = new EventEmitter();
-const state = { language: "bg", theme: themes.DEFAULT, edgeHandle: process.platform === "win32", autoUpdate: true, newWindow: true, sessionsIn: "tabs", autoCompact: false, autoCompactTokens: 150000, dayView: false, notify: null, terminalFontSize: 16, uiScale: 1, editor: "vscode" };
+const state = { language: "bg", theme: themes.DEFAULT, edgeHandle: process.platform === "win32", autoUpdate: true, newWindow: true, sessionsIn: "tabs", autoCompact: false, autoCompactTokens: 150000, dayView: false, notify: null, terminalFontSize: 16, uiScale: 1, editor: "vscode", taskbarMonitor: false, taskbarNet: false, taskbarCpu: false, taskbarMemory: false };
 let sessionsInChosen = false; // the user picked where sessions open (settings or the tray menu)
 let autoCompactTokensChosen = false; // the user picked a compaction threshold, so a stale old default is ignored
 let handleX = 0.5; // the edge handle's centre, as a fraction of the display width
@@ -44,6 +45,7 @@ const themeId = () => (themes.get(state.theme) ? state.theme : resolvedTheme());
 // With the choices the pages offer (the lists above), so none keeps a copy of them.
 const get = () => ({
   ...state, resolvedTheme: resolvedTheme(), themeId: themeId(), dev: !app.isPackaged,
+  windows: process.platform === "win32",
   themes: THEMES.map(id => ({ id, group: themes.get(id)?.group ?? "app" })),
   terminalFontSizes: TERMINAL_FONT_SIZES, uiScales: UI_SCALES, autoCompactSizes: AUTO_COMPACT_TOKENS, editors: EDITORS,
   autoCompactChosen: autoCompactTokensChosen
@@ -84,6 +86,12 @@ function load() {
   if (UI_SCALES.includes(ui.scale)) state.uiScale = ui.scale;
   if (EDITORS.includes(ui.editor)) state.editor = ui.editor;
   state.dayView = isObj(root.dayView) && root.dayView.show === true;
+  // The strip on the Windows taskbar (taskbar-monitor.js) and what it shows: nothing until asked for.
+  const taskbar = isObj(root.taskbarMonitor) ? root.taskbarMonitor : {};
+  state.taskbarMonitor = process.platform === "win32" && taskbar.show === true;
+  state.taskbarNet = taskbar.net === true;
+  state.taskbarCpu = taskbar.cpu === true;
+  state.taskbarMemory = taskbar.memory === true;
   // null: not saved here yet (main carries the earlier choice over).
   state.notify = isObj(root.notify) && typeof root.notify.on === "boolean" ? root.notify.on : null;
   i18n.setLanguage(state.language, { dev: !app.isPackaged });
@@ -149,6 +157,12 @@ async function set(patch) {
     state.notify = patch.notify;
     keys.push("notify");
   }
+  for (const key of ["taskbarMonitor", "taskbarNet", "taskbarCpu", "taskbarMemory"]) {
+    if (typeof patch[key] === "boolean" && patch[key] !== state[key]) {
+      state[key] = patch[key];
+      keys.push(key);
+    }
+  }
   if (typeof patch.dayView === "boolean" && patch.dayView !== state.dayView) {
     state.dayView = patch.dayView;
     keys.push("dayView");
@@ -184,6 +198,7 @@ function save() {
       autoCompact: { on: state.autoCompact, tokens: state.autoCompactTokens, chosen: autoCompactTokensChosen || undefined }
     },
     dayView: { show: state.dayView },
+    taskbarMonitor: { show: state.taskbarMonitor, net: state.taskbarNet, cpu: state.taskbarCpu, memory: state.taskbarMemory },
     notify: { on: state.notify !== false },
     hoverEdge: undefined
   }).catch(e => console.error("Could not save settings:", e.message));
