@@ -6,7 +6,7 @@
 // page needs to hear about.
 //
 // events: "changed" (snapshot, keys) - keys lists what changed: "language", "theme", "edgeHandle", "autoUpdate",
-// "newWindow", "sessionsIn", "autoCompact", "autoCompactTokens", "terminalFontSize", "uiScale".
+// "newWindow", "sessionsIn", "autoCompact", "autoCompactTokens", "terminalFontSize", "uiScale", "editor".
 const { app, nativeTheme } = require("electron");
 const { EventEmitter } = require("node:events");
 const settings = require("./voice/settings");
@@ -23,9 +23,11 @@ const AUTO_COMPACT_TOKENS = [100000, 150000, 200000, 300000, 500000];
 // defaults: 16 px text at 100%.
 const TERMINAL_FONT_SIZES = [11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24];
 const UI_SCALES = [0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5];
+// The editor a file opens in from the Git screens (main.js git:open-file).
+const EDITORS = ["vscode", "idea"];
 
 const prefs = new EventEmitter();
-const state = { language: "bg", theme: themes.DEFAULT, edgeHandle: process.platform === "win32", autoUpdate: true, newWindow: true, sessionsIn: "tabs", autoCompact: false, autoCompactTokens: 150000, dayView: false, notify: null, terminalFontSize: 16, uiScale: 1 };
+const state = { language: "bg", theme: themes.DEFAULT, edgeHandle: process.platform === "win32", autoUpdate: true, newWindow: true, sessionsIn: "tabs", autoCompact: false, autoCompactTokens: 150000, dayView: false, notify: null, terminalFontSize: 16, uiScale: 1, editor: "vscode" };
 let sessionsInChosen = false; // the user picked where sessions open (settings or the tray menu)
 let autoCompactTokensChosen = false; // the user picked a compaction threshold, so a stale old default is ignored
 let handleX = 0.5; // the edge handle's centre, as a fraction of the display width
@@ -43,7 +45,7 @@ const themeId = () => (themes.get(state.theme) ? state.theme : resolvedTheme());
 const get = () => ({
   ...state, resolvedTheme: resolvedTheme(), themeId: themeId(), dev: !app.isPackaged,
   themes: THEMES.map(id => ({ id, group: themes.get(id)?.group ?? "app" })),
-  terminalFontSizes: TERMINAL_FONT_SIZES, uiScales: UI_SCALES, autoCompactSizes: AUTO_COMPACT_TOKENS,
+  terminalFontSizes: TERMINAL_FONT_SIZES, uiScales: UI_SCALES, autoCompactSizes: AUTO_COMPACT_TOKENS, editors: EDITORS,
   autoCompactChosen: autoCompactTokensChosen
 });
 // The theme's --bg, for windows until their page paints.
@@ -80,6 +82,7 @@ function load() {
   }
   if (TERMINAL_FONT_SIZES.includes(term.fontSize)) state.terminalFontSize = term.fontSize;
   if (UI_SCALES.includes(ui.scale)) state.uiScale = ui.scale;
+  if (EDITORS.includes(ui.editor)) state.editor = ui.editor;
   state.dayView = isObj(root.dayView) && root.dayView.show === true;
   // null: not saved here yet (main carries the earlier choice over).
   state.notify = isObj(root.notify) && typeof root.notify.on === "boolean" ? root.notify.on : null;
@@ -138,6 +141,10 @@ async function set(patch) {
     state.uiScale = patch.uiScale;
     keys.push("uiScale");
   }
+  if (EDITORS.includes(patch.editor) && patch.editor !== state.editor) {
+    state.editor = patch.editor;
+    keys.push("editor");
+  }
   if (typeof patch.notify === "boolean" && patch.notify !== state.notify) {
     state.notify = patch.notify;
     keys.push("notify");
@@ -167,7 +174,7 @@ function setHandlePosition(x, display) {
 // In effect at once; a file that cannot be written is only logged. `hoverEdge: undefined` drops the former key.
 function save() {
   return settings.writeRoot({
-    ui: { language: state.language, theme: state.theme, autoUpdate: state.autoUpdate, scale: state.uiScale },
+    ui: { language: state.language, theme: state.theme, autoUpdate: state.autoUpdate, scale: state.uiScale, editor: state.editor },
     edgeHandle: { show: state.edgeHandle, x: Math.round(handleX * 10000) / 10000, display: handleDisplay ?? undefined },
     terminal: {
       newWindow: state.newWindow,
@@ -182,4 +189,4 @@ function save() {
   }).catch(e => console.error("Could not save settings:", e.message));
 }
 
-module.exports = Object.assign(prefs, { load, get, set, handlePosition, handleDisplayId, setHandlePosition, background, LANGUAGES, THEMES, SESSIONS_IN, TERMINAL_FONT_SIZES, UI_SCALES });
+module.exports = Object.assign(prefs, { load, get, set, handlePosition, handleDisplayId, setHandlePosition, background, LANGUAGES, THEMES, SESSIONS_IN, TERMINAL_FONT_SIZES, UI_SCALES, EDITORS });

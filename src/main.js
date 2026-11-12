@@ -783,6 +783,24 @@ const meshSettings = {
   },
   on: cb => { for (const ev of ["nodes", "self", "discovered"]) links.on(ev, () => cb(meshSettings.state())); }
 };
+// IntelliJ IDEA's launcher: on PATH, else the newest install under Program Files or Toolbox's Programs folder; "" if none.
+function findIdea() {
+  const onPath = (process.env.PATH || '').split(path.delimiter).filter(Boolean)
+    .flatMap(dir => ['idea64.exe', 'idea.cmd'].map(name => path.join(dir, name)))
+    .find(file => fs.existsSync(file));
+  if (onPath) {
+    return onPath;
+  }
+  const roots = [path.join(process.env.ProgramFiles || 'C:\\Program Files', 'JetBrains'), path.join(process.env.LOCALAPPDATA || '', 'Programs')];
+  const installs = roots.flatMap(root => {
+    try {
+      return fs.readdirSync(root).filter(name => /^IntelliJ IDEA/i.test(name)).map(name => path.join(root, name, 'bin', 'idea64.exe'));
+    } catch {
+      return [];
+    }
+  });
+  return installs.filter(file => fs.existsSync(file)).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))[0] || '';
+}
 function spawnDetached(file, args, opts) {
   const child = spawn(file, args, { detached: true, stdio: "ignore", ...opts });
   child.unref();
@@ -1420,7 +1438,13 @@ function registerIpc() {
     const realRoot = await fs.promises.realpath(root), realFile = await fs.promises.realpath(target);
     const relative = path.relative(realRoot, realFile);
     if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('File is outside the repository');
-    // An editor URI opens text in VS Code, never executes the file's default association.
+    // In the editor chosen in Settings, never through the file's default association (which could execute it).
+    if (prefs.get().editor === 'idea') {
+      const idea = findIdea();
+      if (!idea) throw new Error(t('errors.ideaMissing'));
+      await spawnDetached(idea, [realFile], { windowsHide: true });
+      return true;
+    }
     await shell.openExternal('vscode://file/' + realFile.replaceAll('\\', '/').split('/').map(encodeURIComponent).join('/'));
     return true;
   });

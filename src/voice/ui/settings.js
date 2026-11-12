@@ -75,7 +75,7 @@ const AUTO_COMPACT_RECOMMENDED = PLAN === "max" ? 300000 : 150000;
 const CONTEXT_200K = 200000;
 // prefs.js: the themes ({id, group}, "system" first), TERMINAL_FONT_SIZES, UI_SCALES and AUTO_COMPACT_TOKENS, as the
 // prefs snapshot brings them.
-const { themes: THEMES = [], terminalFontSizes: TERM_FONT_SIZES, uiScales: UI_SCALES, autoCompactSizes: AUTO_COMPACT_SIZES } = window.prefs;
+const { themes: THEMES = [], terminalFontSizes: TERM_FONT_SIZES, uiScales: UI_SCALES, autoCompactSizes: AUTO_COMPACT_SIZES, editors: EDITORS = ["vscode"] } = window.prefs;
 let general = { ...window.prefs };
 const dirty = new Set(); // tabs with unsaved edits: a language switch reloads the window
 function setDirty(tab, on) {
@@ -98,6 +98,7 @@ function renderGeneral() {
   $("sessionsIn").innerHTML = segHtml(SESSIONS_IN.map(m => [m, t(`tray.sessionsIn.${m}`)]), general.sessionsIn || "tabs");
   const options = (list, value, label) => list.map(v => `<option value="${v}" ${v === value ? "selected" : ""}>${esc(label(v))}</option>`).join("");
   $("termFont").innerHTML = options(TERM_FONT_SIZES, general.terminalFontSize ?? 16, v => `${v} px${v === 16 ? ` · ${t("settings.general.default")}` : ""}`);
+  $("editor").innerHTML = options(EDITORS, general.editor || "vscode", v => t(`settings.general.editor.${v}`));
   $("uiScale").innerHTML = options(UI_SCALES, general.uiScale ?? 1, v => `${Math.round(v * 100)}%${v === 1 ? ` · ${t("settings.general.default")}` : ""}`);
   $("newWindow").checked = general.newWindow !== false;
   $("newWindow").disabled = general.sessionsIn === "tabs";
@@ -174,6 +175,7 @@ $("autoCompact").addEventListener("change", async e => {
 });
 $("autoCompactTokens").addEventListener("change", e => setPref("autoCompactTokens", Number(e.target.value)));
 $("termFont").addEventListener("change", e => setPref("terminalFontSize", Number(e.target.value)));
+$("editor").addEventListener("change", e => setPref("editor", e.target.value));
 $("uiScale").addEventListener("change", e => setPref("uiScale", Number(e.target.value)));
 $("dayView").addEventListener("change", e => setPref("dayView", e.target.checked));
 $("notify").addEventListener("change", e => setPref("notify", e.target.checked));

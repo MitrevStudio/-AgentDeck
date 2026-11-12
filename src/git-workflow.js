@@ -24,7 +24,7 @@ const GIT_LABELS = {
   stage: ['Stage selected', 'Подготви избраните'], unstage: ['Unstage selected', 'Извади избраните'],
   manage: ['Repository actions', 'Действия с repo'], commit: ['Review & commit', 'Преглед и commit'],
   refresh: ['Refresh', 'Обнови'], previous: ['Previous', 'Предишен'], next: ['Next', 'Следващ'],
-  editor: ['Open in VS Code', 'Отвори във VS Code'], split: ['Side by side', 'Един до друг'], unified: ['Unified', 'Обединен'],
+  editor: ['Open in VS Code', 'Отвори във VS Code'], editorIdea: ['Open in IntelliJ IDEA', 'Отвори в IntelliJ IDEA'], split: ['Side by side', 'Един до друг'], unified: ['Unified', 'Обединен'],
   checked: ['Checked', 'Проверено'], stale: ['Status may be outdated', 'Статусът може да е остарял'],
   branches: ['Branches', 'Branches'], branch: ['New branch name', 'Име на нов branch'], switch: ['Switch branch', 'Смени branch'], create: ['Create branch', 'Създай branch'],
   branchMenu: ['Branch', 'Branch'], commitMenu: ['Commit', 'Commit'], pullPush: ['Pull, Push', 'Pull, Push'],
@@ -49,7 +49,13 @@ const GIT_LABELS = {
   sourceControl: ['Source Control', 'Git промени'], panelActions: ['Source Control actions', 'Git действия'],
   worktreesNav: ['Worktrees', 'Worktrees'], agent: ['Agent', 'Агент'], changedFiles: ['Changed files', 'Променени файлове']
 };
-function gitText(key) { return GIT_LABELS[key]?.[typeof I18N !== 'undefined' && I18N.language() === 'bg' ? 1 : 0] || key; }
+// "editor" is named after the editor chosen in Settings (prefs.js EDITORS).
+let preferredEditor = window.prefs?.editor || 'vscode';
+window.prefs?.onChanged?.(p => { preferredEditor = p.editor || 'vscode'; });
+function gitText(key) {
+  const label = key === 'editor' && preferredEditor === 'idea' ? 'editorIdea' : key;
+  return GIT_LABELS[label]?.[typeof I18N !== 'undefined' && I18N.language() === 'bg' ? 1 : 0] || key;
+}
 window.gitWorkflow = (() => {
   let target = null, details = null, generation = 0, busy = false, view = 'branches', draft = '';
   const outputs = new Map(), drafts = new Map();
