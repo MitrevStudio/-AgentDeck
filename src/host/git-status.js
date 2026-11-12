@@ -187,6 +187,13 @@ function refresh({ force = false, changedOnly = false } = {}) {
   });
   return running;
 }
+// After an action that changed one repository's index only (stage, unstage): just its status, once any pass running now
+// is over - no rescan of the projects, no other repository.
+async function refreshRepo(root) {
+  changedRoots.add(norm(root));
+  if (running) await running.catch(() => {});
+  return refresh({ changedOnly: true });
+}
 async function pass(force, changedOnly = false) {
   const t0 = Date.now();
   if (!force && missingAt && t0 - missingAt < MISSING_RETRY_MS) return snapshot;
@@ -282,7 +289,7 @@ async function diff({ root, file } = {}) {
 }
 
 let actionContext = () => ({});
-const actions = require('./git-actions').createGitActions({ status: () => snapshot, refresh, parseStatus, context: () => actionContext() });
+const actions = require('./git-actions').createGitActions({ status: () => snapshot, refresh, refreshRepo, parseStatus, context: () => actionContext() });
 function stop() { clearInterval(timer); clearTimeout(watchTimer); watchTimer = null; changedRoots.clear(); for (const w of watchers.values()) w.close(); watchers.clear(); }
 module.exports = { start, stop, refresh, get: () => snapshot, parseStatus, norm, discoverRepositories, diff, WATCH_NOISE,
   query: actions.query, execute: actions.execute, configure: context => { actionContext = context; } };
