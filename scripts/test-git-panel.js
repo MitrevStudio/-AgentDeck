@@ -46,16 +46,46 @@ assert.match(element('gitRepositories').innerHTML, />2500<\/span>/);
 element('gitFilter').oninput({ target: { value: 'not-present' } });
 assert.doesNotMatch(element('gitRepositories').innerHTML, /data-diff-file/);
 element('gitFilter').oninput({ target: { value: '' } });
-// The folder view is chosen per repository, in its own menu; its folders start folded.
+// A checkbox names what it stands for; the paths are looked up when it is clicked, and only those that change are sent.
+assert.doesNotMatch(element('gitRepositories').innerHTML, /data-paths/);
+state.repos.one.files = [{ path: 'src/<script>.js', status: '.M' }, { path: 'src/deep/staged.js', status: 'M.' }, { path: 'src/deep/part.js', status: 'MM' }, { path: 'docs/new.md', status: '??' }];
+ctx.window.gitPanel.render();
+const check = (scope, checkPath, checked) => element('gitRepositories').listeners.change({ target: { closest: () => ({ checked, dataset: { check: scope, checkPath }, closest: () => ({ dataset: { repo: repoKey } }) }) } });
+check('folder', 'src', true);
+assert.deepEqual({ ...executed.at(-1) }, { node: '', root: 'C:/app/backend', action: 'stage', files: ['src/<script>.js', 'src/deep/part.js'] }, 'a folder stages what is not staged in whole');
+executed.length = 0;
+// The folder view: the button above the list sets it for every repository, a repository's own menu for that one. Folders
+// start open, a chain of single folders shares a row, and a filter opens what the user folded.
 const repoMenuButton = { dataset: { repoMenu: '' }, closest: selector => selector === '[data-repo]' ? { dataset: { repo: repoKey } } : null };
 const openRepoMenu = () => element('gitRepositories').listeners.click({ target: { closest: () => repoMenuButton }, preventDefault() {}, stopPropagation() {} });
 openRepoMenu();
 assert.equal(menuItems[0].label, 'asTree');
-assert.doesNotMatch(menuItems.map(x => x.label).join(), /(commit|stageAll|unstageAll|branches|sync|history)/, 'nothing the row has a button for');
-menuItems[0].run();
-assert.match(element('gitRepositories').innerHTML, /<details class="git-folder git-check-folder" data-expand="[^"]*" >/);
+assert.equal(menuItems[0].checked, false);
+assert.doesNotMatch(menuItems.map(x => x.label).join(), /(commit|stageAll|unstageAll|branches|sync|history)/, 'nothing the row has a button for');
+assert.doesNotMatch(element('gitRepositories').innerHTML, /git-check-folder/);
+element('gitTreeToggle').onclick();
+assert.equal(element('gitTreeToggle').attributes['aria-pressed'], 'true');
+assert.match(element('gitRepositories').innerHTML, /<details class="git-folder git-check-folder" data-expand="[^"]*" open>/, 'folders start open');
+assert.match(element('gitRepositories').innerHTML, /data-check="folder" data-check-path="src\/deep"/);
+const folderId = JSON.stringify([repoKey, 'folder', 'src']);
+element('gitRepositories').listeners.toggle({ target: { dataset: { expand: folderId }, open: false } });
+ctx.window.gitPanel.render();
+assert.match(element('gitRepositories').innerHTML, /folder&quot;,&quot;src&quot;\]" ><summary>/, 'a folded folder stays folded');
+element('gitFilter').oninput({ target: { value: 'script' } });
+assert.match(element('gitRepositories').innerHTML, /folder&quot;,&quot;src&quot;\]" open><summary>/, 'a filter opens the folders that hold what it found');
+element('gitFilter').oninput({ target: { value: '' } });
 openRepoMenu();
+assert.equal(menuItems[0].checked, true, 'the repository follows the button');
 menuItems[0].run();
+assert.doesNotMatch(element('gitRepositories').innerHTML.split('C:/app/frontend')[0], /git-check-folder/, 'one repository apart from the others');
+element('gitPanelMenu').onclick();
+assert.equal(menuItems[0].label, 'asTree');
+assert.equal(menuItems[0].checked, true);
+menuItems[0].run();
+element('gitPanelMenu').onclick();
+menuItems[0].run();
+assert.match(element('gitRepositories').innerHTML.split('C:/app/frontend')[0], /git-check-folder/, 'the view menu sets all of them, the one that differed too');
+element('gitTreeToggle').onclick();
 assert.doesNotMatch(element('gitRepositories').innerHTML, /git-check-folder/);
 assert.match(element('gitRepositories').innerHTML, /git-repository offline/);
 assert.doesNotMatch(element('gitRepositories').innerHTML, /<script>/);
@@ -88,6 +118,7 @@ assert.equal(element('gitRepoCount').textContent, 0, 'path prefix must end at di
 ctx.ws.tabs = {};
 ctx.window.gitPanel.render();
 assert.equal(element('gitRepoCount').textContent, 0, 'unattached terminal does not keep a repository visible');
+const settle = () => new Promise(resolve => setTimeout(resolve, 10));
 element('gitPanelRefresh').onclick().then(async () => {
   assert.equal(refreshed, true);
   assert.equal(element('gitPanelRefresh').disabled, false);
@@ -99,6 +130,21 @@ element('gitPanelRefresh').onclick().then(async () => {
   state.repos.one.upstream = 'origin/main'; ctx.window.gitPanel.render(); openRepoMenu();
   await menuItems.find(item => item.label === 'push').run();
   assert.equal(executed.at(-1).action, 'push', 'tracked branches still push directly');
+  check('all', '', false);
+  await settle();
+  assert.deepEqual(executed.at(-1).files, ['src/deep/staged.js', 'src/deep/part.js'], 'unticking the root takes out what is staged, an untracked file aside');
+  check('file', 'docs/new.md', true);
+  await settle();
+  assert.deepEqual(executed.at(-1).files, ['docs/new.md']);
+  // Commit sends what is staged: a file changed again since it was staged is not staged again behind the user's back.
+  ctx.window.manager.gitQuery = async () => ({ token: 'reviewed' });
+  element('gitRepositories').listeners.input({ target: { dataset: { commitMessage: repoKey }, value: 'A message', parentElement: { querySelector: () => ({}) }, closest: () => ({ querySelector: () => null }) } });
+  const before = executed.length;
+  const commitButton = { dataset: { repoAction: 'commit' }, closest: selector => selector === '[data-repo]' ? { dataset: { repo: repoKey } } : null };
+  element('gitRepositories').listeners.click({ target: { closest: () => commitButton }, preventDefault() {}, stopPropagation() {} });
+  await settle();
+  assert.deepEqual(executed.slice(before).map(x => [x.action, x.token]), [['commit', 'reviewed']], 'commit stages nothing by itself');
+  state.repos.one.files = [{ path: 'src/<script>.js', status: '.M' }];
   // Group by Project: a worktree beside its main checkout goes under that checkout's project.
   const saved = new Map();
   ctx.localStorage.setItem = (k, v) => saved.set(k, v);
@@ -129,5 +175,5 @@ element('gitPanelRefresh').onclick().then(async () => {
   element('gitRepositories').listeners.toggle({ target: { dataset: { expand: 'project:c:/app' }, open: true } });
   ctx.window.gitPanel.render();
   assert.match(element('gitRepositories').innerHTML, /<details class="git-project" data-expand="project:c:\/app" open>/);
-  console.log('Git sidebar tabs, local/remote identity, offline state, filename escaping and refresh passed');
+  console.log('Git sidebar tabs, local/remote identity, offline state, filename escaping, checkboxes, the folder view and refresh passed');
 }).catch(e => { console.error(e); process.exitCode = 1; });

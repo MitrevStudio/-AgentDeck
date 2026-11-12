@@ -30,7 +30,7 @@ const GIT_LABELS = {
   branchMenu: ['Branch', 'Branch'], commitMenu: ['Commit', 'Commit'], pullPush: ['Pull, Push', 'Pull, Push'],
   checkout: ['Checkout to…', 'Checkout към…'], viewSort: ['View & Sort', 'Изглед и сортиране'],
   asTree: ['View by folders', 'Изглед по папки'], byProject: ['Group by Project', 'Групирай по проект'],
-  oneFile: ['1 file', '1 файл'], fileCount: ['{n} files', '{n} файла'], asList: ['View as List', 'Изглед като списък'],
+  oneFile: ['1 file', '1 файл'], fileCount: ['{n} files', '{n} файла'],
   sortPath: ['Sort by Path', 'Сортирай по път'], sortName: ['Sort by Name', 'Сортирай по име'],
   sortStatus: ['Sort by Status', 'Сортирай по статус'], showOutput: ['Show Git Output', 'Покажи Git изхода'],
   history: ['History', 'История'], more: ['Older commits', 'По-стари commits'], compare: ['Compare with base', 'Сравни с базов branch'],
