@@ -3,6 +3,8 @@
 // terminals open.
 let raw = { registry: { projects: [] }, sessions: [] };
 let data = { projects: [], sessions: [], groups: [] };
+// The same, hidden ones too (each marked .concealed): the Project sessions view lists and counts them.
+let built = { projects: [], sessions: [], groups: [] };
 // Every project's path in the order shown, hidden ones too: a drag or a pin is placed within it.
 let order = [];
 // Each project's group id ("" for none), by its path as listed, hidden ones too.
@@ -24,7 +26,7 @@ const refOf = p => (p.node ? p.n : p.path);
 function prepare() {
   const m = mergeNodes(raw, live);
   allLive = m.live;
-  const built = buildData(m.raw, m.live);
+  built = buildData(m.raw, m.live);
   order = built.projects.map(refOf);
   groupOfPath = new Map(built.projects.map(p => [refOf(p), p.group || ""]));
   data = conceal(built, readHidden());
@@ -376,7 +378,7 @@ function renderTerms(v) {
 const termOfRow = row => row?.dataset.key?.startsWith("term:") ? row.dataset.key.slice(5) : "";
 // The sidebar lists only the newest few of a session's subagents.
 const SIDEBAR_SUBAGENTS = 3;
-const sessionByKey = key => data.sessions.find(s => sessionKey(s) === key) || null;
+const sessionByKey = key => built.sessions.find(s => sessionKey(s) === key) || null;
 
 // ---------- a project with no terminals open ----------
 // Its name, a new terminal or agent session, and its latest sessions to resume.
@@ -412,7 +414,15 @@ function renderSpaceEmpty(el, key) {
     setHtml(el, `<div class="se-box empty"><div class="empty-ico">${icon("terminal")}</div><h3>${esc(t("ws.pick.title"))}</h3><p>${esc(t("ws.pick.body"))}</p></div>`);
     return;
   }
-  const recent = [...p.sessions].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  const all = [...(built.projects.find(x => x.n === key) || p).sessions].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  const days = getSessionAge(key);
+  const since = days ? Date.now() - days * DAY_MS : 0;
+  const isHidden = s => s.concealed && !liveOf(s);
+  const showHidden = readHidden().reveal || hiddenShownIn.has(key);
+  const inAge = s => Boolean(liveOf(s)) || (s.updatedAt || 0) >= since;
+  const listed = all.filter(s => inAge(s) && (showHidden || !isHidden(s)));
+  const older = all.filter(s => !inAge(s) && (showHidden || !isHidden(s))).length;
+  const hiddenCount = all.filter(isHidden).length;
   setHtml(el, `<div class="se-box">
     <div class="se-head"><span class="pmono" style="--h:${hue(p.n)}">${esc(initials(p.name))}</span>
       <div><h2>${esc(p.name)}</h2>${pathHtml(p.path, [])}</div></div>
@@ -420,11 +430,89 @@ function renderSpaceEmpty(el, key) {
       <button class="btn" data-new="terminal" title="${esc(t("ws.newTerminalTitle"))}">${icon("terminal")}${esc(t("ws.newTerminal"))}</button>
       ${getInstalledAgents().map(a => `<button class="btn" data-new="${esc(a)}" title="${esc(t("ws.newAgentTitle", { agent: a, key: getNewAgentKey(a) }))}">${icon(`agent${a}`)}${esc(a)}</button>`).join("")}
     </div>
-    ${recent.length ? `<p class="se-label">${esc(t("ws.sessions"))}<span class="se-hint">${esc(t("ws.sessionsHint"))}</span></p>${recent.map(s => `<div class="se-row" data-key="${esc(sessionKey(s))}" tabindex="0">
+    ${all.length ? `<p class="se-label">${esc(t("ws.sessions"))}<span class="se-hint">${esc(t("ws.sessionsHint"))}</span></p>
+    ${getAgeFilterHtml(key, days)}
+    ${listed.map(getSessionRowHtml).join("")}
+    ${getListNotesHtml(older, hiddenCount, hiddenShownIn.has(key))}` : ""}
+  </div>`);
+}
+function getSessionRowHtml(s) {
+  const hidden = s.concealed && !liveOf(s);
+  const hideButton = liveOf(s) ? "" : `<button class="icon-btn" data-se="${hidden ? "unhide" : "hide"}" title="${esc(t(hidden ? "ws.unhide" : "ws.hide"))}">${icon(hidden ? "eye" : "eyeOff")}</button>`;
+  return `<div class="se-row ${hidden ? "concealed" : ""}" data-key="${esc(sessionKey(s))}" tabindex="0">
       ${agentMark(s.agent)}<span class="se-title" title="${esc(s.title)}">${esc(s.title)}</span>${getContextChip(s)}${getLiveMark(s)}
       <span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span>
-      <span class="se-acts">${liveOf(s) ? `<button class="btn sm" data-action="show-terminal">${icon("raise")}${esc(t("term.show"))}</button>` : getSessionActions(s)}</span></div>`).join("")}` : ""}
-  </div>`);
+      <span class="se-acts">${hideButton}${liveOf(s) ? `<button class="btn sm" data-action="show-terminal">${icon("raise")}${esc(t("term.show"))}</button>` : getSessionActions(s)}</span></div>`;
+}
+// All, 1 week, 1 month or a number of days of the user's own.
+function getAgeFilterHtml(key, days) {
+  const custom = !AGE_PRESETS.includes(days) || customAgeIn.has(key);
+  const chips = AGE_PRESETS.map(d => `<button class="chip ${!custom && d === days ? "on" : ""}" data-se="age" data-days="${d}">${esc(t(`ws.age.${d}`))}</button>`).join("");
+  const input = custom ? `<label class="se-days"><input type="number" min="1" max="3650" data-se="days" value="${days || ""}">${esc(t("ws.age.days"))}</label>` : "";
+  return `<div class="se-filter"><div class="chips">${chips}<button class="chip ${custom ? "on" : ""}" data-se="custom">${esc(t("ws.age.custom"))}</button></div>${input}</div>`;
+}
+// What the list leaves out: older sessions, and the hidden ones with a switch to show them.
+function getListNotesHtml(older, hiddenCount, shown) {
+  const notes = [];
+  if (older) {
+    notes.push(`<span>${esc(t("ws.age.older", { n: older }))}</span>`);
+  }
+  if (hiddenCount) {
+    notes.push(`<button class="link" data-se="show-hidden">${esc(t(shown ? "ws.hiddenHide" : "ws.hiddenShow", { n: hiddenCount }))}</button>`);
+  }
+  return notes.length ? `<p class="se-notes">${notes.join("")}</p>` : "";
+}
+
+// ---------- the Project sessions view's filters ----------
+// Per project (its key): how many days back its sessions are listed, 0 for all - kept in localStorage. Per window, until
+// it closes: the projects whose custom field is open and those whose hidden sessions are shown.
+const SESSION_AGE_KEY = "agentdeck.sessionAge";
+const AGE_PRESETS = [0, 7, 30];
+const DAY_MS = 24 * 60 * 60 * 1000;
+const customAgeIn = new Set();
+const hiddenShownIn = new Set();
+function readSessionAges() {
+  try {
+    return JSON.parse(localStorage.getItem(SESSION_AGE_KEY)) || {};
+  } catch {
+    return {};
+  }
+}
+let sessionAges = readSessionAges();
+const getSessionAge = key => sessionAges[key] || 0;
+function setSessionAge(key, days) {
+  if (days) {
+    sessionAges[key] = days;
+  } else {
+    delete sessionAges[key];
+  }
+  try {
+    localStorage.setItem(SESSION_AGE_KEY, JSON.stringify(sessionAges));
+  } catch {}
+  render();
+}
+function setSessionHidden(key, on) {
+  const h = readHidden();
+  if (on) {
+    h.sessions.add(key);
+  } else {
+    h.sessions.delete(key);
+  }
+  writeHidden(h);
+  prepare();
+  render();
+}
+// A click in the view's filters or on a row's eye; false when it was none of them.
+function runSessionFilter(el, key) {
+  const row = el.closest("[data-key]")?.dataset.key;
+  switch (el.dataset.se) {
+    case "hide": setSessionHidden(row, true); return true;
+    case "unhide": setSessionHidden(row, false); return true;
+    case "age": customAgeIn.delete(key); setSessionAge(key, Number(el.dataset.days)); return true;
+    case "custom": customAgeIn.add(key); render(); return true;
+    case "show-hidden": if (!hiddenShownIn.delete(key)) hiddenShownIn.add(key); render(); return true;
+    default: return false;
+  }
 }
 // A running session's state (working, waiting for you, ready), as the agents list shows it.
 function getLiveMark(s) {
@@ -1089,9 +1177,21 @@ $("spaceEmpty").addEventListener("click", async e => {
   const make = e.target.closest("[data-new]");
   if (make?.dataset.new === "centre") return window.manager.centreStart().catch(err => toast(err.message, true));
   if (make) return openInSpace(make.dataset.new === "terminal" ? "terminal" : make.dataset.new);
+  const filter = e.target.closest("button[data-se]");
+  if (filter) {
+    e.stopPropagation();
+    runSessionFilter(filter, ws.activeSpace);
+    return;
+  }
   if (await onAction(e)) return;
   const row = e.target.closest(".se-row");
   if (row && e.detail === 2) openSession(sessionByKey(row.dataset.key)).catch(err => toast(err.message, true));
+});
+// The custom number of days: taken once typed in, 1 to 3650.
+$("spaceEmpty").addEventListener("change", e => {
+  if (e.target.dataset.se !== "days") return;
+  const days = Math.round(Number(e.target.value));
+  if (days >= 1 && days <= 3650) setSessionAge(ws.activeSpace, days);
 });
 $("spaceEmpty").addEventListener("keydown", e => {
   if (e.key !== "Enter" || !e.target.classList.contains("se-row") || !e.target.dataset.key) return;

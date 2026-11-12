@@ -133,4 +133,11 @@
 .se-acts { display: flex; gap: 6px; opacity: 0; }
 .se-row:hover .se-acts, .se-row:focus .se-acts, .se-acts:focus-within { opacity: 1; }
 .se-row:focus-visible { background: var(--panel-2); }
+.se-row.concealed { opacity: .45; }
+.se-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 2px 0 10px; }
+.se-days { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+.se-days input { width: 68px; }
+.se-notes { display: flex; flex-wrap: wrap; gap: 14px; margin: 10px 0 0 10px; font-size: 12px; color: var(--faint); }
+.se-notes .link { padding: 0; border: 0; background: none; color: var(--muted); font: inherit; text-decoration: underline; cursor: pointer; }
+.se-notes .link:hover { color: var(--text); }
 .se-label .se-hint { margin-left: 8px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--faint); }
