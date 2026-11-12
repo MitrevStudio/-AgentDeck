@@ -39,6 +39,7 @@ const { createServed } = require("./mesh/serve");
 const { DEFAULT_PORT } = require("./mesh/identity");
 const frames = require("./mesh/frames");
 const { normPath } = require("./shared/util");
+const { findIdea } = require("./shared/editors");
 const { HostError } = require("./host/errors");
 const { getProject, isPinned, setPin, setGroups, unpinEmptyGroups, repin, keyOf, keyify } = require("./host/registry");
 const atomicFile = require("./shared/atomic-file");
@@ -783,24 +784,6 @@ const meshSettings = {
   },
   on: cb => { for (const ev of ["nodes", "self", "discovered"]) links.on(ev, () => cb(meshSettings.state())); }
 };
-// IntelliJ IDEA's launcher: on PATH, else the newest install under Program Files or Toolbox's Programs folder; "" if none.
-function findIdea() {
-  const onPath = (process.env.PATH || '').split(path.delimiter).filter(Boolean)
-    .flatMap(dir => ['idea64.exe', 'idea.cmd'].map(name => path.join(dir, name)))
-    .find(file => fs.existsSync(file));
-  if (onPath) {
-    return onPath;
-  }
-  const roots = [path.join(process.env.ProgramFiles || 'C:\\Program Files', 'JetBrains'), path.join(process.env.LOCALAPPDATA || '', 'Programs')];
-  const installs = roots.flatMap(root => {
-    try {
-      return fs.readdirSync(root).filter(name => /^IntelliJ IDEA/i.test(name)).map(name => path.join(root, name, 'bin', 'idea64.exe'));
-    } catch {
-      return [];
-    }
-  });
-  return installs.filter(file => fs.existsSync(file)).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))[0] || '';
-}
 function spawnDetached(file, args, opts) {
   const child = spawn(file, args, { detached: true, stdio: "ignore", ...opts });
   child.unref();
@@ -1442,7 +1425,8 @@ function registerIpc() {
     if (prefs.get().editor === 'idea') {
       const idea = findIdea();
       if (!idea) throw new Error(t('errors.ideaMissing'));
-      await spawnDetached(idea, [realFile], { windowsHide: true });
+      // Its window must show: windowsHide would start a not yet running IDE hidden.
+      await spawnDetached(idea, [realFile], { windowsHide: false });
       return true;
     }
     await shell.openExternal('vscode://file/' + realFile.replaceAll('\\', '/').split('/').map(encodeURIComponent).join('/'));

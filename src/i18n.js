@@ -2374,7 +2374,7 @@
       "voice.settings.dict.err.replacements": "До {n} замени, всяка страна до {chars} знака.",
       "voice.settings.dict.err.half": "Попълни двете страни на всяка замяна или я премахни.",
       "settings.general.notifications": "Известия",
-      "settings.git": "Source control",
+      "settings.git": "Git промени",
       "settings.git.files": "Отваряне на файлове",
       "settings.terminal.sessions": "Къде се отварят сесиите",
       "settings.terminal.text": "Текст",

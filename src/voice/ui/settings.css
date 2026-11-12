@@ -1,12 +1,12 @@
 /* The app's Settings: the tabs down the left (General, Network, then the voice group: Dictation, Dictionary, Read
    aloud, Commands), the tab's sections and its footer to the right. Tokens and shared components (buttons, fields,
-   selects, switch, segmented control, tags, kbd) come from ../../theme.css. The window is sized to the tab shown and
+   selects, switch, segmented control, tags, kbd) come from ../../theme.css. The window is sized to the tallest tab and
    every tab fits a 1080p screen; should a screen be too short, the tabs and the footer stay put while the tab
    scrolls. */
 body { user-select: none; }
 
-/* One height for all tabs (settings-preload.js getPageHeight): the page fills the window, so a shorter tab leaves no
-   empty band under the footer, and a taller one scrolls. */
+/* One height for all tabs, the tallest one's (settings-preload.js getPageHeight): the page fills the window, so a
+   shorter tab leaves no empty band under the footer; a tab scrolls only on a screen too short for it. */
 .vs {
   --side: 196px;
   min-height: 100vh;

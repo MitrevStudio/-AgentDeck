@@ -1,28 +1,29 @@
 // Bridge for the voice Settings page. Only these calls; main answers them for this window alone.
 const { contextBridge, ipcRenderer } = require("electron");
 
-// One height for every tab, so switching tabs does not resize the window: halfway between the shortest and the tallest
-// tab, never below the tab list. A taller tab scrolls; the page fills the window below a shorter one (settings.css).
-// Each tab is shown alone for a moment to be measured; no frame is painted in between.
+// One height for every tab, so switching tabs does not resize the window: the tallest tab's. Main keeps the window
+// within the screen (voice:settings:fit), where the tab scrolls between the tab list and the footer; the page fills
+// the window below a shorter tab (settings.css). Each tab is shown alone for a moment to be measured, without a frame
+// painted in between; a tab that is not offered (its button is hidden) does not count.
 function getPageHeight() {
   const shown = document.querySelector(".vs-pane.on");
   if (!shown) {
     return Math.ceil(document.body.getBoundingClientRect().height);
   }
-  const panes = [...document.querySelectorAll(".vs-pane")];
+  const isOffered = pane => !document.querySelector(`[role="tab"][aria-controls="${pane.id}"]`)?.hidden;
+  const panes = [...document.querySelectorAll(".vs-pane")].filter(isOffered);
   shown.classList.remove("on");
   const heights = panes.map(pane => {
     pane.classList.add("on");
     const height = pane.getBoundingClientRect().height;
     pane.classList.remove("on");
     return height;
-  }).filter(height => height > 0);
+  });
   shown.classList.add("on");
   const main = document.querySelector(".vs-main").getBoundingClientRect().height;
   const footer = main - document.querySelector(".vs-panes").getBoundingClientRect().height;
-  const middle = (Math.min(...heights) + Math.max(...heights)) / 2;
   const side = document.querySelector(".vs-side").getBoundingClientRect().height;
-  return Math.ceil(Math.max(side, footer + middle));
+  return Math.ceil(Math.max(side, footer + Math.max(0, ...heights)));
 }
 
 contextBridge.exposeInMainWorld("voiceSettings", {

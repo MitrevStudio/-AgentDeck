@@ -34,7 +34,7 @@ function resolveMic(devices, id, name) {
   return Math.max(0, i);
 }
 
-// The window is sized to what is shown (VoiceTray: SizeToContent), so each tab gets its own height.
+// The window is sized to its content: the tallest tab's height for all of them (settings-preload.js getPageHeight).
 const fit = () => window.voiceSettings.fit();
 
 // ---------- tabs ----------
