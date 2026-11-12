@@ -142,18 +142,12 @@
 
     <div class="vs-pane" id="paneTerminal" data-group="general" role="tabpanel" aria-labelledby="tabTerminal">
       <section class="vs-sec">
-        <h2><span data-icon="terminal"></span><span data-i18n="settings.general.terminal"></span></h2>
+        <h2><span data-icon="window"></span><span data-i18n="settings.terminal.sessions"></span></h2>
         <div class="vs-grid">
           <span class="vs-label" id="sessionsInLabel" data-i18n="settings.general.openIn"></span>
           <div class="vs-field">
             <div class="seg" id="sessionsIn" role="radiogroup" aria-labelledby="sessionsInLabel"></div>
             <div class="vs-hint vs-list" data-i18n="settings.general.openInHint"></div>
-          </div>
-
-          <span class="vs-label" id="termFontLabel" data-i18n="settings.general.termFont"></span>
-          <div class="vs-field">
-            <select class="select vs-narrow" id="termFont" aria-labelledby="termFontLabel"></select>
-            <div class="vs-hint" data-i18n="settings.general.termFontHint"></div>
           </div>
 
           <span class="vs-label" data-i18n="settings.general.windows"></span>
@@ -164,7 +158,23 @@
             </label>
             <div class="vs-hint vs-list" data-i18n="settings.general.newWindowHint"></div>
           </div>
+        </div>
+      </section>
 
+      <section class="vs-sec">
+        <h2><span data-icon="pencil"></span><span data-i18n="settings.terminal.text"></span></h2>
+        <div class="vs-grid">
+          <span class="vs-label" id="termFontLabel" data-i18n="settings.general.termFont"></span>
+          <div class="vs-field">
+            <select class="select vs-narrow" id="termFont" aria-labelledby="termFontLabel"></select>
+            <div class="vs-hint" data-i18n="settings.general.termFontHint"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="vs-sec">
+        <h2><span data-icon="history"></span><span data-i18n="settings.terminal.large"></span></h2>
+        <div class="vs-grid">
           <span class="vs-label" data-i18n="tray.autoCompact"></span>
           <div class="vs-field">
             <label class="vs-toggle" for="autoCompact">
@@ -180,7 +190,7 @@
 
     <div class="vs-pane" id="paneGit" data-group="general" role="tabpanel" aria-labelledby="tabGit">
       <section class="vs-sec">
-        <h2><span data-icon="branch"></span><span data-i18n="settings.git"></span></h2>
+        <h2><span data-icon="open"></span><span data-i18n="settings.git.files"></span></h2>
         <div class="vs-grid">
           <span class="vs-label" id="editorLabel" data-i18n="settings.general.editor"></span>
           <div class="vs-field">
