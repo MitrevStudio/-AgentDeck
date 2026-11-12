@@ -94,8 +94,7 @@ details[open] > summary > .git-chevron { transform: rotate(90deg); }
 .git-commit-box .textarea { display: block; min-height: 32px; max-height: 120px; padding: 6px 9px; border-radius: var(--r-sm); font-size: 12.5px; line-height: 18px; }
 .git-commit-split { display: flex; gap: 2px; }
 .git-commit-split .btn { height: 28px; font-size: 12.5px; }
-.git-commit-button { flex: 1; min-width: 0; justify-content: center; border-radius: var(--r-sm) var(--r-xs) var(--r-xs) var(--r-sm); }
-.git-commit-options { flex: none; width: 28px; padding: 0; justify-content: center; border-radius: var(--r-xs) var(--r-sm) var(--r-sm) var(--r-xs); }
+.git-commit-button { flex: 1; min-width: 0; justify-content: center; border-radius: var(--r-sm); }
 .git-commit-split .btn .i { width: 14px; height: 14px; }
 
 .git-file-group { margin: 0 0 2px 12px; }
@@ -126,7 +125,7 @@ details[open] > summary > .git-chevron { transform: rotate(90deg); }
 .git-folder-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 .git-folder-count { flex: none; margin-left: 6px; font-size: 11px; font-weight: 400; color: var(--faint); }
 .git-check-tree .git-file-row { padding-left: 20px; }
-.git-check-tree .git-file small { display: none; }
+.git-check-folder .git-file small { display: none; }
 .git-clean, .git-panel-note { margin: 2px 8px 6px 24px; font-size: 12px; color: var(--faint); overflow-wrap: anywhere; }
 #gitRepositories > .git-panel-note { margin: 6px 8px; }
 .git-panel-error { margin: 4px 8px 6px 24px; padding: 6px 9px; border-radius: var(--r-sm); background: var(--danger-bg); color: var(--danger); font-size: 12px; overflow-wrap: anywhere; }
