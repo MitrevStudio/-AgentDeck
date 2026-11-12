@@ -27,6 +27,16 @@ const MAX_TERMINALS = 64;
 const isAgent = agent => typeof agent === "string" && Object.hasOwn(NEW_SESSION, agent);
 const checkAgent = agent => { if (!isAgent(agent)) fail("unknownAgent"); };
 const checkSessionId = id => { if (typeof id !== "string" || !SESSION_ID.test(id)) fail("invalidSession"); };
+// Claude Code's fullscreen renderer in the host's own terminals, Claude tabs and shells a `claude` is typed into alike:
+// its prompt stays at the bottom of the pane while the conversation scrolls above it. The full repaint keeps ConPTY
+// from leaving stale text. A renderer the user picked through these variables is kept.
+const CLAUDE_RENDERER_VARS = /^CLAUDE_CODE_(NO_FLICKER|DISABLE_ALTERNATE_SCREEN)$/i;
+function getClaudeEnv(env) {
+  if (Object.keys(env).some(k => CLAUDE_RENDERER_VARS.test(k))) {
+    return env;
+  }
+  return { ...env, CLAUDE_CODE_NO_FLICKER: "1", CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT: "1" };
+}
 const isDir = p => { try { return typeof p === "string" && path.isAbsolute(p) && fs.statSync(p).isDirectory(); } catch { return false; } };
 function agentCommand(agent, id) {
   if (agent === "OpenCode") return ["opencode", "--session", id];
@@ -161,7 +171,8 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
     // Agent terminals must end with their command, never fall back to a shell that could consume a queued prompt.
     const commandLine = command ? `powershell.exe -NoLogo ${meta.agent ? "" : "-NoExit "}-EncodedCommand ${encoded}` : "powershell.exe -NoLogo";
     const id = await terminals.open({
-      cwd, commandLine, argv, title: meta.title || path.basename(cwd), agent: meta.agent, agentOnly: Boolean(meta.agent), sessionId: meta.sessionId, codexLog: meta.codexLog, owner: meta.owner, env,
+      cwd, commandLine, argv, title: meta.title || path.basename(cwd), agent: meta.agent, agentOnly: Boolean(meta.agent), sessionId: meta.sessionId, codexLog: meta.codexLog, owner: meta.owner,
+      env: getClaudeEnv(env || process.env),
       ...(meta.id ? { id: meta.id, createdAt: meta.createdAt, reopened: meta.reopened === true } : {})
     });
     log(`agentdeck ${how}`, `cwd="${cwd}" cmd=${command ? `"${command.slice(0, 120)}"` : "-"}`);
