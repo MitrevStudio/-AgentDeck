@@ -1,27 +1,28 @@
 // Bridge for the voice Settings page. Only these calls; main answers them for this window alone.
 const { contextBridge, ipcRenderer } = require("electron");
 
-// The page's height with its tallest tab shown, so switching tabs does not resize the window. Each hidden tab is shown
-// alone for a moment to be measured; no frame is painted in between.
+// One height for every tab, so switching tabs does not resize the window: halfway between the shortest and the tallest
+// tab, never below the tab list. A taller tab scrolls; the page fills the window below a shorter one (settings.css).
+// Each tab is shown alone for a moment to be measured; no frame is painted in between.
 function getPageHeight() {
-  const body = document.body.getBoundingClientRect().height;
   const shown = document.querySelector(".vs-pane.on");
   if (!shown) {
-    return Math.ceil(body);
+    return Math.ceil(document.body.getBoundingClientRect().height);
   }
-  const shownHeight = shown.getBoundingClientRect().height;
-  let tallest = shownHeight;
+  const panes = [...document.querySelectorAll(".vs-pane")];
   shown.classList.remove("on");
-  for (const pane of document.querySelectorAll(".vs-pane")) {
-    if (pane === shown) {
-      continue;
-    }
+  const heights = panes.map(pane => {
     pane.classList.add("on");
-    tallest = Math.max(tallest, pane.getBoundingClientRect().height);
+    const height = pane.getBoundingClientRect().height;
     pane.classList.remove("on");
-  }
+    return height;
+  }).filter(height => height > 0);
   shown.classList.add("on");
-  return Math.ceil(body - shownHeight + tallest);
+  const main = document.querySelector(".vs-main").getBoundingClientRect().height;
+  const footer = main - document.querySelector(".vs-panes").getBoundingClientRect().height;
+  const middle = (Math.min(...heights) + Math.max(...heights)) / 2;
+  const side = document.querySelector(".vs-side").getBoundingClientRect().height;
+  return Math.ceil(Math.max(side, footer + middle));
 }
 
 contextBridge.exposeInMainWorld("voiceSettings", {
