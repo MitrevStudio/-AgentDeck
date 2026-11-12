@@ -54,7 +54,7 @@ Desktop → headless: desktop-ът вижда и управлява хоста; 
 (URL-ът на origin се взима от локалния проект), прави бранча, регистрира проекта и пуска сесията. Напредъкът се
 вижда като job в панела.
 
-**Командният център**: инструментите получават `node` – „пусни на devws нов бранч за BDD и го накарай да …“.
+**Командният център**: инструментите получават `node` – „пусни на linux-host нов бранч за уеб магазина и го накарай да …“.
 
 **Известия**: „Чака те“ от сесия на друг възел идва като балон тук, с името на възела.
 
@@ -297,20 +297,20 @@ Windows headless: същият пакет + DockPty; `sc.exe`/Task Scheduler в�
 Всяка фаза е отделен клон и PR; фаза 1 е най-големият и най-рисков PR – без видими промени, само преместване, и
 се тества като regression (session list, resume, терминали, restore на layout, командния център).
 
-### Фаза 0 – резултати (2026-11-07, devws.mitrevstudio.com, Ubuntu 22.04 x64, Node 20.18 от NodeSource)
+### Фаза 0 – резултати (2026-11-07, тестов Linux сървър „linux-host“, Ubuntu 22.04 x64, Node 20.18 от NodeSource)
 
 - **`node-pty` 1.1.0**: prebuilt за linux x64 glibc е в пакета, `bash` през pty тръгва и излиза чисто. ✅
 - **`ws` 8.22, `bonjour-service` 1.4, `selfsigned` 5.5** се инсталират без build tools. `selfsigned.generate` в v5 е
-  *async* (връща `{ private, public, cert, fingerprint }`). avahi не работи на devws и UDP 5353 е свободен, така че
+  *async* (връща `{ private, public, cert, fingerprint }`). avahi не работи на linux-host и UDP 5353 е свободен, така че
   `bonjour-service` може да обяви услугата. ✅
 - **`node:sqlite`** (търсенето в транскриптите, `search-worker.js`) **няма в Node 20** – иска Node ≥ 22.5. Системният
-  Node на devws е 20 (NodeSource) и не се пипа: `install.sh` слага Node 22 LTS *за потребителя* (fnm в
+  Node на linux-host е 20 (NodeSource) и не се пипа: `install.sh` слага Node 22 LTS *за потребителя* (fnm в
   `~/.agentdeck/`), а търсенето на хоста е изключено, когато модулът липсва. ⚠️
 - **Claude Code на Linux** пише `procStart` като изхода на `ps -o lstart= -p <pid>` с `LC_ALL=C TZ=UTC` (прочетено от
   самия CLI; на Windows – `GetProcessTimes` FILETIME или `Get-CimInstance … CreationDate.Ticks`). `live.js` на Linux
   проверява по същата команда. ✅
-- devws няма `claude`/`codex`/`opencode` и `~/.claude` – инсталират се във фаза 4 (с питане).
-- devws е 192.168.50.42/24 с ~18 docker bridge интерфейса: обявяването по mDNS трябва да е **само на eth0**
+- linux-host няма `claude`/`codex`/`opencode` и `~/.claude` – инсталират се във фаза 4 (с питане).
+- linux-host има ~18 docker bridge интерфейса: обявяването по mDNS трябва да е **само на eth0**
   (`bonjour-service` по подразбиране слуша на всички; дава се `interface`).
 
 ### Фаза 1 – състояние (2026-11-07, клон `feat/mesh`)
@@ -352,7 +352,7 @@ shell в таб, продължаване на сесия в split, команд
   „Агенти“ с името на възела; отдалечен проект в центъра – само за гледане (последни сесии и статус).
 
 Бележки: Windows Firewall пита при първото слушане (от сорс – за electron.exe; инсталаторът трябва да добави правило,
-фаза 6). mDNS намери другия екземпляр през eth0 (192.168.50.68). `host.info` още не се ползва от UI-я. Палитрата не
+фаза 6). mDNS намери другия екземпляр през eth0. `host.info` още не се ползва от UI-я. Палитрата не
 търси в другите възли (фаза 3).
 
 ### Фаза 3 – състояние (2026-11-07, клон `feat/mesh`)
@@ -389,22 +389,22 @@ shell в таб, продължаване на сесия в split, команд
   `ps -e -o pid=,ppid=`, `log-file.js` приема папка. `createHost` избира backend по платформа.
 
 Не е проверено на Linux: node-pty backend-ът, `ps`-базираният жив статус, install.sh и systemd. Следващата стъпка е
-devws (с разрешение): клонът трябва да е качен в GitHub, после
+linux-host (с разрешение): клонът трябва да е качен в GitHub, после
 `AGENTDECK_BRANCH=feat/mesh bash <(curl -fsSL …/feat/mesh/host/install.sh)`; `claude`/`codex` там още ги няма.
 
-### Фаза 4 на devws и фаза 5 – състояние (2026-11-07)
+### Фаза 4 на linux-host и фаза 5 – състояние (2026-11-07)
 
-- **devws**: `install.sh` от клона `feat/mesh` (sparse checkout в `~/.agentdeck/app`, пакети в `host/`, systemd user
-  услуга `agentdeck-host`, linger). Сдвоен с работната станция; shell на devws в панел тук, resize, затваряне –
+- **linux-host**: `install.sh` от клона `feat/mesh` (sparse checkout в `~/.agentdeck/app`, пакети в `host/`, systemd user
+  услуга `agentdeck-host`, linger). Сдвоен с работната станция; shell на linux-host в панел тук, resize, затваряне –
   работят на истински Linux (node-pty backend). `agentdeck-host update` обновява от клона. Node 20 → без търсене.
 - **Фаза 5**: „Клонирай на…“ в менюто на проект (`clone-ui.js`): компютър, папка там (`~/work/<име>`), бранч (нов от
   базата или съществуващ), агент и prompt; `launch.cloneCommand` → един терминал там (стойностите в AGENTDECK_*
-  променливи, не на командния ред), папката влиза в проектите на възела. Проверено на devws: клонира, превключи
+  променливи, не на командния ред), папката влиза в проектите на възела. Проверено на linux-host: клонира, превключи
   `feat/mesh`, проектът се появи. `host/setup.js` + Настройки → Компютри → **Подготовка**: git, SSH ключ (генерира се
-  там, показва се само публичният), `ssh-keyscan` в known_hosts, git идентичност, агентите. На devws: git 2.34, има
+  там, показва се само публичният), `ssh-keyscan` в known_hosts, git идентичност, агентите. На linux-host: git 2.34, има
   `id_rsa`, няма known hosts/идентичност/агенти.
 
-Остава: `claude`/`codex` на devws (инсталация + вход през отдалечен терминал); известия от друг възел; палитрата
+Остава: `claude`/`codex` на linux-host (инсталация + вход през отдалечен терминал); известия от друг възел; палитрата
 по възли; firewall правило в инсталатора; headless на Windows; `node:sqlite` при Node 22.
 
 ---
