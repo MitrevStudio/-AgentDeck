@@ -57,7 +57,21 @@ async function main() {
     const large = git.parseStatus(Array.from({ length: 2001 }, (_, i) => `? file${i}\0`).join(''));
     assert.equal(large.files.length, 2000);
     assert.equal(large.filesTruncated, true);
-    console.log('Nested repository discovery, real Git status, spaced names, renames, conflicts and limits passed');
-  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    for (const noise of ['target/classes/A.class', 'node_modules/x/index.js', '.idea/workspace.xml', '.claude/worktrees/fix/src/a.js', 'sub/Build/out.txt']) assert.ok(git.WATCH_NOISE.test(noise), noise);
+    for (const real of ['src/main/App.java', '.claude/settings.json', 'targets.txt', '.gitignore']) assert.equal(git.WATCH_NOISE.test(real), false, real);
+    git.start({ dirs: () => [root], projects: () => [root], active: () => true });
+    await git.refresh({ force: true });
+    git.get().repos[git.norm(frontend)].at = 0; // past TTL_MS: a full pass would check it again
+    fs.mkdirSync(path.join(backend, 'target'), { recursive: true });
+    fs.writeFileSync(path.join(backend, 'target', 'ignored.txt'), 'build output');
+    fs.writeFileSync(path.join(backend, 'watched.txt'), 'new');
+    const seen = () => git.get().repos[git.norm(backend)].files.some(f => f.path === 'watched.txt');
+    for (const deadline = Date.now() + 10000; !seen() && Date.now() < deadline;) await new Promise(r => setTimeout(r, 200));
+    assert.ok(seen(), 'a watched change refreshes its repository');
+    assert.equal(git.get().repos[git.norm(frontend)].at, 0, 'a watched change does not check the other repositories');
+    await git.refresh();
+    assert.ok(git.get().repos[git.norm(frontend)].at > 0, 'a plain refresh still checks a stale repository');
+    console.log('Nested repository discovery, real Git status, spaced names, renames, conflicts, limits and watched refreshes passed');
+  } finally { git.stop(); fs.rmSync(root, { recursive: true, force: true }); }
 }
 main().catch(e => { console.error(e); process.exitCode = 1; });
