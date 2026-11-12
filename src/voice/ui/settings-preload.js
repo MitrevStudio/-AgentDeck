@@ -1,13 +1,36 @@
 // Bridge for the voice Settings page. Only these calls; main answers them for this window alone.
 const { contextBridge, ipcRenderer } = require("electron");
 
+// The page's height with its tallest tab shown, so switching tabs does not resize the window. Each hidden tab is shown
+// alone for a moment to be measured; no frame is painted in between.
+function getPageHeight() {
+  const body = document.body.getBoundingClientRect().height;
+  const shown = document.querySelector(".vs-pane.on");
+  if (!shown) {
+    return Math.ceil(body);
+  }
+  const shownHeight = shown.getBoundingClientRect().height;
+  let tallest = shownHeight;
+  shown.classList.remove("on");
+  for (const pane of document.querySelectorAll(".vs-pane")) {
+    if (pane === shown) {
+      continue;
+    }
+    pane.classList.add("on");
+    tallest = Math.max(tallest, pane.getBoundingClientRect().height);
+    pane.classList.remove("on");
+  }
+  shown.classList.add("on");
+  return Math.ceil(body - shownHeight + tallest);
+}
+
 contextBridge.exposeInMainWorld("voiceSettings", {
   get: () => ipcRenderer.invoke("voice:settings:get"),
   save: payload => ipcRenderer.invoke("voice:settings:save", payload),
   // true while a hotkey field has the focus: main lets go of the voice hotkeys so they reach the field.
   capture: on => ipcRenderer.invoke("voice:settings:capture", on === true),
-  // The window takes the page's height (measured here when not given), as every tab's own script asks.
-  fit: height => ipcRenderer.invoke("voice:settings:fit", Number(height ?? Math.ceil(document.body.getBoundingClientRect().height))),
+  // The window takes the page's height (measured here when not given, by the tallest tab), as every tab's own script asks.
+  fit: height => ipcRenderer.invoke("voice:settings:fit", Number(height ?? getPageHeight())),
   // General section: applied at once ({language}, {theme}, {edgeHandle} or {autoUpdate}); the edge menu's hotkey,
   // read-only.
   setPrefs: patch => ipcRenderer.invoke("prefs:set", patch),
