@@ -22,6 +22,8 @@
     </div>
     <div class="vs-tabs" id="tabs" role="tablist" aria-orientation="vertical">
       <button type="button" role="tab" id="tabGeneral" data-value="general" aria-controls="general"><span data-icon="window"></span><span data-i18n="settings.general"></span></button>
+      <button type="button" role="tab" id="tabTerminal" data-value="paneTerminal" aria-controls="paneTerminal"><span data-icon="terminal"></span><span data-i18n="settings.general.terminal"></span></button>
+      <button type="button" role="tab" id="tabGit" data-value="paneGit" aria-controls="paneGit"><span data-icon="branch"></span><span data-i18n="settings.git"></span></button>
       <button type="button" role="tab" id="tabNetwork" data-value="network" aria-controls="network"><span data-icon="globe"></span><span data-i18n="settings.network"></span></button>
       <button type="button" role="tab" id="tabNodes" data-value="nodes" aria-controls="nodes"><span data-icon="nodes"></span><span data-i18n="settings.nodes"></span></button>
       <div class="vs-group" aria-hidden="true" data-i18n="settings.voice"></div>
@@ -44,6 +46,12 @@
 
           <span class="vs-label" id="uiThemeLabel" data-i18n="settings.general.theme"></span>
           <select class="select vs-narrow" id="uiTheme" aria-labelledby="uiThemeLabel"></select>
+
+          <span class="vs-label" id="uiScaleLabel" data-i18n="settings.general.uiScale"></span>
+          <div class="vs-field">
+            <select class="select vs-narrow" id="uiScale" aria-labelledby="uiScaleLabel"></select>
+            <div class="vs-hint" data-i18n="settings.general.uiScaleHint"></div>
+          </div>
         </div>
       </section>
 
@@ -73,47 +81,7 @@
         </div>
       </section>
 
-      <section class="vs-sec">
-        <h2><span data-icon="terminal"></span><span data-i18n="settings.general.terminal"></span></h2>
-        <div class="vs-grid">
-          <span class="vs-label" id="sessionsInLabel" data-i18n="settings.general.openIn"></span>
-          <div class="vs-field">
-            <div class="seg" id="sessionsIn" role="radiogroup" aria-labelledby="sessionsInLabel"></div>
-            <div class="vs-hint vs-list" data-i18n="settings.general.openInHint"></div>
-          </div>
 
-          <span class="vs-label" id="termFontLabel" data-i18n="settings.general.termFont"></span>
-          <div class="vs-field">
-            <select class="select vs-narrow" id="termFont" aria-labelledby="termFontLabel"></select>
-            <div class="vs-hint" data-i18n="settings.general.termFontHint"></div>
-          </div>
-
-          <span class="vs-label" id="uiScaleLabel" data-i18n="settings.general.uiScale"></span>
-          <div class="vs-field">
-            <select class="select vs-narrow" id="uiScale" aria-labelledby="uiScaleLabel"></select>
-            <div class="vs-hint" data-i18n="settings.general.uiScaleHint"></div>
-          </div>
-
-          <span class="vs-label" data-i18n="settings.general.windows"></span>
-          <div class="vs-field">
-            <label class="vs-toggle" for="newWindow">
-              <span><b data-i18n="settings.general.newWindow"></b></span>
-              <input type="checkbox" id="newWindow" class="switch">
-            </label>
-            <div class="vs-hint vs-list" data-i18n="settings.general.newWindowHint"></div>
-          </div>
-
-          <span class="vs-label" data-i18n="tray.autoCompact"></span>
-          <div class="vs-field">
-            <label class="vs-toggle" for="autoCompact">
-              <span><b data-i18n="tray.autoCompact.on"></b></span>
-              <input type="checkbox" id="autoCompact" class="switch">
-            </label>
-            <select class="select vs-narrow" id="autoCompactTokens" data-i18n-aria-label="settings.general.autoCompactTokens"></select>
-            <div class="vs-hint vs-list" data-i18n="settings.general.autoCompactHint"></div>
-          </div>
-        </div>
-      </section>
 
       <section class="vs-sec">
         <h2><span data-icon="alert"></span><span data-i18n="settings.general.notifications"></span></h2>
@@ -167,6 +135,67 @@
               <input type="checkbox" id="autoUpdate" class="switch">
             </label>
             <div class="vs-hint" data-i18n="settings.updates.autoHint"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="vs-pane" id="paneTerminal" data-group="general" role="tabpanel" aria-labelledby="tabTerminal">
+      <section class="vs-sec">
+        <h2><span data-icon="window"></span><span data-i18n="settings.terminal.sessions"></span></h2>
+        <div class="vs-grid">
+          <span class="vs-label" id="sessionsInLabel" data-i18n="settings.general.openIn"></span>
+          <div class="vs-field">
+            <div class="seg" id="sessionsIn" role="radiogroup" aria-labelledby="sessionsInLabel"></div>
+            <div class="vs-hint vs-list" data-i18n="settings.general.openInHint"></div>
+          </div>
+
+          <span class="vs-label" data-i18n="settings.general.windows"></span>
+          <div class="vs-field">
+            <label class="vs-toggle" for="newWindow">
+              <span><b data-i18n="settings.general.newWindow"></b></span>
+              <input type="checkbox" id="newWindow" class="switch">
+            </label>
+            <div class="vs-hint vs-list" data-i18n="settings.general.newWindowHint"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="vs-sec">
+        <h2><span data-icon="pencil"></span><span data-i18n="settings.terminal.text"></span></h2>
+        <div class="vs-grid">
+          <span class="vs-label" id="termFontLabel" data-i18n="settings.general.termFont"></span>
+          <div class="vs-field">
+            <select class="select vs-narrow" id="termFont" aria-labelledby="termFontLabel"></select>
+            <div class="vs-hint" data-i18n="settings.general.termFontHint"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="vs-sec">
+        <h2><span data-icon="history"></span><span data-i18n="settings.terminal.large"></span></h2>
+        <div class="vs-grid">
+          <span class="vs-label" data-i18n="tray.autoCompact"></span>
+          <div class="vs-field">
+            <label class="vs-toggle" for="autoCompact">
+              <span><b data-i18n="tray.autoCompact.on"></b></span>
+              <input type="checkbox" id="autoCompact" class="switch">
+            </label>
+            <select class="select vs-narrow" id="autoCompactTokens" data-i18n-aria-label="settings.general.autoCompactTokens"></select>
+            <div class="vs-hint vs-list" data-i18n="settings.general.autoCompactHint"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="vs-pane" id="paneGit" data-group="general" role="tabpanel" aria-labelledby="tabGit">
+      <section class="vs-sec">
+        <h2><span data-icon="open"></span><span data-i18n="settings.git.files"></span></h2>
+        <div class="vs-grid">
+          <span class="vs-label" id="editorLabel" data-i18n="settings.general.editor"></span>
+          <div class="vs-field">
+            <select class="select vs-narrow" id="editor" aria-labelledby="editorLabel"></select>
+            <div class="vs-hint" data-i18n="settings.general.editorHint"></div>
           </div>
         </div>
       </section>

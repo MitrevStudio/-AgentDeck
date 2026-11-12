@@ -1,13 +1,37 @@
 // Bridge for the voice Settings page. Only these calls; main answers them for this window alone.
 const { contextBridge, ipcRenderer } = require("electron");
 
+// One height for every tab, so switching tabs does not resize the window: halfway between the shortest and the tallest
+// tab, never below the tab list. A taller tab scrolls; the page fills the window below a shorter one (settings.css).
+// Each tab is shown alone for a moment to be measured; no frame is painted in between.
+function getPageHeight() {
+  const shown = document.querySelector(".vs-pane.on");
+  if (!shown) {
+    return Math.ceil(document.body.getBoundingClientRect().height);
+  }
+  const panes = [...document.querySelectorAll(".vs-pane")];
+  shown.classList.remove("on");
+  const heights = panes.map(pane => {
+    pane.classList.add("on");
+    const height = pane.getBoundingClientRect().height;
+    pane.classList.remove("on");
+    return height;
+  }).filter(height => height > 0);
+  shown.classList.add("on");
+  const main = document.querySelector(".vs-main").getBoundingClientRect().height;
+  const footer = main - document.querySelector(".vs-panes").getBoundingClientRect().height;
+  const middle = (Math.min(...heights) + Math.max(...heights)) / 2;
+  const side = document.querySelector(".vs-side").getBoundingClientRect().height;
+  return Math.ceil(Math.max(side, footer + middle));
+}
+
 contextBridge.exposeInMainWorld("voiceSettings", {
   get: () => ipcRenderer.invoke("voice:settings:get"),
   save: payload => ipcRenderer.invoke("voice:settings:save", payload),
   // true while a hotkey field has the focus: main lets go of the voice hotkeys so they reach the field.
   capture: on => ipcRenderer.invoke("voice:settings:capture", on === true),
-  // The window takes the page's height (measured here when not given), as every tab's own script asks.
-  fit: height => ipcRenderer.invoke("voice:settings:fit", Number(height ?? Math.ceil(document.body.getBoundingClientRect().height))),
+  // The window takes the page's height (measured here when not given, by the tallest tab), as every tab's own script asks.
+  fit: height => ipcRenderer.invoke("voice:settings:fit", Number(height ?? getPageHeight())),
   // General section: applied at once ({language}, {theme}, {edgeHandle} or {autoUpdate}); the edge menu's hotkey,
   // read-only.
   setPrefs: patch => ipcRenderer.invoke("prefs:set", patch),
