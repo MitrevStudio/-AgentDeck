@@ -90,6 +90,21 @@ const watchers = new Map();
 let watchTimer = null;
 const changedRoots = new Set();    // norm(root) of the repositories a watcher saw change since the last pass
 const WATCH_DELAY_MS = 2000;
+const WATCH_DELAY_MAX_MS = 30 * 1000;
+const WATCH_COST_FACTOR = 4;       // a watchers' pass that took 3 s is followed by the next one 12 s later at the earliest
+let watchCostMs = 0;               // how long the last watchers' pass took
+// A linked worktree by where the main checkout keeps its index and HEAD: norm(main root) + "\0" + <name> of
+// <main>/.git/worktrees/<name> -> norm(the worktree's root).
+const worktreeRoots = new Map();
+// While files keep changing (an agent at work, a build), a repository whose `git status` is slow is not asked again
+// right away: git runs for at most 1/(WATCH_COST_FACTOR + 1) of the time.
+const getWatchDelay = () => Math.min(WATCH_DELAY_MAX_MS, Math.max(WATCH_DELAY_MS, watchCostMs * WATCH_COST_FACTOR));
+// The repository a change seen under `root` belongs to: a linked worktree's when it is in the main checkout's
+// .git/worktrees/<name> (staging or committing there changes no file in the worktree's own folder), else root's.
+function getChangedRoot(root, name) {
+  const worktree = /^\.git\/worktrees\/([^/]+)\//.exec(name)?.[1];
+  return (worktree && worktreeRoots.get(`${norm(root)}\0${worktree}`)) || norm(root);
+}
 // Build output, IDE state and the agents' worktrees (repositories of their own, with watchers of their own) change all
 // the time without changing what `git status` reports here.
 const WATCH_NOISE = new RegExp(`(^|/)(${[...SKIP].filter(d => d !== ".git").map(d => d.replace(".", "\\.")).join("|")}|\\.idea|\\.gradle|\\.claude/worktrees)(/|$)`, "i");
@@ -103,12 +118,12 @@ function syncWatchers() {
         const name = String(filename || '').replaceAll('\\', '/');
         if (WATCH_NOISE.test(name) || /\.git\/(objects|logs)\//.test(name) || name.endsWith('.lock')) return;
         if (!opts?.active?.()) return;
-        changedRoots.add(norm(root));
-        // At most one pass per WATCH_DELAY_MS, and only for the repositories that changed.
+        changedRoots.add(getChangedRoot(root, name));
+        // At most one pass per getWatchDelay(), and only for the repositories that changed.
         watchTimer ??= setTimeout(() => {
           watchTimer = null;
           refresh({ changedOnly: true }).catch(() => {});
-        }, WATCH_DELAY_MS);
+        }, getWatchDelay());
         watchTimer.unref?.();
       });
       watcher.on('error', () => { watcher.close(); watchers.delete(root); });
@@ -143,7 +158,11 @@ async function readMainRoot(root) {
   }
   const gitdir = (/^gitdir:\s*(.+?)\s*$/m.exec(text)?.[1] || "").replace(/\\/g, "/");
   const at = gitdir.search(/\/\.git\/worktrees\//);
-  return at > 0 ? path.resolve(root, gitdir.slice(0, at)) : root;
+  if (at <= 0) return root;
+  const main = path.resolve(root, gitdir.slice(0, at));
+  const name = gitdir.slice(at).split("/")[3];
+  if (name) worktreeRoots.set(`${norm(main)}\0${name}`, norm(root));
+  return main;
 }
 async function rootOf(dir, now) {
   const k = norm(dir), known = roots.get(k);
@@ -169,7 +188,8 @@ function runGit(root) {
 // ---------- refreshing ----------
 // Brings every folder that opts.dirs() lists up to date (repositories checked within TTL_MS are kept, unless forced),
 // then reports the result through opts.onChange. A refresh asked for while one runs is folded into one more after it.
-// changedOnly: only the repositories a watcher saw change, not every one past TTL_MS.
+// changedOnly: only the repositories a watcher saw change, not every one past TTL_MS - except those no watcher looks
+// after (there are more repositories than watchers, or watching failed), which are checked past TTL_MS as before.
 function refresh({ force = false, changedOnly = false } = {}) {
   if (!opts) return Promise.resolve(snapshot);
   if (running) {
@@ -206,7 +226,8 @@ async function pass(force, changedOnly = false) {
   const changed = new Set(changedRoots);
   changedRoots.clear();
   const isStale = r => !(t0 - (repos.get(norm(r))?.at || 0) < TTL_MS);
-  const todo = [...new Set(Object.values(dirRoot))].filter(r => force || changed.has(norm(r)) || (!changedOnly && isStale(r)));
+  const watched = new Set([...watchers.keys()].map(norm));
+  const todo = [...new Set(Object.values(dirRoot))].filter(r => force || changed.has(norm(r)) || (isStale(r) && (!changedOnly || !watched.has(norm(r)))));
   let missing = false, next = 0;
   const work = async () => {
     while (next < todo.length && !missing) {
@@ -218,6 +239,7 @@ async function pass(force, changedOnly = false) {
   };
   await Promise.all(Array.from({ length: Math.min(PARALLEL, todo.length) }, work));
   missingAt = missing ? Date.now() : 0;
+  if (changedOnly && todo.length) watchCostMs = Date.now() - t0;
   const used = new Set(Object.values(dirRoot).map(norm));
   for (const k of repos.keys()) if (!used.has(k)) repos.delete(k);
   const prev = snapshot;
@@ -290,6 +312,6 @@ async function diff({ root, file } = {}) {
 
 let actionContext = () => ({});
 const actions = require('./git-actions').createGitActions({ status: () => snapshot, refresh, refreshRepo, parseStatus, context: () => actionContext() });
-function stop() { clearInterval(timer); clearTimeout(watchTimer); watchTimer = null; changedRoots.clear(); for (const w of watchers.values()) w.close(); watchers.clear(); }
-module.exports = { start, stop, refresh, get: () => snapshot, parseStatus, norm, discoverRepositories, diff, WATCH_NOISE,
+function stop() { clearInterval(timer); clearTimeout(watchTimer); watchTimer = null; changedRoots.clear(); watchCostMs = 0; for (const w of watchers.values()) w.close(); watchers.clear(); }
+module.exports = { start, stop, refresh, get: () => snapshot, parseStatus, norm, discoverRepositories, diff, WATCH_NOISE, getWatchDelay,
   query: actions.query, execute: actions.execute, configure: context => { actionContext = context; } };

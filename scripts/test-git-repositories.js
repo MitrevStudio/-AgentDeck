@@ -71,7 +71,21 @@ async function main() {
     assert.equal(git.get().repos[git.norm(frontend)].at, 0, 'a watched change does not check the other repositories');
     await git.refresh();
     assert.ok(git.get().repos[git.norm(frontend)].at > 0, 'a plain refresh still checks a stale repository');
-    console.log('Nested repository discovery, real Git status, spaced names, renames, conflicts, limits and watched refreshes passed');
+    // A linked worktree keeps its index in the main checkout's .git/worktrees/<name>: staging there changes no file in
+    // the worktree's own folder, yet its status must follow.
+    const linked = path.join(root, 'apps', 'backend-linked');
+    run('worktree', 'add', '--quiet', '-b', 'linked', linked);
+    fs.writeFileSync(path.join(linked, 'linked.txt'), 'new');
+    await git.refresh({ force: true });
+    assert.equal(git.get().repos[git.norm(linked)].untracked, 1);
+    await new Promise(r => setTimeout(r, 2500)); // the watchers' pass for what the fixture just wrote is over
+    execFileSync('git', ['-C', linked, 'add', '--', 'linked.txt'], { windowsHide: true });
+    const staged = () => git.get().repos[git.norm(linked)].staged === 1;
+    for (const deadline = Date.now() + 10000; !staged() && Date.now() < deadline;) await new Promise(r => setTimeout(r, 200));
+    assert.ok(staged(), "staging in a linked worktree refreshes the worktree's status");
+    const delay = git.getWatchDelay();
+    assert.ok(delay >= 2000 && delay <= 30000, 'the next watched pass waits at least two seconds, longer after a slow one');
+    console.log('Nested repository discovery, real Git status, spaced names, renames, conflicts, limits, watched refreshes and linked worktrees passed');
   } finally { git.stop(); fs.rmSync(root, { recursive: true, force: true }); }
 }
 main().catch(e => { console.error(e); process.exitCode = 1; });
