@@ -8,7 +8,9 @@
 // The terminals belong to the host (docs/SHARED-SESSIONS.md): every device attaches to them and detaches - this
 // computer's own window (who "") and the peers (who: their node id; mesh/serve.js) - and viewers.js keeps who has each
 // one open and whose size it has. host.tabs() lists them with their viewers and driver, host.liveSessions() tells the
-// terminal each live session runs in (term), host.restoreTerminals() opens those a restart took anew under their ids.
+// terminal each live session runs in (term), host.liveAgents() is what the lists of every device show (the live
+// sessions and a stand-in for each agent terminal without one), host.restoreTerminals() opens those a restart took
+// anew under their ids.
 //
 // Events (an EventEmitter): "data" (the scan's cache), "terminal:data" ({id, data, end}), "terminal:exit" ({id,
 // code, lost}), "terminal:size" ({id, cols, rows, driver}: the size or the driver changed), "terminals" (host.tabs():
@@ -25,6 +27,9 @@ const { createTabLinks } = require("./tab-links");
 const { createSetup } = require("./setup");
 const { liveSessions: claudeLiveSessions, findTranscript } = require("./live");
 const { createCodexLive } = require("./codex-live");
+const { readIdentity } = require("./codex-link");
+const { createOpenCodeLive } = require("./opencode-live");
+const { createOpenCodeLink } = require("./opencode-link");
 const sessionPreview = require("./session-preview");
 const gitStatus = require("./git-status");
 const usage = require("./usage");
@@ -57,11 +62,12 @@ function terminalEvents(host) {
 const REOPEN_AT_ONCE = 4;
 
 // Gives a host (an EventEmitter) its terminals as docs/SHARED-SESSIONS.md 4.7 describes them: host.terminals,
-// host.launch, host.viewers (viewers.js), host.tabs(), host.liveSessions() (each with `term`), host.restoreTerminals()
-// and host.tabsChanged(). terminals: a backend made with terminalEvents(host); launch: launch.js over it;
-// liveSessions(): the live status as live.js and codex-live.js read it; log(...parts): the launch log. createHost does
-// this, and tests make their hosts the same way.
-function equipTerminals(host, { terminals, launch, liveSessions, log = () => {} }) {
+// host.launch, host.viewers (viewers.js), host.tabs(), host.liveSessions() (each with `term`), host.liveAgents(),
+// host.restoreTerminals() and host.tabsChanged(). terminals: a backend made with terminalEvents(host); launch:
+// launch.js over it; liveSessions(): the live status as live.js, codex-live.js and opencode-live.js read it;
+// linkTabs(): tab-links.js's, when the host has one; log(...parts): the launch log. createHost does this, and tests
+// make their hosts the same way.
+function equipTerminals(host, { terminals, launch, liveSessions, linkTabs = null, log = () => {} }) {
   const viewers = createViewers({
     resize: (id, cols, rows) => terminals.resize(id, cols, rows), size: id => terminals.size(id),
     onSize: e => host.emit("terminal:size", e), onChange: () => tabsChanged()
@@ -85,6 +91,43 @@ function equipTerminals(host, { terminals, launch, liveSessions, log = () => {} 
     const running = new Map(terminals.getTabs().filter(x => !x.exited && x.sessionId).map(x => [`${x.agent}:${x.sessionId}`, x.id]));
     return live.map(l => ({ ...l, term: running.get(`${l.agent}:${l.id}`) || "" }));
   }
+  // What the Agents lists show, on this computer and on every device that sees it: the live sessions, and a stand-in
+  // for each running terminal started as an agent (agentOnly: it ends with its agent) that no live session accounts
+  // for - the agent still starts, its session is not written yet (Codex and OpenCode before the first prompt), or
+  // nothing tells its state. So such a terminal is an agent from its launch to its end, and never also a terminal of
+  // the Terminals lists. A stand-in goes by the session the terminal was started with or linked to, so the row is
+  // that session's once it reports; with none (`unlinked`) by the terminal's own id. Its status "running" claims
+  // nothing: started, no state yet - what live.js says of a Claude session that has not reported one.
+  // Only for showing: everything that acts on a session (send-text.js, launch.js, the command centre, the
+  // notifications) asks liveSessions(), which holds real sessions only.
+  async function liveAgents() {
+    let live = await host.liveSessions();
+    let loose = getLooseAgentTabs(live);
+    // A Claude session that has just registered - a new one, or the one /clear started - is linked to its terminal
+    // before the list goes out, not a few seconds later (tab-links.js on its own): it never shows beside the stand-in
+    // of its own terminal. tab-links.js looks at a session once, so this costs one process snapshot a new session.
+    if (linkTabs && loose.some(x => x.agent === "Claude") && live.some(l => l.agent === "Claude" && !l.term)) {
+      try { await linkTabs(); } catch (e) { console.error("Linking tabs failed:", e.message); }
+      live = await host.liveSessions();
+      loose = getLooseAgentTabs(live);
+    }
+    return [...live, ...loose.map(x => ({
+      agent: x.agent, id: x.sessionId || x.id, cwd: x.cwd, pid: x.pid || 0, status: "running", statusAt: x.createdAt || 0,
+      startedAt: x.createdAt || 0, activityAt: 0, subagents: [], term: x.id, unlinked: !x.sessionId
+    }))];
+  }
+  // The running agent terminals no live session accounts for. A second terminal on a session already listed is not
+  // among them (it stays a terminal): one row a session.
+  function getLooseAgentTabs(live) {
+    const shown = new Set(live.map(l => l.term).filter(Boolean));
+    const keys = new Set(live.map(l => `${l.agent}:${l.id}`));
+    return terminals.getTabs().filter(x => {
+      const key = `${x.agent}:${x.sessionId || x.id}`;
+      if (x.exited || !x.agentOnly || !x.agent || shown.has(x.id) || keys.has(key)) return false;
+      keys.add(key);
+      return true;
+    });
+  }
 
   // ---------- after a restart (4.6) ----------
   // A terminal the restart took, opened anew under its id: an agent resumes its session (a resume that cannot be
@@ -92,9 +135,11 @@ function equipTerminals(host, { terminals, launch, liveSessions, log = () => {} 
   // could open; its entry goes then.
   async function reopen({ id, createdAt, meta }, env) {
     const again = { id, createdAt, reopened: true, owner: meta.owner };
-    if (meta.agent && meta.sessionId) {
+    // A Codex terminal the restart took before its session was read from its log (codex-live.js): read now.
+    const sessionId = meta.sessionId || (meta.agent === "Codex" ? await readIdentity(meta.codexLog) : "");
+    if (meta.agent && sessionId) {
       try {
-        const spec = launch.resumeCommand(meta.agent, meta.sessionId, meta.cwd);
+        const spec = launch.resumeCommand(meta.agent, sessionId, meta.cwd);
         return await launch.openTerminal(meta.cwd, spec.command, { ...spec.meta, title: meta.title || spec.meta.title, ...again }, env, "reopen resume", spec.argv);
       } catch (e) {
         log(`reopening ${id.slice(0, 8)} with its session failed (${e.message}), a shell instead`, `cwd="${meta.cwd}"`);
@@ -140,7 +185,7 @@ function equipTerminals(host, { terminals, launch, liveSessions, log = () => {} 
     return { attached, kept, reopened };
   }
 
-  return Object.assign(host, { terminals, launch, viewers, tabs, tabsChanged, liveSessions: liveWithTerm, restoreTerminals });
+  return Object.assign(host, { terminals, launch, viewers, tabs, tabsChanged, liveSessions: liveWithTerm, liveAgents, restoreTerminals });
 }
 
 // dataDir: the host's own files (registry, caches, terminals, prompts); home: the user's home (the agents' folders);
@@ -173,11 +218,14 @@ function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () 
   });
   const terminals = createTerminals({ userDataDir: dataDir, ...terminalEvents(host) });
   const codexLive = createCodexLive({ sessions: () => sessions.get()?.sessions || [], tabs: () => terminals.getTabs(), link: terminals.link });
-  const liveSessions = async () => (await Promise.all([claudeLiveSessions(), codexLive()])).flat();
-  const launch = createLaunch({ dataDir, terminals, sessions, liveSessions, findTranscript, log, noLauncher });
-  equipTerminals(host, { terminals, launch, liveSessions, log });
-  const sendText = require("./send-text").createSendText({ terminals, liveSessions });
+  const openCodeLive = createOpenCodeLive({ dbFile: sessions.OPENCODE_DB, tabs: () => terminals.getTabs() });
+  const liveSessions = async () => (await Promise.all([claudeLiveSessions(), codexLive(), openCodeLive()])).flat();
+  // A new OpenCode session gets its id at the launch, where the installed OpenCode takes one (opencode-link.js).
+  const openCodeLink = createOpenCodeLink({ help: async () => (await sessions.runOpenCode(["--help"], home, 15000)).stdout });
+  const launch = createLaunch({ dataDir, terminals, sessions, liveSessions, findTranscript, log, noLauncher, openCodeIdentity: openCodeLink.launchIdentity });
   const tabLinks = createTabLinks({ terminals, liveSessions });
+  equipTerminals(host, { terminals, launch, liveSessions, linkTabs: tabLinks.linkTabs, log });
+  const sendText = require("./send-text").createSendText({ terminals, liveSessions });
   const setup = createSetup({ agents: () => sessions.agents });
   gitStatus.configure(async () => ({
     sessions: sessions.get()?.sessions || [], terminals: terminals.getTabs(), live: await liveSessions(),
@@ -205,6 +253,7 @@ function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () 
     sessions.watchTranscripts();
     sessions.scanPeriodically();
     tabLinks.start();
+    sessions.agents.then(list => { if (list.includes("OpenCode")) openCodeLink.check(); });
     usage.start({ claudeDir: sessions.CLAUDE_DIR, codexDir: sessions.CODEX_DIR, openCodeDb: sessions.OPENCODE_DB, userData: dataDir, onChange: u => host.emit("usage", u) })
       .catch(err => console.error("Usage scan failed:", err.message));
     gitStatus.start({
@@ -225,7 +274,7 @@ function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () 
     sessions.stop();
   }
 
-  // terminals, launch, viewers, tabs, liveSessions (with term) and restoreTerminals come from equipTerminals.
+  // terminals, launch, viewers, tabs, liveSessions (with term), liveAgents and restoreTerminals come from equipTerminals.
   return Object.assign(host, {
     dataDir, home, sessions, sendText, setup, findTranscript, preview, search,
     git: gitStatus, usage, limits, resources, start, flush, stop

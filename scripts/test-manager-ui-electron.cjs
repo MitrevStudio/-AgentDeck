@@ -675,6 +675,85 @@ app.whenReady().then(async () => {
   await evaluate("fx.ws = structuredClone(fx.ws); fx.ws.spaces['d:/repos/parent-repo/apps/child-app'].active = 't2'; fx.cbs.onWorkspace(fx.ws); 0"); await settle(150);
   assert.deepEqual([await marked('active'), await marked('shown')], [['term:z3'], []], 'and with the tab');
 
+  // ---------- a terminal started as an agent is an agent from its launch (#31, #32) ----------
+  // What the hosts send (host/index.js liveAgents): a stand-in for each agent terminal with no live session - q1 a
+  // Codex terminal with no session yet (by the terminal's id), q2 an OpenCode one started under a session nothing was
+  // sent to, q4 a Codex one on another computer. q3 is a shell, q5 a shell an agent was typed into and has left.
+  await evaluate(`(() => {
+    const now = Date.now(), me = { id: 'self', name: 'WORK-01', kind: 'desktop', me: true }, cwd = 'D:/repos/parent-repo/apps/child-app';
+    const term = (id, extra) => ({ id, node: '', cwd, title: 'pwsh', agent: '', sessionId: '', agentOnly: false, exited: false, paned: true, createdAt: now, viewers: [me], driver: null, legacy: false, note: '', ...extra });
+    const standIn = (agent, id, term, extra) => ({ agent, id, cwd, pid: 900, status: 'running', statusAt: now - 5000, startedAt: now - 5000, activityAt: 0, subagents: [], term, ...extra });
+    window.titleBefore = document.title;
+    fx.live = [...fx.live, standIn('Codex', 'q1', 'q1', { unlinked: true }), standIn('OpenCode', 'ses_oc1', 'q2')];
+    fx.nodes = structuredClone(fx.nodes);
+    fx.nodes[0].live.push(standIn('Codex', 'q4', 'q4', { cwd: 'D:/src/clinicdesk/services/api', unlinked: true }));
+    fx.ws = { activeSpace: cwd.toLowerCase(), spaces: { [cwd.toLowerCase()]: { tabs: ['t1'], active: 't1' } },
+      tabs: { t1: { id: 't1', space: cwd.toLowerCase(), name: '', focus: 'q3', zoom: '', root: { dir: 'right', ratio: 0.5, a: { term: 'q1' }, b: { term: 'q3' } } } },
+      terminals: [term('q1', { agent: 'Codex', agentOnly: true, title: 'Codex · child-app' }), term('q2', { agent: 'OpenCode', agentOnly: true, sessionId: 'ses_oc1', title: 'OpenCode · child-app', paned: false, createdAt: now - 1000 }),
+        term('q3', { createdAt: now - 2000 }), term('q5', { agent: 'Claude', sessionId: 'left1', title: 'child-app', paned: false, createdAt: now - 3000 }),
+        term('q4', { node: 'node-a', cwd: 'D:/src/clinicdesk/services/api', agent: 'Codex', agentOnly: true, title: 'Codex · api · StudioPc', paned: false, viewers: [], createdAt: now - 4000 })] };
+    fx.cbs.onNodesChanged(fx.nodes); applyNodes(fx.nodes); fx.cbs.onWorkspace(fx.ws);
+  })(); 0`);
+  await rescanSessions(); await poll(); await settle(150);
+  const agentKeys = () => evaluate("[...document.querySelectorAll('#agents .agent')].map(el => el.dataset.key)");
+  const termKeys = () => evaluate("[...document.querySelectorAll('#terms .agent')].map(el => el.dataset.key)");
+  const standIns = ['Codex:q1', 'OpenCode:ses_oc1', 'node:node-a:Codex:q4'];
+  assert.deepEqual((await agentKeys()).filter(k => standIns.includes(k)).sort(), standIns.slice().sort(), 'each agent terminal is an agent row');
+  assert.deepEqual(await termKeys(), ['term:q3', 'term:q5'], 'and none of them a Terminals row; a shell stays one, also one an agent has left');
+  assert.equal(await evaluate("Number($('agentCount').textContent) === document.querySelectorAll('#agents .agent').length && Number($('termCount').textContent) === 2"), true, 'the counts are the rows');
+  const rowOf = key => `#agents [data-key="${key}"]`;
+  assert.deepEqual(await evaluate(`[...document.querySelectorAll('${standIns.map(rowOf).join(', ')}')].map(el => [el.querySelector('.agent-title').textContent, el.querySelector('.agent-mark').title || el.querySelector('.agent-mark').dataset.tip, el.querySelector('.agent-sub').textContent].join(' | ')).sort()`),
+    ['New session | Codex | Clinic API · StudioPc', 'New session | Codex | child-app', 'New session | OpenCode | child-app'], 'an honest title, the agent, its project');
+  const stateOf = key => evaluate(`(() => { const el = document.querySelector('${rowOf(key)} .st'); return [el.className, (el.title || el.dataset.tip).split('\\n').slice(0, 2).join(' / ')]; })()`);
+  assert.deepEqual(await stateOf('Codex:q1'), ['st pulse other', 'Started / Open in a terminal; it has reported no state yet'], 'started, no state claimed: neither working nor ready');
+  assert.equal(await evaluate(`document.querySelector('${rowOf('Codex:q1')}').previousElementSibling.closest('.agroup, .agent') && [...document.querySelectorAll('#agents .agroup')].map(el => el.textContent).join()`), 'Working,Ready', 'under Ready, not Working');
+  assert.equal(await evaluate("document.title === titleBefore"), true, 'the window title counts only what works or needs the user');
+  assert.equal(await evaluate("document.querySelector('#projects .proj[data-path=\"D:/repos/parent-repo/apps/child-app\"] .proj-live').title || document.querySelector('#projects .proj[data-path=\"D:/repos/parent-repo/apps/child-app\"] .proj-live').dataset.tip"), '1 working, 2 ready', "the project's badge counts them");
+  assert.deepEqual(await evaluate("getSessionView('d:/repos/parent-repo/apps/child-app', built.projects.find(p => p.n === 'd:/repos/parent-repo/apps/child-app').sessions).listed.filter(liveOf).map(sessionKey).sort()"),
+    ['Claude:n1', 'Codex:q1', 'OpenCode:ses_oc1'], "the project's session list has them, as running");
+  // The pane of such a terminal shows the same state (the headers follow the live state on a timer of their own); its
+  // row is the current one's neighbour, a click brings it up.
+  await evaluate("renderWorkspace(); 0");
+  assert.equal(await evaluate("document.querySelector('.pane[data-term=q1] .pane-info .st')?.className"), 'st pulse other', 'the pane header has the state too');
+  assert.equal(await evaluate(`document.querySelector('${rowOf('Codex:q1')}').dataset.pane`), 'shown');
+  await evaluate("fx.wsCommands.length = 0; 0"); await click(rowOf('Codex:q1'));
+  assert.deepEqual(await evaluate("fx.wsCommands"), [{ cmd: 'focus', term: 'q1' }]);
+  await evaluate("fx.wsCommands.length = 0; 0"); await click(rowOf('OpenCode:ses_oc1'));
+  assert.deepEqual(await evaluate("fx.wsCommands"), [{ cmd: 'open-term', term: 'q2', place: 'tab' }], 'one with no pane here opens in one');
+  // Its menu: the terminal's actions; no session id to copy while there is none.
+  await click(rowOf('Codex:q1') + ' [data-action=agent-menu]');
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('.menu button')].map(b => b.textContent.trim())"), ['Show terminal', 'Copy path', 'Open terminal', 'Open in Explorer', 'Stop']);
+  await evaluate("closeGroupMenu(); 0");
+  await click(rowOf('OpenCode:ses_oc1') + ' [data-action=agent-menu]');
+  assert.equal(await evaluate("[...document.querySelectorAll('.menu button')].map(b => b.textContent.trim()).includes('Copy the session ID')"), true, 'started under a session: its id is there');
+  await click('.menu button.danger'); await settle();
+  assert.equal(await evaluate("document.querySelector('dialog.confirm h2').textContent"), 'Stop for everyone', 'Stop ends its terminal');
+  await evaluate("document.querySelector('dialog.confirm button[value=cancel]').click(); 0"); await settle();
+  // The search lists them among the running ones.
+  await evaluate("window.searchPalette.open('new session'); 0"); await settle();
+  assert.equal(await evaluate("[...document.querySelectorAll('#palList .pal-row')].filter(r => r.querySelector('.pal-title').textContent === 'New session' && r.querySelector('.st.pulse.other')).length"), 3);
+  await evaluate("window.searchPalette.close(); 0");
+  // The session reports: the Codex terminal is linked and its first turn runs, OpenCode's session is written and ready.
+  // Each is the same one row, now the session's; nothing passes through Terminals.
+  await evaluate(`(() => {
+    const now = Date.now(), cwd = 'D:/repos/parent-repo/apps/child-app';
+    fx.data.sessions.push({ id: 'cx1', agent: 'Codex', cwd, title: 'Add the visit filter', prompt: 'Add the visit filter', updatedAt: now },
+      { id: 'ses_oc1', agent: 'OpenCode', cwd, title: 'Draft the invoice export', prompt: '', updatedAt: now });
+    fx.live = fx.live.filter(l => !['q1', 'ses_oc1'].includes(l.id)).concat(
+      { agent: 'Codex', id: 'cx1', cwd, pid: 900, status: 'busy', statusAt: now, startedAt: now - 5000, activityAt: now, subagents: [], term: 'q1' },
+      { agent: 'OpenCode', id: 'ses_oc1', cwd, pid: 900, status: 'idle', statusAt: now, startedAt: now - 5000, activityAt: now, subagents: [], term: 'q2' });
+    fx.ws = structuredClone(fx.ws);
+    fx.ws.terminals.find(x => x.id === 'q1').sessionId = 'cx1';
+    fx.cbs.onWorkspace(fx.ws);
+  })(); 0`);
+  await rescanSessions(); await poll(); await settle(150);
+  assert.deepEqual((await agentKeys()).filter(k => /q1|cx1|ses_oc1/.test(k)).sort(), ['Codex:cx1', 'OpenCode:ses_oc1'], 'one row a terminal, the session\'s');
+  assert.deepEqual(await evaluate(`['Codex:cx1', 'OpenCode:ses_oc1'].map(k => { const el = document.querySelector('#agents [data-key="' + k + '"]'); return [el.querySelector('.agent-title').textContent, el.querySelector('.st').className].join(' | '); })`),
+    ['Add the visit filter | st spinner', 'Draft the invoice export | st pulse'], 'with its title and its state');
+  assert.deepEqual(await termKeys(), ['term:q3', 'term:q5'], 'Terminals as it was');
+  assert.equal(await evaluate("Number($('agentCount').textContent) === document.querySelectorAll('#agents .agent').length"), true);
+  await capture('agent-terminals');
+
   await settle(3200);
   assert.equal(await evaluate("document.querySelectorAll('.toast-item').length"), 0, 'messages leave by themselves');
   assert.deepEqual(errors, []);

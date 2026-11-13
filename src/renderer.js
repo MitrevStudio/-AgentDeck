@@ -71,7 +71,11 @@ function getCentreTerm() {
   const tab = ws.tabs[ws.spaces[CENTRE]?.tabs[0]];
   return tab ? getTerminal(getPanesOf(tab.root)[0]) : null;
 }
-const isCentreSession = s => Boolean(s?.id && getCentreTerm()?.sessionId === s.id);
+// Its session, or - while that is not there yet - its terminal's stand-in.
+function isCentreSession(s) {
+  const term = getCentreTerm();
+  return Boolean(s?.id && term && (term.sessionId === s.id || liveOf(s)?.term === term.id));
+}
 function renderCentre() {
   const term = getCentreTerm();
   const key = term?.sessionId ? `Claude:${term.sessionId}` : "";
@@ -312,7 +316,9 @@ function renderTitle(v) {
 
 // ---------- agents ----------
 // The sessions running now under Need you / Working / Waiting for you, each with its project and subagents. One open
-// in AgentDeck is brought up by a click, one in another terminal too (or moved here from its menu).
+// in AgentDeck is brought up by a click, one in another terminal too (or moved here from its menu). A terminal
+// started as an agent is among them from its launch on: until its session reports, as the host's stand-in for it
+// ("New session", started, no state yet - host/index.js liveAgents), which the session's own row then replaces.
 function renderAgents(v) {
   $("agentCount").textContent = v.running.length;
   if (!v.running.length) {
@@ -350,9 +356,10 @@ function agentHtml(s, l, toks) {
     ${l.subagents?.length ? subagentsHtml(key, l.subagents, "data-action", SIDEBAR_SUBAGENTS) : ""}`;
 }
 // ---------- terminals ----------
-// The terminals running on this and every online computer that the agents list does not show - shells, clones, an
-// agent whose session is not live - whichever device opened them: this computer first, then the others in their
-// order, the newest first in each. A click brings one up here (its pane, or a new one); Stop ends it for everyone.
+// The terminals running on this and every online computer that the agents list does not show - shells (one an agent
+// was typed into by hand too, once that agent is gone), an agent's terminal on a computer whose AgentDeck sends no
+// stand-ins yet, or of a hidden project - whichever device opened them: this computer first, then the others in
+// their order, the newest first in each. A click brings one up here (its pane, or a new one); Stop ends it for everyone.
 function getSideTerms(v) {
   const shown = new Set(v.running.flatMap(s => [findSessionTab(s)?.id, liveOf(s)?.term]).filter(Boolean));
   const rank = x => (x.node ? 1 + nodes.findIndex(n => n.id === x.node) : 0);
@@ -968,7 +975,9 @@ function openRowMenu(btn, s) {
   const copy = (text, msg) => async () => { await window.manager.copyText(text); toast(msg); };
   openMenu(btn, "", [
     { label: t("term.show"), icon: "raise", run: () => showTerminal(s) },
-    ...(!s.node && liveOf(s) && isMoveHereOffered(s) ? [{ label: t("term.moveHere"), icon: "download", run: () => moveSessionHere(s) }] : []),    { label: t("manager.session.copyId"), icon: "copy", run: copy(s.id, t("manager.toast.copiedId", { id: s.id })) },
+    ...(!s.node && liveOf(s) && isMoveHereOffered(s) ? [{ label: t("term.moveHere"), icon: "download", run: () => moveSessionHere(s) }] : []),
+    // A terminal with no session yet has no id to copy (its row goes by the terminal's).
+    ...(liveOf(s)?.unlinked ? [] : [{ label: t("manager.session.copyId"), icon: "copy", run: copy(s.id, t("manager.toast.copiedId", { id: s.id })) }]),
     ...(s.cwd && !s.node ? [
       { label: t("action.copyPath"), icon: "copy", run: copy(s.cwd, t("toast.copied", { path: s.cwd })) },
       { label: t("action.terminalHere"), icon: "terminal", run: async () => { await window.manager.launchFolder(s.cwd); toast(t("manager.toast.terminal", { path: s.cwd })); } },

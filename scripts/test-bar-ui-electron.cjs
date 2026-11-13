@@ -27,7 +27,7 @@ app.setPath('userData', path.join(temp, 'profile'));
 // What main would answer: many projects (a group, pinned ones, repositories), running sessions, figures and previews.
 const FIXTURE = `(() => {
   const now = Date.now();
-  const fx = { cbs: {}, commands: [], live: [], copied: [], launched: [] };
+  const fx = { cbs: {}, commands: [], live: [], copied: [], launched: [], focused: [] };
   const names = ['agentdeck', 'EonBiz', 'BetterSelfCare', 'intranet-portal', 'irisdb', 'Documents', 'IrisAll', 'availabilityapi', 'DOTNETALL',
     'basketwrapper', 'ProblemDiagnostics', 'approvals', 'billing-gateway', 'customer-portal', 'reports', 'warehouse'];
   const session = (id, cwd, title, agent = 'Claude', age = 60000) => ({ id, agent, cwd, title, prompt: title, updatedAt: now - age });
@@ -67,7 +67,7 @@ const FIXTURE = `(() => {
     getLimits: async () => fx.limits, refreshLimits: async () => fx.limits, getUsage: async () => fx.usage, refreshGit: async () => {},
     getPreview: async (_agent, id) => preview(id), searchText: async () => [], getDay: async date => ({ date, groups: [{ project: 'agentdeck', ticket: 'AD-12', sessions: [{ agent: 'Claude', id: 's1', title: 'Polish the edge menu', from: now - 7200000, to: now - 3600000, minutes: 60, branch: 'feat/ui-ux-polish', spans: [[now - 7200000, now - 3600000]] }] }] }), isDir: async () => '', getShortcuts: async () => ({ menu: 'Alt + \`' }),
     copyText: async text => { fx.copied.push(text); }, barCommand: async (...args) => { fx.commands.push(args); },
-    launchAgent: async (...args) => { fx.launched.push(args); }, focusTerminal: async () => ({ ok: true, exact: true }), voiceCommandState: async () => ({ available: false })
+    launchAgent: async (...args) => { fx.launched.push(args); }, focusTerminal: async (...args) => { fx.focused.push(args); return { ok: true, exact: true }; }, voiceCommandState: async () => ({ available: false })
   };
   // Answers come a moment later, as over IPC: never within the turn that asked. Every listener of an event is kept.
   const later = fn => (...args) => new Promise(resolve => setTimeout(() => resolve(fn(...args)), 1));
@@ -160,6 +160,25 @@ app.whenReady().then(async () => {
   await capture('delete');
   await key('Escape'); await settle();
   assert.equal(await evaluate("document.querySelectorAll('.confirm.del').length"), 0);
+
+  // ---------- a terminal started as an agent, before its session is there (#31, #32) ----------
+  // The host's stand-in for it (host/index.js liveAgents): a running row of its project, counted with the others,
+  // brought up by its terminal - with no session to resume or to delete.
+  await evaluate(`(() => {
+    const now = Date.now();
+    fx.live = [...fx.live, { agent: 'Codex', id: 'q1', cwd: 'C:/work/agentdeck', status: 'running', pid: 900, statusAt: now, startedAt: now, activityAt: 0, subagents: [], term: 'q1', unlinked: true }];
+  })(); 0`);
+  await poll(); await settle(100);
+  const standIn = '#rows .row[data-key="Codex:q1"]';
+  assert.deepEqual(await evaluate(`(() => { const row = document.querySelector('${standIn}'); return [row.querySelector('.t').textContent, row.querySelector('.st').className, Boolean(row.querySelector('.in-deck')),
+    [...row.querySelectorAll('.ract [data-act]')].map(b => b.dataset.act).filter(a => ['resume', 'delete', 'show-terminal'].includes(a)).join()]; })()`),
+    ['New session', 'st pulse other', true, 'show-terminal'], 'a row of its project: started, in AgentDeck, only to be shown');
+  assert.equal(await evaluate("document.querySelector('.tile[data-key=live] .tcount').textContent"), '3', 'the running ones count it');
+  assert.equal(await evaluate("$('liveSum').textContent.includes('working')"), true);
+  await evaluate(`document.querySelector('${standIn}').click(); 0`); await settle();
+  assert.deepEqual(await evaluate("fx.focused.at(-1)"), ['Codex', 'q1'], 'a click asks for its terminal, by the id the row goes by');
+  await evaluate("fx.live = fx.live.filter(l => l.id !== 'q1'); 0"); await poll(); await settle(100);
+  assert.equal(await evaluate(`document.querySelector('${standIn}')`), null);
 
   // ---------- search ----------
   await evaluate("setQuery('iris')"); await settle(350);

@@ -206,8 +206,11 @@ function getLiveKind(l) {
   }
   return "other";
 }
+// "running": started, with no state reported yet - a Claude session that has not written one, an agent terminal
+// whose session is not there yet (the host's stand-in, host/index.js liveAgents). It says so, and claims no more.
+const isStateless = l => l.status === "running";
 function getLiveHint(l) {
-  return t(`live.hint.${getLiveKind(l)}`, { reason: l.waitingFor || t("live.reason.unknown") });
+  return t(isStateless(l) ? "live.hint.running" : `live.hint.${getLiveKind(l)}`, { reason: l.waitingFor || t("live.reason.unknown") });
 }
 function shortAgo(ms) {
   const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
@@ -231,7 +234,7 @@ function getStatusClass(l) {
 // timed: with how long it has been so ("Working · 12 s").
 function getStatusTitle(l, timed = true) {
   const kind = getLiveKind(l);
-  const label = kind === "other" ? l.status : t(`live.label.${kind}`);
+  const label = isStateless(l) ? t("live.label.running") : kind === "other" ? l.status : t(`live.label.${kind}`);
   return [`${label}${timed && liveText(l) ? ` · ${liveText(l)}` : ""}`, getLiveHint(l), `PID ${l.pid}`].join("\n");
 }
 // The markup holds nothing that changes by the second: the pages compare it to tell whether a row is drawn again, and
@@ -469,7 +472,8 @@ function conceal(data, h) {
 // ---------- data ----------
 // Turns the scan result into searchable projects and sessions. `live` maps sessionKey -> live state.
 function buildData(raw, live) {
-  // A running session that has no transcript yet (nothing sent so far) is still worth showing.
+  // A running session that has no transcript yet (nothing sent so far) is still worth showing; so is an agent
+  // terminal whose session is not there yet (the host's stand-in, host/index.js liveAgents).
   const known = new Set((raw.sessions || []).map(sessionKey));
   const fresh = [...live.values()].filter(l => !known.has(sessionKey(l)))
     .map(l => ({ node: l.node, nodeName: l.nodeName, agent: l.agent, id: l.id, cwd: l.cwd, title: t("session.new"), prompt: "", updatedAt: l.startedAt }));

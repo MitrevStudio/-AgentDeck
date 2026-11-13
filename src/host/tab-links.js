@@ -31,7 +31,8 @@ function findTabPid(pid, parents, tabPids) {
 // A tab linked already is looked at again once its session is no longer live while the tab runs: Claude Code's /clear
 // (and the like) starts a new session id in the same process, and the tab takes it over (link with replace), so the
 // session shows in its terminal and a restart resumes the newest conversation (docs/SHARED-SESSIONS.md 4.8). Only a
-// session of the tab's own agent replaces its session; Codex tabs are linked by their log (codex-live.js) instead.
+// session of the tab's own agent replaces its session, and only Claude's does: Codex tabs are linked by their log
+// (codex-live.js), OpenCode tabs have their session from the launch (opencode-link.js), and neither names a process.
 //
 // terminals: terminals.js; liveSessions(): live.js.
 function createTabLinks({ terminals, liveSessions, parentMap = getParentMap }) {
@@ -48,7 +49,7 @@ function createTabLinks({ terminals, liveSessions, parentMap = getParentMap }) {
     const live = await liveSessions();
     const liveKeys = new Set(live.map(l => `${l.agent}:${l.id}`));
     // Unlinked tabs, and linked ones whose session is gone while they run (stale).
-    const tabs = running.filter(tab => !tab.sessionId || (tab.agent !== "Codex" && !liveKeys.has(`${tab.agent}:${tab.sessionId}`)));
+    const tabs = running.filter(tab => !tab.sessionId || (tab.agent === "Claude" && !liveKeys.has(`${tab.agent}:${tab.sessionId}`)));
     if (!tabs.length) {
       return;
     }
@@ -79,7 +80,7 @@ function createTabLinks({ terminals, liveSessions, parentMap = getParentMap }) {
       }
       if (!tab.sessionId) {
         terminals.link(tab.id, l.agent, l.id);
-      } else if (tab.agent === l.agent && l.agent !== "Codex") {
+      } else if (tab.agent === l.agent && l.agent === "Claude") {
         terminals.link(tab.id, l.agent, l.id, { replace: true });
       } else {
         continue;

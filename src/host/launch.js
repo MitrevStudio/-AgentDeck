@@ -47,11 +47,13 @@ function agentCommand(agent, id) {
 
 // deps: dataDir (the prompt and handoff files); terminals (terminals.js); liveSessions(), findTranscript(id)
 // (live.js); sessions (sessions.js, for a session's title and a rescan); log(line) (the launch log; never a prompt's
-// text); noLauncher(exe): the text a terminal prints when an agent is not installed.
-function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessions, log = () => {}, noLauncher = exe => `${exe} is not installed` }) {
+// text); noLauncher(exe): the text a terminal prints when an agent is not installed; openCodeIdentity(): the id a new
+// OpenCode session starts under ({ args, sessionId }, opencode-link.js; no args: none).
+function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessions, log = () => {}, noLauncher = exe => `${exe} is not installed`, openCodeIdentity = () => ({ args: [] }) }) {
   const PROMPTS_DIR = path.join(dataDir, "prompts");
   const HANDOFFS_DIR = path.join(dataDir, "handoffs");
-  const identity = (agent, cwd) => agent === "Codex" ? launchIdentity(dataDir)
+  // What ties a new session to its terminal: Codex's log folder (codexLog), OpenCode's session id (sessionId).
+  const identity = (agent, cwd) => agent === "Codex" ? launchIdentity(dataDir) : agent === "OpenCode" ? openCodeIdentity()
     : { args: agent === "Claude" ? require('./claude-context').launchSettings(dataDir, cwd) : [] };
 
   function getSessionTitle(agent, id) {
@@ -79,7 +81,7 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
   function newCommand(agent, cwd) {
     checkAgent(agent);
     const link = identity(agent, cwd), argv = [NEW_SESSION[agent], ...link.args];
-    return { command: "& " + argv.map(psQuote).join(" "), argv, meta: { title: `${agent} · ${path.basename(cwd)}`, agent, codexLog: link.codexLog }, undo: none };
+    return { command: "& " + argv.map(psQuote).join(" "), argv, meta: { title: `${agent} · ${path.basename(cwd)}`, agent, codexLog: link.codexLog, sessionId: link.sessionId }, undo: none };
   }
   function resumeCommand(agent, id, cwd) {
     checkResumable(agent, id, cwd);
@@ -96,6 +98,7 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
     const meta = { title: `${agent} · ${path.basename(cwd)}`, agent };
     const link = identity(agent, cwd);
     meta.codexLog = link.codexLog;
+    meta.sessionId = link.sessionId;
     // A pseudo terminal takes the prompt as an argument as it is; only PowerShell needs the file.
     if (process.platform !== "win32") return { command: null, argv: [NEW_SESSION[agent], ...link.args, ...(agent === "OpenCode" ? ["--prompt"] : []), text], meta, undo: none };
     const file = promptLaunch.writePrompt(PROMPTS_DIR, text);
@@ -125,7 +128,7 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
     const env = { AGENTDECK_URL: u, AGENTDECK_DIR: d, AGENTDECK_BRANCH: b, AGENTDECK_BASE: bs, AGENTDECK_PROMPT: text };
     const exe = agent ? NEW_SESSION[agent] : "";
     const link = identity(agent, path.resolve(cwd || process.cwd(), d));
-    const promptArgs = agent === "OpenCode" ? ["--prompt"] : link.args;
+    const promptArgs = agent === "OpenCode" ? [...link.args, "--prompt"] : link.args;
     // PowerShell: the clone, the branch, then the agent with the prompt as one argument (an empty one is left out).
     const ps = [
       "git clone --progress $env:AGENTDECK_URL $env:AGENTDECK_DIR",
@@ -142,7 +145,7 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
       b ? 'test "$?" -eq 0 || exit 1; actual_branch=$(git branch --show-current) || exit 1; test "$actual_branch" = "$AGENTDECK_BRANCH" || exit 1' : "",
       exe ? `exec ${exe} ${promptArgs.map(a => "'" + a.replace(/'/g, "'\\''") + "'").join(" ")} \${AGENTDECK_PROMPT:+"$AGENTDECK_PROMPT"}` : "exec bash -l"
     ].filter(Boolean).join("; ");
-    return { command: ps, argv: ["bash", "-lc", sh], env, meta: { title: `${agent || "git"} · ${path.basename(d)}`, agent: agent || "", codexLog: link.codexLog }, undo: none };
+    return { command: ps, argv: ["bash", "-lc", sh], env, meta: { title: `${agent || "git"} · ${path.basename(d)}`, agent: agent || "", codexLog: link.codexLog, sessionId: link.sessionId }, undo: none };
   }
   // The command for a launch described as data (what a peer or the command centre asks for):
   // kind "shell" | "new" | "resume" | "prompt" | "handoff" | "clone".
@@ -178,11 +181,13 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
     log(`agentdeck ${how}`, `cwd="${cwd}" cmd=${command ? `"${command.slice(0, 120)}"` : "-"}`);
     return id;
   }
-  // The running terminal here a session is in (its agent and session id; tab-links.js and codex-live.js link them),
-  // or null. A second resume of it would run the agent twice on one conversation: the callers show this one instead.
+  // The running terminal here a session is in (its agent and session id; tab-links.js and codex-live.js link them,
+  // an OpenCode session has its id from the launch), or null. A second resume of it would run the agent twice on one
+  // conversation: the callers show this one instead. An agent terminal with no session yet goes by its own id, as
+  // the lists name it (host/index.js liveAgents).
   function runningTab(agent, sessionId) {
     if (typeof agent !== "string" || !agent || typeof sessionId !== "string" || !sessionId) return null;
-    return terminals.getTabs().find(x => x.agent === agent && x.sessionId === sessionId && !x.exited) || null;
+    return terminals.getTabs().find(x => x.agent === agent && !x.exited && (x.sessionId ? x.sessionId === sessionId : x.agentOnly && x.id === sessionId)) || null;
   }
   // Prompts of launches whose terminal never started (a start that was cut short).
   function sweepPrompts() {
@@ -228,8 +233,8 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
   // as "Move here" stops it (stop-session.ps1), on Linux and macOS by SIGTERM (SIGKILL when that is not enough).
   // The conversation stays and can be resumed. Codex and OpenCode sessions answer stopUnsupported: outside a terminal
   // of the host's own nothing names their process for sure (codex-live.js has a Codex session's pid only from such a
-  // terminal, OpenCode no live status at all), and a guessed pid could be another program's. The app and the manager
-  // do not offer Stop for them.
+  // terminal, an OpenCode session runs in OpenCode's background service), and a guessed pid could be another
+  // program's. The app and the manager do not offer Stop for them.
   async function stopSession(agent, id) {
     checkAgent(agent);
     checkSessionId(id);
@@ -278,7 +283,7 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
   async function deleteSession(agent, id, trash) {
     checkAgent(agent);
     checkSessionId(id);
-    if ((await liveSessions()).some(l => l.agent === agent && l.id === id)) fail("sessionRunning");
+    if (runningTab(agent, id) || (await liveSessions()).some(l => l.agent === agent && l.id === id)) fail("sessionRunning");
     if (agent === "OpenCode") {
       if (!/^[\w-]+$/.test(id)) fail("invalidSession");
       await sessions.runOpenCode(["session", "delete", id], path.dirname(sessions.CLAUDE_DIR), 15000);

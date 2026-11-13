@@ -23,10 +23,12 @@
 //                               { registry: { projects: [{ name, path }] },
 //                                 sessions: [{ id, agent, cwd, title, prompt?, recap?, projectName?, updatedAt }],
 //                                 agents: [...], at }
-//        "live.list"         -> Live[] (host/live.js + codex-live.js):
+//        "live.list"         -> Live[] (host/index.js liveAgents: live.js, codex-live.js, opencode-live.js):
 //                               [{ agent, id, pid, cwd, name, kind: "" | "bg", status: "busy" | "waiting" | "idle" | ...,
 //                                  waitingFor, statusAt, startedAt, activityAt, subagents: [], jobs: [],
-//                                  term }]   term: the terminal there the session runs in, or "" (older hosts: missing)
+//                                  term, unlinked }]   term: the terminal there the session runs in, or "" (older
+//                               hosts: missing). An agent's terminal with no live session comes as a stand-in (status
+//                               "running"); unlinked: it has no session yet, and `id` is the terminal's own.
 //        "terminals.list"    { all: true } -> Tab[], every terminal of the host (a host before terminals: 2 needs
 //                               `all` for that - the "wide view"; a newer one lists all of them anyway), asked again
 //                               after every (re)connect before any attach:
@@ -231,7 +233,8 @@ export function createStore(provider) {
     return {
       key: sessionKey(id, agent, sid), node: id, nodeName: nodeName(id), online: isOnline(id),
       agent, id: sid, cwd, project: projectOf(e, cwd, s),
-      title: s?.title || live?.name || `${agent} ${sid.slice(0, 8)}`,
+      // A terminal with no session yet (unlinked) goes by the terminal's title.
+      title: s?.title || live?.name || (live?.unlinked && e.terminals.find(x => x.id === live.term)?.title) || `${agent} ${sid.slice(0, 8)}`,
       updatedAt: Math.max(s?.updatedAt || 0, live?.activityAt || 0, live?.statusAt || 0),
       live: status === "stopped" ? null : live, status, waitingFor: live?.status === "waiting" ? live.waitingFor || "" : "",
       term: termOf(id, agent, sid, (isOnline(id) && live) || null),
@@ -288,9 +291,11 @@ export function createStore(provider) {
     for (const [id, e] of nodes) {
       if ((node && id !== node) || !isOnline(id) || e.node?.kind === "relay") continue;
       const items = new Map(itemsOf(id).map(x => [`${x.agent}:${x.id}`, x]));
+      // An agent's terminal with no session yet is the inbox row of its stand-in, which names the terminal.
+      const byTerm = new Map([...items.values()].filter(x => x.live?.unlinked && x.term).map(x => [x.term, x]));
       for (const tab of e.terminals) {
         if (!tab?.id || (running && (tab.exited || tab.lost))) continue;
-        const item = tab.agent && tab.sessionId ? items.get(`${tab.agent}:${tab.sessionId}`) || null : null;
+        const item = (tab.agent && tab.sessionId ? items.get(`${tab.agent}:${tab.sessionId}`) : byTerm.get(tab.id)) || null;
         if (loose && item && item.status !== "stopped") continue;
         const owner = !tab.owner ? "here" : tab.owner === provider.id ? "phone" : "peer";
         const row = {

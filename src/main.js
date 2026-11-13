@@ -833,7 +833,7 @@ async function showTab(id) {
 // this computer's terminals comes up there - whoever opened it, with a pane here or not -, any other in its own
 // terminal (terminal-focus.js; same answer).
 async function focusSessionAnywhere(opts) {
-  const tab = terminals.getTabs().find(x => x.agent === opts.agent && x.sessionId === opts.id && !x.exited);
+  const tab = launch.runningTab(opts.agent, opts.id);
   if (!tab) return focusSession(opts);
   await showTab(tab.id);
   return { ok: true, how: "tab", reason: "", ms: 0 };
@@ -1291,7 +1291,8 @@ function registerIpc() {
   handle("clipboard:image-file", id => saveClipboardImage(text(id, 64)));
   // A file dropped on a pane of a terminal on another computer: sent there, its path there answered.
   handle("terminal:upload", (id, name, bytes) => putFile(text(id, 64), text(name, 200), Buffer.from(bytes)));
-  handle("live:get", () => liveSessions());
+  // What the lists show: the live sessions, and a stand-in for each agent terminal without one (host.liveAgents).
+  handle("live:get", () => host.liveAgents());
   // AgentDeck's own terminals and their layout. Keystrokes and sizes come as plain messages (many, no answer needed).
   handle("workspace:get", () => getWorkspaceView());
   // The terminals' text size and the window's scale, from the window's own keys (Ctrl+= / Ctrl+- / Ctrl+0).

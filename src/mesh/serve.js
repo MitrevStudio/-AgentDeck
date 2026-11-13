@@ -97,12 +97,15 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
     }, CLONE_POLL_MS);
     timer.unref?.();
   }
+  // A host put together without liveAgents (a test's) has its live sessions only.
+  const liveOut = () => (host.liveAgents || host.liveSessions)();
   const METHODS = {
     // terminals: 2 - this host shares its terminals as docs/SHARED-SESSIONS.md 4 says (viewers, driver, resize).
     "host.info": () => ({ ...(links?.self() || {}), code: undefined, platform: process.platform, home: host.home, agents: sessions.get()?.agents || [], terminals: 2, ...info() }),
     "sessions.list": async () => localSnapshot(await sessions.data()),
-    // Each with `term`: the terminal here the session runs in, or "".
-    "live.list": () => host.liveSessions(),
+    // Each with `term`: the terminal here the session runs in, or "". With a stand-in for each agent terminal that
+    // has no live session (host/index.js liveAgents), so a peer lists it under its agents too.
+    "live.list": () => liveOut(),
     "git.diff": p => git.diff(p),
     "git.query": p => git.query(p),
     "git.execute": p => git.execute(p),
@@ -278,7 +281,7 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
     let lastLiveSig = "";
     setInterval(async () => {
       if (!links.nodes().some(n => n.status === "online")) return;
-      const live = await host.liveSessions();
+      const live = await liveOut();
       const sig = JSON.stringify(live);
       if (sig !== lastLiveSig) {
         lastLiveSig = sig;

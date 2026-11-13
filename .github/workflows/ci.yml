@@ -21,6 +21,7 @@ jobs:
       - run: node scripts/test-remote-state.js
       - run: node scripts/test-resources.js
       - run: node scripts/test-codex-live.js
+      - run: npm run test:opencode-live
       - run: node scripts/test-project-sessions.js
       - run: npm run test:limits
       - run: npm run test:themes
@@ -55,6 +56,7 @@ jobs:
       - run: node scripts/test-remote-state.js
       - run: node scripts/test-resources.js
       - run: node scripts/test-codex-live.js
+      - run: npm run test:opencode-live
       - run: node scripts/test-project-sessions.js
       - run: npm run test:limits
       - run: npm run test:themes

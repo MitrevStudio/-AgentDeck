@@ -16,8 +16,8 @@
 //
 // A job whose parent is gone is listed on its own (`kind: "bg"`, its `jobId`).
 //
-// Codex's rollout lifecycle is read separately by codex-live.js and merged in host/index.js.
-// OpenCode has no live status source here.
+// Codex's rollout lifecycle is read separately by codex-live.js, OpenCode's turn times by opencode-live.js; both are
+// merged in host/index.js.
 const { execFile } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");

@@ -364,6 +364,16 @@ function makeHost() {
     const loose = again.terminals({ running: true, loose: true }).map(x => x.id);
     assert.ok(loose.includes(pane) && loose.includes(tab.id) && !loose.includes(local), "the inbox lists the terminals that are not a running session's");
     assert.deepEqual(again.terminals({ query: "pane" }).map(x => x.id), [pane], "searched as the inbox is");
+    // A terminal started as an agent, its session not there yet (#31, #32): the host sends a stand-in for it, so it is
+    // one row among the running sessions - under the terminal's title - and not also a loose terminal.
+    const starting = await host.terminals.open({ cwd: work, commandLine: SHELL.join(" "), argv: SHELL, title: "Codex · work", agent: "Codex", sessionId: "", agentOnly: true, owner: "", env: process.env });
+    const standIn = () => again.inbox().working.find(x => x.agent === "Codex" && x.id === starting);
+    await wait(() => standIn() && byId(starting), "the stand-in and its terminal reached the phone");
+    assert.deepEqual([standIn().status, standIn().term, standIn().title, standIn().project], ["other", starting, "Codex · work", "work"]);
+    assert.equal(byId(starting).item?.id, starting, "its terminal row is that session's");
+    assert.ok(!again.terminals({ running: true, loose: true }).some(x => x.id === starting), "listed once: not under the loose terminals too");
+    await again.closeTerminal(selfH.id, starting);
+    await wait(() => !standIn() && !byId(starting), "gone with its terminal");
     // Opened again from the list and typed into: it is the same shell.
     const back = await again.attach(selfH.id, tab.id);
     let bout = back.scrollback;

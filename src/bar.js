@@ -250,11 +250,11 @@ function rowHtml(r, toks) {
   return `${head}<div class="row ${s.concealed ? "concealed" : ""}" data-key="${esc(key)}">
     ${agentMark(s.agent)}
     <div class="rmain"><div class="t" title="${esc(title)}">${hl(title, toks)}</div>${r.showPath && s.cwd ? pathHtml(s.cwd, toks) : ""}${snipHtml(s, toks)}</div>
-    ${deck.sessions.has(key) ? `<span class="in-deck" title="${esc(t("bar.inDeck"))}">${icon("terminal")}</span>` : ""}
+    ${deck.sessions.has(key) || l?.term ? `<span class="in-deck" title="${esc(t("bar.inDeck"))}">${icon("terminal")}</span>` : ""}
     <span class="rend"><span class="rmeta">${getContextChip(s)}${usageCost(s)}<span class="when" title="${esc(fullDate(s.updatedAt))}">${esc(ago(s.updatedAt))}</span></span>
     <span class="ract">${hideBtn("session", key, hidden.sessions.has(key))}${s.cwd ? `<button class="icon-btn" data-act="terminal" data-path="${esc(s.cwd)}" title="${esc(t("bar.terminalIn", { path: s.cwd }))}">${icon("terminal")}</button>
       <button class="icon-btn" data-act="copy" data-path="${esc(s.cwd)}" title="${esc(t("action.copyPath"))}">${icon("copy")}</button>` : ""}
-      ${l ? `<button class="icon-btn" data-act="resume" title="${esc(t("bar.alreadyOpen"))}">${icon("play")}</button>
+      ${l ? `${l.unlinked ? "" : `<button class="icon-btn" data-act="resume" title="${esc(t("bar.alreadyOpen"))}">${icon("play")}</button>`}
       <button class="icon-btn go" data-act="show-terminal" title="${esc(t("term.showTitle", { pid: l.pid }))}">${icon("raise")}</button>`
         : `<button class="icon-btn danger" data-act="delete" title="${esc(t("bar.delete"))}">${icon("trash")}</button>
       <button class="icon-btn go" data-act="resume" title="${esc(t("action.resume"))}">${icon("play")}</button>`}</span></span>

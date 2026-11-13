@@ -399,8 +399,11 @@ function getTermSession(x) {
   return x?.sessionId ? data.sessions.find(s => s.agent === x.agent && s.id === x.sessionId && (s.node || "") === (x.node || "")) || null : null;
 }
 const getTermTitle = x => getTermSession(x)?.title || x?.title || "";
+// The live state of what a terminal runs: its session's, or - an agent terminal with no session yet - that of its
+// stand-in, which goes by the terminal's own id (host/index.js liveAgents).
 function getTermLive(x) {
-  return x?.sessionId ? allLive.get(sessionKey({ agent: x.agent, id: x.sessionId, node: x.node })) || null : null;
+  const id = x?.sessionId || (x?.agentOnly ? x.id : "");
+  return id ? allLive.get(sessionKey({ agent: x.agent, id, node: x.node })) || null : null;
 }
 // The computer a terminal runs on, as a small mark beside its title - drawn once any terminal runs on another
 // computer, and then on every one (this computer's too), so none is left to guess.

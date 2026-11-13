@@ -3,14 +3,15 @@
 // waiting on the user. The command centre's send_to_session (orchestrator.js) and a peer's terminals.send
 // (mesh/serve.js) both go through here.
 //
-// A tab knows its session by `sessionId`: given when a session is resumed, linked by tab-links.js (Claude) or
-// codex-live.js (Codex) once a new one runs. OpenCode reports no live status, so its tabs are never "ready" here.
+// A tab knows its session by `sessionId`: given when a session is resumed (and to a new OpenCode session, at its
+// launch), linked by tab-links.js (Claude) or codex-live.js (Codex) once a new one runs. A session with no state
+// reported yet - nothing sent to it so far - is not "ready" here.
 const { HostError } = require("./errors");
 
 const ENTER_DELAY_MS = 400;
 const TEXT_MAX = 20000;
 
-// terminals: terminals.js; liveSessions(): live.js and codex-live.js.
+// terminals: terminals.js; liveSessions(): live.js, codex-live.js and opencode-live.js.
 function createSendText({ terminals, liveSessions }) {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   // The running tab a session is in, or null.

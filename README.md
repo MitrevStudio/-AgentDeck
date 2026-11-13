@@ -103,7 +103,7 @@ The AppImage targets **Linux x64** and is tested on Wayland under Hyprland. It d
 
 AgentDeck supports **only the latest stable releases** of **Claude Code**, **Codex CLI**, and **OpenCode 2.x**. Keep the agents up to date on every connected machine. Older releases and OpenCode 1.x are not supported; we do not maintain legacy storage readers or API compatibility fallbacks.
 
-OpenCode integration uses the v2 `session_v2` and `session_message` SQLite tables and the v2 `model.list` API. Upgrade and let OpenCode migrate its own data before using AgentDeck. Legacy tables left behind by migration are ignored; AgentDeck never migrates or writes to the agent's database.
+OpenCode integration uses the v2 `session_v2` and `session_message` SQLite tables and the v2 `model.list` API. Upgrade and let OpenCode migrate its own data before using AgentDeck. Legacy tables left behind by migration are ignored; AgentDeck never migrates or writes to the agent's database. A new OpenCode session is started as `opencode --session <new id>` where the installed OpenCode creates a session under a given id (its `--help` says so), so AgentDeck knows which session its terminal runs; its working and ready states are read from the turn times in `session_v2`.
 
 Context indicators show the last reported context separately from accumulated usage and cost. Claude Code launches from AgentDeck collect status-line metadata while preserving the existing display command; Codex uses its last token-usage report; OpenCode 2 reads its main-session messages and current configured model limits. Approximate limits are marked with `≈`, and compaction or a model change can temporarily show “awaiting update”. Historical sessions do not necessarily have a recorded context limit. A cache is marked warm only when the agent reports it.
 
@@ -182,6 +182,8 @@ AgentDeck combines sessions from three sources:
 The catalog refreshes as local session files change. AgentDeck derives titles and project associations from the metadata it can read, including a session's current working directory when it changes into a worktree.
 
 The Agents list makes running sessions easier to find, with live states where the integration can determine them. A session waiting for you is different from one still working; notifications can bring you back when attention is needed. The row of the session in the focused pane is marked with an accent bar, the ones in the other panes of the tab are tinted, and each row names the most specific project that holds the session's folder.
+
+A Claude, Codex or OpenCode session started from AgentDeck is listed under **Agents** from the moment its terminal opens until it ends, as one row: *New session*, marked as started with no state claimed, until the agent has written its session (Codex and OpenCode do that with the first prompt), then under the session's title with its state. Working and ready are read from Claude Code's registry, Codex's rollout and OpenCode's database; only Claude Code reports that it needs you. **Terminals** lists everything else: shells, including one you start Codex or OpenCode in by hand (a Claude Code session typed into a shell is recognized while it runs).
 
 Removing a project from the catalog and deleting a session are separate actions. Discovery and previews read history; explicit session deletion can remove the corresponding agent history.
 
@@ -649,6 +651,7 @@ npm run check
 node scripts/test-remote-state.js
 node scripts/test-resources.js
 node scripts/test-codex-live.js
+npm run test:opencode-live
 node scripts/test-project-sessions.js
 npm run test:limits
 npm run test:themes

@@ -183,6 +183,17 @@ test('7 new Codex sessions link by launch identity, including two sessions in on
   const live = await poll();
   assert.deepEqual(live.map(l => l.pid), [123, 124]);
   assert.deepEqual(linked.map(l => l[2]), ids);
+  // #31: a third session in the same cwd, nothing sent to it yet - Codex has written its log, but no rollout. It is
+  // linked by its log all the same, and the host lists its terminal as an agent, under that session.
+  const quiet = launchIdentity(dir), quietId = '33333333-3333-3333-3333-333333333333';
+  fs.mkdirSync(path.dirname(quiet.codexLog), { recursive: true });
+  fs.writeFileSync(quiet.codexLog, `INFO session_loop{thread_id=${quietId}}\n`);
+  tabs.push({ id: 'tab2', agent: 'Codex', agentOnly: true, sessionId: '', codexLog: quiet.codexLog, cwd: dir, pid: 125 });
+  const terminals = { getTabs: () => tabs, resize() {}, size: () => null };
+  const host = require('../src/host').equipTerminals(new EventEmitter(), { terminals, launch: {}, liveSessions: createCodexLive({ sessions: () => sessions, tabs: () => tabs, link: (...args) => linked.push(args) }) });
+  const agents = await host.liveAgents();
+  assert.equal(linked.at(-1)[2], quietId);
+  assert.deepEqual(agents.map(l => [l.id, l.status, l.term]), [[ids[0], 'busy', 'tab0'], [ids[1], 'busy', 'tab1'], [quietId, 'running', 'tab2']]);
   assert.equal(findTabPid(123, new Map([[123, 1]]), new Set([123])), 123);
   assert.equal(findTabPid(9, new Map([[9, 123]]), new Set([123])), 123);
   assert.equal(findTabPid(9, new Map([[9, 9]]), new Set([123])), 0);

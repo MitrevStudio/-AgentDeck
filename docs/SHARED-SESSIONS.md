@@ -85,7 +85,10 @@ X само скрива панела; отделно „Спри“ (с потв
 
 **„Терминали“** – нова секция в `#sideOverview` под „Агенти“ (`<section class="side-sec terms-sec" id="sideTerms">`,
 заглавие + брой, скрита при 0). Редове: всеки работещ терминал на този и на всеки онлайн компютър, който „Агенти“ не
-показва (shell-ове, clone терминали, агент без жива сесия). Ред като `.agent`: икона (`terminal` или знакът на
+показва: shell-ове (и такъв, в който агент е пуснат на ръка и вече го няма), clone без агент. Терминал, пуснат като
+агент (`agentOnly`), е в „Агенти“ от пускането до края си – докато сесията му не се обади, като заместител от хоста
+(§4.7 `host.liveAgents()`), – и никога тук; тук остава само ако компютърът му е с по-стар AgentDeck (без заместители)
+или проектът му е скрит. Ред като `.agent`: икона (`terminal` или знакът на
 агента), заглавие, под него „{проект} · {компютър}“ и „· няма панел тук“ когато няма; вдясно `eye`+брой при зрители;
 при hover `stop` icon-btn. Клик / Enter → отваря (фокус или нов таб). Ред с панел тук – `.here`. Ред: този компютър
 първо, после по реда на компютрите; вътре най-новите първо.
@@ -156,7 +159,7 @@ X само скрива панела; отделно „Спри“ (с потв
 | `terminals.send` `{id, text}` | Свой или широк | Всеки. Не е „писане“ за правилото за размера (`terminals.type`, не `input`). |
 | `repo.clone` | `owner` = peer | Също + `MAX_TERMINALS`. |
 | `sessions.stop` | Отказва `sessionRunning`, ако е в терминал тук | Без промяна (UI-ят вика `terminals.close` тогава). |
-| `live.list` | Live[] | Всеки запис + `term`: id на терминала тук, в който върви сесията (`agent`+`sessionId`, неприключил), или "". |
+| `live.list` | Live[] | Всеки запис + `term`: id на терминала тук, в който върви сесията (`agent`+`sessionId`, неприключил), или "". Плюс заместител за всеки работещ `agentOnly` терминал без жива сесия (`host.liveAgents()`, §4.7): `status: "running"`, `term`, `id` = `sessionId` на терминала, а без такъв – id-то на самия терминал (`unlinked: true`). |
 | `host.info` | … | + `terminals: 2` – хостът говори тези правила (§6). |
 | кадър `input` | От собственик или широк peer | От peer, направил поне една `terminals.*` заявка по текущата връзка (множество `ctl`, заменя `wide`; брои се и отказана заявка – до нея стига само peer с `control`) и който `links.sees`; само към неприключил терминал. За §4.3 се брои само ако е зрител и ако не е само отговор на терминала (`isReport`, §5.2) – той се пише с `terminals.type`. |
 | кадър `resize` | Прилага се; широк peer → `sizedBy` | Само от зрител: **want** (§4.3), не директен resize. От друг – пуска се. |
@@ -267,8 +270,10 @@ host.viewers.release(id, who)
 host.viewers.state(id)                   -> { cols, rows, driver, viewers: [who] } | null
 host.tabs()                              -> Tab[] (§4.2, who-та, "" = този прозорец)
 host.restoreTerminals({ skip, env })     -> { attached, kept, reopened }
-host.liveSessions()                      -> Live[] + term
-launch.runningTab(agent, sessionId)      -> Tab | null
+host.liveSessions()                      -> Live[] + term (само истински сесии: за всичко, което действа върху сесия)
+host.liveAgents()                        -> liveSessions() + заместител за всеки agentOnly терминал без жива сесия
+                                            (за списъците: live:get, live.list, push "live")
+launch.runningTab(agent, sessionId)      -> Tab | null (agentOnly терминал без сесия се намира по своето id)
 събития: "terminals" (host.tabs()), "terminal:size" { id, cols, rows, driver };  "terminal:refit" – махнато
 ```
 `who`: `""` – собственият прозорец на този компютър; иначе node id. Имената са на извикващия (`serve.js`, `main.js`).
