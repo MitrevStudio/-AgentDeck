@@ -632,6 +632,49 @@ app.whenReady().then(async () => {
   // Dragging a pane onto another pane still moves it, as before.
   assert.deepEqual((await dragTo('.pane[data-term=y1] .pane-info', '.pane[data-term=y2] .pane-body', SIDE_AT.down)).commands, [{ cmd: 'move-pane', term: 'y1', into: 't1', at: 'y2', side: 'down' }]);
 
+  // ---------- the rows name the deepest project and mark the pane in view (#18, #19) ----------
+  // child-app is a project of its own inside parent-repo, which is listed first (its own session is the newer one);
+  // the same on another computer. Tab t1: z1 (the session n1) | z2 (a shell), tab t2: z3.
+  await evaluate(`(() => {
+    const now = Date.now(), me = { id: 'self', name: 'WORK-01', kind: 'desktop', me: true };
+    const term = (id, extra) => ({ id, node: '', cwd: 'D:/repos/parent-repo/apps/child-app', title: 'pwsh', exited: false, paned: true, createdAt: now, viewers: [me], driver: null, legacy: false, note: '', ...extra });
+    const session = (id, cwd, title, updatedAt) => ({ id, agent: 'Claude', cwd, title, prompt: title, updatedAt });
+    fx.data.registry.projects.push({ name: 'parent-repo', path: 'D:/repos/parent-repo' }, { name: 'child-app', path: 'D:/repos/parent-repo/apps/child-app' });
+    fx.data.sessions.push(session('n0', 'D:/repos/parent-repo', 'Tidy the workspace file', now - 1000), session('n1', 'D:/repos/parent-repo/apps/child-app', 'Wire the child app', now - 50000));
+    fx.live = [...fx.live, { agent: 'Claude', id: 'n1', cwd: 'D:/repos/parent-repo/apps/child-app', status: 'busy', pid: 300, startedAt: now - 90000, activityAt: now, statusAt: now }];
+    fx.nodes = structuredClone(fx.nodes);
+    fx.nodes[0].data.registry.projects.push({ name: 'Clinic API', path: 'D:/src/clinicdesk/services/api' });
+    fx.nodes[0].data.sessions.push(session('rs2', 'D:/src/clinicdesk/services/api', 'Page the visit list', now - 70000));
+    fx.nodes[0].live.push({ agent: 'Claude', id: 'rs2', cwd: 'D:/src/clinicdesk/services/api', status: 'busy', pid: 8, startedAt: now - 90000, activityAt: now, statusAt: now, term: 'z9' });
+    fx.ws = { activeSpace: 'd:/repos/parent-repo/apps/child-app', spaces: { 'd:/repos/parent-repo/apps/child-app': { tabs: ['t1', 't2'], active: 't1' } },
+      tabs: { t1: { id: 't1', space: 'd:/repos/parent-repo/apps/child-app', name: '', focus: 'z1', zoom: '', root: { dir: 'right', ratio: 0.5, a: { term: 'z1' }, b: { term: 'z2' } } },
+        t2: { id: 't2', space: 'd:/repos/parent-repo/apps/child-app', name: '', focus: 'z3', zoom: '', root: { term: 'z3' } } },
+      terminals: [term('z1', { agent: 'Claude', sessionId: 'n1', title: 'Claude' }), term('z2', { cwd: 'D:/repos/parent-repo/apps/child-app/src', createdAt: now - 1000 }), term('z3', { createdAt: now - 2000 }),
+        term('z4', { node: 'node-a', cwd: 'D:/src/clinicdesk/services/api/db', title: 'bash · StudioPc', paned: false, viewers: [], createdAt: now - 3000 })] };
+    fx.cbs.onNodesChanged(fx.nodes); applyNodes(fx.nodes); fx.cbs.onWorkspace(fx.ws);
+  })(); 0`);
+  await rescanSessions(); await poll(); await settle(150);
+  const subOf = key => evaluate(`document.querySelector('.side [data-key="${key}"] .agent-sub').textContent`);
+  assert.equal(await evaluate("(() => { const names = [...document.querySelectorAll('#projects .proj-name')].map(el => el.textContent); return names.indexOf('parent-repo') >= 0 && names.indexOf('parent-repo') < names.indexOf('child-app'); })()"), true, 'the outer project is listed first');
+  assert.equal(await subOf('Claude:n1'), 'child-app', 'a session in a project nested in another goes by the nested one, as its space does');
+  assert.equal(await subOf('term:z2'), 'child-app · This computer', 'a terminal too');
+  assert.equal(await subOf('node:node-a:Claude:rs2'), 'Clinic API · StudioPc', 'and a session on another computer');
+  assert.equal(await subOf('term:z4'), 'Clinic API · StudioPc · no pane here', 'and a terminal there');
+  // Exactly one row is the current one: that of the focused pane. The other pane of the tab is only "shown"; a pane
+  // in another tab is neither.
+  const marked = state => evaluate(`[...document.querySelectorAll('.side .agent[data-pane="${state}"]')].map(el => el.dataset.key)`);
+  assert.deepEqual([await marked('active'), await marked('shown')], [['Claude:n1'], ['term:z2']]);
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('.side .agent[aria-current]')].map(el => el.dataset.key)"), ['Claude:n1']);
+  assert.equal(await evaluate("(() => { const el = document.querySelector('#terms [data-key=\"term:z3\"]'); return el.classList.contains('here') && !el.dataset.pane; })()"), true, 'a pane in another tab is not marked');
+  assert.equal(await evaluate("getComputedStyle(document.querySelector('.side .agent[data-pane=active]'), '::before').width"), '3px', 'the current row has a bar on its edge, not only a colour');
+  assert.equal(await evaluate("(() => { const bg = s => getComputedStyle(document.querySelector(s)).backgroundColor; const all = [bg('.side .agent[data-pane=active]'), bg('.side .agent[data-pane=shown]'), bg('#terms [data-key=\"term:z3\"]')]; return new Set(all).size; })()"), 3, 'current, shown and neither look different');
+  await captureLight('agents-active-row-light'); await capture('agents-active-row');
+  // The mark follows the focus: to the other pane, then to the other tab.
+  await evaluate("runWorkspace('focus', { term: 'z2' }); 0"); await settle(150);
+  assert.deepEqual([await marked('active'), await marked('shown')], [['term:z2'], ['Claude:n1']], 'the mark moves with the focus');
+  await evaluate("fx.ws = structuredClone(fx.ws); fx.ws.spaces['d:/repos/parent-repo/apps/child-app'].active = 't2'; fx.cbs.onWorkspace(fx.ws); 0"); await settle(150);
+  assert.deepEqual([await marked('active'), await marked('shown')], [['term:z3'], []], 'and with the tab');
+
   await settle(3200);
   assert.equal(await evaluate("document.querySelectorAll('.toast-item').length"), 0, 'messages leave by themselves');
   assert.deepEqual(errors, []);

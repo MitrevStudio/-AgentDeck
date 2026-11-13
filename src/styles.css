@@ -191,7 +191,11 @@ main {
 .agent { position: relative; display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 3px 8px; border-radius: var(--r-sm); cursor: pointer; }
 .agent:hover { background: var(--panel-2); }
 .agent.menu-open { background: var(--panel-2); }
-.agent.here { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
+/* A row whose terminal is in view: tinted in a pane of the shown tab, stronger and with a bar on its edge in the
+   focused pane - one row at most. A pane in another tab (.here) is not marked: nearly every row has one. */
+.agent[data-pane] { background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
+.agent[data-pane="active"] { background: color-mix(in srgb, var(--accent) 16%, var(--panel)); }
+.agent[data-pane="active"]::before { content: ""; position: absolute; left: 0; top: 5px; bottom: 5px; width: 3px; border-radius: 2px; background: var(--accent); }
 .agent-main { flex: 1; min-width: 0; }
 /* The row's menu button, over its right end while the row is pointed at or has the keyboard (as a project's tools). */
 .agent-tools {

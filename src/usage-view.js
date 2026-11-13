@@ -115,7 +115,7 @@ function projectsOf(rows) {
   const out = new Map();
   for (const s of sessionsOf(rows)) {
     const n = normPath(s.cwd);
-    const p = data.projects.filter(p => n && (n === p.n || n.startsWith(p.n + "/"))).sort((a, b) => b.n.length - a.n.length)[0];
+    const p = ownerProject(data.projects, n);
     const key = p ? p.n : n;
     if (!out.has(key)) out.set(key, { ...emptyUsage(), key, name: p?.name || s.cwd.split(/[\\/]/).filter(Boolean).pop() || t("usage.noFolder"), path: p?.path || s.cwd, sessions: 0 });
     const g = out.get(key);

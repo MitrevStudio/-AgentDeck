@@ -181,7 +181,7 @@ AgentDeck combines sessions from three sources:
 
 The catalog refreshes as local session files change. AgentDeck derives titles and project associations from the metadata it can read, including a session's current working directory when it changes into a worktree.
 
-The Agents list makes running sessions easier to find, with live states where the integration can determine them. A session waiting for you is different from one still working; notifications can bring you back when attention is needed.
+The Agents list makes running sessions easier to find, with live states where the integration can determine them. A session waiting for you is different from one still working; notifications can bring you back when attention is needed. The row of the session in the focused pane is marked with an accent bar, the ones in the other panes of the tab are tinted, and each row names the most specific project that holds the session's folder.
 
 Removing a project from the catalog and deleting a session are separate actions. Discovery and previews read history; explicit session deletion can remove the corresponding agent history.
 

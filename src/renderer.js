@@ -328,14 +328,22 @@ function renderAgents(v) {
   }
   patchChildren($("agents"), html);
 }
+// What a row calls the project of a folder: the deepest project in the list that holds it (ownerProject), or as its
+// computer lists it, else the folder's name.
+function getProjectName(node, cwd) {
+  const n = normPath(cwd);
+  return (ownerProject(data.projects, node ? remoteKey(node, n) : n) || (node && ownerProject(getNode(node)?.view.projects || [], n)))?.name
+    || cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop();
+}
 function agentHtml(s, l, toks) {
-  // .here: a pane of it is in this window. "in another terminal": only one outside AgentDeck's terminals.
-  const key = sessionKey(s), here = hasSessionPane(s);
-  const project = isCentreSession(s) ? t("centre.title") : data.projects.find(p => inProject(s, p))?.name || s.cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop();
-  const where = s.node ? ` · ${esc(s.nodeName || nodeNameOf(s.node))}` : findSessionTab(s) || l.term ? "" : ` · ${esc(t("manager.agents.outside"))}`;
+  // .here: a pane of it is in this window; data-pane: that pane is in view, or the focused one (getPaneMark).
+  // "in another terminal": only one outside AgentDeck's terminals.
+  const key = sessionKey(s), tab = findSessionTab(s), here = isPaned(tab);
+  const project = isCentreSession(s) ? t("centre.title") : getProjectName(s.node, s.cwd);
+  const where = s.node ? ` · ${esc(s.nodeName || nodeNameOf(s.node))}` : tab || l.term ? "" : ` · ${esc(t("manager.agents.outside"))}`;
   // One in a terminal of AgentDeck can be dragged onto a pane (workspace-ui.js); one outside cannot come here.
   const drag = getAgentTerm(s) ? 'draggable="true"' : "";
-  return `<div class="agent ${here ? "here" : ""}" data-key="${esc(key)}" tabindex="0" ${drag} title="${esc(`${s.title}\n${s.cwd}${s.node ? `\n${s.nodeName || ""}` : ""}`)}">${agentMark(s.agent)}
+  return `<div class="agent ${here ? "here" : ""}" ${getPaneMark(tab?.id)} data-key="${esc(key)}" tabindex="0" ${drag} title="${esc(`${s.title}\n${s.cwd}${s.node ? `\n${s.nodeName || ""}` : ""}`)}">${agentMark(s.agent)}
       <div class="agent-main"><div class="agent-title">${hl(s.title, toks)}</div><div class="agent-sub">${esc(project)}${where}</div></div>
       ${statusMark(l, isLoading(key, l))}
       <span class="agent-tools"><button class="icon-btn" data-action="agent-menu" title="${esc(t("manager.agents.more"))}" aria-haspopup="menu">${icon("more")}</button></span></div>
@@ -358,12 +366,8 @@ function getBareTermTitle(x) {
 }
 function termRowHtml(x) {
   const here = isPaned(x), title = getBareTermTitle(x);
-  // Its project in the list, or as its computer lists it, else its folder's name.
-  const cwdN = x.node ? remoteKey(x.node, normPath(x.cwd)) : normPath(x.cwd);
-  const project = data.projects.find(p => inProject({ cwdN }, p))?.name || (x.node && getNode(x.node)?.view.projects.find(p => inProject({ cwdN: normPath(x.cwd) }, p))?.name)
-    || x.cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop();
-  const sub = [project, x.node ? nodeNameOf(x.node) : t("manager.devices.local"), here ? "" : t("term.noPane")].filter(Boolean).map(esc).join(" · ");
-  return `<div class="agent term ${here ? "here" : ""}" data-key="term:${esc(x.id)}" tabindex="0" draggable="true" title="${esc(`${title}\n${x.cwd}`)}">
+  const sub = [getProjectName(x.node, x.cwd), x.node ? nodeNameOf(x.node) : t("manager.devices.local"), here ? "" : t("term.noPane")].filter(Boolean).map(esc).join(" · ");
+  return `<div class="agent term ${here ? "here" : ""}" ${getPaneMark(x.id)} data-key="term:${esc(x.id)}" tabindex="0" draggable="true" title="${esc(`${title}\n${x.cwd}`)}">
       ${x.agent ? agentMark(x.agent) : `<span class="agent-mark">${icon("terminal")}</span>`}
       <div class="agent-main"><div class="agent-title">${esc(title)}</div><div class="agent-sub">${sub}</div></div>
       ${getViewersHtml(x, "term-viewers")}

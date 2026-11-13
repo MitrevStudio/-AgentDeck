@@ -433,6 +433,9 @@ function leafStart(p) {
 }
 const pathHtml = (p, toks) => `<span class="path">${hl(p, toks, leafStart(p))}</span>`;
 const inProject = (s, p) => s.cwdN === p.n || s.cwdN.startsWith(p.n + "/");
+// The project a folder (by its key, as a session's cwdN) is named after: the deepest one holding it - a project nested
+// in another is its own -, as main gives its terminal its space (main.js getSpaceFor). null when in none.
+const ownerProject = (projects, cwdN) => projects.reduce((best, p) => (inProject({ cwdN }, p) && (!best || p.n.length > best.n.length) ? p : best), null);
 
 // ---------- hidden items ----------
 // Projects (by normalized path) and sessions (by sessionKey) tagged as hidden, and whether they are revealed. Kept in

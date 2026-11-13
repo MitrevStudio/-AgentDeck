@@ -1,7 +1,7 @@
 // The centre of the manager window: the shown project's tabs, and the shown tab split into panes, each a terminal
 // (xterm.js) of AgentDeck's own. The layout lives in main (workspace.js); this page draws it and sends commands back.
 // Loaded before renderer.js, which provides the session data (data, live, liveOf) and calls showSessionTab,
-// findSessionTab, hasSessionPane, getSessionTerm, isMoveHereOffered, moveSessionHere, openTerm, stopTerm,
+// findSessionTab, getPaneMark, getSessionTerm, isMoveHereOffered, moveSessionHere, openTerm, stopTerm,
 // getViewersHtml, startTermDrag, endDrag, renderWorkspace and runWorkspace.
 const ANSI_NAMES = [
   "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
@@ -29,6 +29,18 @@ const getOtherViewers = x => (x?.viewers || []).filter(v => !v.me);
 const getViewerNames = list => list.map(v => v.name).filter(Boolean).join(", ");
 const getShownSpace = () => ws.spaces[ws.activeSpace] || { tabs: [], active: "" };
 const getShownTab = () => ws.tabs[getShownSpace().active] || null;
+// Where a terminal is in the tab in view: "active" in its focused pane, "shown" in another pane of it (none while a
+// pane is zoomed over them), "" out of view.
+function getPaneState(id) {
+  const tab = getShownTab();
+  if (!id || !tab || !getPanesOf(tab.zoom ? { term: tab.zoom } : tab.root).includes(id)) return "";
+  return tab.focus === id ? "active" : "shown";
+}
+// A sidebar row's mark for it: the row of the focused pane is the current one, at most one in the lists.
+function getPaneMark(id) {
+  const state = getPaneState(id);
+  return state === "active" ? 'data-pane="active" aria-current="true"' : state ? `data-pane="${state}"` : "";
+}
 function getPanesOf(node, out = []) {
   if (!node) return out;
   if (node.term) out.push(node.term);
@@ -373,8 +385,6 @@ function showSessionTab(s, place = "tab") {
   openTerm(term, place);
   return true;
 }
-// Has a pane here (the agents list marks it).
-const hasSessionPane = s => isPaned(findSessionTab(s));
 // "Move here" ends a session elsewhere and resumes it here: only for one that runs outside AgentDeck's terminals.
 function isMoveHereOffered(s) {
   return s.agent === "Claude" && !findSessionTab(s) && !getSessionTerm(s);

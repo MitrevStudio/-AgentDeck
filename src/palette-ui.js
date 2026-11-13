@@ -47,7 +47,7 @@
         <span class="pal-kind">${esc(t("palette.project"))}</span></div>`;
     }
     const s = item.s, l = liveOf(s);
-    const project = data.projects.find(p => inProject(s, p))?.name || s.cwd;
+    const project = ownerProject(data.projects, s.cwdN)?.name || s.cwd;
     const snip = isTextHit(s) && !matches(s.hay, toks)
       ? `<div class="pal-snip">${esc(st.text.hits.get(sessionKey(s)).replace(/\s+/g, " ")).replace(/\u0002/g, "<mark>").replace(/\u0003/g, "</mark>")}</div>` : "";
     return `<div class="pal-row ${sel}" data-i="${i}">${agentMark(s.agent)}
