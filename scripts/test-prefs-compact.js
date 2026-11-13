@@ -38,5 +38,18 @@ assert.deepEqual(loadWith({ on: false, tokens: 300000, chosen: true }), { on: fa
 (async () => {
   await prefs.set({ autoCompact: true });
   assert.deepEqual(written.at(-1).terminal.autoCompact, { on: true, tokens: 300000, chosen: true });
-  console.log("prefs auto-compact migration OK");
+  // Which repositories the Git panel lists: only known values, "open" when nothing (or nonsense) is stored.
+  root = {};
+  prefs.load();
+  assert.equal(prefs.get().gitScope, "open");
+  assert.deepEqual(prefs.get().gitScopes, ["open", "all"]);
+  root = { git: { scope: "everything" } };
+  prefs.load();
+  assert.equal(prefs.get().gitScope, "open");
+  await prefs.set({ gitScope: "all" });
+  assert.deepEqual(written.at(-1).git, { scope: "all" });
+  root = { git: { scope: "all" } };
+  prefs.load();
+  assert.equal(prefs.get().gitScope, "all");
+  console.log("prefs auto-compact migration and Git scope OK");
 })();

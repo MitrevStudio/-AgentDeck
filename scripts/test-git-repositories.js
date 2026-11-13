@@ -17,6 +17,33 @@ async function main() {
     assert.deepEqual(result.repos.sort(), [backend, frontend].sort());
     assert.equal(result.truncated, false);
     assert.equal((await git.discoverRepositories([root], { maxDirs: 1 })).truncated, true);
+    // Each project has its own budget: a big one that spends it does not leave another one unscanned, and is named.
+    const scan = fs.mkdtempSync(path.join(os.tmpdir(), 'agentdeck-scan-'));
+    const big = path.join(scan, 'big'), small = path.join(scan, 'small', 'repo');
+    for (let i = 0; i < 6; i++) fs.mkdirSync(path.join(big, `d${i}`), { recursive: true });
+    fs.mkdirSync(small, { recursive: true });
+    execFileSync('git', ['init', '--quiet', small], { windowsHide: true });
+    const budget = await git.discoverRepositories([big, path.join(scan, 'small')], { maxDirs: 4 });
+    assert.deepEqual(budget.repos, [small]);
+    assert.equal(budget.truncated, true);
+    assert.deepEqual(budget.truncatedIn, [big]);
+    // Below the depth limit: inside a repository it is that repository's source tree, so not reported; outside one, a
+    // repository could be missed there, so the project is named - and the rest of it is still scanned.
+    const source = path.join(scan, 'deep', 'app');
+    fs.mkdirSync(path.join(source, 'src', 'main', 'java'), { recursive: true });
+    execFileSync('git', ['init', '--quiet', source], { windowsHide: true });
+    const sourceTree = await git.discoverRepositories([path.join(scan, 'deep')], { maxDepth: 2 });
+    assert.deepEqual(sourceTree.repos, [source]);
+    assert.equal(sourceTree.truncated, false);
+    const loose = path.join(scan, 'deep', 'loose');
+    fs.mkdirSync(path.join(loose, 'a', 'b'), { recursive: true });
+    const deep = await git.discoverRepositories([path.join(scan, 'deep')], { maxDepth: 2 });
+    assert.deepEqual(deep.truncatedIn, [path.join(scan, 'deep')]);
+    assert.deepEqual(deep.repos, [source], 'the depth note does not stop the scan');
+    // The overall ceiling: projects past it are named too.
+    const capped = await git.discoverRepositories([big, path.join(scan, 'small')], { maxDirs: 10, maxTotal: 7 });
+    assert.deepEqual(capped.truncatedIn.sort(), [big, path.join(scan, 'small')].sort());
+    fs.rmSync(scan, { recursive: true, force: true });
     git.start({ dirs: () => [root], projects: () => [root] });
     const snapshot = await git.refresh({ force: true });
     assert.equal(Object.keys(snapshot.repos).length, 2);
