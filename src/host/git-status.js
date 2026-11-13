@@ -59,24 +59,38 @@ function parseStatus(out) {
 
 // Walk project folders, including nested independent repositories and worktrees.
 // Never follow junctions/symlinks or descend into dependency/build caches.
+// Each project has a budget of its own (maxDirs folders), so a big one cannot leave the others unscanned, within an
+// overall ceiling (maxTotal); a folder inside several projects counts for the one that reached it first. truncatedIn:
+// the projects not scanned in full - a budget spent, or folders below the depth limit outside any repository (below
+// it inside one, they are that repository's source tree).
 const SKIP = new Set([".git", "node_modules", ".venv", "venv", "vendor", "dist", "build", ".next", "coverage", "target", "__pycache__"]);
-async function discoverRepositories(dirs, { maxDepth = 5, maxDirs = 3000 } = {}) {
-  const queue = dirs.filter(d => typeof d === "string" && path.isAbsolute(d)).map(dir => ({ dir, depth: 0 }));
-  const seen = new Set(), found = new Set();
-  let count = 0, truncated = false;
+async function discoverRepositories(dirs, { maxDepth = 5, maxDirs = 3000, maxTotal = maxDirs * 5 } = {}) {
+  const queue = dirs.filter(d => typeof d === "string" && path.isAbsolute(d)).map(dir => ({ dir, depth: 0, project: dir, inRepo: false }));
+  const seen = new Set(), found = new Set(), counts = new Map(), spent = new Set(), truncatedIn = new Set();
+  let total = 0;
   for (let i = 0; i < queue.length; i++) {
-    const { dir, depth } = queue[i], key = norm(dir);
-    if (seen.has(key)) continue;
+    const { dir, depth, project } = queue[i], key = norm(dir);
+    if (seen.has(key) || spent.has(project)) continue;
     seen.add(key);
-    if (++count > maxDirs) { truncated = true; break; }
+    const count = (counts.get(project) || 0) + 1;
+    counts.set(project, count);
+    if (count > maxDirs || ++total > maxTotal) {
+      spent.add(project);
+      truncatedIn.add(project);
+      continue;
+    }
     let entries;
     try { entries = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { continue; }
-    if (entries.some(e => e.name === ".git")) found.add(dir);
+    const isRepo = entries.some(e => e.name === ".git"), inRepo = queue[i].inRepo || isRepo;
+    if (isRepo) found.add(dir);
     const children = entries.filter(e => e.isDirectory() && !e.isSymbolicLink() && !SKIP.has(e.name.toLowerCase()));
-    if (depth >= maxDepth) { if (children.length) truncated = true; continue; }
-    for (const e of children) queue.push({ dir: path.join(dir, e.name), depth: depth + 1 });
+    if (depth >= maxDepth) {
+      if (children.length && !inRepo) truncatedIn.add(project);
+      continue;
+    }
+    for (const e of children) queue.push({ dir: path.join(dir, e.name), depth: depth + 1, project, inRepo });
   }
-  return { repos: [...found], truncated };
+  return { repos: [...found], truncated: truncatedIn.size > 0, truncatedIn: [...truncatedIn] };
 }
 
 // ---------- state ----------
@@ -84,7 +98,7 @@ let opts = null, timer = null, running = null, again = null; // the options of o
 let missingAt = 0;                 // when git was last found missing
 const roots = new Map();           // norm(dir) -> { root: absolute path | null, at }
 const repos = new Map();           // norm(root) -> status (with root, at, error?)
-let discovery = { key: "", at: 0, repos: [], truncated: false };
+let discovery = { key: "", at: 0, repos: [], truncated: false, truncatedIn: [] };
 let snapshot = { at: 0, missing: false, dirs: {}, repos: {} };
 const watchers = new Map();
 let watchTimer = null;
@@ -244,7 +258,7 @@ async function pass(force, changedOnly = false) {
   for (const k of repos.keys()) if (!used.has(k)) repos.delete(k);
   const prev = snapshot;
   snapshot = {
-    at: Date.now(), missing, discoveryTruncated: discovery.truncated, ms: Date.now() - t0, checked: todo.length,
+    at: Date.now(), missing, discoveryTruncated: discovery.truncated, discoveryTruncatedIn: discovery.truncatedIn, ms: Date.now() - t0, checked: todo.length,
     dirs: Object.fromEntries(Object.entries(dirRoot).map(([d, r]) => [d, norm(r)])),
     repos: Object.fromEntries(repos)
   };
@@ -255,7 +269,7 @@ async function pass(force, changedOnly = false) {
 // What the pages show: an unchanged status is not sent again just because it was checked again, or because the
 // folders came in another order (the sessions are sorted by their last activity).
 const sorted = o => Object.entries(o || {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-const signature = s => JSON.stringify([s.missing, s.discoveryTruncated, sorted(s.dirs), sorted(s.repos).map(([k, v]) => [k, { ...v, at: 0 }])]);
+const signature = s => JSON.stringify([s.missing, s.discoveryTruncatedIn, sorted(s.dirs), sorted(s.repos).map(([k, v]) => [k, { ...v, at: 0 }])]);
 
 // dirs(): the folders to report on; onChange(snapshot); active(): whether a window that shows the state is open
 // (the background refresh runs only then).

@@ -15,6 +15,10 @@ const NB_PLUS = "\u00a0+\u00a0";
 const pretty = acc => String(acc || "").replace(/Control/g, "Ctrl").replace(/Super/g, "Win").split("+").join(NB_PLUS);
 const capLabel = k => ({ Control: "Ctrl", Super: "Win", Escape: "Esc", Plus: "+" }[k] || k);
 
+function fillMics(s, devices) {
+  st.devices = devices.length ? devices : [{ deviceId: "", label: t("voice.settings.micDefault"), fallback: true }];
+  fillSelect($("mic"), st.devices.map((x, i) => [String(i), x.label]), resolveMic(st.devices, s.microphoneDeviceId, s.microphoneName));
+}
 function fillSelect(sel, options, value) {
   sel.innerHTML = options.map(([v, label]) => `<option value="${esc(v)}">${esc(label)}</option>`).join("");
   sel.value = String(value);
@@ -75,7 +79,7 @@ const AUTO_COMPACT_RECOMMENDED = PLAN === "max" ? 300000 : 150000;
 const CONTEXT_200K = 200000;
 // prefs.js: the themes ({id, group}, "system" first), TERMINAL_FONT_SIZES, UI_SCALES and AUTO_COMPACT_TOKENS, as the
 // prefs snapshot brings them.
-const { themes: THEMES = [], terminalFontSizes: TERM_FONT_SIZES, uiScales: UI_SCALES, autoCompactSizes: AUTO_COMPACT_SIZES, editors: EDITORS = ["vscode"] } = window.prefs;
+const { themes: THEMES = [], terminalFontSizes: TERM_FONT_SIZES, uiScales: UI_SCALES, autoCompactSizes: AUTO_COMPACT_SIZES, editors: EDITORS = ["vscode"], gitScopes: GIT_SCOPES = ["open", "all"] } = window.prefs;
 let general = { ...window.prefs };
 const dirty = new Set(); // tabs with unsaved edits: a language switch reloads the window
 function setDirty(tab, on) {
@@ -99,6 +103,7 @@ function renderGeneral() {
   const options = (list, value, label) => list.map(v => `<option value="${v}" ${v === value ? "selected" : ""}>${esc(label(v))}</option>`).join("");
   $("termFont").innerHTML = options(TERM_FONT_SIZES, general.terminalFontSize ?? 16, v => `${v} px${v === 16 ? ` · ${t("settings.general.default")}` : ""}`);
   $("editor").innerHTML = options(EDITORS, general.editor || "vscode", v => t(`settings.general.editor.${v}`));
+  $("gitScope").innerHTML = options(GIT_SCOPES, general.gitScope || "open", v => t(`settings.git.scope.${v}`));
   $("uiScale").innerHTML = options(UI_SCALES, general.uiScale ?? 1, v => `${Math.round(v * 100)}%${v === 1 ? ` · ${t("settings.general.default")}` : ""}`);
   $("newWindow").checked = general.newWindow !== false;
   $("newWindow").disabled = general.sessionsIn === "tabs";
@@ -176,6 +181,7 @@ $("autoCompact").addEventListener("change", async e => {
 $("autoCompactTokens").addEventListener("change", e => setPref("autoCompactTokens", Number(e.target.value)));
 $("termFont").addEventListener("change", e => setPref("terminalFontSize", Number(e.target.value)));
 $("editor").addEventListener("change", e => setPref("editor", e.target.value));
+$("gitScope").addEventListener("change", e => setPref("gitScope", e.target.value));
 $("uiScale").addEventListener("change", e => setPref("uiScale", Number(e.target.value)));
 $("dayView").addEventListener("change", e => setPref("dayView", e.target.checked));
 $("notify").addEventListener("change", e => setPref("notify", e.target.checked));
@@ -648,8 +654,9 @@ async function init() {
   fillSelect($("language"), d.languages, s.language); // an unknown code falls back to auto-detect, as in VoiceTray
   $("clipboard").checked = s.useClipboardPaste;
 
-  st.devices = d.devices.length ? d.devices : [{ deviceId: "", label: t("voice.settings.micDefault"), fallback: true }];
-  fillSelect($("mic"), st.devices.map((x, i) => [String(i), x.label]), resolveMic(st.devices, s.microphoneDeviceId, s.microphoneName));
+  // Until the microphones are listed (that can take seconds), the saved one, so a save meanwhile keeps it.
+  fillMics(s, s.microphoneName ? [{ deviceId: s.microphoneDeviceId || "", label: s.microphoneName }] : []);
+  window.voiceSettings.devices().then(list => fillMics(s, list || [])).catch(() => {});
 
   // Keep a hand-edited length from settings.json rather than silently rounding it away.
   const lengths = [...new Set([...d.lengths, s.maxRecordingMinutes])].sort((a, b) => a - b);

@@ -28,6 +28,7 @@ function getPageHeight() {
 
 contextBridge.exposeInMainWorld("voiceSettings", {
   get: () => ipcRenderer.invoke("voice:settings:get"),
+  devices: () => ipcRenderer.invoke("voice:settings:devices"),
   save: payload => ipcRenderer.invoke("voice:settings:save", payload),
   // true while a hotkey field has the focus: main lets go of the voice hotkeys so they reach the field.
   capture: on => ipcRenderer.invoke("voice:settings:capture", on === true),

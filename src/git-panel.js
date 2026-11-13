@@ -7,9 +7,33 @@
   try { sortMode = localStorage.getItem('agentdeck.gitSort') || sortMode; } catch {}
   let byProject = false;
   try { byProject = localStorage.getItem('agentdeck.gitByProject') === '1'; } catch {}
-  // How the repositories list their changes: by folders (tree) or as a flat list. The button above the list sets it for
-  // all of them; a repository's own menu makes that repository differ (repoViews, by its key). Either way as
-  // IntelliJ's commit view: a checkbox on every file and folder, checked being staged.
+  // Which repositories are listed (Settings > Git, prefs.js gitScope): 'open' - those an open terminal is in; 'all' -
+  // also every one in a project.
+  const toScope = value => (value === 'all' ? 'all' : 'open');
+  let scope = toScope(window.prefs?.gitScope);
+  window.prefs?.onChanged?.(p => {
+    if (toScope(p.gitScope) === scope) return;
+    scope = toScope(p.gitScope);
+    render();
+  });
+  // Filters: the projects hidden with "all" (by project key), and the repositories hidden from a project's group
+  // ({ project key: [repository key] }). projectRepos: what each group listed in the last render, for its menu.
+  const HIDDEN_PROJECTS_KEY = 'agentdeck.gitHiddenProjects', HIDDEN_REPOS_KEY = 'agentdeck.gitHiddenRepos';
+  function readJson(key, fallback, isValid) {
+    try {
+      const value = JSON.parse(localStorage.getItem(key));
+      return isValid(value) ? value : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+  const hiddenProjects = new Set(readJson(HIDDEN_PROJECTS_KEY, [], Array.isArray));
+  const hiddenRepos = readJson(HIDDEN_REPOS_KEY, {}, v => v && typeof v === 'object' && !Array.isArray(v));
+  const projectRepos = new Map();
+  // How a repository lists its changes: by folders (tree) or as a flat list, set in that repository's own menu
+  // (repoViews, by its key). The default is the flat list - or the folders for whoever had them on for all
+  // repositories before (TREE_KEY, no longer set). Either way as IntelliJ's commit view: a checkbox on every file and
+  // folder, checked being staged.
   const TREE_KEY = 'agentdeck.gitTree', REPO_VIEWS_KEY = 'agentdeck.gitRepoViews';
   let tree = false, repoViews = {};
   try { tree = localStorage.getItem(TREE_KEY) === '1'; } catch {}
@@ -153,79 +177,101 @@
     const id = JSON.stringify([node.key, group]);
     return `<details class="git-file-group" data-expand="${esc(id)}" data-group="${group}" ${expanded.get(id) !== false ? 'open' : ''}><summary><span class="git-chevron">${icon('right')}</span><span>${esc(gitText(group))}</span><span class="grow"></span><span class="git-hover-actions">${quick('review', 'eye', 'reviewChanges', disabled)}${quick(group === 'staged' ? 'unstage' : 'stage', group === 'staged' ? 'undo' : 'plus', group === 'staged' ? 'unstageAll' : 'stageAll', disabled)}${more('data-group-menu', disabled)}</span><span class="git-count">${files.length}</span></summary>${isTree(node.key) ? renderTree(files) : files.map(f => fileRow(f, node, group, disabled)).join('')}</details>`;
   }
-  // The project a repository belongs to: the deepest one holding it - a linked worktree by its main checkout, else by
-  // its own folder (a worktree added as a project of its own) - or, in none, its own folder.
-  function getRepoProject(sourceId, repo) {
-    const root = normPath(repo.root);
-    const holding = dir => (data.projects || []).filter(p => (p.node || 'local') === sourceId && within(dir, normPath(p.path)))
-      .sort((a, b) => b.path.length - a.path.length)[0];
-    const project = holding(normPath(repo.mainRoot || repo.root)) || holding(root);
-    return project ? { key: project.n, name: project.name } : { key: root, name: root.split('/').filter(Boolean).at(-1) || root };
+  // The projects a repository belongs to: every one holding it - a linked worktree by its main checkout or by its own
+  // folder (a worktree added as a project of its own) - so a folder of many repositories lists them too; in none, its
+  // own folder (real: false - no project to filter).
+  function getRepoProjects(sourceId, repo) {
+    const root = normPath(repo.root), dirs = [normPath(repo.mainRoot || repo.root), root];
+    const projects = (data.projects || []).filter(p => (p.node || 'local') === sourceId && dirs.some(d => within(d, normPath(p.path))));
+    if (projects.length) return projects.map(p => ({ key: p.n, name: p.name, real: true }));
+    return [{ key: root, name: root.split('/').filter(Boolean).at(-1) || root, real: false }];
   }
+  const isRepoHidden = (projectKey, repoKey) => (hiddenRepos[projectKey] || []).includes(repoKey);
   // A repository is open until folded; inside a project group ("Group by Project") it is folded until opened, so an
   // opened project shows the list of its repositories first.
   // The two views keep their own fold state (a <details> drawn open reports itself as opened, so one state would carry
-  // "open" from the plain list into the groups).
-  const getRepoExpandId = key => (byProject ? `in-project:${key}` : key);
-  const isRepoOpen = key => (byProject ? expanded.get(getRepoExpandId(key)) === true : expanded.get(key) !== false);
-  // With "Group by Project": the repositories in a foldable group per project (folded until opened), the projects by name.
+  // "open" from the plain list into the groups), and so does each group a repository is in.
+  const getRepoExpandId = (key, projectKey) => (byProject ? `in-project:${projectKey}:${key}` : key);
+  const isRepoOpen = id => (byProject ? expanded.get(id) === true : expanded.get(id) !== false);
+  // With "Group by Project": the repositories in a foldable group per project (folded until opened), the projects by
+  // name. A repository is in the group of every project holding it, unless hidden from that group; a group whose
+  // repositories are all hidden stays, so its menu can bring them back.
   function getRepoRows(items) {
-    if (!byProject) return items.map(x => x.html);
+    if (!byProject) return items.map(x => x.html(getRepoExpandId(x.key)));
     const groups = new Map();
     for (const x of items) {
-      if (!groups.has(x.project.key)) groups.set(x.project.key, { key: `project:${x.project.key}`, name: x.project.name, rows: [] });
-      groups.get(x.project.key).rows.push(x.html);
+      for (const p of x.projects) {
+        if (!groups.has(p.key)) groups.set(p.key, { key: p.key, name: p.name, real: p.real, repos: [], rows: [] });
+        const g = groups.get(p.key);
+        g.repos.push({ key: x.key, name: x.name });
+        if (!isRepoHidden(p.key, x.key)) g.rows.push(x.html(getRepoExpandId(x.key, p.key)));
+      }
     }
-    return [...groups.values()].sort((a, b) => a.name.localeCompare(b.name)).map(g =>
-      `<details class="git-project" data-expand="${esc(g.key)}" ${expanded.get(g.key) === true ? 'open' : ''}><summary class="git-project-head">`
-      + `<span class="git-chevron">${icon('right')}</span>${icon('folder')}<span>${esc(g.name)}</span><span class="git-count">${g.rows.length}</span>`
-      + `</summary>${g.rows.join('')}</details>`);
+    for (const g of groups.values()) if (g.real) projectRepos.set(g.key, g.repos);
+    return [...groups.values()].sort((a, b) => a.name.localeCompare(b.name)).map(g => {
+      const id = `project:${g.key}`, count = g.rows.length < g.repos.length ? `${g.rows.length}/${g.repos.length}` : g.rows.length;
+      // A filter needs something to choose from: a single repository has none, unless it is the one hidden.
+      const actions = g.real && (g.repos.length > 1 || g.rows.length < g.repos.length) ? `<span class="git-hover-actions">${more(`data-project-menu="${esc(g.key)}"`)}</span>` : '';
+      return `<details class="git-project" data-expand="${esc(id)}" ${expanded.get(id) === true ? 'open' : ''}><summary class="git-project-head">`
+        + `<span class="git-chevron">${icon('right')}</span>${icon('folder')}<span>${esc(g.name)}</span><span class="grow"></span>${actions}<span class="git-count">${count}</span>`
+        + `</summary>${g.rows.join('')}</details>`;
+    });
   }
   function setByProject(on) {
     byProject = on;
     try { localStorage.setItem('agentdeck.gitByProject', on ? '1' : '0'); } catch {}
     render();
   }
-  const saveViews = () => { try { localStorage.setItem(TREE_KEY, tree ? '1' : '0'); localStorage.setItem(REPO_VIEWS_KEY, JSON.stringify(repoViews)); } catch {} };
-  // All the repositories by folders, or all as lists: the ones that differed follow too.
-  function setTree(on) {
-    tree = on; repoViews = {};
-    saveViews();
-    $('gitTreeToggle').setAttribute('aria-pressed', String(tree));
-    render();
-  }
-  // One repository apart from the others; nothing is kept for it once it is as they are.
+  const saveViews = () => { try { localStorage.setItem(REPO_VIEWS_KEY, JSON.stringify(repoViews)); } catch {} };
+  // One repository's view; nothing is kept for it once it is the default.
   function setRepoTree(key, on) {
     if (on === tree) delete repoViews[key]; else repoViews[key] = { tree: on };
     saveViews();
     render();
+  }
+  // The projects whose scan budget ran out, by name. A computer on an older version reports only that one did.
+  function getScanLimitNote(source) {
+    const paths = source.git.discoveryTruncatedIn || [];
+    if (!paths.length) return t('git.panel.scanLimit');
+    const name = dir => (data.projects || []).find(p => (p.node || 'local') === source.id && normPath(p.path) === normPath(dir))?.name || dir;
+    return t('git.panel.scanLimitIn', { projects: paths.map(name).join(', ') });
   }
   function render() {
     if (selected !== 'git') return;
     const sources = [{ id: 'local', name: t('git.panel.local'), status: 'online', git }, ...nodes], rows = [], open = openFolders();
     const tips = new Map();
     repositories.clear();
+    projectRepos.clear();
     for (const source of sources) {
       const paths = open.filter(p => (p.node || 'local') === source.id).map(p => normPath(p.path));
-      if (!paths.length) continue;
-      const shown = openRoots(paths, Object.values(source.git?.repos || {}).map(repo => normPath(repo.root)));
+      if (!paths.length && scope !== 'all') continue;
+      const repos = Object.values(source.git?.repos || {}).sort((a, b) => a.root.localeCompare(b.root));
+      const viaTerminal = openRoots(paths, repos.map(repo => normPath(repo.root)));
       const items = [];
-      for (const repo of Object.values(source.git?.repos || {}).sort((a, b) => a.root.localeCompare(b.root))) {
-        if (!shown.has(normPath(repo.root))) continue;
-        const key = JSON.stringify([source.id, repo.root]), node = { key, node: source.id === 'local' ? '' : source.id, repo, offline: source.status !== 'online', source: source.name, error: errors.get(key) || source.gitError || repo.error };
+      for (const repo of repos) {
+        // Listed: the repositories an open terminal is in and, with "all", every one in a project - unless every
+        // project holding it is hidden by the project filter (which never hides one a terminal is in).
+        const open = viaTerminal.has(normPath(repo.root)), holding = getRepoProjects(source.id, repo);
+        if (!open && (scope !== 'all' || !holding[0].real)) continue;
+        const projects = open || scope !== 'all' ? holding : holding.filter(p => !hiddenProjects.has(p.key));
+        if (!projects.length) continue;
+        const key = JSON.stringify([source.id, repo.root]), name = repo.root.split(/[\\/]/).at(-1);
+        if (byProject && projects.every(p => isRepoHidden(p.key, key))) { items.push({ key, name, projects, html: () => '' }); continue; }
+        const node = { key, node: source.id === 'local' ? '' : source.id, repo, offline: source.status !== 'online', source: source.name, error: errors.get(key) || source.gitError || repo.error };
         repositories.set(key, node);
         const offline = source.status !== 'online', disabled = offline || busy.has(key), files = repo.files || [], staged = files.some(f => accepts('staged', f));
         tips.set(key, `${source.name}\n${repo.root}\n${gitText('checked')}: ${repo.at ? new Date(repo.at).toLocaleTimeString() : '—'}${offline || Date.now() - (repo.at || 0) > 150000 ? '\n' + gitText('stale') : ''}`);
-        items.push({ project: getRepoProject(source.id, repo), html: `<details class="git-repository ${offline ? 'offline' : ''}" data-repo="${esc(key)}" data-expand="${esc(getRepoExpandId(key))}" ${isRepoOpen(key) ? 'open' : ''}>
-          <summary><span class="git-chevron">${icon('right')}</span><strong>${esc(repo.root.split(/[\\/]/).at(-1))}</strong><span class="git-repo-branch">${icon('branch')}${esc(repo.error ? '' : gitHead(repo))}</span>${gitAb(repo)}${source.id === 'local' ? '' : `<span class="proj-node ${offline ? 'offline' : 'online'}">${icon('nodes')}${esc(source.name)}</span>`}${offline ? `<span class="git-offline">${icon('alert')}</span>` : ''}<span class="grow"></span><span class="git-hover-actions">${quick('preview', 'eye', 'commit', disabled)}${quick('commit', 'check', 'commitMenu', disabled || !staged || !(drafts.get(key) || '').trim())}${quick('branches', 'branch', 'branches', disabled)}${quick('refresh', 'refresh', 'refresh', disabled)}${more('data-repo-menu', disabled)}</span><span class="git-count">${repo.fileCount ?? files.length}</span></summary>
+        // In a group a copy is folded until opened: its body is drawn once it is (the toggle listener renders again).
+        items.push({ key, name, projects, html: expandId => `<details class="git-repository ${offline ? 'offline' : ''}" data-repo="${esc(key)}" data-expand="${esc(expandId)}" ${isRepoOpen(expandId) ? 'open' : ''}>
+          <summary><span class="git-chevron">${icon('right')}</span><strong>${esc(name)}</strong><span class="git-repo-branch">${icon('branch')}${esc(repo.error ? '' : gitHead(repo))}</span>${gitAb(repo)}${source.id === 'local' ? '' : `<span class="proj-node ${offline ? 'offline' : 'online'}">${icon('nodes')}${esc(source.name)}</span>`}${offline ? `<span class="git-offline">${icon('alert')}</span>` : ''}<span class="grow"></span><span class="git-hover-actions">${quick('preview', 'eye', 'commit', disabled)}${quick('commit', 'check', 'commitMenu', disabled || !staged || !(drafts.get(key) || '').trim())}${quick('branches', 'branch', 'branches', disabled)}${quick('refresh', 'refresh', 'refresh', disabled)}${more('data-repo-menu', disabled)}</span><span class="git-count">${repo.fileCount ?? files.length}</span></summary>${byProject && !isRepoOpen(expandId) ? '' : `
           <div class="git-commit-box"><textarea class="textarea" data-commit-message="${esc(key)}" rows="1" spellcheck="false" aria-label="${esc(gitText('message'))}" placeholder="${esc(gitText('commitHint'))}" ${disabled ? 'disabled' : ''}>${esc(drafts.get(key) || '')}</textarea><div class="git-commit-split"><button type="button" class="btn sm primary git-commit-button" data-repo-action="commit" ${disabled || !staged || !(drafts.get(key) || '').trim() ? 'disabled' : ''}>${icon('check')}<span>${esc(gitText(busy.has(key) ? 'loading' : 'commitMenu'))}</span></button></div></div>
           ${errors.has(key) || repo.error || source.gitError ? `<p class="git-panel-error" role="status">${esc(errors.get(key) || repo.error || source.gitError)}</p>` : ''}
           ${grouped(node, disabled)}${!files.length && !repo.error ? `<p class="git-clean">${esc(gitText('empty'))}</p>` : filter && !files.some(f => f.path.toLocaleLowerCase().includes(filter)) ? `<p class="git-clean">${esc(gitText('noMatches'))}</p>` : ''}
-          ${repo.filesTruncated ? `<p class="git-panel-note">${esc(t('git.panel.truncated'))}</p>` : ''}</details>` });
+          ${repo.filesTruncated ? `<p class="git-panel-note">${esc(t('git.panel.truncated'))}</p>` : ''}`}</details>` });
       }
       rows.push(...getRepoRows(items));
       if (source.git?.missing) rows.push(`<p class="git-panel-note">${esc(source.name)}: ${esc(t('git.panel.missing'))}</p>`);
-      if (source.git?.discoveryTruncated) rows.push(`<p class="git-panel-note">${esc(source.name)}: ${esc(t('git.panel.scanLimit'))}</p>`);
+      if (source.git?.discoveryTruncated) rows.push(`<p class="git-panel-note">${esc(source.name)}: ${esc(getScanLimitNote(source))}</p>`);
     }
     $('gitRepoCount').textContent = repositories.size;
     if (!repositories.has(activeKey)) activeKey = repositories.keys().next().value || '';
@@ -233,12 +279,15 @@
     const html = rows.join('') || `<p class="git-panel-note">${esc(t('git.panel.empty'))}</p>`;
     if (html !== last) {
       const active = document.activeElement, focused = active?.dataset, scroll = list.scrollTop, selection = focused?.commitMessage ? [active.selectionStart, active.selectionEnd] : null;
+      // A repository in several groups is drawn once per group: the focus goes back to the same copy.
+      const copy = active?.closest?.('[data-repo]')?.dataset.expand;
       list.innerHTML = html; last = html; list.scrollTop = scroll;
       for (const box of list.querySelectorAll?.('.git-check[data-mixed]') || []) box.indeterminate = true;
+      const copyEl = (copy && [...list.querySelectorAll('[data-repo]')].find(d => d.dataset.expand === copy)) || list;
       if (focused?.commitMessage) {
-        const input = [...list.querySelectorAll('[data-commit-message]')].find(b => b.dataset.commitMessage === focused.commitMessage);
+        const input = [...copyEl.querySelectorAll('[data-commit-message]')].find(b => b.dataset.commitMessage === focused.commitMessage);
         input?.focus({ preventScroll: true }); if (input && selection) input.setSelectionRange(...selection);
-      } else if (focused?.diffFile) [...list.querySelectorAll('[data-diff-file]')].find(b => b.dataset.diffFile === focused.diffFile && b.dataset.diffRoot === focused.diffRoot && b.dataset.diffNode === focused.diffNode)?.focus({ preventScroll: true });
+      } else if (focused?.diffFile) [...copyEl.querySelectorAll('[data-diff-file]')].find(b => b.dataset.diffFile === focused.diffFile && b.dataset.diffRoot === focused.diffRoot && b.dataset.diffNode === focused.diffNode)?.focus({ preventScroll: true });
     }
     // Outside the compared HTML: the time changes with every check, and the list must not be rebuilt for it.
     for (const summary of list.querySelectorAll?.('[data-repo] > summary') || []) {
@@ -298,10 +347,44 @@
       item('showOutput', 'terminal', () => window.gitWorkflow.openOutput(node.node, node.repo.root), { disabled })
     ];
   }
+  function toggleProject(projectKey) {
+    if (!hiddenProjects.delete(projectKey)) hiddenProjects.add(projectKey);
+    try { localStorage.setItem(HIDDEN_PROJECTS_KEY, JSON.stringify([...hiddenProjects])); } catch {}
+    render();
+  }
+  function toggleRepo(projectKey, repoKey) {
+    const keys = new Set(hiddenRepos[projectKey] || []);
+    if (!keys.delete(repoKey)) keys.add(repoKey);
+    if (keys.size) hiddenRepos[projectKey] = [...keys]; else delete hiddenRepos[projectKey];
+    try { localStorage.setItem(HIDDEN_REPOS_KEY, JSON.stringify(hiddenRepos)); } catch {}
+    render();
+  }
+  // A checkbox per project of the computers listed (named with its computer when it is another one).
+  function projectFilterItems() {
+    const sources = new Map([['local', ''], ...nodes.map(n => [n.id, n.name])]);
+    return (data.projects || []).filter(p => sources.has(p.node || 'local'))
+      .map(p => ({ label: p.node ? `${p.name || p.path} · ${sources.get(p.node)}` : p.name || p.path, key: p.n }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+      .map(p => ({ label: p.label, icon: 'folder', checked: !hiddenProjects.has(p.key), keepOpen: true, run: async () => toggleProject(p.key) }));
+  }
+  // A project group's menu (only with "Group by Project"): its repositories to show or hide in this group.
+  function openProjectMenu(button) {
+    const projectKey = button.dataset.projectMenu;
+    // The list is drawn again with each tick: the menu then returns the focus to the button drawn in place of its own.
+    const toggle = repoKey => {
+      toggleRepo(projectKey, repoKey);
+      const anchor = [...(list.querySelectorAll?.('[data-project-menu]') || [])].find(b => b.dataset.projectMenu === projectKey);
+      if (groupMenu && anchor) groupMenu.returnFocus = anchor;
+    };
+    const repos = (projectRepos.get(projectKey) || []).map(r => ({ label: r.name, icon: 'branch', checked: !isRepoHidden(projectKey, r.key), keepOpen: true, run: async () => toggle(r.key) }));
+    openGroupMenu(button, '', [{ label: gitText('filterRepos'), icon: 'eye', items: repos, disabled: !repos.length }]);
+    groupMenu.classList.add('git-context-menu');
+  }
   function panelMenuItems() {
+    const filterProjects = projectFilterItems();
     const view = [
-      item('asTree', 'folder', () => setTree(!tree), { checked: tree }),
       item('byProject', 'stack', () => setByProject(!byProject), { checked: byProject }),
+      ...(scope === 'all' && filterProjects.length ? [{ label: gitText('filterProjects'), icon: 'eye', items: filterProjects }] : []),
       { label: gitText('viewSort'), icon: 'sliders', items: [
         item('sortPath', 'history', () => setSort('path'), { checked: sortMode === 'path' }),
         item('sortName', 'terminal', () => setSort('name'), { checked: sortMode === 'name' }),
@@ -324,7 +407,12 @@
     openGroupMenu(button, node.repo.root, items);
     groupMenu.classList.add('git-context-menu');
   }
-  list.addEventListener('toggle', e => { if (e.target.dataset.expand) expanded.set(e.target.dataset.expand, e.target.open); }, true);
+  list.addEventListener('toggle', e => {
+    if (!e.target.dataset.expand) return;
+    expanded.set(e.target.dataset.expand, e.target.open);
+    // A repository opened inside a group was drawn without its body.
+    if (e.target.open && e.target.dataset.repo && !e.target.querySelector?.('.git-commit-box')) render();
+  }, true);
   list.addEventListener('input', e => {
     const key = e.target.dataset.commitMessage; if (!key) return;
     drafts.set(key, e.target.value);
@@ -351,6 +439,8 @@
   });
   list.addEventListener('focusin', e => { const repo = e.target.closest('[data-repo]'); if (repo) { activeKey = repo.dataset.repo; window.gitFooter?.render(); } });
   list.addEventListener('click', e => {
+    const projectMenu = e.target.closest('[data-project-menu]');
+    if (projectMenu?.dataset.projectMenu) { e.preventDefault(); e.stopPropagation(); return openProjectMenu(projectMenu); }
     const clickedRepo = e.target.closest('[data-repo]');
     if (clickedRepo) { activeKey = clickedRepo.dataset.repo; window.gitFooter?.render(); }
     const button = e.target.closest('[data-repo-menu], [data-group-menu], [data-file-menu], [data-repo-action], [data-quick]');
@@ -371,12 +461,9 @@
   });
   $('gitFilter').placeholder = gitText('search');
   $('gitFilter').setAttribute('aria-label', gitText('filter'));
-  $('gitTreeToggle').title = gitText('tree');
   $('gitPanelTitle').textContent = gitText('sourceControl');
   $('gitPanelMenu').title = gitText('panelActions');
   $('gitFilter').oninput = e => { filter = e.target.value.toLocaleLowerCase(); render(); };
-  $('gitTreeToggle').setAttribute('aria-pressed', String(tree));
-  $('gitTreeToggle').onclick = () => setTree(!tree);
   $('gitPanelMenu').onclick = () => { openGroupMenu($('gitPanelMenu'), '', panelMenuItems()); groupMenu.classList.add('git-context-menu'); };
   $('gitPanelRefresh').onclick = async () => {
     const button = $('gitPanelRefresh'); button.disabled = true;

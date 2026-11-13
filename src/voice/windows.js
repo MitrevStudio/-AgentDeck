@@ -212,9 +212,11 @@ function createVoiceWindows({ settings, store, queue, listDevices, onReread, onS
     defaultVoice: DEFAULT_VOICE,
     hotkeyDefaults: { ...settings.defaults.hotkeys },
     projectNames: (() => { try { return projectNames() || []; } catch { return []; } })(),
-    rewriteModels: { ...REWRITE_MODELS },
-    devices: await devices()
+    rewriteModels: { ...REWRITE_MODELS }
   }));
+  // Apart from the rest: the first listing starts the recorder and can take seconds, and the window waits for the
+  // page's first fit before it shows - with the microphones in it, it was shown unfitted (the timer above) and resized.
+  handle("voice:settings:devices", settingsOwner, () => devices());
 
   handle("voice:settings:fit", settingsOwner, height => {
     const win = settingsWin;
