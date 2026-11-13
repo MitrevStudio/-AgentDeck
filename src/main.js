@@ -23,6 +23,7 @@ const { createLog } = require("./shared/log-file");
 const promptLaunch = require("./host/prompt-launch");
 const { createOrchestrator } = require("./orchestrator");
 const { createEdgeBar } = require("./edge-bar");
+const { createTaskbarMonitor } = require("./taskbar-monitor");
 const { makeIcon } = require("./app-icon");
 const prefs = require("./prefs");
 const network = require("./network");
@@ -1005,7 +1006,7 @@ const PRELOAD = path.join(__dirname, "preload.js");
 const HOTKEYS = ["Alt+`", "Control+Alt+Space", "Control+Alt+Shift+Space"];
 let hotkey = "";
 const hotkeyLabel = () => keyLabel(hotkey, " + ");
-let managerWin = null, bar = null, tray = null, trayHintShown = false, voice = null, voiceStarting = null;
+let managerWin = null, bar = null, taskbarMonitor = null, tray = null, trayHintShown = false, voice = null, voiceStarting = null;
 // Quitting waits this long at most for voice to put an attempt in flight back to Pending and release its hotkeys.
 const QUIT_GRACE_MS = 3000;
 function showManager() {
@@ -1483,9 +1484,10 @@ function onPrefsChanged(p, keys) {
   if (keys.includes("theme") && managerWin && !managerWin.isDestroyed()) managerWin.setBackgroundColor(prefs.background());
   if (keys.includes("language")) {
     sessions.invalidate(); // fallback session titles are in the old language
-    for (const w of [managerWin, bar?.win, bar?.handleWin]) if (w && !w.isDestroyed()) w.webContents.reload();
+    for (const w of [managerWin, bar?.win, bar?.handleWin, taskbarMonitor?.win]) if (w && !w.isDestroyed()) w.webContents.reload();
   }
   if (keys.includes("edgeHandle")) bar?.syncHandle();
+  if (keys.some(k => k.startsWith("taskbar"))) taskbarMonitor?.sync();
   if (keys.includes("uiScale") && managerWin && !managerWin.isDestroyed()) managerWin.webContents.setZoomFactor(p.uiScale);
   if (keys.includes("autoUpdate")) updater.setAuto(p.autoUpdate);
   buildTrayMenu();
@@ -1511,6 +1513,11 @@ if (!app.requestSingleInstanceLock()) {
     bar = createEdgeBar({
       preload: PRELOAD, onOpenManager: showManager, hotkeyLabel,
       handle: { shown: () => prefs.get().edgeHandle, position: prefs.handlePosition, displayId: prefs.handleDisplayId, savePosition: prefs.setHandlePosition }
+    });
+    taskbarMonitor = createTaskbarMonitor({
+      shown: () => prefs.get().taskbarMonitor,
+      items: () => { const p = prefs.get(); return { net: p.taskbarNet, cpu: p.taskbarCpu, memory: p.taskbarMemory }; },
+      trafficFile: path.join(app.getPath("userData"), "taskbar-traffic.json")
     });
     tray = new Tray(makeIcon(32, 2));
     // A press opens or closes the menu at once (here, where Windows lets it take the focus); held down after opening
@@ -1584,6 +1591,7 @@ if (!app.requestSingleInstanceLock()) {
       .finally(() => app.quit());
   });
   app.on("will-quit", () => {
+    taskbarMonitor?.dispose(); // keeps today's traffic
     orchestrator.stop();
     host.stop();
     links.stop();
