@@ -185,7 +185,7 @@ body:not([data-tab="network"]) [data-for="network"], body:not([data-tab="nodes"]
 /* ---------- footer ---------- */
 .vs-foot {
   position: sticky; bottom: 0; z-index: 2;
-  display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 11px 14px 12px;
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 12px; padding: 11px 14px 12px;
   border-top: 1px solid var(--line); background: var(--panel);
 }
 .vs-foot .btn { min-width: 100px; justify-content: center; }
