@@ -8,15 +8,15 @@
 // it was sent. While the agent works the host refuses it (agentNotReady): it stays, and can be typed into the
 // terminal instead.
 import { t, tn, formatTime, ago, errorText } from "../i18n.js";
-import { esc, KEYS } from "../util.js";
+import { esc, KEYS, buzz } from "../util.js";
 import { icon, iconBtn } from "../icons.js";
 import { header, wireBack, statusChip, metaLine, connNote, wireConn } from "./parts.js";
-import { keyStrip } from "./keys.js";
+import { keyStrip, wireStrip } from "./keys.js";
 
 // [label or icon, what it sends]; a key with an icon is named by its aria label (keys.js).
 const QUICK = [
   ["1", "1"], ["2", "2"], ["3", "3"], ["enter", KEYS.enter], ["Esc", KEYS.esc], ["Ctrl+C", KEYS.ctrlC],
-  ["up", KEYS.up], ["down", KEYS.down], ["left", KEYS.left], ["right", KEYS.right], ["tab", KEYS.tab]
+  ["up", KEYS.up], ["down", KEYS.down], ["left", KEYS.left], ["right", KEYS.right], ["tab", KEYS.tab], ["shiftTab", KEYS.shiftTab]
 ];
 const DRAFTS_KEY = "agentdeck.drafts";
 
@@ -139,10 +139,14 @@ export function render(el, ctx, p) {
     ta.onkeydown = e => {
       if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); dock.querySelector("form").requestSubmit(); }
     };
+    // A key goes straight to the terminal; the phone answers with a short buzz, since nothing else shows it went.
     dock.querySelector(".keys").onclick = e => {
       const b = e.target.closest("[data-k]");
-      if (b && item?.term) store.keys(p.node, item.term, QUICK[b.dataset.k][1]);
+      if (!b || !item?.term) return;
+      store.keys(p.node, item.term, QUICK[b.dataset.k][1]);
+      buzz(8);
     };
+    wireStrip(dock.querySelector(".keys"));
     // Keys keep the reply box's focus (and the keyboard up).
     dock.querySelector(".keys").onpointerdown = e => e.preventDefault();
     const sent = () => { ta.value = ""; setDraft(draftKey, ""); grow(); };

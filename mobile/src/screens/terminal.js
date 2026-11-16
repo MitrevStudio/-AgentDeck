@@ -4,6 +4,9 @@
 // a double tap switches between the whole width and the readable size, a single tap brings up the keyboard. While
 // typing, the cursor is kept in view. Dragging down at the top scrolls back through the terminal's history.
 // Landscape fits more: the whole width gets a bigger font, the readable size shows more columns.
+// A host size too wide to read at its whole width is said in a chip that offers "Fit to phone"; while the history
+// is in view another chip goes back to the end. The key row under the terminal: an arrow repeats while held, Paste
+// sends the clipboard.
 // "Fit to phone" is the one thing that resizes the host's terminal - it takes the size, to what fits here at the
 // readable size - and pressing it again gives the size back; so does leaving (the view detaches, and the host hands
 // the size to the device that had it: docs/SHARED-SESSIONS.md 4.3). Under the title: the computer, the size and
@@ -12,11 +15,11 @@
 // only the X in the header closes the terminal, after a confirmation.
 // The view outlives a lost link: it says so, and draws the screen again once it is attached anew.
 import { Terminal } from "@xterm/xterm";
-import { t } from "../i18n.js";
-import { esc, KEYS } from "../util.js";
+import { t, errorText } from "../i18n.js";
+import { esc, KEYS, buzz } from "../util.js";
 import { icon, iconBtn } from "../icons.js";
 import { header, wireBack, closeAsk } from "./parts.js";
-import { keyStrip } from "./keys.js";
+import { keyStrip, wireStrip } from "./keys.js";
 
 const READ_PX = 12;           // a readable font on a phone; also what "Fit to phone" sizes the host's terminal for
 const MIN_PX = 3, MAX_PX = 30;
@@ -27,12 +30,20 @@ const FONT = '"Cascadia Mono", "JetBrains Mono", "Roboto Mono", "Droid Sans Mono
 // The zoom the user chose last, kept while the app runs: "read" (readable), "fit" (whole width) or a font size.
 let lastZoom = "read";
 
-// [label or icon, what it sends] (keys.js); "Ctrl" is index 2 (setCtrl lights it).
+// [label or icon, what it sends] (keys.js), what an agent's prompt needs most first: about nine show on a small
+// phone, the rest scroll. "ctrl" is the sticky Ctrl (setCtrl lights it), "paste" the clipboard.
 const XKEYS = [
-  ["Esc", KEYS.esc], ["tab", KEYS.tab], ["Ctrl", "ctrl"], ["^C", KEYS.ctrlC],
-  ["up", KEYS.up], ["down", KEYS.down], ["left", KEYS.left], ["right", KEYS.right],
-  ["1", "1"], ["2", "2"], ["3", "3"], ["/", "/"], ["-", "-"], ["~", "~"], ["enter", KEYS.enter]
+  ["Esc", KEYS.esc], ["tab", KEYS.tab], ["shiftTab", KEYS.shiftTab], ["Ctrl", "ctrl"], ["^C", KEYS.ctrlC],
+  ["up", KEYS.up], ["down", KEYS.down], ["left", KEYS.left], ["right", KEYS.right], ["enter", KEYS.enter], ["paste", "paste"],
+  ["1", "1"], ["2", "2"], ["3", "3"], ["/", "/"], ["-", "-"], ["~", "~"], ["|", "|"],
+  ["PgUp", KEYS.pageUp], ["PgDn", KEYS.pageDown], ["Home", KEYS.home], ["End", KEYS.end]
 ];
+const CTRL_KEY = XKEYS.findIndex(k => k[1] === "ctrl");
+// The arrows repeat while held: after HOLD_MS, every REPEAT_MS.
+const REPEAT = new Set([KEYS.up, KEYS.down, KEYS.left, KEYS.right]);
+const HOLD_MS = 380, REPEAT_MS = 70;
+// The whole width of the host's size is offered a fit below this share of the readable font.
+const TOO_SMALL = 0.7;
 
 // The terminal colours from the theme tokens (theme.css), as the desktop's terminals take them.
 function themeFromCss() {
@@ -52,11 +63,14 @@ export function render(el, ctx, p) {
   const store = ctx.store;
   const nodeName = store.nodeName(p.node);
   el.innerHTML = `<div class="term-head"></div>
-    <main class="term-wrap"><div class="term-pan"><div class="term-host"></div></div></main>
+    <div class="term-area"><main class="term-wrap"><div class="term-pan"><div class="term-host"></div></div></main>
+      <button class="term-chip fit" type="button" hidden>${icon("fit")}<span></span></button>
+      <button class="term-chip end" type="button" hidden aria-label="${esc(t("term.toEnd"))}" title="${esc(t("term.toEnd"))}">${icon("down")}</button></div>
     <div class="term-over" hidden></div>
     <textarea class="term-input" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="enter" aria-label="${esc(t("term.keyboard"))}"></textarea>
     ${keyStrip(XKEYS, "xkeys")}`;
   const head = el.querySelector(".term-head"), wrap = el.querySelector(".term-wrap"), pan = el.querySelector(".term-pan"), hostEl = el.querySelector(".term-host"), over = el.querySelector(".term-over");
+  const fitChip = el.querySelector(".term-chip.fit"), endChip = el.querySelector(".term-chip.end");
 
   const term = new Terminal({
     // cursorInactiveStyle: xterm never has the focus here (the keyboard types into .term-input), so its cursor is
@@ -78,31 +92,34 @@ export function render(el, ctx, p) {
   // The terminal has this phone's size: on a host that shares its terminals, the host says so (the driver);
   // on an older one, while the phone's own "Fit to phone" is on.
   const isMine = () => (handle?.shared ? handle.mine : Boolean(fitted));
-  // The other devices that have it open, on the line under the size: an eye and their names, the one whose size the
-  // terminal has marked with the fit glyph (the button's); the whole sentence in its tooltip and label.
+  // The other devices that have it open, after the size and the computer on the line under the title: an eye and
+  // their names (the computer's own window as "its window", not its name once more), the one whose size the terminal
+  // has marked with the fit glyph (the button's); the whole sentence in its tooltip and label.
   function viewersLine() {
     const others = store.viewers(p.node, p.term);
     if (!others.length) return "";
     const driver = handle?.shared && !handle.mine ? handle.driver : null;
-    const names = others.map(v => `${esc(v.name)}${v.id === driver ? icon("fit", "drives") : ""}`).join(", ");
+    const names = others.map(v => `${esc(v.id === p.node ? t("term.itsWindow") : v.name)}${v.id === driver ? icon("fit", "drives") : ""}`).join(", ");
     let label = t("term.viewers", { names: others.map(v => v.name).join(", ") });
     if (driver) label += ` · ${t("term.sizeBy", { cols: hostCols, rows: hostRows, name: store.sizeOwner(p.node, p.term, driver) })}`;
-    return `<span class="term-viewers" role="img" aria-label="${esc(label)}" title="${esc(label)}">${icon("eye")}<span>${names}</span></span>`;
+    return `<i class="sep">·</i><span class="term-viewers" role="img" aria-label="${esc(label)}" title="${esc(label)}">${icon("eye")}${names}</span>`;
   }
   let headSig = "";
   function drawHead() {
     const mine = isMine(), seen = viewersLine();
-    const size = t("term.hostSize", { cols: hostCols, rows: hostRows });
+    const size = `${hostCols}×${hostRows}`;
     // Redrawn only when something it shows changed (the store changes every few seconds).
     const sig = JSON.stringify([size, seen, mine]);
     if (sig === headSig) return;
     headSig = sig;
+    // The size first: a narrow screen cuts the line at its end. Closing ends what runs there, so its button is not
+    // the X that elsewhere only puts a view away.
     head.innerHTML = header(p.title || t("session.terminal"), {
       back: true,
-      sub: `${esc(nodeName)} · ${esc(size)}${seen}`,
+      sub: `<span title="${esc(t("term.hostSize", { cols: hostCols, rows: hostRows }))}">${esc(size)}</span><i class="sep">·</i>${esc(nodeName)}${seen}`,
       actions: iconBtn("fit", t(mine ? "term.unfit" : "term.fit"), 'data-act="fit"', mine ? "on" : "")
         + iconBtn("keyboard", t("term.keyboard"), 'data-act="kb"')
-        + iconBtn("x", t("term.close"), 'data-act="close"', "danger")
+        + iconBtn("power", t("term.close"), 'data-act="close"', "danger")
     });
     wireBack(head, ctx);
     head.querySelector("[data-act='fit']").onclick = toggleFit;
@@ -120,6 +137,16 @@ export function render(el, ctx, p) {
     overState = state;
     over.hidden = !state;
     over.textContent = state === "exited" ? t("term.exited") : state === "reconnecting" ? t("term.reconnecting") : state === "gone" ? t("term.gone") : "";
+    drawChips();
+  }
+  // The chips over the terminal: "160 columns · Fit to phone" while the host's size is not the phone's and its whole
+  // width would be too small to read; the way back to the end while the history is in view.
+  function drawChips() {
+    const tooWide = Boolean(handle) && !closed && !overState && !isMine() && fitPx() < READ_PX * TOO_SMALL;
+    fitChip.hidden = !tooWide;
+    if (tooWide) fitChip.lastElementChild.textContent = t("term.fitChip", { cols: hostCols });
+    const b = term.buffer.active;
+    endChip.hidden = b.viewportY >= b.baseY;
   }
 
   // ---------- the size and the zoom ----------
@@ -156,23 +183,23 @@ export function render(el, ctx, p) {
   }
   const applyZoom = anchor => setFont(targetPx(), anchor);
 
-  // The cursor in view: the bottom-left of the screen when the cursor is there, else just enough to show it.
-  function ensureCursor({ snapLeft = false } = {}) {
+  // The cursor in view, moved just enough to show it. rowOnly: only its line (the view stays at the left edge).
+  function ensureCursor({ rowOnly = false } = {}) {
     const b = term.buffer.active;
     if (b.viewportY !== b.baseY) return; // the user is reading the history
     const c = cell();
     const x = PAD + b.cursorX * c.w, y = PAD + b.cursorY * c.h;
     const W = wrap.clientWidth, H = wrap.clientHeight;
-    if (snapLeft && x + 2 * c.w <= W) wrap.scrollLeft = 0;
-    else if (x < wrap.scrollLeft + c.w || x + 2 * c.w > wrap.scrollLeft + W) wrap.scrollLeft = Math.max(0, x - W * 0.7);
+    if (!rowOnly && (x < wrap.scrollLeft + c.w || x + 2 * c.w > wrap.scrollLeft + W)) wrap.scrollLeft = Math.max(0, x - W * 0.7);
     if (y < wrap.scrollTop) wrap.scrollTop = Math.max(0, y - c.h);
     else if (y + 2 * c.h > wrap.scrollTop + H) wrap.scrollTop = y + 2 * c.h - H;
   }
-  // The bottom of the screen and the cursor: how the view opens.
+  // How the view opens: the cursor's line, from the left edge - where the lines begin - even when the cursor itself
+  // is further right than the screen is wide (a long prompt); typing brings it into view.
   function home() {
     wrap.scrollTop = wrap.scrollHeight;
     wrap.scrollLeft = 0;
-    ensureCursor({ snapLeft: true });
+    ensureCursor({ rowOnly: true });
   }
 
   function setHostSize(cols, rows) {
@@ -183,6 +210,7 @@ export function render(el, ctx, p) {
     if (term.cols !== cols || term.rows !== rows) term.resize(cols, rows);
     applyZoom();
     drawHead();
+    drawChips();
   }
 
   // "Fit to phone": takes the size; when the terminal has the phone's size already, gives it back (the host hands it
@@ -231,7 +259,7 @@ export function render(el, ctx, p) {
     if (!rest) { scrollAcc = 0; return; }
     scrollAcc += rest;
     const h = cell().h, lines = Math.trunc(scrollAcc / h);
-    if (lines) { term.scrollLines(lines); scrollAcc -= lines * h; }
+    if (lines) { term.scrollLines(lines); scrollAcc -= lines * h; drawChips(); }
   }
   function toggleZoomAt(at) {
     const fit = fitPx();
@@ -377,22 +405,57 @@ export function render(el, ctx, p) {
   const keyboardUp = () => document.activeElement === input;
   const showKeyboard = () => { input.focus({ preventScroll: true }); followCursor(); };
   const keysEl = el.querySelector(".xkeys");
-  const setCtrl = on => { ctrl = on; keysEl.querySelector(`[data-k="2"]`).classList.toggle("on", on); };
-  keysEl.onpointerdown = e => e.preventDefault(); // the keyboard stays up
-  keysEl.onclick = e => {
-    const b = e.target.closest("[data-k]");
-    if (!b) return;
-    const v = XKEYS[b.dataset.k][1];
+  const setCtrl = on => { ctrl = on; keysEl.querySelector(`[data-k="${CTRL_KEY}"]`).classList.toggle("on", on); };
+  // The clipboard's text as a paste (xterm brackets it where the program asked for that). A WebView that does not let
+  // the page read the clipboard gets a field to paste into by hand instead.
+  async function paste() {
+    let text = "";
+    try { text = await navigator.clipboard.readText(); } catch {}
+    if (!text) text = await ctx.prompt(t("term.pasteAsk"), "", t("key.paste"), { multiline: true });
+    if (text && !closed) term.paste(text);
+  }
+  const press = v => {
     if (v === "ctrl") return setCtrl(!ctrl);
+    if (v === "paste") return paste();
     send(v);
     if (ctrl) setCtrl(false);
   };
+  // An arrow held down repeats; a drag that scrolls the row (pointercancel) or a lifted finger ends it. The first
+  // press is the click's, as for every key, so scrolling the row by an arrow sends nothing.
+  let holdTimer = 0, repeatTimer = 0, repeated = false;
+  const endHold = () => { clearTimeout(holdTimer); clearInterval(repeatTimer); holdTimer = repeatTimer = 0; };
+  keysEl.onpointerdown = e => {
+    e.preventDefault(); // the keyboard stays up
+    endHold();
+    repeated = false;
+    const v = XKEYS[e.target.closest("[data-k]")?.dataset.k]?.[1];
+    if (!REPEAT.has(v)) return;
+    holdTimer = setTimeout(() => {
+      repeated = true;
+      buzz(8);
+      send(v);
+      repeatTimer = setInterval(() => send(v), REPEAT_MS);
+    }, HOLD_MS);
+  };
+  for (const type of ["pointerup", "pointercancel", "pointerleave"]) keysEl.addEventListener(type, endHold);
+  keysEl.oncontextmenu = e => e.preventDefault(); // a long press is a held key, not a menu
+  keysEl.onclick = e => {
+    const b = e.target.closest("[data-k]");
+    if (!b) return;
+    if (repeated) { repeated = false; return; } // the held key was sent already
+    buzz(8);
+    press(XKEYS[b.dataset.k][1]);
+  };
+  wireStrip(keysEl);
+  fitChip.onclick = toggleFit;
+  endChip.onclick = () => { term.scrollToBottom(); home(); drawChips(); };
+  term.onScroll(drawChips);
 
   // ---------- attach ----------
   // The keyboard coming up, a turn to landscape: the whole width is measured again, the cursor stays in view.
   let lastW = 0;
   const ro = new ResizeObserver(() => {
-    if (wrap.clientWidth !== lastW) { lastW = wrap.clientWidth; applyZoom(); }
+    if (wrap.clientWidth !== lastW) { lastW = wrap.clientWidth; applyZoom(); drawChips(); }
     followCursor();
   });
   ro.observe(wrap);
@@ -403,14 +466,14 @@ export function render(el, ctx, p) {
       handle = await store.attach(p.node, p.term);
     } catch (e) {
       say("gone");
-      if (e?.code && e.code !== "invalidData") over.textContent = `${t("term.gone")} (${e.code})`;
+      if (e?.code && e.code !== "invalidData") over.textContent = `${t("term.gone")} · ${errorText(e)}`;
       return;
     }
     if (closed) return handle.detach();
     setHostSize(handle.cols, handle.rows);
     if (handle.scrollback) term.write(handle.scrollback, () => home());
     else home();
-    offs.push(handle.onData(d => term.write(d, () => { if (Date.now() < typingUntil) ensureCursor(); })));
+    offs.push(handle.onData(d => term.write(d, () => { if (Date.now() < typingUntil) ensureCursor(); drawChips(); })));
     offs.push(handle.onSize(({ cols, rows }) => setHostSize(cols, rows)));
     offs.push(handle.onState(({ online }) => { if (!online) say("reconnecting"); else if (overState === "reconnecting") say(""); }));
     offs.push(handle.onReset(({ scrollback, cols, rows }) => {
@@ -433,6 +496,7 @@ export function render(el, ctx, p) {
 
   return () => {
     closed = true;
+    endHold();
     clearTimeout(tapTimer);
     cancelAnimationFrame(raf);
     ro.disconnect();

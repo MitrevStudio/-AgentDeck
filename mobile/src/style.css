@@ -159,7 +159,7 @@ h1, h2, p { margin: 0; }
 .icon-btn.accent { color: var(--accent); }
 .icon-btn.danger:active { color: var(--danger); }
 .icon-btn.danger:active::before { border-color: var(--danger-line); background: var(--danger-bg); }
-.icon-btn[data-act="stop"] { color: var(--danger); }
+.icon-btn[data-act="stop"], .term-head .icon-btn[data-act="close"] { color: var(--danger); }
 .icon-btn:disabled { opacity: .4; }
 
 /* ---------- tab bar ---------- */
@@ -364,20 +364,36 @@ textarea { resize: none; line-height: 1.35; }
   font: 600 12.5px var(--mono); white-space: nowrap;
 }
 .key .ic { width: 15px; height: 15px; }
+/* More keys to the right: the strip's edge fades (keys.js wireStrip). */
+.keystrip.more { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 30px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 30px), transparent); }
 .key:active > span, .key.on > span { background: var(--accent-deep); border-color: var(--accent); color: var(--on-solid); }
 
 /* ---------- terminal ---------- */
 .screen-terminal .screen { background: var(--term-bg); position: relative; }
 .term-head .top { background: var(--bg); border-bottom: 1px solid var(--line); }
-/* "Also open on: …" under the size line. */
-.term-viewers { display: flex; align-items: center; gap: 4px; margin-top: 1px; }
-.term-viewers .ic { flex: none; width: 12px; height: 12px; }
-.term-viewers > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* "Also open on: …" at the end of the line under the title (after the size and the computer). */
+.term-viewers .ic { width: 12px; height: 12px; margin-right: 4px; vertical-align: -2px; }
 /* After the name of the device whose size the terminal has. */
 .term-viewers .ic.drives { width: 11px; height: 11px; margin: 0 0 0 3px; vertical-align: -1px; color: var(--accent); }
+/* Little room above the terminal (the keyboard is up, or the phone lies on its side): the header is its title only. */
+.kb-open .screen-terminal .top small { display: none; }
+.kb-open .screen-terminal .top { min-height: 44px; padding-top: 0; padding-bottom: 0; }
 /* The terminal keeps the host's size and is panned inside the wrap by script (screens/terminal.js): no native
    scrolling, zooming or scrollbars here. */
-.term-wrap { flex: 1; min-height: 0; position: relative; overflow: hidden; background: var(--term-bg); padding: 4px; touch-action: none; overscroll-behavior: contain; }
+.term-area { flex: 1; min-height: 0; position: relative; display: flex; }
+.term-wrap { flex: 1; min-width: 0; min-height: 0; position: relative; overflow: hidden; background: var(--term-bg); padding: 4px; touch-action: none; overscroll-behavior: contain; }
+/* Chips over the terminal's corners: the offer to fit a size too wide to read (top), the way back to the end of
+   the history (bottom). Drawn small, 44px to the touch. */
+.term-chip {
+  position: absolute; right: 8px; z-index: 4; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; max-width: calc(100% - 16px); padding: 0 11px;
+  border: 1px solid var(--line-3); border-radius: var(--r-pill); background: var(--raised); color: var(--text);
+  font-size: 12.5px; font-weight: 600; white-space: nowrap; box-shadow: var(--shadow-pop);
+}
+.term-chip::after { content: ""; position: absolute; inset: -6px 0; }
+.term-chip:active { border-color: var(--accent); }
+.term-chip .ic { width: 14px; height: 14px; color: var(--accent); }
+.term-chip.fit { top: 8px; }
+.term-chip.end { bottom: 8px; width: 36px; padding: 0; }
 .term-pan { width: max-content; }
 .term-host { display: inline-block; }
 .term-host .xterm { padding: 0; }
@@ -387,6 +403,9 @@ textarea { resize: none; line-height: 1.35; }
 .term-input { position: absolute; left: 0; bottom: 0; width: 2px; height: 2px; min-height: 0; padding: 0; border: 0; opacity: 0; pointer-events: none; font-size: 16px; resize: none; }
 .term-over { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); padding: 9px 14px; border-radius: var(--r-md); background: var(--raised); border: 1px solid var(--line-2); color: var(--muted); box-shadow: var(--shadow-pop); text-align: center; font-size: 13px; }
 .xkeys { padding: 0 6px; background: var(--panel); border-top: 1px solid var(--line); margin: 0; }
+/* Narrower than the session's keys, so about nine show at 360px. */
+.xkeys .key { min-width: 38px; padding: 0 1px; }
+.xkeys .key > span { min-width: 30px; padding: 0 6px; }
 
 /* ---------- new session ---------- */
 .step { gap: 7px; }
@@ -485,6 +504,11 @@ textarea { resize: none; line-height: 1.35; }
   box-shadow: var(--shadow-pop); font-size: 13.5px; pointer-events: none;
 }
 .kb-open .toast { bottom: auto; top: calc(58px + var(--sat)); }
+/* Where there is no tab bar the toast sits lower; over a session, above its reply box; over a terminal at the top,
+   clear of the prompt at the bottom and of the chip in the corner. */
+#app:not(.tabbed) ~ .toast { top: auto; bottom: calc(18px + var(--sab)); }
+#app.screen-session ~ .toast { top: auto; bottom: calc(118px + var(--sab)); }
+#app.screen-terminal ~ .toast { bottom: auto; top: calc(100px + var(--sat)); }
 
 .sheet-backdrop { position: fixed; z-index: 50; inset: 0; background: var(--backdrop); display: flex; align-items: flex-end; justify-content: center; }
 .sheet { width: 100%; max-width: 520px; padding: 18px 16px calc(14px + var(--sab)); background: var(--panel); border-radius: var(--r-xl) var(--r-xl) 0 0; border-top: 1px solid var(--line-2); animation: rise .2s ease-out; }
@@ -497,6 +521,8 @@ textarea { resize: none; line-height: 1.35; }
 /* ---------- landscape and wide screens ---------- */
 @media (orientation: landscape) and (max-height: 500px) {
   .top { min-height: 46px; padding-top: 1px; padding-bottom: 1px; }
+  .screen-terminal .top small { display: none; }
+  .screen-terminal .top { min-height: 44px; padding-top: 0; padding-bottom: 0; }
   .tabbar button { min-height: 44px; flex-direction: row; justify-content: center; gap: 6px; font-size: 12px; padding: 2px 4px; }
   .tab-ic { width: 40px; height: 26px; }
   .status-line { padding-bottom: 4px; min-height: 26px; }

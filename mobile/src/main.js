@@ -73,6 +73,7 @@ function confirmSheet(text, okLabel, { danger = false, extra = [] } = {}) {
       <div class="sheet-actions"><button class="btn" data-v="0">${esc(t("common.cancel"))}</button>
       ${extra.map((label, i) => `<button class="btn" data-v="${i + 2}">${esc(label)}</button>`).join("")}
       <button class="btn ${danger ? "danger-solid" : "primary"}" data-v="1">${esc(okLabel)}</button></div></div>`;
+    const focusOn = danger ? "0" : "1"; // a hardware Enter never confirms what cannot be undone
     const done = v => { el.remove(); resolve(v); };
     el.addEventListener("click", e => {
       const b = e.target.closest("button");
@@ -80,22 +81,24 @@ function confirmSheet(text, okLabel, { danger = false, extra = [] } = {}) {
       else if (e.target === el) done(false);
     });
     document.body.append(el);
-    el.querySelector("[data-v='1']").focus();
+    el.querySelector(`[data-v='${focusOn}']`).focus();
   });
 }
 
-// promptSheet(title, value, okLabel) -> the text, or null when cancelled.
-function promptSheet(title, value, okLabel) {
+// promptSheet(title, value, okLabel, { multiline }) -> the text, or null when cancelled. multiline: a few lines of
+// any length (text to paste into a terminal), kept as typed; else one short line, trimmed.
+function promptSheet(title, value, okLabel, { multiline = false } = {}) {
   return new Promise(resolve => {
     const el = document.createElement("div");
     el.className = "sheet-backdrop";
     el.innerHTML = `<form class="sheet" role="dialog" aria-modal="true"><p>${esc(title)}</p>
-      <input class="sheet-input" maxlength="60" autocomplete="off" value="${esc(value)}">
+      ${multiline ? `<textarea class="sheet-input" rows="4" autocomplete="off" autocapitalize="off" spellcheck="false">${esc(value)}</textarea>`
+        : `<input class="sheet-input" maxlength="60" autocomplete="off" value="${esc(value)}">`}
       <div class="sheet-actions"><button class="btn" type="button" data-v="0">${esc(t("common.cancel"))}</button>
       <button class="btn primary" type="submit">${esc(okLabel)}</button></div></form>`;
-    const input = el.querySelector("input");
+    const input = el.querySelector(".sheet-input");
     const done = v => { el.remove(); resolve(v); };
-    el.querySelector("form").onsubmit = e => { e.preventDefault(); done(input.value.trim() || null); };
+    el.querySelector("form").onsubmit = e => { e.preventDefault(); done((multiline ? input.value : input.value.trim()) || null); };
     el.querySelector("[data-v='0']").onclick = () => done(null);
     el.addEventListener("click", e => { if (e.target === el) done(null); });
     document.body.append(el);

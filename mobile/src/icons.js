@@ -37,6 +37,8 @@ const P = {
   rightArrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
   enter: '<path d="M19 5v7a3 3 0 0 1-3 3H6"/><path d="m10 11-4 4 4 4"/>',
   tab: '<path d="M4 12h12"/><path d="m12 8 4 4-4 4"/><path d="M20 6v12"/>',
+  shiftTab: '<path d="M20 12H8"/><path d="m12 8-4 4 4 4"/><path d="M4 6v12"/>',
+  paste: '<rect x="5" y="4.5" width="14" height="16.5" rx="2"/><path d="M9 4.5V3h6v1.5"/><path d="M9 11h6M9 15h4"/>',
   // The agents' glyphs, coloured per agent by CSS (.glyph-*), as on the desktop.
   agentClaude: '<path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4"/>',
   agentOpenCode: '<path d="m9 7-5 5 5 5"/><path d="m15 7 5 5-5 5"/>',

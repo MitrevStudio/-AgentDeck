@@ -53,7 +53,12 @@ export const KEYS = {
   down: "\x1b[B",
   right: "\x1b[C",
   left: "\x1b[D",
-  backspace: "\x7f"
+  backspace: "\x7f",
+  shiftTab: "\x1b[Z",
+  pageUp: "\x1b[5~",
+  pageDown: "\x1b[6~",
+  home: "\x1b[H",
+  end: "\x1b[F"
 };
 
 export const debounce = (fn, ms) => {
