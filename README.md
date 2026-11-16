@@ -625,7 +625,7 @@ The active profile contains the encryption context associated with its `Local St
 | `workspace.json` | Saved spaces, tabs and pane arrangements |
 | `terminals/` | Metadata for reconnecting to Windows terminal processes |
 | `search.db` | Local transcript full-text index |
-| `usage-cache.json` | Cached usage calculations |
+| `usage-cache.json`, `usage-cache.journal` | Cached usage calculations: the base and the changes since it was written |
 | `voice/records/` | Audio files and per-record JSON metadata |
 | `node/` | Mesh identity and pairing state |
 | `orchestrator/` | Command-centre instructions, MCP configuration and state |

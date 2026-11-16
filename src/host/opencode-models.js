@@ -60,4 +60,4 @@ function createModelLimits({ read = query, now = Date.now } = {}) {
   }
   return { enrich };
 }
-module.exports = { parseModels, createModelLimits };
+module.exports = { parseModels, createModelLimits, TTL };
