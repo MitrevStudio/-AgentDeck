@@ -6,7 +6,7 @@
 // page needs to hear about.
 //
 // events: "changed" (snapshot, keys) - keys lists what changed: "language", "theme", "edgeHandle", "autoUpdate",
-// "newWindow", "sessionsIn", "autoCompact", "autoCompactTokens", "terminalFontSize", "uiScale", "editor".
+// "newWindow", "sessionsIn", "autoCompact", "autoCompactTokens", "terminalFontSize", "uiScale", "editor", "gitScope".
 const { app, nativeTheme } = require("electron");
 const { EventEmitter } = require("node:events");
 const settings = require("./voice/settings");
@@ -25,9 +25,11 @@ const TERMINAL_FONT_SIZES = [11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24];
 const UI_SCALES = [0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5];
 // The editor a file opens in from the Git screens (main.js git:open-file).
 const EDITORS = ["vscode", "idea"];
+// Which repositories the Git panel lists (git-panel.js): those an open terminal is in, or all in the projects.
+const GIT_SCOPES = ["open", "all"];
 
 const prefs = new EventEmitter();
-const state = { language: "bg", theme: themes.DEFAULT, edgeHandle: process.platform === "win32", autoUpdate: true, newWindow: true, sessionsIn: "tabs", autoCompact: false, autoCompactTokens: 150000, dayView: false, notify: null, terminalFontSize: 16, uiScale: 1, editor: "vscode" };
+const state = { language: "bg", theme: themes.DEFAULT, edgeHandle: process.platform === "win32", autoUpdate: true, newWindow: true, sessionsIn: "tabs", autoCompact: false, autoCompactTokens: 150000, dayView: false, notify: null, terminalFontSize: 16, uiScale: 1, editor: "vscode", gitScope: "open" };
 let sessionsInChosen = false; // the user picked where sessions open (settings or the tray menu)
 let autoCompactTokensChosen = false; // the user picked a compaction threshold, so a stale old default is ignored
 let handleX = 0.5; // the edge handle's centre, as a fraction of the display width
@@ -45,7 +47,7 @@ const themeId = () => (themes.get(state.theme) ? state.theme : resolvedTheme());
 const get = () => ({
   ...state, resolvedTheme: resolvedTheme(), themeId: themeId(), dev: !app.isPackaged,
   themes: THEMES.map(id => ({ id, group: themes.get(id)?.group ?? "app" })),
-  terminalFontSizes: TERMINAL_FONT_SIZES, uiScales: UI_SCALES, autoCompactSizes: AUTO_COMPACT_TOKENS, editors: EDITORS,
+  terminalFontSizes: TERMINAL_FONT_SIZES, uiScales: UI_SCALES, autoCompactSizes: AUTO_COMPACT_TOKENS, editors: EDITORS, gitScopes: GIT_SCOPES,
   autoCompactChosen: autoCompactTokensChosen
 });
 // The theme's --bg, for windows until their page paints.
@@ -83,6 +85,7 @@ function load() {
   if (TERMINAL_FONT_SIZES.includes(term.fontSize)) state.terminalFontSize = term.fontSize;
   if (UI_SCALES.includes(ui.scale)) state.uiScale = ui.scale;
   if (EDITORS.includes(ui.editor)) state.editor = ui.editor;
+  if (isObj(root.git) && GIT_SCOPES.includes(root.git.scope)) state.gitScope = root.git.scope;
   state.dayView = isObj(root.dayView) && root.dayView.show === true;
   // null: not saved here yet (main carries the earlier choice over).
   state.notify = isObj(root.notify) && typeof root.notify.on === "boolean" ? root.notify.on : null;
@@ -145,6 +148,10 @@ async function set(patch) {
     state.editor = patch.editor;
     keys.push("editor");
   }
+  if (GIT_SCOPES.includes(patch.gitScope) && patch.gitScope !== state.gitScope) {
+    state.gitScope = patch.gitScope;
+    keys.push("gitScope");
+  }
   if (typeof patch.notify === "boolean" && patch.notify !== state.notify) {
     state.notify = patch.notify;
     keys.push("notify");
@@ -184,6 +191,7 @@ function save() {
       autoCompact: { on: state.autoCompact, tokens: state.autoCompactTokens, chosen: autoCompactTokensChosen || undefined }
     },
     dayView: { show: state.dayView },
+    git: { scope: state.gitScope },
     notify: { on: state.notify !== false },
     hoverEdge: undefined
   }).catch(e => console.error("Could not save settings:", e.message));

@@ -10,7 +10,7 @@ function element(id) {
 const buttons = ['projects', 'git'].map(name => Object.assign(element(name), { dataset: { sideTab: name } }));
 const state = { repos: { one: { root: 'C:/app/backend', branch: 'main', files: [{ path: 'src/<script>.js', status: '.M' }] }, two: { root: 'C:/app/frontend', branch: 'feature', files: [] } } };
 let refreshed = false;
-let menuItems = [], executed = [], opened = [];
+let menuItems = [], executed = [], opened = [], prefsChanged = null;
 const ctx = {
   $: element, document: { querySelectorAll: () => buttons },
   localStorage: { getItem: () => 'git', setItem() {} },
@@ -21,7 +21,7 @@ const ctx = {
   t: k => k, gitText: k => k, esc: s => String(s).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;'),
   icon: () => '', gitHead: r => r.branch, gitCounts: () => [], gitAb: () => '', toast: e => { throw new Error(e); },
   groupMenu: { classList: { add() {} } }, openGroupMenu: (_button, _path, items) => { menuItems = items; },
-  window: { gitWorkflow: { open: (...args) => { opened.push(args); } }, manager: { refreshGit: async force => { refreshed = force; }, getGit: async () => state, gitExecute: async (node, args) => { executed.push({ node, ...args }); } } },
+  window: { prefs: { gitScope: 'open', onChanged: cb => { prefsChanged = cb; } }, gitWorkflow: { open: (...args) => { opened.push(args); } }, manager: { refreshGit: async force => { refreshed = force; }, getGit: async () => state, gitExecute: async (node, args) => { executed.push({ node, ...args }); } } },
 };
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/git-panel.js'), 'utf8'), ctx);
 assert.equal(element('gitRepoCount').textContent, 4, 'same paths on different computers stay separate');
@@ -54,8 +54,8 @@ const check = (scope, checkPath, checked) => element('gitRepositories').listener
 check('folder', 'src', true);
 assert.deepEqual({ ...executed.at(-1) }, { node: '', root: 'C:/app/backend', action: 'stage', files: ['src/<script>.js', 'src/deep/part.js'] }, 'a folder stages what is not staged in whole');
 executed.length = 0;
-// The folder view: the button above the list sets it for every repository, a repository's own menu for that one. Folders
-// start open, a chain of single folders shares a row, and a filter opens what the user folded.
+// The folder view is a repository's own, set in its menu (the panel has no switch for all of them). Folders start open,
+// a chain of single folders shares a row, and a filter opens what the user folded.
 const repoMenuButton = { dataset: { repoMenu: '' }, closest: selector => selector === '[data-repo]' ? { dataset: { repo: repoKey } } : null };
 const openRepoMenu = () => element('gitRepositories').listeners.click({ target: { closest: () => repoMenuButton }, preventDefault() {}, stopPropagation() {} });
 openRepoMenu();
@@ -63,8 +63,7 @@ assert.equal(menuItems[0].label, 'asTree');
 assert.equal(menuItems[0].checked, false);
 assert.doesNotMatch(menuItems.map(x => x.label).join(), /(commit|stageAll|unstageAll|branches|sync|history)/, 'nothing the row has a button for');
 assert.doesNotMatch(element('gitRepositories').innerHTML, /git-check-folder/);
-element('gitTreeToggle').onclick();
-assert.equal(element('gitTreeToggle').attributes['aria-pressed'], 'true');
+menuItems[0].run();
 assert.match(element('gitRepositories').innerHTML, /<details class="git-folder git-check-folder" data-expand="[^"]*" open>/, 'folders start open');
 assert.match(element('gitRepositories').innerHTML, /data-check="folder" data-check-path="src\/deep"/);
 const folderId = JSON.stringify([repoKey, 'folder', 'src']);
@@ -74,18 +73,11 @@ assert.match(element('gitRepositories').innerHTML, /folder&quot;,&quot;src&quot;
 element('gitFilter').oninput({ target: { value: 'script' } });
 assert.match(element('gitRepositories').innerHTML, /folder&quot;,&quot;src&quot;\]" open><summary>/, 'a filter opens the folders that hold what it found');
 element('gitFilter').oninput({ target: { value: '' } });
-openRepoMenu();
-assert.equal(menuItems[0].checked, true, 'the repository follows the button');
-menuItems[0].run();
-assert.doesNotMatch(element('gitRepositories').innerHTML.split('C:/app/frontend')[0], /git-check-folder/, 'one repository apart from the others');
 element('gitPanelMenu').onclick();
-assert.equal(menuItems[0].label, 'asTree');
+assert.ok(!menuItems.some(x => x.label === 'asTree'), 'no folder view for all repositories');
+openRepoMenu();
 assert.equal(menuItems[0].checked, true);
 menuItems[0].run();
-element('gitPanelMenu').onclick();
-menuItems[0].run();
-assert.match(element('gitRepositories').innerHTML.split('C:/app/frontend')[0], /git-check-folder/, 'the view menu sets all of them, the one that differed too');
-element('gitTreeToggle').onclick();
 assert.doesNotMatch(element('gitRepositories').innerHTML, /git-check-folder/);
 assert.match(element('gitRepositories').innerHTML, /git-repository offline/);
 assert.doesNotMatch(element('gitRepositories').innerHTML, /<script>/);
@@ -162,7 +154,7 @@ element('gitPanelRefresh').onclick().then(async () => {
   assert.equal(saved.get('agentdeck.gitByProject'), '1');
   assert.equal(html.match(/git-project-head/g).length, 1, 'the worktree joins the project of its main checkout');
   assert.doesNotMatch(html, /class="git-repository[^>]*\sopen>/, 'inside a project group the repositories start folded');
-  assert.match(html, /<details class="git-project" data-expand="project:c:\/app" ><summary class="git-project-head"><span class="git-chevron"><\/span><span>App<\/span><span class="git-count">3</);
+  assert.match(html, /<details class="git-project" data-expand="project:c:\/app" ><summary class="git-project-head"><span class="git-chevron"><\/span><span>App<\/span><span class="grow"><\/span><span class="git-hover-actions"><button [^>]*data-project-menu="c:\/app"[^>]*><\/button><\/span><span class="git-count">3</);
   // A worktree that is a project of its own, its main checkout in none: under its own project, not a made-up group.
   ctx.data.projects.push({ n: 'c:/feature-wt', name: 'Feature', path: 'C:/feature-wt' });
   state.repos.four = { root: 'C:/feature-wt', mainRoot: 'C:/elsewhere/main', branch: 'feature', files: [] };
@@ -170,10 +162,96 @@ element('gitPanelRefresh').onclick().then(async () => {
   ctx.ws.tabs.fw = { root: { term: 'f' } };
   ctx.window.gitPanel.render();
   assert.match(element('gitRepositories').innerHTML, /data-expand="project:c:\/feature-wt" ><summary class="git-project-head"><span class="git-chevron"><\/span><span>Feature</);
+  assert.doesNotMatch(element('gitRepositories').innerHTML, /data-project-menu="c:\/elsewhere/, 'a made-up group has no filter menu');
   assert.doesNotMatch(element('gitRepositories').innerHTML, /project:c:\/elsewhere/);
   // A project group starts folded; opened, it stays open on the next render.
   element('gitRepositories').listeners.toggle({ target: { dataset: { expand: 'project:c:/app' }, open: true } });
   ctx.window.gitPanel.render();
   assert.match(element('gitRepositories').innerHTML, /<details class="git-project" data-expand="project:c:\/app" open>/);
-  console.log('Git sidebar tabs, local/remote identity, offline state, filename escaping, checkboxes, the folder view and refresh passed');
+  // A repository is in the group of every project holding it, each copy folded and opened on its own.
+  const esc = ctx.esc, plain = v => JSON.parse(JSON.stringify(v));
+  ctx.data.projects.push({ n: 'c:/app/backend', name: 'Backend', path: 'C:/app/backend' });
+  ctx.window.gitPanel.render();
+  let list = element('gitRepositories').innerHTML;
+  const backendKey = JSON.stringify(['local', 'C:/app/backend']), frontendKey = JSON.stringify(['local', 'C:/app/frontend']);
+  const expandOf = (project, key) => esc(`in-project:${project}:${key}`);
+  assert.ok(list.includes(`data-expand="${expandOf('c:/app', backendKey)}"`), 'backend under App');
+  assert.ok(list.includes(`data-expand="${expandOf('c:/app/backend', backendKey)}"`), 'backend under Backend too');
+  assert.match(list, /data-expand="project:c:\/app\/backend"/);
+  assert.equal(element('gitRepoCount').textContent, 4, 'a repository in two groups counts once');
+  // A folded copy in a group is drawn without its body; opened, it gets it.
+  const copyOf = (html, id) => html.split(`data-expand="${esc(id)}"`)[1].split('</details>')[0];
+  const backendCopy = `in-project:c:/app/backend:${backendKey}`;
+  assert.doesNotMatch(copyOf(list, backendCopy), /git-commit-box/);
+  element('gitRepositories').listeners.toggle({ target: { dataset: { expand: backendCopy, repo: backendKey }, open: true, querySelector: () => null } });
+  assert.match(copyOf(element('gitRepositories').innerHTML, backendCopy), /git-commit-box/);
+  element('gitRepositories').listeners.toggle({ target: { dataset: { expand: backendCopy, repo: backendKey }, open: false } });
+  // A group of a single repository has no filter menu.
+  assert.doesNotMatch(list, /data-project-menu="c:\/feature-wt"/);
+  assert.match(list, /data-project-menu="c:\/app"/);
+  // A group's menu hides its repositories from that group only; the menu stays open while ticking.
+  const openProjectMenu = projectMenu => element('gitRepositories').listeners.click({ target: { closest: s => (s === '[data-project-menu]' ? { dataset: { projectMenu } } : null) }, preventDefault() {}, stopPropagation() {} });
+  openProjectMenu('c:/app');
+  assert.deepEqual(plain(menuItems.map(x => x.label)), ['filterRepos']);
+  menuItems = menuItems[0].items;
+  assert.deepEqual(plain(menuItems.map(x => [x.label, x.checked, x.keepOpen])), [['app-wt', true, true], ['backend', true, true], ['frontend', true, true]]);
+  await menuItems.find(x => x.label === 'backend').run();
+  await menuItems.find(x => x.label === 'frontend').run();
+  list = element('gitRepositories').innerHTML;
+  assert.deepEqual(JSON.parse(saved.get('agentdeck.gitHiddenRepos')), { 'c:/app': [backendKey, frontendKey] });
+  assert.ok(!list.includes(`data-expand="${expandOf('c:/app', backendKey)}"`), 'hidden from App');
+  assert.ok(list.includes(`data-expand="${expandOf('c:/app/backend', backendKey)}"`), 'still under Backend');
+  assert.ok(!list.includes(`data-repo="${esc(frontendKey)}"`), 'frontend is in no other group, so it is gone');
+  assert.match(list, /data-project-menu="c:\/app"[^>]*><\/button><\/span><span class="git-count">1\/3</, 'the group counts shown of all');
+  assert.equal(element('gitRepoCount').textContent, 3);
+  openProjectMenu('c:/app');
+  menuItems = menuItems[0].items;
+  assert.equal(menuItems.find(x => x.label === 'frontend').checked, false);
+  await menuItems.find(x => x.label === 'frontend').run();
+  assert.deepEqual(JSON.parse(saved.get('agentdeck.gitHiddenRepos')), { 'c:/app': [backendKey] });
+  await menuItems.find(x => x.label === 'backend').run();
+  assert.equal(saved.get('agentdeck.gitHiddenRepos'), '{}', 'nothing is kept for a group with nothing hidden');
+  // "Only with an open terminal": a repository no terminal is in is not listed, and there is no project filter.
+  ctx.ws.tabs = {};
+  ctx.ws.terminals = [];
+  ctx.window.gitPanel.render();
+  assert.equal(element('gitRepoCount').textContent, 0);
+  element('gitPanelMenu').onclick();
+  assert.ok(!menuItems.some(x => x.label === 'filterProjects'));
+  // "All in the projects" (Settings > Git): every repository in a project, with a terminal or not; one outside the
+  // projects is not. A change of the setting draws the panel again.
+  state.repos.five = { root: 'C:/other/old', branch: 'main', files: [] };
+  prefsChanged({ gitScope: 'all' });
+  list = element('gitRepositories').innerHTML;
+  assert.equal(element('gitRepoCount').textContent, 7, 'backend, frontend, the worktree of backend and Feature here; the first three on REMOTE');
+  assert.ok(list.includes(`data-repo="${esc(frontendKey)}"`));
+  assert.doesNotMatch(list, /C:\/other\/old/);
+  // The project filter: a repository goes when every project holding it is hidden.
+  element('gitPanelMenu').onclick();
+  const projectFilter = menuItems.find(x => x.label === 'filterProjects').items;
+  assert.deepEqual(plain(projectFilter.map(x => [x.label, x.checked, x.keepOpen])), [['App', true, true], ['Backend', true, true], ['C:/app · REMOTE', true, true], ['Feature', true, true]]);
+  await projectFilter.find(x => x.label === 'App').run();
+  assert.deepEqual(JSON.parse(saved.get('agentdeck.gitHiddenProjects')), ['c:/app']);
+  list = element('gitRepositories').innerHTML;
+  assert.doesNotMatch(list, /data-expand="project:c:\/app"/, 'the hidden project has no group');
+  assert.ok(list.includes(`data-expand="${expandOf('c:/app/backend', backendKey)}"`), 'backend stays under Backend');
+  assert.ok(!list.includes(`data-repo="${esc(frontendKey)}"`), 'frontend was only in App');
+  // A repository a terminal is in stays, whatever the filter.
+  ctx.ws.tabs = { f: { root: { term: 't' } } };
+  ctx.ws.terminals = [{ id: 't', cwd: 'C:/app/frontend' }];
+  ctx.window.gitPanel.render();
+  assert.ok(element('gitRepositories').innerHTML.includes(`data-repo="${esc(frontendKey)}"`));
+  ctx.ws.tabs = {};
+  ctx.ws.terminals = [];
+  await projectFilter.find(x => x.label === 'App').run();
+  assert.deepEqual(JSON.parse(saved.get('agentdeck.gitHiddenProjects')), []);
+  // The scan-limit note names the projects whose budget ran out; an older computer's bare flag keeps the plain note.
+  state.discoveryTruncated = true;
+  state.discoveryTruncatedIn = ['C:/app'];
+  ctx.window.gitPanel.render();
+  assert.match(element('gitRepositories').innerHTML, /git\.panel\.scanLimitIn/);
+  delete state.discoveryTruncatedIn;
+  ctx.window.gitPanel.render();
+  assert.match(element('gitRepositories').innerHTML, /git\.panel\.scanLimit</);
+  console.log('Git sidebar tabs, local/remote identity, offline state, filename escaping, checkboxes, the folder view, refresh, scopes and filters passed');
 }).catch(e => { console.error(e); process.exitCode = 1; });

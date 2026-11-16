@@ -52,9 +52,6 @@
 #gitFilterBar { flex: none; display: flex; align-items: center; gap: 4px; padding: 0 8px 6px 12px; }
 #gitFilter { flex: 1; min-width: 0; height: 28px; padding: 0 9px; border-radius: var(--r-sm); font-size: 12.5px; }
 #gitFilter::-webkit-search-cancel-button { display: none; }
-#gitTreeToggle { width: 26px; height: 26px; }
-#gitTreeToggle .i { width: 15px; height: 15px; }
-#gitTreeToggle[aria-pressed="true"] { color: var(--accent); background: var(--accent-weak); }
 .git-repository { margin: 0 0 6px; }
 .git-repository + .git-repository { padding-top: 6px; border-top: 1px solid var(--line); }
 .git-repository.offline > summary strong, .git-repository.offline .git-repo-branch { color: var(--faint); }
@@ -81,7 +78,8 @@ details[open] > summary > .git-chevron { transform: rotate(90deg); }
   opacity: 0; pointer-events: none; transition: opacity var(--dur-fast);
 }
 .git-repository > summary:hover > .git-hover-actions, .git-repository > summary:focus-within > .git-hover-actions,
-.git-file-group > summary:hover > .git-hover-actions, .git-file-group > summary:focus-within > .git-hover-actions { opacity: 1; pointer-events: auto; }
+.git-file-group > summary:hover > .git-hover-actions, .git-file-group > summary:focus-within > .git-hover-actions,
+.git-project-head:hover > .git-hover-actions, .git-project-head:focus-within > .git-hover-actions { opacity: 1; pointer-events: auto; }
 .git-quick, .git-more { width: 24px; height: 24px; border-radius: var(--r-xs); }
 .git-quick .i, .git-more .i { width: 15px; height: 15px; }
 .git-quick:disabled, .git-more:disabled { opacity: .35; }
@@ -271,3 +269,5 @@ details[open] > summary > .git-chevron { transform: rotate(90deg); }
 .git-project-head::-webkit-details-marker { display: none; }
 .git-project-head:hover { color: var(--text); }
 .git-project-head .git-count { margin-left: auto; }
+/* In line before the count (shown/all can be wide), not over the row's end as on a repository. */
+.git-project-head > .git-hover-actions { position: static; transform: none; padding-left: 0; background: none; }

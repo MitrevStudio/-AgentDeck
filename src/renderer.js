@@ -1008,6 +1008,14 @@ function renderMenuLayer(menu, items) {
     const x = items[Number(button.dataset.i)];
     if (!x || x.disabled) return;
     if (x.items) return openSubMenu(menu, button, x.items, true);
+    // A checkbox that keeps its menu open, so several can be ticked in a row (a filter's list): it is toggled in place.
+    if (x.keepOpen) {
+      Promise.resolve().then(() => x.run()).catch(err => toast(err.message, true));
+      x.checked = !x.checked;
+      renderMenuLayer(menu, items);
+      menu.querySelector(`[data-i="${button.dataset.i}"]`)?.focus();
+      return;
+    }
     closeGroupMenu();
     Promise.resolve().then(() => x.run()).catch(err => toast(err.message, true));
   };
