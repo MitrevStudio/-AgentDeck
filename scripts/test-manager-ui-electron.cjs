@@ -151,6 +151,15 @@ app.whenReady().then(async () => {
   assert.equal(await evaluate("document.getAnimations().filter(a => a.animationName === 'spin').every(a => a.startTime === 0)"), true, 'spinners turn in step');
   assert.equal(await evaluate('document.title.startsWith("(1!)")'), true);
 
+  // A session's process figures (host/proc-stats.js) are put in place: the row and its spinner stay as they were.
+  await evaluate("fx.live = fx.live.map(l => l.id === 's2' ? { ...l, proc: { cpu: 2.345, mem: 400 * 1048576, memShare: 1.25 } } : l)"); await poll(); await settle();
+  assert.equal(await evaluate("document.querySelector('#agents .agent[data-key=\"Claude:s2\"] .agent-proc').textContent"), ' · CPU 2.3% · RAM 1.3%');
+  assert.match(await evaluate("document.querySelector('#agents .agent[data-key=\"Claude:s2\"] .agent-proc').title"), /400 MB/);
+  assert.equal(await evaluate('keptSpinner.isConnected'), true, 'new figures do not redraw the row');
+  await rescan(); await settle();
+  assert.equal(await evaluate("document.querySelector('#agents .agent[data-key=\"Claude:s2\"] .agent-proc').textContent"), ' · CPU 2.3% · RAM 1.3%', 'the figures survive a redraw');
+  await capture('agents-proc');
+
   // ---------- menus stay open across redraws ----------
   await click('#projects .proj[data-path="C:/work/docs"] [data-action=project-menu]');
   assert.equal(await evaluate("document.querySelectorAll('.menu').length"), 1);

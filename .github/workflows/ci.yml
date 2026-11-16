@@ -20,6 +20,7 @@ jobs:
       - run: npm run test:git-ui
       - run: node scripts/test-remote-state.js
       - run: node scripts/test-resources.js
+      - run: node scripts/test-proc-stats.js
       - run: node scripts/test-codex-live.js
       - run: npm run test:opencode-live
       - run: node scripts/test-project-sessions.js
@@ -57,6 +58,7 @@ jobs:
       - run: npm run test:git
       - run: node scripts/test-remote-state.js
       - run: node scripts/test-resources.js
+      - run: node scripts/test-proc-stats.js
       - run: node scripts/test-codex-live.js
       - run: npm run test:opencode-live
       - run: node scripts/test-project-sessions.js
