@@ -6,8 +6,7 @@
 // page needs to hear about.
 //
 // events: "changed" (snapshot, keys) - keys lists what changed: "language", "theme", "edgeHandle", "autoUpdate",
-// "newWindow", "sessionsIn", "autoCompact", "autoCompactTokens", "terminalFontSize", "uiScale", "editor",
-// "taskbarMonitor", "taskbarNet", "taskbarCpu", "taskbarMemory".
+// "newWindow", "sessionsIn", "autoCompact", "autoCompactTokens", "terminalFontSize", "uiScale", "editor".
 const { app, nativeTheme } = require("electron");
 const { EventEmitter } = require("node:events");
 const settings = require("./voice/settings");
@@ -28,12 +27,16 @@ const UI_SCALES = [0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5];
 const EDITORS = ["vscode", "idea"];
 
 const prefs = new EventEmitter();
-const state = { language: "bg", theme: themes.DEFAULT, edgeHandle: process.platform === "win32", autoUpdate: true, newWindow: true, sessionsIn: "tabs", autoCompact: false, autoCompactTokens: 150000, dayView: false, notify: null, terminalFontSize: 16, uiScale: 1, editor: "vscode", taskbarMonitor: false, taskbarNet: false, taskbarCpu: false, taskbarMemory: false };
+const state = { language: "bg", theme: themes.DEFAULT, edgeHandle: process.platform === "win32", autoUpdate: true, newWindow: true, sessionsIn: "tabs", autoCompact: false, autoCompactTokens: 150000, dayView: false, notify: null, terminalFontSize: 16, uiScale: 1, editor: "vscode" };
 let sessionsInChosen = false; // the user picked where sessions open (settings or the tray menu)
 let autoCompactTokensChosen = false; // the user picked a compaction threshold, so a stale old default is ignored
 let handleX = 0.5; // the edge handle's centre, as a fraction of the display width
 let handleDisplay = null; // the id of the display it is on (null: the primary one)
 const fraction = v => (typeof v === "number" && v >= 0 && v <= 1 ? v : null);
+// The strip on the Windows taskbar (taskbar-monitor.js) and what it shows - traffic, CPU, memory: nothing until asked
+// for. Each is a key of "changed" too.
+const TASKBAR = ["taskbarMonitor", "taskbarNet", "taskbarCpu", "taskbarMemory"];
+for (const key of TASKBAR) state[key] = false;
 
 // themeSource also gives native title bars and dialogs the chosen look: the theme's base (dark or light), or
 // "system", which follows Windows. It takes nothing else.
@@ -86,7 +89,6 @@ function load() {
   if (UI_SCALES.includes(ui.scale)) state.uiScale = ui.scale;
   if (EDITORS.includes(ui.editor)) state.editor = ui.editor;
   state.dayView = isObj(root.dayView) && root.dayView.show === true;
-  // The strip on the Windows taskbar (taskbar-monitor.js) and what it shows: nothing until asked for.
   const taskbar = isObj(root.taskbarMonitor) ? root.taskbarMonitor : {};
   state.taskbarMonitor = process.platform === "win32" && taskbar.show === true;
   state.taskbarNet = taskbar.net === true;
@@ -157,7 +159,7 @@ async function set(patch) {
     state.notify = patch.notify;
     keys.push("notify");
   }
-  for (const key of ["taskbarMonitor", "taskbarNet", "taskbarCpu", "taskbarMemory"]) {
+  for (const key of TASKBAR) {
     if (typeof patch[key] === "boolean" && patch[key] !== state[key]) {
       state[key] = patch[key];
       keys.push(key);
@@ -198,8 +200,8 @@ function save() {
       autoCompact: { on: state.autoCompact, tokens: state.autoCompactTokens, chosen: autoCompactTokensChosen || undefined }
     },
     dayView: { show: state.dayView },
-    taskbarMonitor: { show: state.taskbarMonitor, net: state.taskbarNet, cpu: state.taskbarCpu, memory: state.taskbarMemory },
     notify: { on: state.notify !== false },
+    taskbarMonitor: { show: state.taskbarMonitor, net: state.taskbarNet, cpu: state.taskbarCpu, memory: state.taskbarMemory },
     hoverEdge: undefined
   }).catch(e => console.error("Could not save settings:", e.message));
 }
