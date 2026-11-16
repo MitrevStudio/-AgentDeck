@@ -93,9 +93,9 @@ async function main() {
     const settings = JSON.parse(fs.readFileSync(args[1], 'utf8'));
     assert.equal(settings.statusLine.padding, 2);
     let output;
+    // PowerShell is always there on Windows; scripts/test-claude-statusline.js runs the command in every shell.
     if (process.platform === 'win32') {
-      const encoded = settings.statusLine.command.split(' ').at(-1);
-      output = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], { input: JSON.stringify(data), encoding: 'utf8', windowsHide: true });
+      output = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', settings.statusLine.command], { input: JSON.stringify(data), encoding: 'utf8', windowsHide: true });
     } else output = execFileSync('/bin/sh', ['-c', settings.statusLine.command], { input: JSON.stringify(data), encoding: 'utf8' });
     assert.equal(output, 'ORIGINAL:fixture-session');
     assert.equal(readSnapshots(dir).get('Claude:fixture-session').tokens, 100);

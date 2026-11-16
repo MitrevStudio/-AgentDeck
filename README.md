@@ -109,7 +109,7 @@ Context indicators show the last reported context separately from accumulated us
 
 Local verification baseline (2026-11-09): Claude Code **2.1.282**, Codex CLI **0.163.0**, OpenCode **2.2.6**. These are tested versions, not permanent version pins or a promise of support for older releases.
 
-Run `npm run test:context` to check context accounting, compaction, subagent isolation, status-line preservation, model limits, and OpenCode 2 session discovery. Existing Claude terminals need to be resumed through AgentDeck to receive the status-line collector; transcript-based estimates remain available meanwhile.
+Run `npm run test:context` to check context accounting, compaction, subagent isolation, status-line preservation, model limits, and OpenCode 2 session discovery. Run `npm run test:statusline` to run the status-line command in the shells Claude Code uses (bash, PowerShell). One command line serves both shells and starts the collector directly, with no shell in between; the existing display command then runs in the kind of shell Claude Code itself would use for it. Existing Claude terminals need to be resumed through AgentDeck to receive the status-line collector; transcript-based estimates remain available meanwhile.
 
 ### Other requirements
 
