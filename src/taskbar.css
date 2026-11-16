@@ -1,0 +1,18 @@
+/* The taskbar monitor: two lines of small text on the Windows taskbar. The window is transparent, so
+   the text takes the taskbar's own contrast: light on a dark taskbar, dark on a light one (taskbar.js sets it). */
+:root { --tb-text: #fff; }
+:root[data-taskbar="light"] { --tb-text: #111; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; user-select: none; cursor: default; }
+body { font: 12px/15px "Segoe UI Variable Text", "Segoe UI", sans-serif; color: var(--tb-text); font-variant-numeric: tabular-nums; }
+.strip { display: inline-flex; align-items: center; height: 100%; white-space: nowrap; }
+.device { display: flex; align-items: center; gap: 12px; height: 100%; padding: 0 8px; }
+.col { display: grid; grid-template-rows: 15px 15px; flex: none; }
+.row { display: flex; gap: 10px; }
+.cell { display: flex; gap: 4px; flex: auto; }
+.cell .value { margin-left: auto; text-align: right; }
+.net .value { min-width: 66px; }
+.use .value { min-width: 34px; }
+.col.one { grid-template-rows: 15px; }
+.hot { color: #ff6b6b; font-weight: 600; }
+:root[data-taskbar="light"] .hot { color: #c62828; }

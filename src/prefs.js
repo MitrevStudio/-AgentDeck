@@ -35,6 +35,10 @@ let autoCompactTokensChosen = false; // the user picked a compaction threshold, 
 let handleX = 0.5; // the edge handle's centre, as a fraction of the display width
 let handleDisplay = null; // the id of the display it is on (null: the primary one)
 const fraction = v => (typeof v === "number" && v >= 0 && v <= 1 ? v : null);
+// The strip on the Windows taskbar (taskbar-monitor.js) and what it shows - traffic, CPU, memory: nothing until asked
+// for. Each is a key of "changed" too.
+const TASKBAR = ["taskbarMonitor", "taskbarNet", "taskbarCpu", "taskbarMemory"];
+for (const key of TASKBAR) state[key] = false;
 
 // themeSource also gives native title bars and dialogs the chosen look: the theme's base (dark or light), or
 // "system", which follows Windows. It takes nothing else.
@@ -46,6 +50,7 @@ const themeId = () => (themes.get(state.theme) ? state.theme : resolvedTheme());
 // With the choices the pages offer (the lists above), so none keeps a copy of them.
 const get = () => ({
   ...state, resolvedTheme: resolvedTheme(), themeId: themeId(), dev: !app.isPackaged,
+  windows: process.platform === "win32",
   themes: THEMES.map(id => ({ id, group: themes.get(id)?.group ?? "app" })),
   terminalFontSizes: TERMINAL_FONT_SIZES, uiScales: UI_SCALES, autoCompactSizes: AUTO_COMPACT_TOKENS, editors: EDITORS, gitScopes: GIT_SCOPES,
   autoCompactChosen: autoCompactTokensChosen
@@ -87,6 +92,11 @@ function load() {
   if (EDITORS.includes(ui.editor)) state.editor = ui.editor;
   if (isObj(root.git) && GIT_SCOPES.includes(root.git.scope)) state.gitScope = root.git.scope;
   state.dayView = isObj(root.dayView) && root.dayView.show === true;
+  const taskbar = isObj(root.taskbarMonitor) ? root.taskbarMonitor : {};
+  state.taskbarMonitor = process.platform === "win32" && taskbar.show === true;
+  state.taskbarNet = taskbar.net === true;
+  state.taskbarCpu = taskbar.cpu === true;
+  state.taskbarMemory = taskbar.memory === true;
   // null: not saved here yet (main carries the earlier choice over).
   state.notify = isObj(root.notify) && typeof root.notify.on === "boolean" ? root.notify.on : null;
   i18n.setLanguage(state.language, { dev: !app.isPackaged });
@@ -156,6 +166,12 @@ async function set(patch) {
     state.notify = patch.notify;
     keys.push("notify");
   }
+  for (const key of TASKBAR) {
+    if (typeof patch[key] === "boolean" && patch[key] !== state[key]) {
+      state[key] = patch[key];
+      keys.push(key);
+    }
+  }
   if (typeof patch.dayView === "boolean" && patch.dayView !== state.dayView) {
     state.dayView = patch.dayView;
     keys.push("dayView");
@@ -193,6 +209,7 @@ function save() {
     dayView: { show: state.dayView },
     git: { scope: state.gitScope },
     notify: { on: state.notify !== false },
+    taskbarMonitor: { show: state.taskbarMonitor, net: state.taskbarNet, cpu: state.taskbarCpu, memory: state.taskbarMemory },
     hoverEdge: undefined
   }).catch(e => console.error("Could not save settings:", e.message));
 }

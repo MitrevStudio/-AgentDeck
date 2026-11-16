@@ -333,6 +333,7 @@ function renderAgents(v) {
     html += agentHtml(s, l, v.toks);
   }
   patchChildren($("agents"), html);
+  fillProcTexts($("agents"), key => allLive.get(key));
 }
 // What a row calls the project of a folder: the deepest project in the list that holds it (ownerProject), or as its
 // computer lists it, else the folder's name.
@@ -350,7 +351,7 @@ function agentHtml(s, l, toks) {
   // One in a terminal of AgentDeck can be dragged onto a pane (workspace-ui.js); one outside cannot come here.
   const drag = getAgentTerm(s) ? 'draggable="true"' : "";
   return `<div class="agent ${here ? "here" : ""}" ${getPaneMark(tab?.id)} data-key="${esc(key)}" tabindex="0" ${drag} title="${esc(`${s.title}\n${s.cwd}${s.node ? `\n${s.nodeName || ""}` : ""}`)}">${agentMark(s.agent)}
-      <div class="agent-main"><div class="agent-title">${hl(s.title, toks)}</div><div class="agent-sub">${esc(project)}${where}</div></div>
+      <div class="agent-main"><div class="agent-title">${hl(s.title, toks)}</div><div class="agent-sub"><span class="agent-where">${esc(project)}${where}</span>${procMark(l)}</div></div>
       ${statusMark(l, isLoading(key, l))}
       <span class="agent-tools"><button class="icon-btn" data-action="agent-menu" title="${esc(t("manager.agents.more"))}" aria-haspopup="menu">${icon("more")}</button></span></div>
     ${l.subagents?.length ? subagentsHtml(key, l.subagents, "data-action", SIDEBAR_SUBAGENTS) : ""}`;
@@ -681,6 +682,7 @@ function updateLiveTexts() {
     el.className = getStatusClass(l);
     el.title = getStatusTitle(l);
   });
+  fillProcTexts(document, key => allLive.get(key));
 }
 
 // key: a project's normalized path (its space comes up with all its sessions), or "g:<id>" for a group (it folds or

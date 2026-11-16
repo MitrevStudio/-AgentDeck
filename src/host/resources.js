@@ -2,8 +2,21 @@
 const os = require('node:os');
 const fs = require('node:fs');
 
-function createResources({ home = os.homedir(), onChange = () => {}, system = os, statfs = fs.promises.statfs } = {}) {
-  let previous = null, current = null, timer = null, flight = null, disk = null, diskAt = 0;
+function createResources({ home = os.homedir(), onChange = () => {}, system = os, statfs = fs.promises.statfs,
+  network = () => null, interval = 5000 } = {}) {
+  let previous = null, current = null, timer = null, flight = null, disk = null, diskAt = 0, netPrevious = null;
+  // network(): the computer's traffic counters ({ rx, tx } in bytes since boot, net-counters.js), passed only by who
+  // shows traffic. Traffic since the last sample, in bytes a second; the counters themselves too (bytes since boot), for whoever adds
+  // them up. null without a source; no rate on the first sample, or when the counters went back (an adapter reset).
+  function traffic() {
+    let now = null;
+    try { now = network(); } catch {}
+    if (!now) { netPrevious = null; return null; }
+    const at = Date.now(), last = netPrevious, seconds = last ? (at - last.at) / 1000 : 0;
+    netPrevious = { at, rx: now.rx, tx: now.tx };
+    const ok = last && seconds > 0 && now.rx >= last.rx && now.tx >= last.tx;
+    return { rx: ok ? (now.rx - last.rx) / seconds : null, tx: ok ? (now.tx - last.tx) / seconds : null, rxBytes: now.rx, txBytes: now.tx };
+  }
   async function sample() {
     const cpus = system.cpus();
     const times = cpus.reduce((a, c) => {
@@ -23,7 +36,7 @@ function createResources({ home = os.homedir(), onChange = () => {}, system = os
     }
     const total = system.totalmem(), free = system.freemem();
     current = { at: Date.now(), name: system.hostname(), cpu, cores: cpus.length,
-      memory: { total, free, used: total - free }, disk };
+      memory: { total, free, used: total - free }, disk, net: traffic() };
     onChange(current);
     return current;
   }
@@ -32,7 +45,7 @@ function createResources({ home = os.homedir(), onChange = () => {}, system = os
     return flight;
   }
   return { get: () => current, refresh,
-    start() { if (!timer) { refresh().catch(() => {}); timer = setInterval(() => refresh().catch(() => {}), 5000); timer.unref?.(); } },
+    start() { if (!timer) { refresh().catch(() => {}); timer = setInterval(() => refresh().catch(() => {}), interval); timer.unref?.(); } },
     stop() { clearInterval(timer); timer = null; }
   };
 }
