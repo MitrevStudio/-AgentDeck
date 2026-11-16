@@ -338,7 +338,7 @@ Costs are **API-equivalent estimates** using the application's price table in [`
 
 Git indicators show a project's branch, staged/modified/untracked counts, conflicts and commits ahead of or behind its upstream. They appear in relevant project and session views, including the edge launcher.
 
-Status inspection is read-only and avoids optional Git locks. Automatic refresh never fetches, so ahead/behind numbers reflect the most recent fetch. Use the Git panel's repository actions to fetch explicitly, stage files, review and commit, manage branches, or create a worktree for an AI task.
+Status inspection is read-only and avoids optional Git locks. Automatic refresh never fetches, so ahead/behind numbers reflect the most recent fetch. Git is started only when the status can have changed: when a file that Git does not ignore changes in a repository (checked against the repository's `.gitignore` files, `.git/info/exclude` and your global excludes file without starting Git, so an IDE or a build writing into ignored folders such as `bin/`, `obj/` or `.vs/` costs nothing), when the manager window gets the focus or the edge menu opens, and every two minutes while either is in view. While the manager window is in view but you are working in another program, changes are picked up at most every 30 seconds. Use the Git panel's repository actions to fetch explicitly, stage files, review and commit, manage branches, or create a worktree for an AI task.
 
 The optional **Day** view in the edge menu groups Claude Code activity by ticket key, or by project when no ticket is found. It estimates active time from message timestamps and merges overlapping activity so parallel sessions do not count the same wall-clock minutes twice.
 

@@ -79,8 +79,11 @@ const host = createHost({
   noLauncher: exe => t("voice.command.error.noLauncher", { exe }),
   log: (...parts) => launchLog(...parts),
   // Git: refreshed after each scan, when the edge menu opens or the manager window gets the focus (the pages ask),
-  // and every two minutes while either is in view.
-  gitActive: () => Boolean(bar?.isVisible() || (managerWin && !managerWin.isDestroyed() && managerWin.isVisible() && !managerWin.isMinimized()))
+  // and every two minutes while either is in view. In between, the folders are watched: a change that git does not
+  // ignore is looked at within seconds while the user is at one of the two (gitFocused), within half a minute while
+  // the manager window is only in view.
+  gitActive: () => Boolean(bar?.isVisible() || (managerWin && !managerWin.isDestroyed() && managerWin.isVisible() && !managerWin.isMinimized())),
+  gitFocused: () => Boolean(bar?.isVisible() || (managerWin && !managerWin.isDestroyed() && managerWin.isFocused()))
 });
 const { sessions, terminals, launch, liveSessions, findTranscript, usage, limits, resources, git: gitStatus, search: fullText } = host;
 const sessionLoad = require("./proc-stats").createSessionLoad({

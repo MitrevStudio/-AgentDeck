@@ -197,8 +197,9 @@ function equipTerminals(host, { terminals, launch, liveSessions, linkTabs = null
 // dataDir: the host's own files (registry, caches, terminals, prompts); home: the user's home (the agents' folders);
 // isExcluded(cwd): folders whose sessions are not the user's work; untitled(agent, shortId) and noLauncher(exe):
 // texts in the user's language; log(...parts): the launch log; gitActive(): whether anything shows the git status
-// now (it is refreshed in the background only then).
-function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () => {}, gitActive = () => true, fetch: fetchLimits = globalThis.fetch }) {
+// now (it is refreshed in the background only then); gitFocused(): whether the user is at what shows it (else changes
+// in the folders are looked at less often).
+function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () => {}, gitActive = () => true, gitFocused = () => true, fetch: fetchLimits = globalThis.fetch }) {
   const host = new EventEmitter();
   const limits = require("../limits").createAllLimits({ fetch: fetchLimits, findExecutable: require("./sessions").findOnPath, onChange: l => host.emit("limits", l) });
   const resources = require("./resources").createResources({ home, onChange: r => host.emit("resources", r) });
@@ -277,7 +278,7 @@ function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () 
       projects: () => sessions.get()?.registry.projects.filter(p => !p.node).map(p => p.path) || [],
       dirs: () => { const data = sessions.get(); return data ? [...data.registry.projects.filter(p => !p.node).map(p => p.path), ...data.sessions.flatMap(s => [s.cwd, s.workDir])] : []; },
       onChange: g => host.emit("git", g),
-      active: gitActive
+      active: gitActive, focused: gitFocused
     });
     sessions.scan().catch(err => console.error("Initial scan failed:", err.message));
   }
