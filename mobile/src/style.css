@@ -210,6 +210,7 @@ h1, h2, p { margin: 0; }
 .form-title { font-size: 13px; font-weight: 650; }
 .form-foot { display: flex; justify-content: flex-end; gap: 8px; }
 .form-state { font-size: 12.5px; color: var(--muted); }
+.form-state.bad { color: var(--danger); }
 .inline-field { display: flex; align-items: center; gap: 8px; }
 .inline-field input { flex: 1; min-width: 0; }
 input, textarea {
@@ -235,6 +236,7 @@ textarea { resize: none; line-height: 1.35; }
 .dot.st-idle, .dot.st-other { background: var(--ready); }
 .dot.st-waiting { background: var(--needs); animation: attn 1.6s ease-out infinite; }
 .dot.st-stopped { background: var(--faint); }
+.dot.st-unreachable { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
 .spinner {
   width: 12px; height: 12px; flex: none; border-radius: 50%;
   border: 2px solid color-mix(in srgb, var(--working) 25%, transparent); border-top-color: var(--working); animation: spin .8s linear infinite;
@@ -250,7 +252,7 @@ textarea { resize: none; line-height: 1.35; }
 .live.st-waiting { color: var(--needs); background: var(--needs-bg); }
 .live.st-busy { color: var(--working); background: var(--working-bg); }
 .live.st-idle, .live.st-other { color: var(--ready); background: var(--ready-bg); }
-.live.st-stopped { color: var(--muted); background: var(--panel-2); }
+.live.st-stopped, .live.st-unreachable { color: var(--muted); background: var(--panel-2); }
 .live .dot { width: 7px; height: 7px; }
 .live .spinner { width: 10px; height: 10px; }
 

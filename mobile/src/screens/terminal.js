@@ -72,6 +72,7 @@ export function render(el, ctx, p) {
   let handle = null, ctrl = false, fitted = null; // fitted (an older host): its own size while "Fit to phone" is on
   let hostCols = 120, hostRows = 30, closed = false, closedHere = false;
   let zoom = lastZoom;                            // "read" | "fit" | a font size (px)
+  let beforeFit = null;                           // the zoom "Fit to phone" replaced; back once the size is not the phone's
   let overState = "";                             // what the overlay says: "" | "exited" | "reconnecting" | "gone"
 
   // The terminal has this phone's size: on a host that shares its terminals, the host says so (the driver);
@@ -176,6 +177,9 @@ export function render(el, ctx, p) {
 
   function setHostSize(cols, rows) {
     hostCols = cols; hostRows = rows;
+    // The size is not the phone's any more (given back, taken by someone else, the link made anew): the whole width
+    // of the host's size would be too small to read, so the zoom from before "Fit to phone" is back.
+    if (beforeFit != null && !isMine()) { zoom = beforeFit; beforeFit = null; }
     if (term.cols !== cols || term.rows !== rows) term.resize(cols, rows);
     applyZoom();
     drawHead();
@@ -201,6 +205,7 @@ export function render(el, ctx, p) {
       const c = cell(), k = READ_PX / term.options.fontSize;
       const cols = Math.max(20, Math.floor(availW() / (c.w * k))), rows = Math.max(5, Math.floor(availH() / (c.h * k)));
       if (!handle.shared) fitted = { cols: hostCols, rows: hostRows };
+      if (beforeFit == null) beforeFit = zoom;
       zoom = "fit";
       const s = await handle.take(cols, rows);
       if (closed) return;

@@ -237,6 +237,15 @@ function makeHost() {
     r.stop();
     await wait(() => states.includes(false), "the view hears the link is gone");
     assert.notEqual(store.connection().state, "ok");
+    // What ran when the computer was last seen is "unreachable", not "stopped": it is not known what it does now. It
+    // is not waiting any more as far as the inbox goes, keeps its terminal (a reply being typed stays), and what had
+    // stopped before is still stopped.
+    await wait(() => store.item(selfH.id, "Claude", "s-wait")?.status === "unreachable", "a running session of a computer that is away is unreachable");
+    const away = store.item(selfH.id, "Claude", "s-wait");
+    assert.deepEqual([away.online, away.waitingFor, away.group, away.live, away.term], [false, "", "recent", null, local]);
+    assert.equal(store.item(selfH.id, "Claude", "s-old").status, "stopped");
+    assert.equal(store.inbox().waiting.length, 0, "nothing waits on a computer that is away");
+    assert.equal(store.inbox().recent.find(x => x.node === selfH.id).id, "s-wait", "the unreachable ones come before the stopped ones");
     await wait(() => hostSize().join() === "100,30,", "the size goes back to the host's pane once the phone's link dropped");
     r = node("R", { kind: "host", relayOnly: true, port: rPort });
     all.push(r);

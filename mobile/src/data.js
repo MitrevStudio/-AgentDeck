@@ -75,7 +75,9 @@
 // that part is left empty and store.missing(node, method) says so.
 import { emitter, sessionKey, normPath, baseName } from "./util.js";
 
-const RANK = { waiting: 0, busy: 1, idle: 2, other: 2, stopped: 3 };
+// "unreachable": the session ran when its computer was last seen, and the computer is away now - what it does
+// meanwhile is not known. It is listed with the recent ones, before those that had stopped.
+const RANK = { waiting: 0, busy: 1, idle: 2, other: 2, unreachable: 2.5, stopped: 3 };
 // Why a computer cannot come back by itself (provider-relay.js, web-client.js): it does not know this phone any more,
 // another key answers there, or nothing is left to reach it through. What was loaded of it before is stale; it is
 // not shown as its sessions until it is paired again.
@@ -229,21 +231,23 @@ export function createStore(provider) {
   function makeItem(id, s, live) {
     const e = entry(id);
     const agent = s?.agent || live.agent, sid = s?.id || live.id, cwd = s?.cwd || live?.cwd || "";
-    const status = isOnline(id) ? statusOf(live) : "stopped";
+    const online = isOnline(id);
+    const status = online ? statusOf(live) : live ? "unreachable" : "stopped";
     return {
-      key: sessionKey(id, agent, sid), node: id, nodeName: nodeName(id), online: isOnline(id),
+      key: sessionKey(id, agent, sid), node: id, nodeName: nodeName(id), online,
       agent, id: sid, cwd, project: projectOf(e, cwd, s),
       // A terminal with no session yet (unlinked) goes by the terminal's title.
       title: s?.title || live?.name || (live?.unlinked && e.terminals.find(x => x.id === live.term)?.title) || `${agent} ${sid.slice(0, 8)}`,
       updatedAt: Math.max(s?.updatedAt || 0, live?.activityAt || 0, live?.statusAt || 0),
-      live: status === "stopped" ? null : live, status, waitingFor: live?.status === "waiting" ? live.waitingFor || "" : "",
-      term: termOf(id, agent, sid, (isOnline(id) && live) || null),
-      group: status === "waiting" ? "waiting" : status === "stopped" ? "recent" : "working"
+      live: online && status !== "stopped" ? live : null, status, waitingFor: online && live?.status === "waiting" ? live.waitingFor || "" : "",
+      term: termOf(id, agent, sid, (online && live) || null),
+      group: status === "waiting" ? "waiting" : status === "stopped" || status === "unreachable" ? "recent" : "working"
     };
   }
   function itemsOf(id) {
     const e = entry(id);
-    const liveMap = new Map((isOnline(id) ? e.live : []).map(l => [`${l.agent}:${l.id}`, l]));
+    // The live list of a computer that is away is what it said last: its sessions show as "unreachable".
+    const liveMap = new Map(e.live.map(l => [`${l.agent}:${l.id}`, l]));
     const items = (e.data?.sessions || []).map(s => {
       const k = `${s.agent}:${s.id}`, live = liveMap.get(k);
       liveMap.delete(k);
@@ -502,7 +506,8 @@ export function createStore(provider) {
     missing: (id, method) => entry(id).missing.has(method),
     // True while an online computer has not answered its first lists yet.
     loading: () => [...nodes.values()].some(e => e.node?.status === "online" && e.node.kind !== "relay" && !e.loaded),
-    // { waiting: Item[], working: Item[], recent: Item[] }; Item = see makeItem.
+    // { waiting: Item[], working: Item[], recent: Item[] }; Item = see makeItem. Item.status: "waiting" | "busy" |
+    // "idle" | "other" | "stopped", or "unreachable" for a session that ran when its computer went away.
     inbox,
     item: (id, agent, sid) => itemOf(id, agent, sid),
     // The node's projects (registry) and its sessions per project, newest first, for "New session".

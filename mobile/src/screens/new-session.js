@@ -62,7 +62,8 @@ export function render(el, ctx) {
       const tab = await store.launch(pick.node, spec);
       ctx.toast(t("new.started", { name: store.nodeName(pick.node) }));
       prompt = "";
-      if (!shell && tab?.sessionId) ctx.go("session", { node: pick.node, agent: tab.agent, id: tab.sessionId });
+      // The computer lists the session a moment later: until then the screen goes by the terminal's title.
+      if (!shell && tab?.sessionId) ctx.go("session", { node: pick.node, agent: tab.agent, id: tab.sessionId, title: tab.title || `${tab.agent} · ${baseName(pick.project)}` });
       else if (tab?.id) ctx.go("terminal", { node: pick.node, term: tab.id, title: tab.title || baseName(pick.project) });
     } catch (err) { ctx.fail(err); b.disabled = false; }
   }

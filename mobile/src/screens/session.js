@@ -1,6 +1,8 @@
 // A session: its last messages (sessions.preview), what it waits for, a reply box and a row of quick keys for
 // the terminal it runs in, Stop, and the way to its terminal (or a shell in its folder). A session not in an
-// AgentDeck terminal can only be watched and stopped; one not running can be resumed.
+// AgentDeck terminal can only be watched and stopped; one not running can be resumed. While its computer is away
+// nothing can be done to it: the tools go, the status says "unreachable", the messages loaded before stay.
+// params: node, agent, id; title - what to call it until the computer lists it (a session just started).
 //
 // A reply being typed is kept per session (also across a lost link, leaving the screen, a restart of the app) until
 // it was sent. While the agent works the host refuses it (agentNotReady): it stays, and can be typed into the
@@ -43,15 +45,15 @@ export function render(el, ctx, p) {
   // the host can stop it (store.stopKind: its terminal, or a Claude session), Resume where it can be started again.
   function drawHead() {
     const x = item;
-    const canStop = x && (x.term || (x.online && x.status !== "stopped" && store.stopKind(p.node, p.agent, p.id)));
+    const canStop = x?.online && (x.term || (x.status !== "stopped" && store.stopKind(p.node, p.agent, p.id)));
     const canResume = x && !x.term && x.online && x.status === "stopped";
     const actions = [
       x?.online && x.cwd ? iconBtn("plus", t("session.shell"), 'data-act="shell"') : "",
-      x?.term ? iconBtn("terminal", t("session.terminal"), 'data-act="term"') : "",
+      x?.online && x.term ? iconBtn("terminal", t("session.terminal"), 'data-act="term"') : "",
       canStop ? iconBtn("stop", t("session.stop"), 'data-act="stop"', "danger") : "",
       canResume ? iconBtn("play", t("session.resume"), 'data-act="resume"', "accent") : ""
     ].join("");
-    head.innerHTML = header(x?.title || p.id, { back: true, sub: x ? metaLine(x) : "", actions })
+    head.innerHTML = header(x?.title || p.title || t("session.starting"), { back: true, sub: x ? metaLine(x) : "", actions })
       + (x ? `<div class="status-line">${statusChip(x)}
       ${x.status === "waiting" ? `<span class="reason">${esc(x.waitingFor || t("status.reasonUnknown"))}</span>` : `<span class="when">${esc(ago(x.updatedAt))}</span>`}</div>` : "");
     wireBack(head, ctx);
@@ -64,12 +66,18 @@ export function render(el, ctx, p) {
     wireConn(conn, store, ctx);
   }
 
+  // The view follows the newest message only while it is at the end (or on the first draw): someone reading further
+  // up is left there when the session moves on.
+  let drawn = false;
   function drawMsgs() {
     if (!preview) {
       const missing = item?.online && store.missing(p.node, "sessions.preview");
-      msgs.innerHTML = `<p class="empty">${esc(missing ? t("session.noPreview", { name: item.nodeName }) : loading ? t("session.loading") : t("session.noMessages"))}</p>`;
+      const why = !item ? t("session.loading") : !item.online ? t("session.offline") : missing ? t("session.noPreview", { name: item.nodeName }) : loading ? t("session.loading") : t("session.noMessages");
+      msgs.innerHTML = `<p class="empty">${esc(why)}</p>`;
       return;
     }
+    const atEnd = !drawn || body.scrollHeight - body.scrollTop - body.clientHeight < 60;
+    drawn = true;
     const meta = [preview.model ? t("session.model", { model: preview.model }) : "", preview.prompts != null ? `${tn("session.prompts", preview.prompts)} · ${tn("session.replies", preview.replies ?? 0)}` : ""].filter(Boolean).join(" · ");
     msgs.innerHTML = `${preview.more ? `<p class="more muted small">${esc(t("session.more"))}</p>` : ""}
       ${preview.firstPrompt ? `<div class="msg first"><div class="who">${esc(t("session.firstPrompt"))}</div><div class="text">${fmt(preview.firstPrompt)}</div></div>` : ""}
@@ -78,7 +86,7 @@ export function render(el, ctx, p) {
         <div class="text">${fmt(m.text)}${m.cut ? "…" : ""}</div></div>`).join("")}
       ${preview.messages.length ? "" : `<p class="empty">${esc(t("session.noMessages"))}</p>`}
       ${meta ? `<p class="muted small center">${esc(meta)}</p>` : ""}`;
-    body.scrollTop = body.scrollHeight;
+    if (atEnd) body.scrollTop = body.scrollHeight;
   }
 
   async function loadPreview() {

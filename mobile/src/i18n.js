@@ -32,6 +32,8 @@ const STRINGS = {
     "pair.badInput": "Give the address with its port and the code.",
     "pair.badAddress": "Give the address with its port, e.g. 192.168.1.10:7421",
     "pair.notCode": "Not an AgentDeck pairing code: {why}",
+    "pair.badCode": "That is not an AgentDeck pairing code: its text starts with AGENTDECK-PAIR:",
+    "pair.otherVersion": "That code was made by another version of AgentDeck: update the app, or AgentDeck on the computer, and make a new code.",
     "pair.connecting": "Pairing with {addr}…",
     "pair.addTitle": "Add computers",
     "pair.name": "This phone's name",
@@ -99,6 +101,7 @@ const STRINGS = {
     "status.idle": "Ready",
     "status.other": "Running",
     "status.stopped": "Stopped",
+    "status.unreachable": "Unreachable",
     "status.reasonUnknown": "a question or a permission",
 
     "session.noMessages": "No messages to show",
@@ -119,6 +122,7 @@ const STRINGS = {
     "session.offline": "The computer is offline",
     "session.sent": "Sent",
     "session.loading": "Loading…",
+    "session.starting": "Starting…",
     "session.model": "Model {model}",
     "session.prompts.one": "{n} prompt",
     "session.prompts.other": "{n} prompts",
@@ -261,6 +265,9 @@ const STRINGS = {
     "err.notViewing": "The terminal is not open here yet. Try again in a moment.",
     "err.tooManyTerminals": "Too many terminals run on this computer. Stop some first.",
     "err.storeFailed": "The phone's secure storage failed.",
+    "err.pairOutdated": "That AgentDeck is older and pairs in a way this app no longer accepts – update it and pair again.",
+    "err.tooBig": "That is too big to send.",
+    "err.unreadable": "That computer cannot read its own settings right now – try again in a moment.",
 
     "time.justNow": "just now",
     "time.none": "no date"
@@ -295,6 +302,8 @@ const STRINGS = {
     "pair.badInput": "Дай адреса с порта и кода.",
     "pair.badAddress": "Дай адреса с порта, напр. 192.168.1.10:7421",
     "pair.notCode": "Не е код за сдвояване от AgentDeck: {why}",
+    "pair.badCode": "Това не е код за сдвояване от AgentDeck: текстът му започва с AGENTDECK-PAIR:",
+    "pair.otherVersion": "Кодът е направен от друга версия на AgentDeck: обнови приложението или AgentDeck на компютъра и направи нов код.",
     "pair.connecting": "Сдвоявам се с {addr}…",
     "pair.addTitle": "Добави компютри",
     "pair.name": "Име на телефона",
@@ -362,6 +371,7 @@ const STRINGS = {
     "status.idle": "Готова",
     "status.other": "Върви",
     "status.stopped": "Спряна",
+    "status.unreachable": "Няма връзка",
     "status.reasonUnknown": "въпрос или разрешение",
 
     "session.noMessages": "Няма съобщения за показване",
@@ -382,6 +392,7 @@ const STRINGS = {
     "session.offline": "Компютърът е офлайн",
     "session.sent": "Пратено",
     "session.loading": "Зареждам…",
+    "session.starting": "Пуска се…",
     "session.model": "Модел {model}",
     "session.prompts.one": "{n} задача",
     "session.prompts.other": "{n} задачи",
@@ -524,6 +535,9 @@ const STRINGS = {
     "err.notViewing": "Терминалът още не е отворен тук. Опитай пак след малко.",
     "err.tooManyTerminals": "На този компютър работят твърде много терминали. Спри някои първо.",
     "err.storeFailed": "Защитеното хранилище на телефона даде грешка.",
+    "err.pairOutdated": "Този AgentDeck е по-стар и се сдвоява по начин, който приложението вече не приема – обнови го и сдвои пак.",
+    "err.tooBig": "Това е твърде голямо за пращане.",
+    "err.unreadable": "Компютърът не може да прочете настройките си в момента – опитай пак след малко.",
 
     "time.justNow": "току-що",
     "time.none": "без дата"

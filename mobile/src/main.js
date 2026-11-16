@@ -30,8 +30,10 @@ const META_KEY = "agentdeck.nodes"; // provider-relay.js meta: which nodes are r
 const app = $("#app");
 let store = null;
 let link = null; // the relay provider, once there is an identity (paired, or pairing)
-let stack = []; // [{ name, params }]
+let stack = []; // [{ name, params, scroll }]
 let cleanup = null;
+let shown = null; // the stack entry on the screen now
+const tabScroll = new Map(); // a tab's name -> how far its list was scrolled when it was left
 
 // ---------- the soft keyboard ----------
 // The app is as tall as what is visible above the keyboard, so bottom bars (reply box, extra keys) sit right on it.
@@ -124,6 +126,11 @@ const current = () => stack.at(-1);
 function render() {
   const top = current();
   if (!top) return;
+  // Where the list being left was scrolled to: it is there again when the user comes back to it.
+  if (shown) {
+    shown.scroll = app.querySelector(".body")?.scrollTop || 0;
+    if (TABS.includes(shown.name)) tabScroll.set(shown.name, shown.scroll);
+  }
   cleanup?.();
   cleanup = null;
   const mod = SCREENS[top.name];
@@ -133,6 +140,9 @@ function render() {
   const el = app.firstElementChild;
   cleanup = mod.render(el, ctx, top.params || {}) || null;
   applyI18n(app);
+  shown = top;
+  const body = app.querySelector(".body");
+  if (body && top.scroll) body.scrollTop = top.scroll;
   if (tabbed) {
     for (const b of app.querySelectorAll(".tabbar [data-tab]")) b.onclick = () => go(b.dataset.tab, {}, { root: true });
   }
@@ -146,7 +156,10 @@ function tabBar(active) {
 // go(name, params, { replace, root }): root - a tab: the stack starts again from it.
 function go(name, params = {}, { replace = false, root = false } = {}) {
   if (root) {
-    stack = [{ name, params }];
+    // A tab is where it was left; pressed again while it shows, it goes to its top.
+    const again = stack.length === 1 && current().name === name;
+    if (again) shown = null;
+    stack = [{ name, params, scroll: again ? 0 : tabScroll.get(name) || 0 }];
     history.replaceState({ depth: 0 }, "");
   } else if (replace && stack.length) {
     stack[stack.length - 1] = { name, params };

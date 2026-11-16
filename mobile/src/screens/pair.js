@@ -43,21 +43,22 @@ export function render(el, ctx, params) {
     e.preventDefault();
     const text = e.target.text.value.trim();
     if (!text) return;
-    if (!looksLikePayload(text)) return ctx.toast(t("pair.notCode", { why: "AGENTDECK-PAIR:…" }));
+    if (!looksLikePayload(text)) return ctx.toast(t("pair.badCode"));
     ctx.go("pairing", { text });
   };
 
   const manual = el.querySelector("[data-form='manual']");
   const state = manual.querySelector(".form-state");
+  // What the form says under its fields: what is missing, the progress, or why it failed (in the error's colour).
+  const say = (text, bad = false) => { state.hidden = !text; state.textContent = text; state.classList.toggle("bad", bad); };
   manual.onsubmit = async e => {
     e.preventDefault();
     const where = parseAddress(manual.relay.value), code = cleanCode(manual.code.value);
-    if (!where) return ctx.toast(t(manual.relay.value.trim() ? "pair.badAddress" : "pair.badInput"));
-    if (!code) return ctx.toast(t("pair.badInput"));
+    if (!where) return say(t(manual.relay.value.trim() ? "pair.badAddress" : "pair.badInput"), true);
+    if (!code) return say(t("pair.badInput"), true);
     const button = manual.querySelector("button");
     button.disabled = true;
-    state.hidden = false;
-    state.textContent = t("pair.connecting", { addr: `${where.address}:${where.port}` });
+    say(t("pair.connecting", { addr: `${where.address}:${where.port}` }));
     try {
       const link = await ctx.relay();
       const peer = await link.pairDirect(where.address, where.port, code);
@@ -65,7 +66,7 @@ export function render(el, ctx, params) {
       // A relay: on to the computers behind it. A computer paired directly may relay to others too.
       ctx.go("routes", { hub: peer.id, first: !add }, { replace: true });
     } catch (err) {
-      state.textContent = errorText(err);
+      say(errorText(err), true);
       button.disabled = false;
     }
   };
