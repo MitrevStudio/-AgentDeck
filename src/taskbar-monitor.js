@@ -10,7 +10,6 @@
 // The computer is measured every second by a sampler of its own, running only while the strip is on.
 const { BrowserWindow, screen, ipcMain } = require("electron");
 const path = require("node:path");
-const fs = require("node:fs");
 const { execFile } = require("node:child_process");
 const { t } = require("./i18n");
 const desktop = require("./desktop");
@@ -22,39 +21,7 @@ const FALLBACK_HEIGHT = 48;     // the taskbar's height when Windows will not te
 const FALLBACK_TRAY = 330;      // room left for the tray icons and the clock then
 const GAP = 6;
 const MIN_WIDTH = 40;
-const SAVE_MS = 60000;
 const MODE_TICKS = 30;          // how often Windows is asked whether its taskbar is light
-
-const dayKey = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-
-// Today's traffic of this computer, added up while the strip is on and kept across restarts (file).
-function createDayTraffic(file) {
-  let day = dayKey(), rx = 0, tx = 0, last = null, savedAt = 0, dirty = false;
-  try {
-    const saved = JSON.parse(fs.readFileSync(file, "utf8"));
-    if (saved?.day === day && saved.rx >= 0 && saved.tx >= 0) { rx = saved.rx; tx = saved.tx; }
-  } catch {}
-  function save() {
-    if (!dirty) return;
-    dirty = false; savedAt = Date.now();
-    // A few bytes once a minute, written in one go: two writes in flight could land in either order.
-    try { fs.writeFileSync(file, JSON.stringify({ day, rx, tx })); } catch {}
-  }
-  return {
-    // net: a resources sample's traffic ({ rxBytes, txBytes } since boot), or null.
-    add(net) {
-      if (dayKey() !== day) { day = dayKey(); rx = 0; tx = 0; }
-      if (!net) { last = null; return; }
-      if (last && net.rxBytes >= last.rxBytes && net.txBytes >= last.txBytes) {
-        rx += net.rxBytes - last.rxBytes; tx += net.txBytes - last.txBytes; dirty = true;
-      }
-      last = net;
-      if (Date.now() - savedAt >= SAVE_MS) save();
-    },
-    pause() { last = null; save(); },
-    get: () => ({ rx, tx })
-  };
-}
 
 // Whether Windows itself (the taskbar, Start) is in light mode - its own switch, apart from the apps' mode that
 // Electron reports. cb(true|false); dark when the registry does not say.
@@ -72,9 +39,8 @@ function device(r) {
   };
 }
 
-// shown(): the user wants the strip; items(): which of { net, cpu, memory } it shows; trafficFile: where today's
-// traffic is kept.
-function createTaskbarMonitor({ shown, items = () => ({ net: true, cpu: true, memory: true }), trafficFile }) {
+// shown(): the user wants the strip; items(): which of { net, cpu, memory } it shows.
+function createTaskbarMonitor({ shown, items = () => ({ net: true, cpu: true, memory: true }) }) {
   if (process.platform !== "win32") return { win: null, sync() {}, dispose() {} };
   const win = new BrowserWindow({
     width: 200, height: FALLBACK_HEIGHT, show: false, frame: false, transparent: true, backgroundColor: "#00000000",
@@ -86,13 +52,14 @@ function createTaskbarMonitor({ shown, items = () => ({ net: true, cpu: true, me
     }
   });
   win.setAlwaysOnTop(true, "pop-up-menu");
-  // Clicks go through to the taskbar underneath; the pointer is still forwarded, so the tooltip shows.
-  win.setIgnoreMouseEvents(true, { forward: true });
+  // Clicks go through to the taskbar underneath. Not `forward: true`: for that Electron hooks every mouse move in
+  // Windows (WH_MOUSE_LL) on this process's main thread, so the pointer of the whole computer would wait whenever
+  // that thread is busy. The strip therefore knows nothing of the pointer: no hover, no tooltip.
+  win.setIgnoreMouseEvents(true);
   win.loadFile(path.join(__dirname, "taskbar.html"));
 
   let width = 0, light = false, ticks = 0, fullScreen = false, dead = false, ready = false, timer = null, local = null;
-  const today = createDayTraffic(trafficFile);
-  const sampler = createResources({ interval: TICK_MS, network: netCounters.read, onChange: r => { local = r; today.add(r.net); } });
+  const sampler = createResources({ interval: TICK_MS, network: netCounters.read, onChange: r => { local = r; } });
 
   // On the taskbar, ending where the tray icons begin; no wider than the content, nor than a third of the taskbar.
   function place() {
@@ -110,7 +77,7 @@ function createTaskbarMonitor({ shown, items = () => ({ net: true, cpu: true, me
 
   function send() {
     if (!ready || win.isDestroyed()) return;
-    win.webContents.send("taskbar:data", { device: device(local), today: today.get(), light, items: items() });
+    win.webContents.send("taskbar:data", { device: device(local), light, items: items() });
   }
 
   function tick() {
@@ -136,7 +103,7 @@ function createTaskbarMonitor({ shown, items = () => ({ net: true, cpu: true, me
       else send(); // what it shows was changed: at once, not on the next round
     } else if (timer) {
       clearInterval(timer); timer = null;
-      sampler.stop(); today.pause();
+      sampler.stop();
       fullScreen = false;
     }
     show();
@@ -163,7 +130,7 @@ function createTaskbarMonitor({ shown, items = () => ({ net: true, cpu: true, me
     win, sync,
     dispose() {
       clearInterval(timer); timer = null;
-      sampler.stop(); today.pause();
+      sampler.stop();
       ipcMain.removeListener("taskbar:event", onIpc);
       for (const ev of ["display-added", "display-removed", "display-metrics-changed"]) screen.removeListener(ev, onDisplays);
       if (!win.isDestroyed()) win.destroy();
@@ -171,4 +138,4 @@ function createTaskbarMonitor({ shown, items = () => ({ net: true, cpu: true, me
   };
 }
 
-module.exports = { createTaskbarMonitor, createDayTraffic, device };
+module.exports = { createTaskbarMonitor, device };

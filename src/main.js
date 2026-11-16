@@ -1485,7 +1485,7 @@ function onPrefsChanged(p, keys) {
   if (keys.includes("theme") && managerWin && !managerWin.isDestroyed()) managerWin.setBackgroundColor(prefs.background());
   if (keys.includes("language")) {
     sessions.invalidate(); // fallback session titles are in the old language
-    for (const w of [managerWin, bar?.win, bar?.handleWin, taskbarMonitor?.win]) if (w && !w.isDestroyed()) w.webContents.reload();
+    for (const w of [managerWin, bar?.win, bar?.handleWin]) if (w && !w.isDestroyed()) w.webContents.reload();
   }
   if (keys.includes("edgeHandle")) bar?.syncHandle();
   if (keys.some(k => k.startsWith("taskbar"))) taskbarMonitor?.sync();
@@ -1517,8 +1517,7 @@ if (!app.requestSingleInstanceLock()) {
     });
     taskbarMonitor = createTaskbarMonitor({
       shown: () => prefs.get().taskbarMonitor,
-      items: () => { const p = prefs.get(); return { net: p.taskbarNet, cpu: p.taskbarCpu, memory: p.taskbarMemory }; },
-      trafficFile: path.join(app.getPath("userData"), "taskbar-traffic.json")
+      items: () => { const p = prefs.get(); return { net: p.taskbarNet, cpu: p.taskbarCpu, memory: p.taskbarMemory }; }
     });
     tray = new Tray(makeIcon(32, 2));
     // A press opens or closes the menu at once (here, where Windows lets it take the focus); held down after opening
@@ -1592,7 +1591,7 @@ if (!app.requestSingleInstanceLock()) {
       .finally(() => app.quit());
   });
   app.on("will-quit", () => {
-    taskbarMonitor?.dispose(); // keeps today's traffic
+    taskbarMonitor?.dispose();
     orchestrator.stop();
     host.stop();
     links.stop();
