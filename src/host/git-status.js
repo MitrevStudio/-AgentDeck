@@ -127,9 +127,12 @@ const watchers = new Map();
 let watchTimer = null;
 const changedRoots = new Set();    // norm(root) of the repositories a watcher saw change since the last pass
 const MAX_WATCHERS = 32;
-const WATCH_DELAY_MS = 2000;
-const WATCH_DELAY_MAX_MS = 30 * 1000;
-const WATCH_COST_FACTOR = 4;       // a watchers' pass that took 3 s is followed by the next one 12 s later at the earliest
+// Even with the window focused, agents at work change tracked files all the time, and every `git status` stats each
+// tracked file - each of those opens inspected in the kernel by an EDR (CrowdStrike: about 3 of 14 cores with five
+// agents and a pass every 2 s). So the passes are at least 10 s apart, and 10x what the last one took.
+const WATCH_DELAY_MS = 10 * 1000;
+const WATCH_DELAY_MAX_MS = 60 * 1000;
+const WATCH_COST_FACTOR = 10;      // a watchers' pass that took 3 s is followed by the next one 30 s later at the earliest
 const WATCH_UNFOCUSED_MS = 30 * 1000; // between two watchers' passes while nobody is at the window that shows the status
 let watchCostMs = 0;               // how long the last watchers' pass took
 let watchDue = 0;                  // when the pass that watchTimer waits for runs
@@ -146,7 +149,7 @@ async function getRealKey(dir) {
 // While the status is only in view (opts.focused() is false: the window is open, the user is in another program), a
 // change waits longer still; a page that gets the focus asks for a refresh, which takes the waiting changes with it.
 function getWatchDelay() {
-  const delay = Math.min(WATCH_DELAY_MAX_MS, Math.max(WATCH_DELAY_MS, watchCostMs * WATCH_COST_FACTOR));
+  const delay = Math.min(WATCH_DELAY_MAX_MS, Math.max(opts?.watchDelayMs ?? WATCH_DELAY_MS, watchCostMs * WATCH_COST_FACTOR));
   return opts?.focused && !opts.focused() ? Math.max(delay, opts.watchUnfocusedMs ?? WATCH_UNFOCUSED_MS) : delay;
 }
 // At most one pass per getWatchDelay(), and only for the repositories that changed. A pass already waiting is brought
@@ -382,7 +385,7 @@ const signature = s => JSON.stringify([s.missing, s.discoveryTruncatedIn, sorted
 // dirs(): the folders to report on; onChange(snapshot); active(): whether a window that shows the state is open
 // (the background refresh and the watchers' passes run only then); focused(): whether the user is at such a window
 // (without it: always) - else the watchers' passes are WATCH_UNFOCUSED_MS apart (watchUnfocusedMs: another gap, for
-// the tests).
+// the tests; watchDelayMs likewise for the focused minimum WATCH_DELAY_MS).
 function start(o) {
   opts = o;
   clearInterval(timer);

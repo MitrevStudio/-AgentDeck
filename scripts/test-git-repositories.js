@@ -141,7 +141,7 @@ async function main() {
     execFileSync('git', ['-C', linked, 'add', '--', 'linked.txt'], { windowsHide: true });
     await until(() => git.get().repos[git.norm(linked)].staged === 1, "staging in a linked worktree refreshes the worktree's status");
     const delay = git.getWatchDelay();
-    assert.ok(delay >= 2000 && delay <= 30000, 'the next watched pass waits at least two seconds, longer after a slow one');
+    assert.ok(delay >= 10000 && delay <= 60000, 'the next watched pass waits at least ten seconds, longer after a slow one');
     console.log('Nested repository discovery, real Git status, spaced names, renames, conflicts, limits, watched refreshes and linked worktrees passed');
   } finally {
     git.stop();
