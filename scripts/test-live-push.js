@@ -51,7 +51,7 @@ const burn = ms => { const until = Date.now() + ms; let x = []; while (Date.now(
     for (let i = 0; i < 5; i++) { burn(150); await wait(250); }
     assert.equal(pushes.length, 1, `pushed once for the list, not on every round (${pushes.length})`);
     write('busy');
-    await wait(400);
+    await wait(1500); // the next round after the kept answer (host/shared-read.js) is too old
     assert.equal(pushes.length, 2, 'a change of state is pushed');
     assert.equal(pushes[1][0].status, 'busy');
     for (let i = 0; i < 3; i++) { burn(150); await wait(250); }

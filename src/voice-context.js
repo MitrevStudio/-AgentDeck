@@ -3,7 +3,8 @@
 // transcription (Whisper's prompt, Gemini's custom vocabulary) and the rewrite after the user's own terms and the
 // project names, so "бил детейлс" comes out as bill-details.
 //
-// Kept up to date in the background: the dictionary reads it synchronously at every attempt.
+// Kept up to date in the background: the dictionary reads it synchronously at every attempt. The refresh itself
+// waits for the disk nowhere: it runs on a timer in the process that also carries the terminals.
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -15,16 +16,16 @@ const TICKET = /\b[A-Za-z][A-Za-z0-9]+-\d+\b/g;
 
 const lastSign = l => Math.max(l.activityAt || 0, l.statusAt || 0);
 
-function tail(file) {
-  let fd;
+async function tail(file) {
+  let handle;
   try {
-    fd = fs.openSync(file, "r");
-    const size = fs.fstatSync(fd).size, len = Math.min(size, TAIL_BYTES);
+    handle = await fs.promises.open(file, "r");
+    const size = (await handle.stat()).size, len = Math.min(size, TAIL_BYTES);
     const buf = Buffer.alloc(len);
-    fs.readSync(fd, buf, 0, len, size - len);
-    const text = buf.toString("utf8");
+    const { bytesRead } = await handle.read(buf, 0, len, size - len);
+    const text = buf.toString("utf8", 0, bytesRead);
     return len < size ? text.slice(text.indexOf("\n") + 1) : text; // drop the cut first line
-  } catch { return ""; } finally { if (fd !== undefined) fs.closeSync(fd); }
+  } catch { return ""; } finally { await handle?.close().catch(() => {}); }
 }
 
 // "src/app/bill-details/bill-details.component.ts" -> "bill-details"
@@ -64,7 +65,7 @@ function termsOf(text, cwd) {
   return out.slice(0, MAX_TERMS);
 }
 
-// liveSessions() -> live.js entries; findTranscript(id) -> path.
+// liveSessions() -> live.js entries; findTranscript(id, cwd) -> path, or a promise of it (live.js locateTranscript).
 function createVoiceContext({ liveSessions, findTranscript }) {
   let terms = [], timer = null, busy = false;
   async function refresh() {
@@ -74,8 +75,8 @@ function createVoiceContext({ liveSessions, findTranscript }) {
       const list = (await liveSessions()).filter(l => l.agent === "Claude");
       if (!list.length) { terms = []; return; }
       const last = list.sort((a, b) => lastSign(b) - lastSign(a))[0];
-      const file = findTranscript(last.id);
-      terms = file ? termsOf(tail(file), last.cwd) : (last.cwd ? [path.basename(last.cwd)] : []);
+      const file = await findTranscript(last.id, last.cwd);
+      terms = file ? termsOf(await tail(file), last.cwd) : (last.cwd ? [path.basename(last.cwd)] : []);
     } catch (e) { console.error("Voice context failed:", e.message); } finally { busy = false; }
   }
   return {

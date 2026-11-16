@@ -18,22 +18,56 @@
 //
 // Codex's rollout lifecycle is read separately by codex-live.js, OpenCode's turn times by opencode-live.js; both are
 // merged in host/index.js.
+//
+// The status is asked for every few seconds by many (the windows, the notifier, the tab links, the peers), in the
+// process that also carries the terminals. So liveSessions() is one read they all share (shared-read.js: askers that
+// come together get one read, { fresh: true } a new one), and that read waits for the disk nowhere: every file
+// operation is asynchronous, a few at a time (FS_AT_ONCE). It also opens as little as it can: a registry file is read
+// again only when its time or size changed (Claude Code writes it when the status changes, not in between), a
+// subagent's description once, and a transcript that is not where its folder says is searched for only now and then.
+// What is left for every read: the registry's listing, a stat per registry file, per transcript and per subagent, and
+// the listing of each session's subagents.
+// findTranscript() is the synchronous lookup for those who act once (a launch, a preview, the command centre);
+// locateTranscript() is the same without waiting for the disk, for what runs on a timer.
 const { execFile } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
+const { createSharedRead } = require("./shared-read");
 
 const CLAUDE_HOME = path.join(os.homedir(), ".claude");
 const REGISTRY_DIR = path.join(CLAUDE_HOME, "sessions");
 const PROJECTS_DIR = path.join(CLAUDE_HOME, "projects");
 
 const SUBAGENT_ACTIVE_MS = 30000;
+const FS_AT_ONCE = 8;
+// A registry file written this shortly before it was read may be written again within the same tick of the file
+// system's clock (FAT counts in 2 s), at the same size ("idle" -> "busy"): it is read again the next time.
+const SETTLED_MS = 3000;
+// A session's transcript that is not in the folder its cwd names is looked for in all of them this often.
+const SEEK_MS = 5000;
 
 const startVerified = new Map(); // `${pid}:${procStart}` -> boolean
 const transcripts = new Map();   // sessionId -> transcript path
 const subagentMeta = new Map();  // .meta.json path -> {type, description}
+const registry = new Map();      // registry file name -> { mtimeMs, size, settled, x }: the entry as last parsed
+const sought = new Map();        // sessionId -> when its transcript was last looked for in every project folder
 
-const mtime = f => { try { return fs.statSync(f).mtimeMs; } catch { return 0; } };
+// At most `max` of the operations given to it run at a time; the rest wait their turn.
+function limiter(max) {
+  let running = 0;
+  const waiting = [];
+  return async fn => {
+    if (running < max) running++; else await new Promise(resolve => waiting.push(resolve));
+    try { return await fn(); } finally {
+      const next = waiting.shift();
+      if (next) next(); else running--; // the next one takes this one's place
+    }
+  };
+}
+const io = limiter(FS_AT_ONCE);
+// When a file was last written; -1 when it is not there.
+const mtime = f => io(() => fs.promises.stat(f)).then(s => s.mtimeMs, () => -1);
 
 function pidAlive(pid) {
   try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; }
@@ -42,10 +76,10 @@ function pidAlive(pid) {
 // Process creation times in the formats Claude Code writes to `procStart`, pid -> [accepted values]: Windows FILETIME
 // ticks; on Linux the start time from /proc/<pid>/stat (clock ticks since boot, what current versions write) and,
 // on Linux and macOS, the text of `ps -o lstart=` (LC_ALL=C, TZ=UTC), as older versions wrote it.
-function procStatStart(pid) {
+async function procStatStart(pid) {
   try {
     // Fields after the command name, which is in parentheses and may hold spaces: starttime is field 22 of the line.
-    const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+    const stat = await fs.promises.readFile(`/proc/${pid}/stat`, "utf8");
     return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19] || null;
   } catch { return null; }
 }
@@ -53,7 +87,7 @@ function processStartTimes(pids) {
   if (!pids.length) return Promise.resolve(null);
   if (process.platform !== "win32") {
     return new Promise(resolve => {
-      execFile("ps", ["-o", "pid=,lstart=", "-p", pids.join(",")], { env: { ...process.env, LC_ALL: "C", TZ: "UTC" }, timeout: 8000 }, (err, stdout) => {
+      execFile("ps", ["-o", "pid=,lstart=", "-p", pids.join(",")], { env: { ...process.env, LC_ALL: "C", TZ: "UTC" }, timeout: 8000 }, async (err, stdout) => {
         const map = new Map();
         for (const line of String(stdout || "").split(/\r?\n/)) {
           const m = /^\s*(\d+)\s+(.+?)\s*$/.exec(line);
@@ -61,7 +95,7 @@ function processStartTimes(pids) {
         }
         if (process.platform === "linux") {
           for (const pid of pids) {
-            const ticks = procStatStart(pid);
+            const ticks = await procStatStart(pid);
             if (ticks) map.set(String(pid), [...(map.get(String(pid)) || []), ticks]);
           }
         }
@@ -86,7 +120,8 @@ async function verifyStarts(entries) {
   for (const e of todo) startVerified.set(`${e.pid}:${e.procStart}`, (starts.get(String(e.pid)) || []).includes(String(e.procStart)));
 }
 
-// A Claude Code session's transcript, found by its id (remembered once found).
+// A Claude Code session's transcript, found by its id (remembered once found). Synchronous: for those who ask once,
+// on the user's action - nothing that runs on a timer (those: locateTranscript).
 function findTranscript(id) {
   const known = transcripts.get(id);
   if (known && fs.existsSync(known)) return known;
@@ -98,40 +133,68 @@ function findTranscript(id) {
   }
   return "";
 }
+// The same without waiting for the disk, and with the time of the transcript's last write: { file, at } ("" and 0
+// when there is none - a session nothing was sent to yet has no transcript, for as long as it stays so). Claude Code
+// keeps a transcript in the folder named after the session's cwd (every other character than a letter or digit as
+// "-"), so with the cwd that is one stat; all the folders are gone through only when it is not there (a session
+// resumed from another folder), and at most every SEEK_MS a session.
+async function transcriptOf(id, cwd = "") {
+  const file = `${id}.jsonl`;
+  const known = transcripts.get(id);
+  const guess = cwd ? path.join(PROJECTS_DIR, String(cwd).replace(/[^a-z0-9]/gi, "-"), file) : "";
+  for (const f of new Set([known, guess])) {
+    const at = f ? await mtime(f) : -1;
+    if (at >= 0) { transcripts.set(id, f); sought.delete(id); return { file: f, at }; }
+  }
+  if (Date.now() - (sought.get(id) || 0) < SEEK_MS) return { file: "", at: 0 };
+  sought.set(id, Date.now());
+  let dirs;
+  try { dirs = await io(() => fs.promises.readdir(PROJECTS_DIR)); } catch { return { file: "", at: 0 }; }
+  const ats = await Promise.all(dirs.map(d => mtime(path.join(PROJECTS_DIR, d, file))));
+  const i = ats.findIndex(at => at >= 0);
+  if (i < 0) return { file: "", at: 0 };
+  const found = path.join(PROJECTS_DIR, dirs[i], file);
+  transcripts.set(id, found);
+  sought.delete(id);
+  return { file: found, at: ats[i] };
+}
+const locateTranscript = async (id, cwd = "") => (await transcriptOf(id, cwd)).file;
 
 // What Claude Code wrote about a subagent when it started it (agentType, description); remembered once read, it does
 // not change. A file not there yet, or still being written, is read again on the next poll.
 const NO_META = Object.freeze({ type: "", description: "" });
-function readSubagentMeta(file) {
+async function readSubagentMeta(file) {
   let meta = subagentMeta.get(file);
   if (!meta) {
     let m;
-    try { m = JSON.parse(fs.readFileSync(file, "utf8")); } catch { return NO_META; }
+    try { m = JSON.parse(await io(() => fs.promises.readFile(file, "utf8"))); } catch { return NO_META; }
     meta = { type: String(m?.agentType || ""), description: String(m?.description || "") };
     subagentMeta.set(file, meta);
   }
   return meta;
 }
-function listSubagents(dir, now) {
+async function listSubagents(dir, now) {
   let names;
-  try { names = fs.readdirSync(dir).filter(f => f.endsWith(".jsonl")); } catch { return []; }
+  try { names = (await io(() => fs.promises.readdir(dir))).filter(f => f.endsWith(".jsonl")); } catch { return []; }
   // The subagents gone from this folder are forgotten.
   const ids = new Set(names.map(f => f.slice(0, -".jsonl".length)));
   for (const file of subagentMeta.keys()) {
     if (path.dirname(file) === dir && !ids.has(path.basename(file, ".meta.json"))) subagentMeta.delete(file);
   }
-  return names.map(f => {
+  const list = await Promise.all(names.map(async f => {
     const id = f.slice(0, -".jsonl".length);
-    const at = mtime(path.join(dir, f));
-    return { id, at, working: now - at < SUBAGENT_ACTIVE_MS, ...readSubagentMeta(path.join(dir, `${id}.meta.json`)) };
-  }).sort((a, b) => b.at - a.at);
+    const [written, meta] = await Promise.all([mtime(path.join(dir, f)), readSubagentMeta(path.join(dir, `${id}.meta.json`))]);
+    const at = Math.max(0, written); // 0 for one that went meanwhile
+    return { id, at, working: now - at < SUBAGENT_ACTIVE_MS, ...meta };
+  }));
+  return list.sort((a, b) => b.at - a.at);
 }
 // The newest write to the transcript or to a subagent's, and the subagents.
-function getActivity(id) {
-  const file = findTranscript(id);
+async function getActivity(id, cwd) {
+  const { file, at } = await transcriptOf(id, cwd);
   if (!file) return { at: 0, subagents: [] };
-  const subagents = listSubagents(path.join(file.slice(0, -".jsonl".length), "subagents"), Date.now());
-  return { at: Math.max(mtime(file), ...subagents.map(a => a.at)), subagents };
+  const subagents = await listSubagents(path.join(file.slice(0, -".jsonl".length), "subagents"), Date.now());
+  return { at: Math.max(at, ...subagents.map(a => a.at)), subagents };
 }
 
 // Registry entries as the user sees them: spares gone, each background job folded into its parent (`jobs` on the
@@ -161,19 +224,34 @@ function getStatus(e) {
   return e.kind === "bg" ? "busy" : "idle";
 }
 
+// A registry file's entry (null when it cannot be read), parsed again only when the file changed. The parsed entry is
+// kept as it is: nothing writes into it (foldJobs copies).
+async function readEntry(name) {
+  const file = path.join(REGISTRY_DIR, name);
+  let stat;
+  try { stat = await io(() => fs.promises.stat(file)); } catch { registry.delete(name); return null; }
+  const seenAt = Date.now();
+  const had = registry.get(name);
+  if (had?.settled && had.mtimeMs === stat.mtimeMs && had.size === stat.size) return had.x;
+  let x;
+  try { x = JSON.parse(await io(() => fs.promises.readFile(file, "utf8"))); } catch { registry.delete(name); return null; }
+  registry.set(name, { mtimeMs: stat.mtimeMs, size: stat.size, settled: seenAt - stat.mtimeMs > SETTLED_MS, x });
+  return x;
+}
+
 async function claudeLive() {
   let files;
-  try { files = fs.readdirSync(REGISTRY_DIR).filter(f => /^\d+\.json$/.test(f)); } catch { return []; }
-  const entries = [];
-  for (const f of files) {
-    let x;
-    try { x = JSON.parse(fs.readFileSync(path.join(REGISTRY_DIR, f), "utf8")); } catch { continue; }
-    if (x.sessionId && Number.isInteger(x.pid) && pidAlive(x.pid)) entries.push(x);
-  }
+  try { files = (await fs.promises.readdir(REGISTRY_DIR)).filter(f => /^\d+\.json$/.test(f)); } catch { return []; }
+  const names = new Set(files);
+  for (const name of registry.keys()) if (!names.has(name)) registry.delete(name);
+  const entries = (await Promise.all(files.map(readEntry))).filter(x => x?.sessionId && Number.isInteger(x.pid) && pidAlive(x.pid));
   await verifyStarts(entries);
-  return foldJobs(entries.filter(x => !x.procStart || startVerified.get(`${x.pid}:${x.procStart}`) !== false))
-    .map(x => ({ x, lead: leadingEntry(x), activities: [x, ...x.jobs].map(e => getActivity(e.sessionId)) }))
-    .map(({ x, lead, activities }) => ({
+  const sessions = foldJobs(entries.filter(x => !x.procStart || startVerified.get(`${x.pid}:${x.procStart}`) !== false));
+  const ids = new Set(sessions.flatMap(x => [x, ...x.jobs]).map(e => e.sessionId));
+  for (const id of sought.keys()) if (!ids.has(id)) sought.delete(id);
+  const read = await Promise.all(sessions.map(async x =>
+    ({ x, lead: leadingEntry(x), activities: await Promise.all([x, ...x.jobs].map(e => getActivity(e.sessionId, e.cwd))) })));
+  return read.map(({ x, lead, activities }) => ({
       agent: "Claude", id: x.sessionId, pid: x.pid, procStart: String(x.procStart || ""), cwd: x.cwd || "", name: x.name || "",
       // A background job left on its own (its parent gone): Claude Code's daemon restarts its process when it dies,
       // so it is stopped by `claude stop <jobId>` (launch.stopSession).
@@ -189,8 +267,8 @@ async function claudeLive() {
     }));
 }
 
-async function liveSessions() {
-  return claudeLive();
-}
+// The Claude sessions running here: one read for all who ask (shared-read.js), each with a list of its own.
+// liveSessions({ fresh: true }) for a caller that acts on the answer at once.
+const liveSessions = createSharedRead(claudeLive);
 
-module.exports = { liveSessions, findTranscript, foldJobs, leadingEntry, getStatus };
+module.exports = { liveSessions, findTranscript, locateTranscript, foldJobs, leadingEntry, getStatus };

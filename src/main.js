@@ -30,7 +30,7 @@ const network = require("./network");
 const updater = require("./updater");
 let answerPopup = null;
 const day = require("./day");
-const voiceContext = require("./voice-context").createVoiceContext({ liveSessions: (...a) => liveSessions(...a), findTranscript: id => findTranscript(id) });
+const voiceContext = require("./voice-context").createVoiceContext({ liveSessions: (...a) => liveSessions(...a), findTranscript: (id, cwd) => require("./host/live").locateTranscript(id, cwd) });
 
 const { createNotifier } = require("./notify");
 const { createHost } = require("./host");

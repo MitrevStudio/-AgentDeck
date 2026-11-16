@@ -138,7 +138,7 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
         const agent = str(p?.agent, 16), sessionId = str(p?.sessionId, 200);
         const running = launch.runningTab(agent, sessionId);
         if (running) return { ...tabOut(findTab(running.id), namesOf()), already: true };
-        if (p?.force !== true && (await host.liveSessions()).some(l => l.agent === agent && l.id === sessionId)) throw new HostError("sessionRunningOutside");
+        if (p?.force !== true && (await host.liveSessions({ fresh: true })).some(l => l.agent === agent && l.id === sessionId)) throw new HostError("sessionRunningOutside");
       }
       const spec = launch.commandFor({ kind, agent: p?.agent, sessionId: p?.sessionId, prompt: p?.prompt }, cwd);
       try {

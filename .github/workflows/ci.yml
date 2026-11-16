@@ -21,6 +21,7 @@ jobs:
       - run: node scripts/test-remote-state.js
       - run: node scripts/test-resources.js
       - run: npm run test:load
+      - run: npm run test:live
       - run: node scripts/test-codex-live.js
       - run: node scripts/test-codex-links.js
       - run: npm run test:opencode-live
@@ -60,6 +61,7 @@ jobs:
       - run: node scripts/test-remote-state.js
       - run: node scripts/test-resources.js
       - run: npm run test:load
+      - run: npm run test:live
       - run: node scripts/test-codex-live.js
       - run: node scripts/test-codex-links.js
       - run: npm run test:opencode-live
