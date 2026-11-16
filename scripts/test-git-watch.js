@@ -116,7 +116,8 @@ async function main() {
   };
   ignoredWrites(0);
 
-  const options = { dirs: () => [root], projects: () => [root], active: () => true, focused: () => true, onChange: () => onChange() };
+  // The focused minimum is shortened as the unfocused gap is below: the steps here wait for one watched pass each.
+  const options = { dirs: () => [root], projects: () => [root], active: () => true, focused: () => true, watchDelayMs: 2000, onChange: () => onChange() };
   git.start(options);
   await git.refresh({ force: true });
   assert.deepEqual(repo().files, [], 'nothing but ignored files');
