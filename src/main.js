@@ -1393,7 +1393,7 @@ function registerIpc() {
   handle("limits:get", () => limits.refresh());
   handle("limits:refresh", () => limits.refresh(true));
   // The figures themselves come as "usage:changed" when they changed; the answer only says when they were checked.
-  handle("usage:refresh", async () => { const u = await usage.refresh(); return u && { at: u.at, stats: u.stats, version: u.version }; });
+  handle("usage:refresh", async () => { const u = await usage.refresh({ full: true }); return u && { at: u.at, stats: u.stats, version: u.version }; });
   // A session's last messages and a few facts about it (session-preview.js). The transcript is the one the scan
   // found; one started since is looked up by its id.
   handle("session:preview", (agent, id) => {

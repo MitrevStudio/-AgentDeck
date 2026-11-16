@@ -59,16 +59,25 @@ function launchSettings(dataDir, cwd, home = os.homedir()) {
   }
 }
 
+const snapshotsDir = dataDir => path.join(dataDir, 'claude-context', 'sessions');
+// One session's snapshot file: [key, context], or null when the file is not a snapshot (or is gone). Throws while
+// the file cannot be read - it is being replaced - so the caller keeps what it had and tries again.
+function readSnapshot(dir, name) {
+  if (!/^[\w-]{1,200}\.json$/.test(name)) return null;
+  let text;
+  try { text = fs.readFileSync(path.join(dir, name), 'utf8'); } catch (e) { if (e.code === 'ENOENT') return null; throw e; }
+  const d = JSON.parse(text);
+  if (name !== d.sessionId + '.json' || d.context?.source !== 'claude-statusline' || !Number.isFinite(d.context.at)) return null;
+  return [`Claude:${d.sessionId}`, d.context];
+}
 function readSnapshots(dataDir) {
-  const dir = path.join(dataDir, 'claude-context', 'sessions'), result = new Map();
+  const dir = snapshotsDir(dataDir), result = new Map();
   let names;
   try { names = fs.readdirSync(dir); } catch { return result; }
   for (const name of names) {
-    if (!/^[\w-]{1,200}\.json$/.test(name)) continue;
     try {
-      const d = JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8'));
-      if (name !== d.sessionId + '.json' || d.context?.source !== 'claude-statusline' || !Number.isFinite(d.context.at)) continue;
-      result.set(`Claude:${d.sessionId}`, d.context);
+      const found = readSnapshot(dir, name);
+      if (found) result.set(found[0], found[1]);
     } catch { /* A concurrently replaced file is retried on the next scan. */ }
   }
   return result;
@@ -87,4 +96,4 @@ function prune(dataDir, maxAgeMs = 30 * 24 * 60 * 60 * 1000, now = Date.now()) {
     }
   }
 }
-module.exports = { launchSettings, readSnapshots, originalStatusLine, prune };
+module.exports = { launchSettings, readSnapshots, readSnapshot, snapshotsDir, originalStatusLine, prune };

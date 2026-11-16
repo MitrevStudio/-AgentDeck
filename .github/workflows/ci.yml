@@ -26,6 +26,7 @@ jobs:
       - run: node scripts/test-codex-links.js
       - run: npm run test:opencode-live
       - run: node scripts/test-project-sessions.js
+      - run: npm run test:usage
       - run: npm run test:limits
       - run: npm run test:themes
       - run: npm run test:prefs
@@ -67,6 +68,7 @@ jobs:
       - run: node scripts/test-codex-links.js
       - run: npm run test:opencode-live
       - run: node scripts/test-project-sessions.js
+      - run: npm run test:usage
       - run: npm run test:limits
       - run: npm run test:themes
       - run: npm run test:prefs

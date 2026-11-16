@@ -39,6 +39,7 @@
     "test:codex-links": "node scripts/test-codex-links.js",
     "test:opencode-live": "node scripts/test-opencode-live.js",
     "test:context": "node scripts/test-session-context.js && node scripts/test-opencode-sessions.js",
+    "test:usage": "node scripts/test-usage-incremental.js",
     "test:audit": "node scripts/test-audit-regressions.js",
     "test:themes": "node scripts/test-themes.js",
     "test:prefs": "node scripts/test-prefs-compact.js",
