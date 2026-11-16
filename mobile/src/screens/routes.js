@@ -37,7 +37,7 @@ export function render(el, ctx, p) {
             : errors.get(r.id) ? `<div class="row-sub bad">${esc(errors.get(r.id))}</div>` : ""}
         </div>
         ${r.paired ? `<span class="end-ic ok">${icon("check")}</span>`
-          : r.web ? `<form class="route-pair" data-id="${esc(r.id)}"><input data-code="${esc(r.id)}"${r.kind === "host" ? ' class="long"' : ""} inputmode="${r.kind === "host" ? "text" : "numeric"}" autocapitalize="characters" autocomplete="off" spellcheck="false" maxlength="40" placeholder="${esc(t(r.kind === "host" ? "routes.codePhHost" : "routes.codePh"))}" aria-label="${esc(t("routes.codeFor", { name: r.name || r.id.slice(0, 8) }))}" value="${esc(drafts.get(r.id) || "")}">
+          : r.web ? `<form class="route-pair" data-id="${esc(r.id)}"><input data-code="${esc(r.id)}"${r.kind === "host" ? ' class="long"' : ""} inputmode="${r.kind === "host" ? "text" : "numeric"}" autocapitalize="${r.kind === "host" ? "characters" : "off"}" enterkeyhint="go" autocomplete="off" spellcheck="false" maxlength="40" placeholder="${esc(t(r.kind === "host" ? "routes.codePhHost" : "routes.codePh"))}" aria-label="${esc(t("routes.codeFor", { name: r.name || r.id.slice(0, 8) }))}" value="${esc(drafts.get(r.id) || "")}">
             ${iconBtn("link", t("pair.pair"), `type="submit" ${busy.has(r.id) ? "disabled" : ""}`, "accent")}</form>` : ""}
       </div>`).join("")}</div>`;
     if (focused) body.querySelector(`[data-code="${CSS.escape(focused)}"]`)?.focus();

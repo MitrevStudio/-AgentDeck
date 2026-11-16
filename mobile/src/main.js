@@ -5,7 +5,7 @@
 import { App } from "@capacitor/app";
 import { t, setLanguage, applyI18n, errorText } from "./i18n.js";
 import { $, esc, buzz } from "./util.js";
-import { icon } from "./icons.js";
+import { icon, iconBtn } from "./icons.js";
 import { createStore } from "./data.js";
 import { createRelayProvider } from "./provider-relay.js";
 import { keystore, lock, deviceModel } from "./keystore.js";
@@ -111,16 +111,19 @@ let bannerTimer = 0;
 function banner({ node, item }) {
   if (current()?.name === "session" && current().params.node === node && current().params.id === item.id) return;
   const el = $("#banner");
-  el.innerHTML = `<button class="banner-in" aria-label="${esc(`${t("common.open")}: ${t("banner.waiting", { title: item.title })}`)}"><i class="mark dot st-waiting"></i><span class="banner-text"><b>${esc(t("banner.waiting", { title: item.title }))}</b>
-    <small>${esc(item.nodeName)} · ${esc(item.project)}${item.waitingFor ? ` · ${esc(item.waitingFor)}` : ""}</small></span>${icon("right", "banner-go")}</button>`;
+  // The banner opens the session; its X puts it away (it lies over the header's tools). Over a terminal it goes
+  // sooner: the header there is all the way out.
+  el.innerHTML = `<div class="banner-in" role="alert"><button class="banner-open" aria-label="${esc(`${t("common.open")}: ${t("banner.waiting", { title: item.title })}`)}"><i class="mark dot st-waiting"></i><span class="banner-text"><b>${esc(t("banner.waiting", { title: item.title }))}</b>
+    <small>${esc(item.nodeName)} · ${esc(item.project)}${item.waitingFor ? ` · ${esc(item.waitingFor)}` : ""}</small></span></button>${iconBtn("x", t("common.dismiss"), 'data-act="dismiss"')}</div>`;
   el.hidden = false;
   el.classList.remove("in");
   void el.offsetWidth;
   el.classList.add("in");
-  el.querySelector("button").onclick = () => { el.hidden = true; go("session", { node, agent: item.agent, id: item.id }); };
+  el.querySelector(".banner-open").onclick = () => { el.hidden = true; go("session", { node, agent: item.agent, id: item.id }); };
+  el.querySelector("[data-act='dismiss']").onclick = () => { el.hidden = true; };
   buzz();
   clearTimeout(bannerTimer);
-  bannerTimer = setTimeout(() => { el.hidden = true; }, 9000);
+  bannerTimer = setTimeout(() => { el.hidden = true; }, current()?.name === "terminal" ? 5000 : 9000);
 }
 
 // ---------- screens ----------
@@ -245,7 +248,7 @@ async function phoneName() {
   return link?.name || (await keystore.getName()) || (await deviceModel()) || "Phone";
 }
 
-const ctx = { store: null, go, back, toast, fail, confirm: confirmSheet, prompt: promptSheet, unpair, relay, rename, phoneName, secure: () => keystore.secure };
+const ctx = { store: null, go, back, toast, fail, confirm: confirmSheet, prompt: promptSheet, unpair, relay, rename, phoneName, secure: () => keystore.secure, version: pkg.version };
 
 // ---------- the lifecycle ----------
 // The links do not survive the background reliably (and not at all on iOS): back in the foreground, or when the

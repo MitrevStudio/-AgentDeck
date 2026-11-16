@@ -137,6 +137,9 @@ h1, h2, p { margin: 0; }
 .top-actions { flex: none; display: flex; align-items: center; }
 .top-actions .btn.sm { margin: 0 6px 0 4px; }
 .top-actions .tag { margin-right: 12px; }
+/* Until the first screen is drawn (the keys are read, the links started). */
+.boot { flex: 1; display: grid; place-items: center; }
+.boot .spinner { width: 22px; height: 22px; }
 
 /* ---------- icon buttons ----------
    The button box is the touch target (44px); the chip drawn in it (::before) is the desktop's small icon button.
@@ -292,7 +295,8 @@ textarea { resize: none; line-height: 1.35; }
 .row.st-waiting:active { background: color-mix(in srgb, var(--needs) 12%, var(--panel-2)); }
 .row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .row-title { font-weight: 600; font-size: 14.5px; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.row-reason { color: var(--needs); font-size: 12.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* What it waits for is what the user came to read: two lines of it. */
+.row-reason { color: var(--needs); font-size: 12.5px; font-weight: 500; line-height: 1.3; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
 .row-meta { display: block; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row-end { flex: none; display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 7px; min-width: 44px; }
 .row-end time { color: var(--faint); font-size: 11.5px; white-space: nowrap; }
@@ -308,7 +312,7 @@ textarea { resize: none; line-height: 1.35; }
 .agent .ic { width: 12px; height: 12px; margin-top: 2px; }
 .agent-mark { display: inline-block; margin-right: 6px; vertical-align: -2px; }
 .agent-mark .ic { width: 13px; height: 13px; }
-.offline-note { display: flex; align-items: center; gap: 8px; color: var(--faint); font-size: 12px; margin: 12px 10px 0; }
+.offline-note { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; margin: 6px 10px 0; }
 .offline-note .ic { width: 14px; height: 14px; }
 /* A terminal in a list: the row opens it (as a session row does), the X at its end closes it. */
 .trow { display: flex; align-items: center; gap: 2px; border-radius: var(--r-md); }
@@ -328,8 +332,18 @@ textarea { resize: none; line-height: 1.35; }
 /* ---------- a session ---------- */
 .screen-session .screen { overflow: hidden; }
 .sess-head .top small { display: block; }
-.status-line { display: flex; align-items: center; gap: 8px; padding: 0 16px 8px; min-height: 30px; }
-.status-line .reason { flex: 1; min-width: 0; color: var(--needs); font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The title on up to two lines (three tools stand beside it); what the session waits for whole, up to five. */
+.sess-head .top h1 { font-size: 15.5px; line-height: 1.25; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
+.status-line { display: flex; align-items: flex-start; gap: 8px; padding: 0 16px 8px; min-height: 30px; }
+.status-line .reason { flex: 1; min-width: 0; padding-top: 2px; color: var(--needs); font-weight: 600; font-size: 13px; line-height: 1.35; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5; overflow-wrap: anywhere; }
+.status-line .when { padding-top: 3px; }
+/* The keyboard is up: the messages get the room - the title on one line, no line under it, the reason on one. */
+.kb-open .sess-head .top { min-height: 44px; padding-top: 0; padding-bottom: 0; }
+.kb-open .sess-head .top h1 { -webkit-line-clamp: 1; }
+.kb-open .sess-head .top small { display: none; }
+.kb-open .status-line { padding-bottom: 4px; min-height: 0; }
+.kb-open .status-line:not(:has(.reason)) { display: none; }
+.kb-open .status-line .reason { -webkit-line-clamp: 1; }
 .status-line .when { color: var(--faint); font-size: 12px; }
 .session { padding-top: 4px; border-top: 1px solid var(--line); }
 .msgs { display: flex; flex-direction: column; gap: 8px; padding: 6px 0; }
@@ -411,7 +425,9 @@ textarea { resize: none; line-height: 1.35; }
 .step { gap: 7px; }
 .step-n { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--accent-weak); color: var(--accent); font-size: 10px; letter-spacing: 0; }
 /* A choice among a few (computer, agent): the desktop's segmented chips. */
-.seg { display: flex; flex-wrap: wrap; padding: 0 3px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; }
+/* One row, whatever their number: it scrolls sideways. */
+.seg { display: flex; overflow-x: auto; scrollbar-width: none; padding: 0 3px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; }
+.seg::-webkit-scrollbar { display: none; }
 .seg > button {
   position: relative; flex: 1 0 auto; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: var(--tap); padding: 0 12px;
   border: 0; background: transparent; color: var(--muted); font-size: 13.5px; font-weight: 550; white-space: nowrap;
@@ -429,6 +445,9 @@ textarea { resize: none; line-height: 1.35; }
 .pick-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .pick-main b { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pick-main small { color: var(--faint); font: 11.5px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A path is cut at its start: the folder that tells it apart is at its end. */
+.pick-main small.path { direction: rtl; text-align: left; }
+.proj-filter { min-height: 38px; margin: 0 0 4px; padding: 6px 11px; background: var(--panel); border-color: var(--line); font-size: 15px; }
 .pick-check { color: var(--accent); width: 16px; height: 16px; }
 .pmono { --h: 215; flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: var(--r-sm); font-size: 10.5px; font-weight: 700; letter-spacing: .02em; background: hsl(var(--h) var(--tile-bg)); color: hsl(var(--h) var(--tile-fg)); }
 .new .prompt { min-height: 76px; }
@@ -437,9 +456,9 @@ textarea { resize: none; line-height: 1.35; }
 .cards { display: flex; flex-direction: column; gap: 6px; }
 .node-row { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 4px 2px 4px 12px; background: var(--card); border: 1px solid var(--line); border-radius: var(--r-md); }
 .node-row > .row-main { padding: 4px 0; }
-/* A computer's main part opens its screen. */
-.node-open { min-height: 44px; margin: 0; padding: 4px 0; text-align: left; background: transparent; border: 0; border-radius: var(--r-sm, 6px); color: var(--text); font: inherit; }
-.node-open:active { background: var(--panel-2); }
+/* A computer's row opens its screen. */
+button.node-row { width: 100%; padding-right: 2px; text-align: left; color: var(--text); font: inherit; }
+button.node-row:active { background: var(--card-hover); border-color: var(--line-2); }
 .node-row > .mark { margin-right: 14px; }
 .node-ic { display: grid; place-items: center; flex: none; color: var(--accent); }
 .node-ic .ic { width: 17px; height: 17px; }
@@ -454,6 +473,22 @@ textarea { resize: none; line-height: 1.35; }
 .end-ic.ok { color: var(--busy); }
 .end-ic.bad { color: var(--danger); }
 .computers > .group { margin-top: 18px; }
+.node-row .tag { flex: none; height: 18px; padding: 0 7px; font-size: 11px; color: var(--wait); background: var(--wait-bg); }
+.end-ic.go { width: 32px; color: var(--faint); }
+.computers .foot-actions { justify-content: space-between; }
+/* A computer's projects: a heading that folds its sessions open and shut, its tools at the end. */
+.proj-block { border-radius: var(--r-md); }
+.proj-head { display: flex; align-items: center; }
+.proj-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 5px 4px 5px 4px; text-align: left; background: transparent; border: 0; border-radius: var(--r-md); color: var(--text); }
+.proj-open:active { background: var(--panel-2); }
+.proj-open .fold-ic { width: 14px; height: 14px; color: var(--faint); transition: transform var(--dur); transform: rotate(-90deg); }
+.proj-open[aria-expanded="true"] .fold-ic { transform: none; }
+.proj-open .count { flex: none; }
+.proj-open .count.waiting { color: var(--needs); background: var(--needs-bg); }
+.proj-open .count.running { color: var(--working); background: var(--working-bg); }
+.proj-rows { margin: 0 0 6px 13px; padding-left: 9px; border-left: 1px solid var(--line); }
+.proj-rows .empty.small { text-align: left; padding: 6px 8px; }
+.more-row { min-height: var(--tap); padding: 0 10px; text-align: left; border: 0; background: none; color: var(--accent); font-size: 13px; font-weight: 600; }
 .route-pair { flex: none; display: flex; align-items: center; }
 .route-pair input { width: 92px; min-height: 36px; padding: 6px 8px; font: 14px var(--mono); letter-spacing: .05em; }
 .route-pair input.long { width: 132px; letter-spacing: 0; }
@@ -467,6 +502,18 @@ textarea { resize: none; line-height: 1.35; }
 .hint { text-align: center; color: var(--faint); font-size: 12.5px; }
 .pair > .group { margin: 10px 4px 0; }
 .pair .link { align-self: center; }
+/* The ways to pair by hand: a card each, folded shut until it is chosen. */
+.fold > summary { display: flex; align-items: center; gap: 10px; min-height: 44px; margin: -12px; padding: 6px 12px; list-style: none; border-radius: var(--r-lg); color: var(--text); }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary:active { background: var(--card-hover); }
+.fold > summary > .ic { width: 17px; height: 17px; color: var(--accent); }
+.fold > summary > .ic.fold-ic { width: 14px; height: 14px; color: var(--faint); transition: transform var(--dur); transform: rotate(-90deg); }
+.fold[open] > summary > .ic.fold-ic { transform: none; }
+.fold[open] > summary { margin-bottom: 0; }
+.fold-title { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.fold-title b { font-size: 14px; font-weight: 600; }
+.fold-title small { font-size: 12px; color: var(--muted); }
+.field-hint { font-size: 12px; font-weight: 400; color: var(--muted); line-height: 1.35; }
 
 /* ---------- scanner ---------- */
 .scan { display: flex; flex-direction: column; gap: 12px; align-items: stretch; }
@@ -475,6 +522,7 @@ textarea { resize: none; line-height: 1.35; }
 .viewfinder .frame { position: absolute; inset: 16%; border: 2px solid rgba(255, 255, 255, .85); border-radius: var(--r-lg); box-shadow: 0 0 0 999px rgba(0, 0, 0, .35); }
 .scan .hint { display: flex; gap: 8px; justify-content: center; align-items: center; color: var(--muted); font-size: 13px; }
 .scan .hint .ic { width: 16px; height: 16px; }
+.scan .note { margin: 4px 0 0; }
 
 /* ---------- diagnostics ---------- */
 .diag { display: flex; flex-direction: column; gap: 10px; }
@@ -489,13 +537,13 @@ textarea { resize: none; line-height: 1.35; }
 .banner { position: fixed; z-index: 30; left: calc(8px + var(--sal)); right: calc(8px + var(--sar)); top: calc(6px + var(--sat)); }
 .banner.in { animation: drop .28s ease-out; }
 .banner-in {
-  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 8px 10px 8px 14px; text-align: left; color: var(--text);
+  display: flex; align-items: center; width: 100%; min-height: 52px; color: var(--text);
   border: 1px solid color-mix(in srgb, var(--needs) 45%, transparent); border-radius: var(--r-lg); background: var(--raised); box-shadow: var(--shadow-pop);
 }
+.banner-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 8px 0 8px 14px; text-align: left; border: 0; background: none; color: inherit; }
 .banner-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .banner-text b { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.banner-text small { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.banner-go { color: var(--muted); width: 16px; height: 16px; }
+.banner-text small { color: var(--muted); font-size: 12px; line-height: 1.35; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
 @keyframes drop { from { transform: translateY(-120%); opacity: 0; } }
 
 .toast {
@@ -526,6 +574,8 @@ textarea { resize: none; line-height: 1.35; }
   .tabbar button { min-height: 44px; flex-direction: row; justify-content: center; gap: 6px; font-size: 12px; padding: 2px 4px; }
   .tab-ic { width: 40px; height: 26px; }
   .status-line { padding-bottom: 4px; min-height: 26px; }
+  .sess-head .top h1 { -webkit-line-clamp: 1; }
+  .status-line .reason { -webkit-line-clamp: 2; }
   .hero { padding: 0 0 6px; }
   .logo { width: 40px; height: 40px; border-radius: 10px; }
   .hero h1 { font-size: 18px; margin-top: 4px; }

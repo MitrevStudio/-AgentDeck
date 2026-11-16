@@ -510,6 +510,8 @@ export function createStore(provider) {
     // "idle" | "other" | "stopped", or "unreachable" for a session that ran when its computer went away.
     inbox,
     item: (id, agent, sid) => itemOf(id, agent, sid),
+    // Every session of one computer (Item[]), in no order.
+    sessions: id => itemsOf(id),
     // The node's projects (registry) and its sessions per project, newest first, for "New session".
     projects(id) {
       const e = entry(id);

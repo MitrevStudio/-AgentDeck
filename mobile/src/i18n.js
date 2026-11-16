@@ -10,6 +10,9 @@ const STRINGS = {
     "common.open": "Open",
     "common.you": "You",
     "common.search": "Search",
+    "common.dismiss": "Dismiss",
+    "common.yes": "yes",
+    "common.no": "no",
 
     "nav.inbox": "Sessions",
     "nav.new": "New",
@@ -22,11 +25,14 @@ const STRINGS = {
     "pair.paste": "Paste the code's text",
     "pair.pastePh": "AGENTDECK-PAIR:…",
     "pair.pair": "Pair",
-    "pair.manual": "Without a code from AgentDeck",
+    "pair.manual": "Connect to a relay by its address",
+    "pair.manualHint": "Then each computer behind it pairs with its own code.",
     "pair.relay": "Address of the relay (or of a computer)",
     "pair.relayPh": "192.168.1.10:7421",
     "pair.code": "Its code",
-    "pair.codePh": "the relay's long code (agentdeck-host pair) or a computer's six digits",
+    "pair.codePh": "long code or 6 digits",
+    "pair.codeHint": "A relay's long code (agentdeck-host pair), or a computer's six digits (Settings → Computers).",
+    "pair.byHand": "Pair by hand",
     "pair.connect": "Connect",
     "pair.diag": "Connection check",
     "pair.badInput": "Give the address with its port and the code.",
@@ -70,6 +76,7 @@ const STRINGS = {
     "scan.noCamera": "No camera here, or no access to it. Allow the camera, or pair by hand.",
     "scan.insecure": "The camera needs a secure page (the app, or localhost in a browser).",
     "scan.found": "Code read",
+    "scan.torch": "Light",
 
     "inbox.title": "Sessions",
     "inbox.searchPh": "Session, project or computer",
@@ -94,7 +101,18 @@ const STRINGS = {
     "terms.none": "No terminals on {name}.",
 
     "node.newShell": "New terminal in the home folder",
-    "node.offline": "{name} is offline: its terminals show once it is connected.",
+    "node.offline": "{name} is offline: its projects and terminals show once it is connected.",
+    "node.projects": "Projects",
+    "node.otherFolders": "Other folders",
+    "node.noSessions": "No sessions here yet",
+    "node.newIn": "New session in {name}",
+    "node.shellIn": "Terminal in {name}",
+    "node.showAll": "Show all {n}",
+    "node.waiting.one": "{n} needs you",
+    "node.waiting.other": "{n} need you",
+    "node.running.one": "{n} running",
+    "node.running.other": "{n} running",
+    "node.noProjects": "No projects on {name}.",
 
     "status.waiting": "Needs you",
     "status.busy": "Working",
@@ -180,6 +198,7 @@ const STRINGS = {
     "new.started": "Started on {name}",
     "new.resumeTitle": "Or resume one",
     "new.noProjects": "No projects on this computer",
+    "new.filterPh": "Filter the projects",
     "new.noComputers": "No computer is online",
 
     "computers.title": "Computers",
@@ -193,6 +212,10 @@ const STRINGS = {
     "computers.add": "Add computers: paste a code or type an address",
     "computers.scan": "Scan a code from AgentDeck",
     "computers.addBehind": "Pair a computer behind {name}",
+    "computers.refresh": "Refresh",
+    "computers.refreshed": "Asked the computers again",
+    "computers.outdated": "needs an update",
+    "computers.version": "App version {version}",
     "computers.phone": "This phone",
     "computers.rename": "Rename",
     "computers.renamed": "The computers will see “{name}”",
@@ -229,6 +252,7 @@ const STRINGS = {
     "diag.ok": "Connected in {ms} ms",
     "diag.okClosed": "The server closed it (code {code})",
     "diag.fail": "Failed after {ms} ms (code {code})",
+    "diag.addrPh": "ws://192.168.1.10:7421",
     "diag.timeout": "No answer in {s} s",
     "diag.bad": "Not a ws:// or wss:// address",
     "diag.message": "Received: {text}",
@@ -276,6 +300,10 @@ const STRINGS = {
     "err.unreadable": "That computer cannot read its own settings right now – try again in a moment.",
 
     "time.justNow": "just now",
+    "time.now": "now",
+    "time.min": "{n}m",
+    "time.hour": "{n}h",
+    "time.day": "{n}d",
     "time.none": "no date"
   },
 
@@ -286,6 +314,9 @@ const STRINGS = {
     "common.open": "Отвори",
     "common.you": "Ти",
     "common.search": "Търси",
+    "common.dismiss": "Скрий",
+    "common.yes": "да",
+    "common.no": "не",
 
     "nav.inbox": "Сесии",
     "nav.new": "Нова",
@@ -298,11 +329,14 @@ const STRINGS = {
     "pair.paste": "Постави текста на кода",
     "pair.pastePh": "AGENTDECK-PAIR:…",
     "pair.pair": "Сдвои",
-    "pair.manual": "Без код от AgentDeck",
+    "pair.manual": "Свържи се с релей по адреса му",
+    "pair.manualHint": "После всеки компютър зад него се сдвоява със своя код.",
     "pair.relay": "Адрес на релея (или на компютър)",
     "pair.relayPh": "192.168.1.10:7421",
     "pair.code": "Кодът му",
-    "pair.codePh": "дългият код на релея (agentdeck-host pair) или шестте цифри на компютър",
+    "pair.codePh": "дълъг код или 6 цифри",
+    "pair.codeHint": "Дългият код на релей (agentdeck-host pair) или шестте цифри на компютър (Настройки → Компютри).",
+    "pair.byHand": "Сдвои ръчно",
     "pair.connect": "Свържи",
     "pair.diag": "Проверка на връзката",
     "pair.badInput": "Дай адреса с порта и кода.",
@@ -346,6 +380,7 @@ const STRINGS = {
     "scan.noCamera": "Няма камера или достъп до нея. Разреши камерата или сдвои ръчно.",
     "scan.insecure": "Камерата иска защитена страница (приложението или localhost в браузър).",
     "scan.found": "Кодът е прочетен",
+    "scan.torch": "Светлина",
 
     "inbox.title": "Сесии",
     "inbox.searchPh": "Сесия, проект или компютър",
@@ -370,7 +405,18 @@ const STRINGS = {
     "terms.none": "Няма терминали на {name}.",
 
     "node.newShell": "Нов терминал в домашната папка",
-    "node.offline": "{name} е офлайн: терминалите му ще се покажат, когато се свърже.",
+    "node.offline": "{name} е офлайн: проектите и терминалите му ще се покажат, когато се свърже.",
+    "node.projects": "Проекти",
+    "node.otherFolders": "Други папки",
+    "node.noSessions": "Тук още няма сесии",
+    "node.newIn": "Нова сесия в {name}",
+    "node.shellIn": "Терминал в {name}",
+    "node.showAll": "Покажи всичките {n}",
+    "node.waiting.one": "{n} те чака",
+    "node.waiting.other": "{n} те чакат",
+    "node.running.one": "{n} върви",
+    "node.running.other": "{n} вървят",
+    "node.noProjects": "Няма проекти на {name}.",
 
     "status.waiting": "Нужен си",
     "status.busy": "Работи",
@@ -456,6 +502,7 @@ const STRINGS = {
     "new.started": "Пусната на {name}",
     "new.resumeTitle": "Или продължи стара",
     "new.noProjects": "Няма проекти на този компютър",
+    "new.filterPh": "Филтрирай проектите",
     "new.noComputers": "Няма компютър онлайн",
 
     "computers.title": "Компютри",
@@ -469,6 +516,10 @@ const STRINGS = {
     "computers.add": "Добави компютри: постави код или въведи адрес",
     "computers.scan": "Сканирай код от AgentDeck",
     "computers.addBehind": "Сдвои компютър зад {name}",
+    "computers.refresh": "Опресни",
+    "computers.refreshed": "Попитах компютрите отново",
+    "computers.outdated": "трябва да се обнови",
+    "computers.version": "Версия на приложението {version}",
     "computers.phone": "Този телефон",
     "computers.rename": "Преименувай",
     "computers.renamed": "Компютрите ще виждат „{name}“",
@@ -505,6 +556,7 @@ const STRINGS = {
     "diag.ok": "Свързано за {ms} ms",
     "diag.okClosed": "Сървърът затвори (код {code})",
     "diag.fail": "Неуспех след {ms} ms (код {code})",
+    "diag.addrPh": "ws://192.168.1.10:7421",
     "diag.timeout": "Няма отговор за {s} s",
     "diag.bad": "Не е ws:// или wss:// адрес",
     "diag.message": "Получено: {text}",
@@ -552,6 +604,10 @@ const STRINGS = {
     "err.unreadable": "Компютърът не може да прочете настройките си в момента – опитай пак след малко.",
 
     "time.justNow": "току-що",
+    "time.now": "сега",
+    "time.min": "{n} мин",
+    "time.hour": "{n} ч",
+    "time.day": "{n} д",
     "time.none": "без дата"
   }
 };
@@ -568,12 +624,12 @@ function detect() {
   return "en";
 }
 
-let lang = detect();
+let lang = typeof navigator === "undefined" ? "en" : detect();
 const cache = new Map();
 
 export function setLanguage(next) {
   if (STRINGS[next]) { lang = next; cache.clear(); }
-  document.documentElement.lang = lang;
+  if (typeof document !== "undefined") document.documentElement.lang = lang;
   return lang;
 }
 export const language = () => lang;
@@ -616,6 +672,17 @@ export function ago(ms) {
   if (abs < 3600) return rel(Math.round(sec / 60), "minute");
   if (abs < 86400) return rel(Math.round(sec / 3600), "hour");
   if (abs < 7 * 86400) return rel(Math.round(sec / 86400), "day");
+  return new Date(ms).toLocaleDateString(LOCALES[lang], { day: "numeric", month: "short" });
+}
+// The same in a few characters - "now", "11m", "2h", "3d", then the date - for a list row, where the long form
+// would take the title's room (it is the row's tooltip).
+export function agoShort(ms, now = Date.now()) {
+  if (!ms) return "";
+  const sec = Math.max(0, (now - ms) / 1000);
+  if (sec < 45) return t("time.now");
+  if (sec < 3570) return t("time.min", { n: Math.max(1, Math.round(sec / 60)) });
+  if (sec < 84600) return t("time.hour", { n: Math.max(1, Math.round(sec / 3600)) });
+  if (sec < 7 * 86400) return t("time.day", { n: Math.max(1, Math.round(sec / 86400)) });
   return new Date(ms).toLocaleDateString(LOCALES[lang], { day: "numeric", month: "short" });
 }
 export const formatTime = ms => new Date(ms).toLocaleTimeString(LOCALES[lang], { hour: "2-digit", minute: "2-digit" });

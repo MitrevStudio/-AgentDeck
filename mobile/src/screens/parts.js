@@ -1,6 +1,6 @@
 // Pieces several screens draw: the header with its tool strip, a session's status (a mark in a row, a chip in the
 // session's header), agent and project labels, a session row, the relay link's note.
-import { t, ago, errorText } from "../i18n.js";
+import { t, ago, agoShort, errorText } from "../i18n.js";
 import { esc, hue } from "../util.js";
 import { icon, iconBtn, agentIcon } from "../icons.js";
 
@@ -40,9 +40,12 @@ const initials = name => {
 };
 export const projectMark = name => `<span class="pmono" style="--h:${hue(name)}" aria-hidden="true">${esc(initials(name))}</span>`;
 // "computer · project · agent" on one line. In a list row the agent is its glyph, first (as the desktop's sidebar
-// has it), so a narrow screen cuts the project rather than the agent.
-export const metaLine = (x, { showNode = true, glyph = false } = {}) => {
-  const parts = [showNode ? nodeTag(x.nodeName, x.online) : "", projectTag(x.project), glyph ? "" : agentTag(x.agent)].filter(Boolean).join('<i class="sep">·</i>');
+// has it), so a narrow screen cuts the project rather than the agent. Under a project's own heading (a computer's
+// screen) neither the computer nor the project is said again: the agent by its glyph and name.
+export const metaLine = (x, { showNode = true, showProject = true, glyph = false } = {}) => {
+  const lead = [showNode ? nodeTag(x.nodeName, x.online) : "", showProject ? projectTag(x.project) : ""].filter(Boolean);
+  if (!lead.length) return agentTag(x.agent);
+  const parts = [...lead, glyph ? "" : agentTag(x.agent)].filter(Boolean).join('<i class="sep">·</i>');
   return glyph ? `<span class="agent-mark" role="img" aria-label="${esc(x.agent)}" title="${esc(x.agent)}">${agentIcon(x.agent)}</span>${parts}` : parts;
 };
 
@@ -123,15 +126,15 @@ export function wireTerminals(el, ctx) {
   });
 }
 
-// A session in a list (inbox, new session's resume list): the title, what it waits for, computer · project · agent;
-// at the end the time and its status mark.
-export function sessionRow(x, { showNode = true } = {}) {
+// A session in a list (inbox, a computer's projects, new session's resume list): the title, what it waits for (two
+// lines of it), computer · project · agent; at the end the time in its short form and its status mark.
+export function sessionRow(x, { showNode = true, showProject = true } = {}) {
   return `<button class="row st-${esc(x.status)}" data-node="${esc(x.node)}" data-agent="${esc(x.agent)}" data-id="${esc(x.id)}">
     <span class="row-main">
       <span class="row-title">${esc(x.title)}</span>
       ${x.status === "waiting" ? `<span class="row-reason">${esc(x.waitingFor || t("status.reasonUnknown"))}</span>` : ""}
-      <span class="row-meta">${metaLine(x, { showNode, glyph: true })}</span>
+      <span class="row-meta">${metaLine(x, { showNode, showProject, glyph: true })}</span>
     </span>
-    <span class="row-end"><time>${esc(ago(x.updatedAt))}</time>${x.status !== "stopped" ? statusMark(x.status) : ""}</span>
+    <span class="row-end"><time title="${esc(ago(x.updatedAt))}">${esc(agoShort(x.updatedAt))}</time>${x.status !== "stopped" ? statusMark(x.status) : ""}</span>
   </button>`;
 }

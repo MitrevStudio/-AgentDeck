@@ -11,6 +11,10 @@ const P = {
   server: '<rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/>',
   phone: '<rect x="6.5" y="2.5" width="11" height="19" rx="2.5"/><path d="M11 18h2"/>',
   terminal: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3"/><path d="M13 15h4"/>',
+  // A new terminal (a shell in a folder): the terminal with a plus where its cursor line is.
+  termPlus: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m6.5 9.5 2.5 2.5-2.5 2.5"/><path d="M15 9.5v5M12.5 12h5"/>',
+  chevDown: '<path d="m6 9 6 6 6-6"/>',
+  bolt: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
   send: '<path d="M21 3 10.5 13.5M21 3l-6.5 18-4-7.5L3 9.5z"/>',
   stop: '<rect x="6.5" y="6.5" width="11" height="11" rx="2" fill="currentColor"/>',
