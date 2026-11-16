@@ -541,7 +541,7 @@ Agent-launch shortcuts require the corresponding CLI. In the search palette, arr
 
 | Area | What you can change |
 | --- | --- |
-| **General** | English/Bulgarian, colour theme, window scale, notifications, the taskbar strip, startup and updates |
+| **General** | English/Bulgarian, colour theme, window scale, notifications, the taskbar strip, startup, updates and disk space |
 | **Terminal** | Built-in tabs or Windows Terminal, external window behavior, font size and automatic compaction |
 | **Source control** | The editor the Git screens open a changed file in: VS Code or IntelliJ IDEA |
 | **Dictation** | Provider, model, language, microphone, recording length, delivery, text mode and push-to-talk |
@@ -556,6 +556,8 @@ Agent-launch shortcuts require the corresponding CLI. In the search palette, arr
 The tray also provides quick language/theme switches, terminal destination controls, voice actions and app lifecycle controls. Closing the manager leaves AgentDeck available in the tray.
 
 **Start with Windows** applies to installed copies and starts quietly in the tray. It is enabled once for a new installed setup; disabling it persists.
+
+**Disk space** (Settings → General) shows how much room Claude Code's scratchpad folders take in the temp folder (`%TEMP%\claude`; `claude-<uid>` under the temp folder on Linux and macOS) - Claude Code keeps one per session and never removes them. **Clear finished** deletes, after asking, only the folders of sessions that are no longer running and have not been written to in the last hour; everything else there stays.
 
 <details>
 <summary><strong>Proxy and corporate-network support</strong></summary>

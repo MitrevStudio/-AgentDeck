@@ -63,6 +63,7 @@ function showTab(name, focus = false) {
   try { localStorage.setItem(TAB_KEY, pane.id); } catch {}
   if (focus) tab.focus();
   if (st.data) fit(); // before that, the first fit comes once the voice part is in
+  if (pane.id === "general") queueMicrotask(measureScratchpads); // once the page's script has run to its end
 }
 // The tab `step` places after (or before) the one shown, round the end.
 function nextTab(step) {
@@ -272,6 +273,76 @@ $("updateInstall").addEventListener("click", () => updates.install());
 updates.onChanged(renderUpdates);
 updates.get().then(renderUpdates).catch(() => {});
 
+// ---------- disk space ----------
+// Claude Code's scratchpad folders on this computer (host/scratchpads.js). Measuring them can take seconds, so it
+// happens the first time General is shown and on Refresh; nothing is removed before the user confirms.
+// busy: "" | "scan" | "clear"; data: the last measurement; failed: the last one did not come; note: what the last
+// clearing did.
+const scratch = { supported: false, asked: false, busy: "", data: null, failed: false, note: "" };
+const BYTE_UNITS = ["B", "KB", "MB", "GB", "TB"];
+function formatBytes(n) {
+  let i = 0;
+  while (n >= 1024 && i < BYTE_UNITS.length - 1) { n /= 1024; i++; }
+  return `${I18N.formatNumber(n, { maximumFractionDigits: i < 2 || n >= 100 ? 0 : n >= 10 ? 1 : 2 })} ${BYTE_UNITS[i]}`;
+}
+const sizeAndFolders = part => ({ size: formatBytes(part.bytes), folders: tn("settings.storage.folders", part.folders) });
+function renderScratchpads() {
+  const d = scratch.data;
+  $("scratchSection").hidden = !scratch.supported;
+  if (!scratch.supported) return refit();
+  let tag = ["", "folder", d ? tn("settings.storage.folders", d.total.folders) : ""];
+  if (scratch.busy) tag = ["accent", null, t(scratch.busy === "scan" ? "settings.storage.tag.scanning" : "settings.storage.tag.clearing")];
+  else if (scratch.failed) tag = ["danger", "alert", t("settings.storage.tag.failed")];
+  $("scratchSize").textContent = d ? formatBytes(d.total.bytes) : "";
+  $("scratchTag").className = `tag ${tag[0]}`;
+  $("scratchTag").innerHTML = `${tag[1] ? icon(tag[1]) : '<span class="spinner"></span>'}<span class="t">${esc(tag[2])}</span>`;
+  $("scratchTag").hidden = !tag[2];
+  const lines = [scratch.note];
+  if (d) {
+    lines.push(t("settings.storage.about", { dir: d.dir }));
+    lines.push(d.finished.folders ? t("settings.storage.finished", sizeAndFolders(d.finished)) : t("settings.storage.nothing"));
+    if (d.running.folders) lines.push(t("settings.storage.kept", sizeAndFolders(d.running)));
+  }
+  if (scratch.failed) lines.push(t("settings.storage.scanFailed"));
+  $("scratchHint").textContent = lines.filter(Boolean).join("\n");
+  $("scratchRefresh").disabled = Boolean(scratch.busy);
+  $("scratchRefresh").classList.toggle("spin", scratch.busy === "scan");
+  $("scratchClear").disabled = Boolean(scratch.busy) || scratch.failed || !d?.finished.folders;
+  refit();
+}
+// again: asked for by Refresh or after a clearing; otherwise only the first call measures.
+async function measureScratchpads(again = false) {
+  if (scratch.busy || (scratch.asked && again !== true)) return;
+  scratch.asked = true;
+  const api = window.voiceSettings.scratchpads;
+  if (!scratch.supported) scratch.supported = Boolean((await api.info().catch(() => null))?.supported);
+  if (!scratch.supported) return;
+  scratch.busy = "scan";
+  renderScratchpads();
+  const d = await api.scan().catch(() => null);
+  scratch.busy = "";
+  scratch.failed = !d;
+  if (d) { scratch.data = d.supported ? d : null; scratch.supported = d.supported; } // the folder itself may be gone
+  renderScratchpads();
+}
+async function clearScratchpads() {
+  const d = scratch.data;
+  if (scratch.busy || !d?.finished.folders) return;
+  const confirmed = await confirmDialog({ title: t("settings.storage.clearTitle"), body: t("settings.storage.clearConfirm", sizeAndFolders(d.finished)),
+    confirmLabel: t("settings.storage.clear"), danger: true });
+  if (!confirmed || scratch.busy) return;
+  scratch.busy = "clear";
+  scratch.note = "";
+  renderScratchpads();
+  const r = await window.voiceSettings.scratchpads.clear().catch(() => null);
+  scratch.note = !r ? t("settings.storage.clearFailed")
+    : [t("settings.storage.cleared", sizeAndFolders({ bytes: r.bytes, folders: r.removed })), r.failed ? tn("settings.storage.notRemoved", r.failed) : ""].filter(Boolean).join(" ");
+  scratch.busy = "";
+  await measureScratchpads(true);
+}
+$("scratchRefresh").addEventListener("click", () => { scratch.note = ""; measureScratchpads(true); });
+$("scratchClear").addEventListener("click", clearScratchpads);
+
 // ---------- provider: segmented control ----------
 function renderProviders() {
   $("provider").innerHTML = st.data.providers.map(p =>
@@ -436,7 +507,8 @@ $("keyState").addEventListener("click", e => {
   renderKeyState();
 });
 for (const id of ["cancel", "close"]) $(id).addEventListener("click", () => window.close());
-document.addEventListener("keydown", e => { if (e.key === "Escape" && !e.defaultPrevented) window.close(); });
+// Escape in a question (confirmDialog) answers the question only.
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !e.defaultPrevented && !document.querySelector("dialog[open]")) window.close(); });
 
 $("form").addEventListener("submit", async e => {
   e.preventDefault();

@@ -74,8 +74,9 @@ function normalizeAccelerator(value) {
 // ---------- windows ----------
 // copyText(text) -> bool puts text on the clipboard; onHotkeyCapture(on) is told while the Settings page records a
 // new combination (the current ones must not fire meanwhile). The Settings window is the app's: its General section
-// goes to general.set(patch) / general.hotkey() and to general.updates (../updater.js), its Network section to
-// general.network (../network.js); background() is the window colour of the current theme.
+// goes to general.set(patch) / general.hotkey(), to general.updates (../updater.js) and to general.scratchpads
+// (../host/scratchpads.js), its Network section to general.network (../network.js); background() is the window colour
+// of the current theme.
 function createVoiceWindows({ settings, store, queue, listDevices, onReread, onSettingsChanged, onHotkeyCapture, copyText, icon,
   general, background = () => "#0d1015", projectNames = () => [], commandSettings = null } = {}) {
   if (!settings || !store || !queue) throw new Error("createVoiceWindows: settings, store and queue are required");
@@ -282,6 +283,13 @@ function createVoiceWindows({ settings, store, queue, listDevices, onReread, onS
   handle("mesh:setup", settingsOwner, id => mesh?.setup(String(id ?? "")) ?? null);
   handle("mesh:setup-action", settingsOwner, (id, action, args) => mesh?.setupAction(String(id ?? ""), String(action ?? ""), args) ?? { ok: false });
   mesh?.on(state => { if (alive(settingsWin)) settingsWin.webContents.send("mesh:changed", state); });
+
+  // Disk space: Claude Code's scratchpad folders on this computer (../host/scratchpads.js). Measured when the page
+  // asks; clear() removes those of finished sessions only, and the page asks the user first.
+  const scratchpads = general?.scratchpads;
+  handle("scratchpads:info", settingsOwner, () => scratchpads?.info() ?? { supported: false });
+  handle("scratchpads:scan", settingsOwner, () => scratchpads?.scan() ?? { supported: false });
+  handle("scratchpads:clear", settingsOwner, () => scratchpads?.clear() ?? { removed: 0, bytes: 0, failed: 0 });
 
   // The page is recording a new combination while one of its hotkey fields has the focus.
   handle("voice:settings:capture", settingsOwner, on => { onHotkeyCapture?.(on === true); return true; });
