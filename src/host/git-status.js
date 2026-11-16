@@ -6,9 +6,20 @@
 // own git config sets for it (Git LFS, say), as git does in every terminal that shows the branch; a repository owned
 // by another user is refused by git itself (safe.directory). A folder inside a repository shares the repository's
 // status; one outside any is ruled out with a few stat calls, without starting git.
+//
+// When it runs. Every start of git is a process (on Windows with a console host of its own) that security software
+// inspects, so a status is asked for only when it can have changed: after a full scan of the
+// sessions, when a page asks (the manager window gets the focus, the edge menu opens), every BACKGROUND_MS while a
+// window shows it, and when a watcher on the repository's folder reports a change - unless git ignores the changed
+// path (git-ignore.js): an IDE and a build write into ignored folders all the time. The watchers' passes are at least
+// WATCH_DELAY_MS apart, WATCH_UNFOCUSED_MS while the status is in view but nobody is at the window (opts.focused);
+// a change that comes after a quiet while is looked at WATCH_SETTLE_MS later.
+// Known limit: a change of a file that is tracked although an ignore pattern matches it is not seen by the watchers;
+// the next of the other refreshes shows it.
 const { execFile } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
+const { createGitIgnores, getDefaultExcludesFile } = require("./git-ignore");
 
 const TTL_MS = 20 * 1000;             // a status younger than this is not asked for again
 const BACKGROUND_MS = 2 * 60 * 1000;  // while a window that shows it is open
@@ -117,10 +128,17 @@ const watchers = new Map();
 let watchTimer = null;
 const changedRoots = new Set();    // norm(root) of the repositories a watcher saw change since the last pass
 const MAX_WATCHERS = 32;
-const WATCH_DELAY_MS = 2000;
-const WATCH_DELAY_MAX_MS = 30 * 1000;
-const WATCH_COST_FACTOR = 4;       // a watchers' pass that took 3 s is followed by the next one 12 s later at the earliest
+// Even with the window focused, agents at work change tracked files all the time, and every `git status` stats each
+// tracked file - each of those opens inspected in the kernel by an EDR (CrowdStrike: about 3 of 14 cores with five
+// agents and a pass every 2 s). So the passes are at least 10 s apart, and 10x what the last one took.
+const WATCH_DELAY_MS = 10 * 1000;
+const WATCH_DELAY_MAX_MS = 60 * 1000;
+const WATCH_COST_FACTOR = 10;      // a watchers' pass that took 3 s is followed by the next one 30 s later at the earliest
+const WATCH_UNFOCUSED_MS = 30 * 1000; // between two watchers' passes while nobody is at the window that shows the status
+const WATCH_SETTLE_MS = 2000;      // a change is looked at this long after it at the earliest: a burst of writes is one pass
 let watchCostMs = 0;               // how long the last watchers' pass took
+let watchDue = 0;                  // when the pass that watchTimer waits for runs
+let watchedAt = 0;                 // when the last pass that asked git ended: the watchers' next one keeps its distance from it
 // A linked worktree by where the main checkout keeps its index and HEAD: the main root -> <name> of
 // <main>/.git/worktrees/<name> -> norm(the worktree's root). The main root is keyed by its real path: git names it
 // that way, while a watcher goes by the folder as the project gives it - through a junction or a symlink, or with a
@@ -131,7 +149,32 @@ async function getRealKey(dir) {
 }
 // While files keep changing (an agent at work, a build), a repository whose `git status` is slow is not asked again
 // right away: git runs for at most 1/(WATCH_COST_FACTOR + 1) of the time.
-const getWatchDelay = () => Math.min(WATCH_DELAY_MAX_MS, Math.max(WATCH_DELAY_MS, watchCostMs * WATCH_COST_FACTOR));
+// While the status is only in view (opts.focused() is false: the window is open, the user is in another program), a
+// change waits longer still; a page that gets the focus asks for a refresh, which takes the waiting changes with it.
+function getWatchDelay() {
+  const delay = Math.min(WATCH_DELAY_MAX_MS, Math.max(opts?.watchDelayMs ?? WATCH_DELAY_MS, watchCostMs * WATCH_COST_FACTOR));
+  return opts?.focused && !opts.focused() ? Math.max(delay, opts.watchUnfocusedMs ?? WATCH_UNFOCUSED_MS) : delay;
+}
+// At most one pass per getWatchDelay(), and only for the repositories that changed. The distance is kept from the last
+// pass, not from the change: a change after a quiet while shows WATCH_SETTLE_MS later, and only where files keep
+// changing do the passes come getWatchDelay() apart. A pass already waiting is brought forward when the delay has
+// become shorter since (the window got the focus), never put off.
+function scheduleWatchPass() {
+  const now = Date.now(), gap = getWatchDelay();
+  const due = Math.max(now + Math.min(opts?.watchSettleMs ?? WATCH_SETTLE_MS, gap), watchedAt + gap);
+  if (watchTimer && due >= watchDue) return;
+  clearTimeout(watchTimer);
+  watchDue = due;
+  watchTimer = setTimeout(() => {
+    watchTimer = null;
+    // A pass asked for otherwise (a page, the background refresh) is running or has just ended: the changes since
+    // wait their distance from that one.
+    if (running) return void running.catch(() => {}).then(() => { if (changedRoots.size) scheduleWatchPass(); });
+    if (Date.now() < watchedAt + getWatchDelay()) return scheduleWatchPass();
+    refresh({ changedOnly: true }).catch(() => {});
+  }, Math.max(0, due - now));
+  watchTimer.unref?.();
+}
 // The repositories a change seen under `root` belongs to: a linked worktree's when it is in the main checkout's
 // .git/worktrees/<name> (staging or committing there changes no file in the worktree's own folder), else root's.
 // Without a name the watcher lost track of what changed (too many changes at once): root's and its worktrees'.
@@ -142,28 +185,52 @@ function getChangedRoots(root, name) {
   return [(worktree && linked?.get(worktree)) || norm(root)];
 }
 // Build output, IDE state and the agents' worktrees (repositories of their own, with watchers of their own) change all
-// the time without changing what `git status` reports here.
-const WATCH_NOISE = new RegExp(`(^|/)(${[...SKIP].filter(d => d !== ".git").map(d => d.replace(".", "\\.")).join("|")}|\\.idea|\\.gradle|\\.claude/worktrees)(/|$)`, "i");
+// the time without changing what `git status` reports here. Only names that mean the same in every repository: a
+// "bin" or an "obj" is build output in one and tracked source in another, which the repository's ignore rules tell.
+const WATCH_NOISE = new RegExp(`(^|/)(${[...SKIP].filter(d => d !== ".git").map(d => d.replace(".", "\\.")).join("|")}|\\.idea|\\.vs|\\.gradle|\\.claude/worktrees)(/|$)`, "i");
+// What git ignores in each watched repository (git-ignore.js). Where the user's excludes file is, is asked of git
+// once, as its config can include other files: one process, not one per change.
+let excludesFile = null;
+const ignores = createGitIgnores({
+  excludesFile: () => excludesFile ||= getGitExe().then(exe => new Promise(resolve => {
+    execFile(exe, ["config", "--global", "--type=path", "--get", "core.excludesfile"], { windowsHide: true, timeout: TIMEOUT_MS }, (err, stdout) => {
+      const file = String(stdout || "").trim();
+      resolve(!err && path.isAbsolute(file) ? file : getDefaultExcludesFile());
+    });
+  }))
+});
+const IGNORE_RULES = /(^|\/)\.gitignore$/i;
+// A change a watcher reports under `root`: whether it can change the status, and then the pass that will ask.
+function onWatched(root, watcher, event, filename) {
+  const name = String(filename || '').replaceAll('\\', '/');
+  if (WATCH_NOISE.test(name) || /\.git\/(objects|logs)\//.test(name) || name.endsWith('.lock')) return;
+  // The rules themselves changed, or (no name: too many changes at once) may have. info/exclude is a main checkout's
+  // and its worktrees' alike.
+  if (!name || IGNORE_RULES.test(name)) ignores.reload(root);
+  else if (name === '.git/info/exclude') ignores.clear();
+  if (!opts?.active?.()) return;
+  const changed = () => {
+    for (const r of getChangedRoots(root, name)) changedRoots.add(r);
+    scheduleWatchPass();
+  };
+  // Git's own folder (the index, HEAD, refs: staging and committing from outside) and the rules always count.
+  if (!name || name === '.git' || name.startsWith('.git/') || IGNORE_RULES.test(name)) return changed();
+  // Rules not loaded yet: the answer comes later and the change with it, unless the watcher is gone by then.
+  // Windows also reports the folder a file was added to as changed (its times did); that file has a report of its own,
+  // and an ignored one would start a status through its folder otherwise.
+  const ignored = ignores.isIgnored(root, name, { renamed: event === 'rename', skipFolders: process.platform === 'win32' && event === 'change' });
+  if (ignored === false) changed();
+  else if (ignored !== true) ignored.then(yes => { if (!yes && watchers.get(root) === watcher) changed(); }, () => {});
+}
 async function syncWatchers() {
   const wanted = new Set(Object.values(snapshot.repos).map(r => r.root));
-  for (const [root, watcher] of watchers) if (!wanted.has(root)) { watcher.close(); watchers.delete(root); realRoots.delete(root); }
+  for (const [root, watcher] of watchers) if (!wanted.has(root)) { watcher.close(); watchers.delete(root); realRoots.delete(root); ignores.reload(root); }
   for (const root of wanted) {
     if (watchers.has(root) || watchers.size >= MAX_WATCHERS) continue;
     if (!realRoots.has(root)) realRoots.set(root, await getRealKey(root));
     try {
-      const watcher = fs.watch(root, { recursive: true, persistent: false }, (_event, filename) => {
-        const name = String(filename || '').replaceAll('\\', '/');
-        if (WATCH_NOISE.test(name) || /\.git\/(objects|logs)\//.test(name) || name.endsWith('.lock')) return;
-        if (!opts?.active?.()) return;
-        for (const changed of getChangedRoots(root, name)) changedRoots.add(changed);
-        // At most one pass per getWatchDelay(), and only for the repositories that changed.
-        watchTimer ??= setTimeout(() => {
-          watchTimer = null;
-          refresh({ changedOnly: true }).catch(() => {});
-        }, getWatchDelay());
-        watchTimer.unref?.();
-      });
-      watcher.on('error', () => { watcher.close(); watchers.delete(root); });
+      const watcher = fs.watch(root, { recursive: true, persistent: false }, (event, filename) => onWatched(root, watcher, event, filename));
+      watcher.on('error', () => { watcher.close(); watchers.delete(root); ignores.reload(root); });
       watchers.set(root, watcher);
     } catch { /* Periodic refresh covers platforms without recursive watching. */ }
   }
@@ -213,9 +280,31 @@ async function rootOf(dir, now) {
   return root;
 }
 
-function runGit(root) {
+// ---------- the executable ----------
+// Git for Windows puts a launcher on the PATH (<Git>\cmd\git.exe) that only starts the real program
+// (<Git>\mingw64\bin\git.exe): one more process per status, and the real one sets up the same environment for its
+// filters by itself (its sh, its PATH). So the status and the diff here run the real one when the layout is exactly
+// that; any other git (a shim, a portable or unknown install, another system) runs as "git" from the PATH as before.
+// git-actions.js and setup.js keep the launcher: hooks, credential helpers and ssh are the user's own programs.
+// find(name): the file on the PATH; isFile(file).
+async function resolveGitExe({ platform = process.platform, find = name => require("./sessions").findOnPath(name), isFile = async file => (await fs.promises.stat(file)).isFile() } = {}) {
+  if (platform !== "win32") return "git";
+  const win = path.win32, found = String(await find("git") || "");
+  if (win.basename(found).toLowerCase() !== "git.exe" || win.basename(win.dirname(found)).toLowerCase() !== "cmd") return "git";
+  for (const arch of ["mingw64", "clangarm64", "mingw32"]) {
+    const exe = win.join(win.dirname(win.dirname(found)), arch, "bin", "git.exe");
+    if (await Promise.resolve(exe).then(isFile).catch(() => false)) return exe;
+  }
+  return "git";
+}
+// Looked for once, and again after git was found missing (installed or updated since).
+let gitExe = null;
+const getGitExe = () => gitExe ||= resolveGitExe().catch(() => "git");
+
+async function runGit(root) {
+  const exe = await getGitExe();
   return new Promise(resolve => {
-    execFile("git", ["-C", root, ...ARGS], {
+    execFile(exe, ["-C", root, ...ARGS], {
       windowsHide: true, timeout: TIMEOUT_MS, maxBuffer: 64 * 1024 * 1024,
       env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }
     }, (err, stdout, stderr) => {
@@ -268,6 +357,8 @@ async function pass(force, changedOnly = false) {
   for (const d of [...dirs, ...discovery.repos]) { if (force) roots.delete(norm(d)); const r = await rootOf(d, t0); if (r) dirRoot[norm(d)] = r; }
   const changed = new Set(changedRoots);
   changedRoots.clear();
+  clearTimeout(watchTimer); // this pass takes the changes the watchers' one was waiting with
+  watchTimer = null;
   const isStale = r => !(t0 - (repos.get(norm(r))?.at || 0) < TTL_MS);
   const watched = new Set([...watchers.keys()].map(norm));
   const todo = [...new Set(Object.values(dirRoot))].filter(r => force || changed.has(norm(r)) || (isStale(r) && (!changedOnly || !watched.has(norm(r)))));
@@ -282,7 +373,9 @@ async function pass(force, changedOnly = false) {
   };
   await Promise.all(Array.from({ length: Math.min(PARALLEL, todo.length) }, work));
   missingAt = missing ? Date.now() : 0;
+  if (missing) gitExe = excludesFile = null;
   if (changedOnly && todo.length) watchCostMs = Date.now() - t0;
+  if (todo.length) watchedAt = Date.now();
   const used = new Set(Object.values(dirRoot).map(norm));
   for (const k of repos.keys()) if (!used.has(k)) repos.delete(k);
   const prev = snapshot;
@@ -301,7 +394,9 @@ const sorted = o => Object.entries(o || {}).sort(([a], [b]) => (a < b ? -1 : a >
 const signature = s => JSON.stringify([s.missing, s.discoveryTruncatedIn, sorted(s.dirs), sorted(s.repos).map(([k, v]) => [k, { ...v, at: 0 }])]);
 
 // dirs(): the folders to report on; onChange(snapshot); active(): whether a window that shows the state is open
-// (the background refresh runs only then).
+// (the background refresh and the watchers' passes run only then); focused(): whether the user is at such a window
+// (without it: always) - else the watchers' passes are WATCH_UNFOCUSED_MS apart (watchUnfocusedMs: another gap, for
+// the tests; watchDelayMs likewise for the focused minimum WATCH_DELAY_MS, watchSettleMs for WATCH_SETTLE_MS).
 function start(o) {
   opts = o;
   clearInterval(timer);
@@ -339,8 +434,9 @@ async function diff({ root, file } = {}) {
     if (bytes.includes(0)) return { binary: true };
     return { staged: "", unstaged: "", untracked: text ? text.replace(/\n$/, "").split("\n").map(line => "+" + line).join("\n") : "", emptyFile: !bytes.length };
   }
+  const exe = await getGitExe();
   const readDiff = cached => new Promise((resolve, reject) => {
-    execFile("git", ["--no-pager", "--no-optional-locks", "--literal-pathspecs", "-C", root, "-c", "core.fsmonitor=false", "diff", ...(cached ? ["--cached"] : []), "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", "--", file, ...(entry.original ? [entry.original] : [])], {
+    execFile(exe, ["--no-pager", "--no-optional-locks", "--literal-pathspecs", "-C", root, "-c", "core.fsmonitor=false", "diff", ...(cached ? ["--cached"] : []), "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", "--", file, ...(entry.original ? [entry.original] : [])], {
       windowsHide: true, timeout: TIMEOUT_MS, maxBuffer: limit,
       env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_PAGER: "cat" }
     }, (err, stdout, stderr) => {
@@ -355,6 +451,6 @@ async function diff({ root, file } = {}) {
 
 let actionContext = () => ({});
 const actions = require('./git-actions').createGitActions({ status: () => snapshot, refresh, refreshRepo, parseStatus, context: () => actionContext() });
-function stop() { clearInterval(timer); clearTimeout(watchTimer); watchTimer = null; changedRoots.clear(); watchCostMs = 0; for (const w of watchers.values()) w.close(); watchers.clear(); realRoots.clear(); }
-module.exports = { start, stop, refresh, get: () => snapshot, parseStatus, norm, discoverRepositories, diff, WATCH_NOISE, getWatchDelay,
+function stop() { clearInterval(timer); clearTimeout(watchTimer); watchTimer = null; changedRoots.clear(); watchCostMs = 0; watchedAt = 0; for (const w of watchers.values()) w.close(); watchers.clear(); realRoots.clear(); ignores.clear(); }
+module.exports = { start, stop, refresh, get: () => snapshot, parseStatus, norm, discoverRepositories, diff, WATCH_NOISE, getWatchDelay, resolveGitExe,
   query: actions.query, execute: actions.execute, configure: context => { actionContext = context; } };
