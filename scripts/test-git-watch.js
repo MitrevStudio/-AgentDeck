@@ -161,6 +161,25 @@ async function main() {
   run('add', '--', 'App/Program.cs');
   await until(() => has('App/Program.cs', 'M.'), 'staging from outside');
 
+  // 4b. The passes keep their distance from the last pass, not from the change: after a quiet while a change shows
+  // at once, and the one right behind it waits out the distance.
+  const DISTANCE = 6000;
+  options.watchDelayMs = DISTANCE;
+  options.watchSettleMs = 300;
+  await sleep(DISTANCE + 300); // nothing was asked of git for as long as the passes are apart
+  let t = Date.now();
+  write('App/Quiet.cs');
+  await until(() => has('App/Quiet.cs', '??'), 'a change after a quiet while');
+  assert.ok(Date.now() - t < DISTANCE / 2, `seen ${Date.now() - t} ms after it, not a whole distance later`);
+  t = Date.now();
+  before = count();
+  write('App/Close.cs');
+  await until(() => has('App/Close.cs', '??'), 'a change right behind a pass');
+  assert.ok(Date.now() - t >= DISTANCE - 1500, `the next pass kept its distance (${Date.now() - t} ms)`);
+  assert.equal(count() - before, 1, 'and was one pass');
+  options.watchDelayMs = 2000;
+  delete options.watchSettleMs;
+
   // 5. Nobody at the window: the watchers' passes are a long gap apart, however much changes. (The gap is shortened
   // here; the first pass after the switch may still be one that was waiting from before.)
   const GAP = 5000;

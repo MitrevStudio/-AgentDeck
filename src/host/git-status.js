@@ -12,7 +12,8 @@
 // sessions, when a page asks (the manager window gets the focus, the edge menu opens), every BACKGROUND_MS while a
 // window shows it, and when a watcher on the repository's folder reports a change - unless git ignores the changed
 // path (git-ignore.js): an IDE and a build write into ignored folders all the time. The watchers' passes are at least
-// WATCH_DELAY_MS apart, WATCH_UNFOCUSED_MS while the status is in view but nobody is at the window (opts.focused).
+// WATCH_DELAY_MS apart, WATCH_UNFOCUSED_MS while the status is in view but nobody is at the window (opts.focused);
+// a change that comes after a quiet while is looked at WATCH_SETTLE_MS later.
 // Known limit: a change of a file that is tracked although an ignore pattern matches it is not seen by the watchers;
 // the next of the other refreshes shows it.
 const { execFile } = require("node:child_process");
@@ -134,8 +135,10 @@ const WATCH_DELAY_MS = 10 * 1000;
 const WATCH_DELAY_MAX_MS = 60 * 1000;
 const WATCH_COST_FACTOR = 10;      // a watchers' pass that took 3 s is followed by the next one 30 s later at the earliest
 const WATCH_UNFOCUSED_MS = 30 * 1000; // between two watchers' passes while nobody is at the window that shows the status
+const WATCH_SETTLE_MS = 2000;      // a change is looked at this long after it at the earliest: a burst of writes is one pass
 let watchCostMs = 0;               // how long the last watchers' pass took
 let watchDue = 0;                  // when the pass that watchTimer waits for runs
+let watchedAt = 0;                 // when the last pass that asked git ended: the watchers' next one keeps its distance from it
 // A linked worktree by where the main checkout keeps its index and HEAD: the main root -> <name> of
 // <main>/.git/worktrees/<name> -> norm(the worktree's root). The main root is keyed by its real path: git names it
 // that way, while a watcher goes by the folder as the project gives it - through a junction or a symlink, or with a
@@ -152,17 +155,24 @@ function getWatchDelay() {
   const delay = Math.min(WATCH_DELAY_MAX_MS, Math.max(opts?.watchDelayMs ?? WATCH_DELAY_MS, watchCostMs * WATCH_COST_FACTOR));
   return opts?.focused && !opts.focused() ? Math.max(delay, opts.watchUnfocusedMs ?? WATCH_UNFOCUSED_MS) : delay;
 }
-// At most one pass per getWatchDelay(), and only for the repositories that changed. A pass already waiting is brought
-// forward when the delay has become shorter since (the window got the focus), never put off.
+// At most one pass per getWatchDelay(), and only for the repositories that changed. The distance is kept from the last
+// pass, not from the change: a change after a quiet while shows WATCH_SETTLE_MS later, and only where files keep
+// changing do the passes come getWatchDelay() apart. A pass already waiting is brought forward when the delay has
+// become shorter since (the window got the focus), never put off.
 function scheduleWatchPass() {
-  const due = Date.now() + getWatchDelay();
+  const now = Date.now(), gap = getWatchDelay();
+  const due = Math.max(now + Math.min(opts?.watchSettleMs ?? WATCH_SETTLE_MS, gap), watchedAt + gap);
   if (watchTimer && due >= watchDue) return;
   clearTimeout(watchTimer);
   watchDue = due;
   watchTimer = setTimeout(() => {
     watchTimer = null;
+    // A pass asked for otherwise (a page, the background refresh) is running or has just ended: the changes since
+    // wait their distance from that one.
+    if (running) return void running.catch(() => {}).then(() => { if (changedRoots.size) scheduleWatchPass(); });
+    if (Date.now() < watchedAt + getWatchDelay()) return scheduleWatchPass();
     refresh({ changedOnly: true }).catch(() => {});
-  }, due - Date.now());
+  }, Math.max(0, due - now));
   watchTimer.unref?.();
 }
 // The repositories a change seen under `root` belongs to: a linked worktree's when it is in the main checkout's
@@ -365,6 +375,7 @@ async function pass(force, changedOnly = false) {
   missingAt = missing ? Date.now() : 0;
   if (missing) gitExe = excludesFile = null;
   if (changedOnly && todo.length) watchCostMs = Date.now() - t0;
+  if (todo.length) watchedAt = Date.now();
   const used = new Set(Object.values(dirRoot).map(norm));
   for (const k of repos.keys()) if (!used.has(k)) repos.delete(k);
   const prev = snapshot;
@@ -385,7 +396,7 @@ const signature = s => JSON.stringify([s.missing, s.discoveryTruncatedIn, sorted
 // dirs(): the folders to report on; onChange(snapshot); active(): whether a window that shows the state is open
 // (the background refresh and the watchers' passes run only then); focused(): whether the user is at such a window
 // (without it: always) - else the watchers' passes are WATCH_UNFOCUSED_MS apart (watchUnfocusedMs: another gap, for
-// the tests; watchDelayMs likewise for the focused minimum WATCH_DELAY_MS).
+// the tests; watchDelayMs likewise for the focused minimum WATCH_DELAY_MS, watchSettleMs for WATCH_SETTLE_MS).
 function start(o) {
   opts = o;
   clearInterval(timer);
@@ -440,6 +451,6 @@ async function diff({ root, file } = {}) {
 
 let actionContext = () => ({});
 const actions = require('./git-actions').createGitActions({ status: () => snapshot, refresh, refreshRepo, parseStatus, context: () => actionContext() });
-function stop() { clearInterval(timer); clearTimeout(watchTimer); watchTimer = null; changedRoots.clear(); watchCostMs = 0; for (const w of watchers.values()) w.close(); watchers.clear(); realRoots.clear(); ignores.clear(); }
+function stop() { clearInterval(timer); clearTimeout(watchTimer); watchTimer = null; changedRoots.clear(); watchCostMs = 0; watchedAt = 0; for (const w of watchers.values()) w.close(); watchers.clear(); realRoots.clear(); ignores.clear(); }
 module.exports = { start, stop, refresh, get: () => snapshot, parseStatus, norm, discoverRepositories, diff, WATCH_NOISE, getWatchDelay, resolveGitExe,
   query: actions.query, execute: actions.execute, configure: context => { actionContext = context; } };
