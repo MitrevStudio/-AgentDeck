@@ -31,6 +31,7 @@ jobs:
       - run: npm run test:prefs
       - run: npm run test:editors
       - run: npm run test:taskbar
+      - run: npm run test:scratchpads
       - run: npm run test:taskbar-ui
       - run: npm run test:noise
       - run: npm run test:terminal-viewers
@@ -71,6 +72,7 @@ jobs:
       - run: npm run test:prefs
       - run: npm run test:editors
       - run: npm run test:taskbar
+      - run: npm run test:scratchpads
       - run: npm run test:audit
       - name: Package (unpacked, no AppImage)
         run: npx electron-builder --linux --dir --publish never

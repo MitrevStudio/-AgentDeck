@@ -48,6 +48,14 @@ contextBridge.exposeInMainWorld("voiceSettings", {
     install: () => ipcRenderer.invoke("updates:install"),
     onChanged: cb => ipcRenderer.on("updates:changed", (_e, state) => cb(state))
   },
+  // Disk space: Claude Code's scratchpad folders. info() -> {supported, dir} at once; scan() measures them ->
+  // {supported, dir, total, finished, running}, each {bytes, folders}; clear() removes the finished sessions' ->
+  // {removed, bytes, failed}.
+  scratchpads: {
+    info: () => ipcRenderer.invoke("scratchpads:info"),
+    scan: () => ipcRenderer.invoke("scratchpads:scan"),
+    clear: () => ipcRenderer.invoke("scratchpads:clear")
+  },
   // Voice commands: get() -> {commands, agents, hotkey}; set(patch) applies at once -> {ok, commands} or {ok: false, error}.
   commands: {
     get: () => ipcRenderer.invoke("voice:commands:get"),

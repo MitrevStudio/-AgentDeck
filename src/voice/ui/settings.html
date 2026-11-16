@@ -155,6 +155,25 @@
           </div>
         </div>
       </section>
+
+      <!-- Claude Code's scratchpad folders in the temp folder (host/scratchpads.js), laid out as the Updates row:
+           the size, its state, the actions at the end. Hidden where there is no such folder. -->
+      <section class="vs-sec" id="scratchSection" hidden>
+        <h2><span data-icon="folder"></span><span data-i18n="settings.storage"></span></h2>
+        <div class="vs-grid">
+          <span class="vs-label" data-i18n="settings.storage.scratchpads"></span>
+          <div class="vs-field">
+            <div class="vs-upd">
+              <span class="vs-ver" id="scratchSize"></span>
+              <span class="tag" id="scratchTag"></span>
+              <span class="grow"></span>
+              <button type="button" class="btn sm" id="scratchRefresh"><span data-icon="refresh"></span><span data-i18n="settings.storage.refresh"></span></button>
+              <button type="button" class="btn sm danger" id="scratchClear"><span data-icon="trash"></span><span data-i18n="settings.storage.clear"></span></button>
+            </div>
+            <div class="vs-hint vs-list" id="scratchHint" role="status"></div>
+          </div>
+        </div>
+      </section>
     </div>
 
     <div class="vs-pane" id="paneTerminal" data-group="general" role="tabpanel" aria-labelledby="tabTerminal">

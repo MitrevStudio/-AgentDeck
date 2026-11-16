@@ -271,4 +271,20 @@ async function claudeLive() {
 // liveSessions({ fresh: true }) for a caller that acts on the answer at once.
 const liveSessions = createSharedRead(claudeLive);
 
-module.exports = { liveSessions, findTranscript, locateTranscript, foldJobs, leadingEntry, getStatus };
+// The id of every session a running Claude Code process holds: the sessions, their background jobs and the spare bg
+// processes alike, and by the PID alone - for a caller that must never take a running session for a finished one
+// (scratchpads.js), where a reused PID only makes a finished session count as running for a while. -> a Set.
+async function liveIds() {
+  let files;
+  try { files = (await fs.promises.readdir(REGISTRY_DIR)).filter(f => /^\d+\.json$/.test(f)); } catch { return new Set(); }
+  const ids = new Set();
+  for (const f of files) {
+    let x;
+    try { x = JSON.parse(await fs.promises.readFile(path.join(REGISTRY_DIR, f), "utf8")); } catch { continue; }
+    if (!Number.isInteger(x.pid) || !pidAlive(x.pid)) continue;
+    for (const id of [x.sessionId, x.jobId, x.parkedJobId]) if (id) ids.add(String(id));
+  }
+  return ids;
+}
+
+module.exports = { liveSessions, liveIds, findTranscript, locateTranscript, foldJobs, leadingEntry, getStatus };

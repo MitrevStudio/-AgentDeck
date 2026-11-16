@@ -1573,7 +1573,7 @@ if (!app.requestSingleInstanceLock()) {
         // The dictionary may include the projects' names.
         projectNames: () => [...readRegistry().projects.map(p => p.name), ...voiceContext.terms()],
         general: { set: patch => prefs.set(patch), hotkey: () => ({ current: hotkeyLabel(), candidates: HOTKEYS.map(k => keyLabel(k, " + ")) }), updates: updater, network,
-          autostart, mesh: meshSettings },
+          autostart, mesh: meshSettings, scratchpads: require("./host/scratchpads").createScratchpads() },
         // What a voice command says goes to the command centre.
         commands: {
           orchestrate: s => orchestrator.send(s),
