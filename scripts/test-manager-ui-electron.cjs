@@ -31,7 +31,7 @@ const FIXTURE = `(() => {
   const now = Date.now();
   // stopped / taken: the terminals Stop and "Use my size" were sent for; attached: the terminals the page attached.
   // resized: the wants the panes sent (terminals.resize).
-  const fx = { cbs: {}, wsCommands: [], live: [], copied: [], stopped: [], taken: [], attached: [], resized: [] };
+  const fx = { cbs: {}, wsCommands: [], live: [], copied: [], stopped: [], taken: [], attached: [], resized: [], load: null, loadAsked: 0, prefsCbs: [], views: [] };
   const session = (id, cwd, title, agent = 'Claude') => ({ id, agent, cwd, title, prompt: title, updatedAt: now - 60000 });
   fx.data = {
     agents: ['Claude', 'Codex'],
@@ -66,7 +66,7 @@ const FIXTURE = `(() => {
   fx.sizes = { x1: { cols: 120, rows: 32, mine: false, by: 'StudioPc' } };
   const answers = {
     getData: async () => fx.data, getLive: async () => fx.live, getNodes: async () => fx.nodes, getGit: async () => fx.git,
-    getLimits: async () => limits(16), getResources: async () => stats('WORK-01'), getUsage: async () => null, refreshGit: async () => {},
+    getSessionLoad: async () => { fx.loadAsked++; return fx.load; }, getLimits: async () => limits(16), getResources: async () => stats('WORK-01'), getUsage: async () => null, refreshGit: async () => {},
     copyText: async text => { fx.copied.push(text); }, gitQuery: async () => ({ status: fx.git.repos.r1, branches: ['main'], remotes: ['origin'], worktrees: [], operation: '' })
   };
   // Answers come a moment later, as over IPC: never within the turn that asked.
@@ -76,7 +76,7 @@ const FIXTURE = `(() => {
   window.manager = bridge(answers);
   window.terminals = bridge({
     getWorkspace: async () => fx.ws, attach: async id => { fx.attached.push(id); return { scrollback: 'agentdeck $ ', end: 12, ...(fx.sizes[id] || {}) }; }, input() {}, resize(id, cols, rows) { fx.resized.push([id, cols, rows]); },
-    stop: async id => { fx.stopped.push(id); return true; }, takeSize: async id => { fx.taken.push(id); return true; },
+    stop: async id => { fx.stopped.push(id); return true; }, setView: async patch => { fx.views.push(patch); }, takeSize: async id => { fx.taken.push(id); return true; },
     command: async (cmd, args) => {
       fx.wsCommands.push({ cmd, ...args });
       if (cmd === 'split') {
@@ -89,7 +89,7 @@ const FIXTURE = `(() => {
       if (cmd === 'focus') { fx.ws = structuredClone(fx.ws); fx.ws.tabs.t1.focus = args.term; fx.cbs.onWorkspace(fx.ws); }
     }
   });
-  window.prefs = { language: 'en', themeId: 'dark', resolvedTheme: 'dark', terminalFontSizes: [12, 14, 16], terminalFontSize: 14, onChanged() {} };
+  window.prefs = { language: 'en', themeId: 'dark', resolvedTheme: 'dark', terminalFontSizes: [12, 14, 16], terminalFontSize: 14, agentLoad: true, onChanged(cb) { fx.prefsCbs.push(cb); } };
   window.fx = fx;
 })();
 `;
@@ -151,14 +151,74 @@ app.whenReady().then(async () => {
   assert.equal(await evaluate("document.getAnimations().filter(a => a.animationName === 'spin').every(a => a.startTime === 0)"), true, 'spinners turn in step');
   assert.equal(await evaluate('document.title.startsWith("(1!)")'), true);
 
-  // A session's process figures (host/proc-stats.js) are put in place: the row and its spinner stay as they were.
-  await evaluate("fx.live = fx.live.map(l => l.id === 's2' ? { ...l, proc: { cpu: 2.345, mem: 400 * 1048576, memShare: 1.25 } } : l)"); await poll(); await settle();
-  assert.equal(await evaluate("document.querySelector('#agents .agent[data-key=\"Claude:s2\"] .agent-proc').textContent"), ' · CPU 2.3% · RAM 1.3%');
-  assert.match(await evaluate("document.querySelector('#agents .agent[data-key=\"Claude:s2\"] .agent-proc').title"), /400 MB/);
+  // ---------- the Claude sessions' CPU and memory (proc-stats.js) ----------
+  // Asked of main on a timer of their own, never part of the live list: put in place, the row and its spinner stay
+  // as they were.
+  const proc = id => `document.querySelector('#agents .agent[data-key="Claude:${id}"] .agent-proc')`;
+  const loadPoll = async () => { await evaluate('pollSessionLoad()'); await settle(); };
+  const asked = () => evaluate('fx.loadAsked');
+  assert.equal(await evaluate(proc('s2') + '.textContent'), '', 'nothing until measured');
+  await evaluate("fx.load = { 'Claude:s2': { cpu: 2.345, mem: 400 * 1048576, memShare: 1.25, procs: 3 }, 'Claude:s1': { cpu: null, mem: 2048 * 1048576, memShare: 12.4, procs: 1 } }");
+  await loadPoll();
+  assert.equal(await asked(), 1);
+  assert.equal(await evaluate(proc('s2') + '.textContent'), 'CPU 2.3% · RAM 1.3%');
+  assert.match(await evaluate(proc('s2') + '.title'), /the processes it started \(3 in all\).*400 MB/, 'the tooltip says what is added up');
+  assert.equal(await evaluate(proc('s1') + '.textContent'), 'RAM 12%', 'no processor share on the first measurement');
+  assert.match(await evaluate(proc('s1') + '.title'), /session's process,.*2\.0 GB/);
   assert.equal(await evaluate('keptSpinner.isConnected'), true, 'new figures do not redraw the row');
-  await rescan(); await settle();
-  assert.equal(await evaluate("document.querySelector('#agents .agent[data-key=\"Claude:s2\"] .agent-proc').textContent"), ' · CPU 2.3% · RAM 1.3%', 'the figures survive a redraw');
+  await rescan(); await poll(); await settle();
+  assert.equal(await evaluate(proc('s2') + '.textContent'), 'CPU 2.3% · RAM 1.3%', 'the figures survive a redraw and a live poll');
+  assert.equal(await evaluate("JSON.stringify([...document.querySelectorAll('#agents .agent')].map(el => el.dataset.pane || ''))"), '["active",""]', 'beside the marks of the panes');
+  // The project gives way first; the figures stay whole, on the row's one line.
+  const line = id => evaluate(`(() => { const sub = ${proc(id)}.parentElement.getBoundingClientRect(), p = ${proc(id)}.getBoundingClientRect(), w = ${proc(id)}.previousElementSibling.getBoundingClientRect();
+    return { one: p.top < sub.bottom && p.bottom > sub.top, inside: p.right <= sub.right + 1, apart: w.right <= p.left + 1, where: Math.round(w.width), h: Math.round(sub.height) }; })()`);
+  assert.deepEqual({ ...(await line('s2')), where: 0, h: 0 }, { one: true, inside: true, apart: true, where: 0, h: 0 });
+  const height = (await line('s2')).h;
   await capture('agents-proc');
+  // A sidebar too narrow for a few letters of the project and the figures: the project stays, the figures go.
+  await evaluate("document.querySelector('.side').style.width = '150px'"); await settle();
+  const narrow = await line('s2');
+  assert.equal(narrow.one, false, 'no figures in a row too narrow for them');
+  assert.ok(narrow.where > 40, `the project keeps the line (${narrow.where}px)`);
+  assert.equal(narrow.h, height, 'the row is no taller');
+  assert.equal(await evaluate("(() => { const a = document.querySelector('#agents .agent[data-key=\"Claude:s2\"]'); return a.scrollWidth <= a.clientWidth; })()"), true, 'nothing sticks out of the row');
+  await capture('agents-proc-narrow');
+  await evaluate("document.querySelector('.side').style.width = ''"); await settle();
+  // Only a Claude session of this computer has a place for them: another agent's PID is its terminal's, and another
+  // computer's sessions are not measured here.
+  assert.equal(await evaluate("procMark({ agent: 'Codex', id: 'c1' }) + procMark({ agent: 'Claude', id: 'r1', node: 'node-a' })"), '');
+  // Nobody looking, nothing asked: the list out of view (the Git tab), the window hidden, the setting off. The
+  // figures of before go - they say nothing of now.
+  await click('#sideTabGit'); await loadPoll();
+  assert.equal(await asked(), 1, 'not asked while the Agents list is not shown');
+  await click('#sideTabProjects'); await loadPoll();
+  assert.equal(await asked(), 2);
+  await evaluate("Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' }); document.dispatchEvent(new Event('visibilitychange'))"); await settle();
+  await loadPoll();
+  assert.equal(await asked(), 2, 'not asked while the window is hidden');
+  assert.equal(await evaluate(proc('s2') + '.textContent'), '', 'no stale figures');
+  await evaluate("delete document.visibilityState; document.dispatchEvent(new Event('visibilitychange'))"); await settle();
+  assert.equal(await asked(), 3, 'asked at once when the window is back');
+  assert.equal(await evaluate(proc('s2') + '.textContent'), 'CPU 2.3% · RAM 1.3%');
+  // Switched off by the button in the list's heading (the app keeps the choice), and on again; also from elsewhere.
+  assert.deepEqual(await evaluate("[$('agentLoad').getAttribute('aria-pressed'), $('agentLoad').classList.contains('on'), $('agentLoad').title]"), ['true', true, "Hide the Claude sessions' processor and memory"]);
+  await click('#agentLoad'); await loadPoll();
+  assert.equal(await asked(), 3, 'not asked while switched off');
+  assert.equal(await evaluate(proc('s2') + '.textContent'), '');
+  assert.deepEqual(await evaluate("[$('agentLoad').getAttribute('aria-pressed'), $('agentLoad').classList.contains('on'), fx.views.at(-1).agentLoad]"), ['false', false, false]);
+  await click('#agentLoad');
+  assert.equal(await asked(), 4, 'asked at once when switched on');
+  assert.equal(await evaluate(proc('s2') + '.textContent'), 'CPU 2.3% · RAM 1.3%');
+  assert.equal(await evaluate('fx.views.at(-1).agentLoad'), true);
+  await evaluate("fx.prefsCbs.forEach(cb => cb({ ...window.prefs, agentLoad: false }))"); await settle();
+  await loadPoll();
+  assert.equal(await asked(), 4);
+  assert.equal(await evaluate("$('agentLoad').getAttribute('aria-pressed')"), 'false');
+  await evaluate("fx.prefsCbs.forEach(cb => cb({ ...window.prefs, agentLoad: true }))"); await settle();
+  assert.equal(await asked(), 5);
+  // Main answers null for a window it does not count as in view: nothing shown.
+  await evaluate('fx.load = null'); await loadPoll();
+  assert.equal(await evaluate(proc('s2') + '.textContent'), '');
 
   // ---------- menus stay open across redraws ----------
   await click('#projects .proj[data-path="C:/work/docs"] [data-action=project-menu]');

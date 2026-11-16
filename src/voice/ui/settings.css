@@ -104,6 +104,12 @@ body:not([data-tab="network"]) [data-for="network"], body:not([data-tab="nodes"]
 .vs-toggle b { font-size: 13.5px; font-weight: 600; }
 .vs-toggle small { margin-left: 6px; font-size: 12px; color: var(--faint); }
 
+/* What a switch shows, picked on one line under it (the taskbar strip's measurements). */
+.vs-checks { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 7px 2px 0 12px; font-size: 13px; }
+.vs-checks label { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; }
+.vs-checks label:has(:disabled) { color: var(--muted); cursor: default; }
+.vs-checks .check:disabled { opacity: .5; cursor: default; }
+
 /* Computers: this node's pairing code, and the rows of paired and found nodes - name and state, the action at the end. */
 .vs-code { display: flex; align-items: center; gap: 10px; min-height: 34px; }
 .vs-code b { font-family: var(--mono); font-size: 20px; letter-spacing: .12em; user-select: text; }

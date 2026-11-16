@@ -83,6 +83,10 @@ const host = createHost({
   gitActive: () => Boolean(bar?.isVisible() || (managerWin && !managerWin.isDestroyed() && managerWin.isVisible() && !managerWin.isMinimized()))
 });
 const { sessions, terminals, launch, liveSessions, findTranscript, usage, limits, resources, git: gitStatus, search: fullText } = host;
+const sessionLoad = require("./proc-stats").createSessionLoad({
+  sessions: () => require("./host/live").liveSessions(),
+  wanted: () => prefs.get().agentLoad && Boolean(managerWin && !managerWin.isDestroyed() && managerWin.isVisible() && !managerWin.isMinimized())
+});
 host.on("limits", l => broadcast("limits:changed", l));
 host.on("resources", r => broadcast("resources:changed", r));
 host.on("data", data => broadcast("data:changed", data));
@@ -1294,10 +1298,14 @@ function registerIpc() {
   handle("terminal:upload", (id, name, bytes) => putFile(text(id, 64), text(name, 200), Buffer.from(bytes)));
   // What the lists show: the live sessions, and a stand-in for each agent terminal without one (host.liveAgents).
   handle("live:get", () => host.liveAgents());
+  // The CPU and memory of the Claude sessions here, for the rows of the Agents list (proc-stats.js): measured only
+  // while the setting is on and the manager window is in view; null otherwise. Never part of what peers get.
+  handle("proc:get", sessionLoad);
   // AgentDeck's own terminals and their layout. Keystrokes and sizes come as plain messages (many, no answer needed).
   handle("workspace:get", () => getWorkspaceView());
-  // The terminals' text size and the window's scale, from the window's own keys (Ctrl+= / Ctrl+- / Ctrl+0).
-  handle("prefs:set-view", patch => prefs.set({ terminalFontSize: patch?.terminalFontSize, uiScale: patch?.uiScale }));
+  // The terminals' text size and the window's scale, from the window's own keys (Ctrl+= / Ctrl+- / Ctrl+0), and the
+  // sessions' CPU and memory in the Agents list, from the button in its heading.
+  handle("prefs:set-view", patch => prefs.set({ terminalFontSize: patch?.terminalFontSize, uiScale: patch?.uiScale, agentLoad: patch?.agentLoad }));
   handle("workspace:command", (cmd, args) => runWorkspaceCommand(text(cmd, 32), isObj(args) ? args : {}));
   handle("terminal:attach", id => attachTerm(text(id, 64)));
   handle("terminal:move", async (agent, id) => {

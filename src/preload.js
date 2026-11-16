@@ -22,6 +22,9 @@ contextBridge.exposeInMainWorld("manager", {
   copyText: text => ipcRenderer.invoke("clipboard:write", text),
   readClipboardText: () => ipcRenderer.invoke("clipboard:read"),
   getLive: () => ipcRenderer.invoke("live:get"),
+  // { "Claude:<id>": { cpu, mem, memShare, procs } } of the Claude sessions running here, or null: switched off, or
+  // this window is not in view (main.js "proc:get").
+  getSessionLoad: () => ipcRenderer.invoke("proc:get"),
   getUsage: () => ipcRenderer.invoke("usage:get"),
   getShortcuts: () => ipcRenderer.invoke("app:shortcuts"),
   getDay: date => ipcRenderer.invoke("day:get", date),

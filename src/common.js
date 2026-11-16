@@ -237,32 +237,29 @@ function getStatusTitle(l, timed = true) {
   const label = isStateless(l) ? t("live.label.running") : kind === "other" ? l.status : t(`live.label.${kind}`);
   return [`${label}${timed && liveText(l) ? ` · ${liveText(l)}` : ""}`, getLiveHint(l), `PID ${l.pid}`].join("\n");
 }
-// A running session's process figures (host/proc-stats.js: `proc: { cpu, mem, memShare }`, its main process alone):
-// "CPU 3% · RAM 1.2%", "" until measured; procHint: the tooltip, with the memory in MB. Both are shares of the whole
-// computer; cpu is null on the first measurement.
+// A Claude session's load on this computer (proc-stats.js: { cpu, mem, memShare, procs } - its own process and all
+// it started, as shares of the whole computer): "CPU 3% · RAM 1.2%", "" until measured; cpu is null on the first
+// measurement. procHint: the tooltip, which says what was added up, with the memory in MB.
 const procPct = x => `${x < 10 ? Math.round(x * 10) / 10 : Math.round(x)}%`;
 const mbText = bytes => { const mb = bytes / 1048576; return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`; };
-function procText(l) {
-  const p = l?.proc;
+function procText(p) {
   if (!p) return "";
   return [Number.isFinite(p.cpu) && `CPU ${procPct(p.cpu)}`, Number.isFinite(p.memShare) && `RAM ${procPct(p.memShare)}`].filter(Boolean).join(" · ");
 }
-function procHint(l) {
-  const p = l?.proc;
-  return t("manager.agents.procTitle", { pid: l?.pid || "", mem: p?.mem > 0 ? mbText(p.mem) : "-" });
-}
+const procHint = p => tn("manager.agents.procTitle", p.procs || 1, { mem: p.mem > 0 ? mbText(p.mem) : "-" });
 // The row's place for them, empty: the figures change by the second, so the page puts them in place (fillProcTexts)
-// and the markup stays the same (see statusMark).
-function procMark(l) {
-  if (!l?.pid) return "";
-  return `<span class="agent-proc" data-proc="${esc(sessionKey(l))}"></span>`;
+// and the markup stays the same (see statusMark). Only a Claude session of this computer has them: its PID is the
+// agent's own process, and they are measured here, for this window (main.js "proc:get").
+function procMark(s) {
+  if (s?.node || s?.agent !== "Claude") return "";
+  return `<span class="agent-proc" data-proc="${esc(sessionKey(s))}"></span>`;
 }
-// Puts each row's figures in its place; get(key): the live entry of a session key.
+// Puts each row's figures in its place; get(key): the figures of a session key, if any.
 function fillProcTexts(root, get) {
   root.querySelectorAll("[data-proc]").forEach(el => {
-    const l = get(el.dataset.proc), text = procText(l);
-    const shown = text ? ` · ${text}` : "", hint = text ? procHint(l) : "";
-    if (el.textContent !== shown) el.textContent = shown;
+    const p = get(el.dataset.proc), text = procText(p);
+    const hint = text ? procHint(p) : "";
+    if (el.textContent !== text) el.textContent = text;
     if (el.title !== hint) el.title = hint;
   });
 }

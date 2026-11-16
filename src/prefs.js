@@ -6,7 +6,8 @@
 // page needs to hear about.
 //
 // events: "changed" (snapshot, keys) - keys lists what changed: "language", "theme", "edgeHandle", "autoUpdate",
-// "newWindow", "sessionsIn", "autoCompact", "autoCompactTokens", "terminalFontSize", "uiScale", "editor", "gitScope".
+// "newWindow", "sessionsIn", "autoCompact", "autoCompactTokens", "terminalFontSize", "uiScale", "editor", "gitScope",
+// "agentLoad", "taskbarMonitor", "taskbarNet", "taskbarCpu", "taskbarMemory".
 const { app, nativeTheme } = require("electron");
 const { EventEmitter } = require("node:events");
 const settings = require("./voice/settings");
@@ -35,10 +36,15 @@ let autoCompactTokensChosen = false; // the user picked a compaction threshold, 
 let handleX = 0.5; // the edge handle's centre, as a fraction of the display width
 let handleDisplay = null; // the id of the display it is on (null: the primary one)
 const fraction = v => (typeof v === "number" && v >= 0 && v <= 1 ? v : null);
-// The strip on the Windows taskbar (taskbar-monitor.js) and what it shows - traffic, CPU, memory: nothing until asked
-// for. Each is a key of "changed" too.
-const TASKBAR = ["taskbarMonitor", "taskbarNet", "taskbarCpu", "taskbarMemory"];
-for (const key of TASKBAR) state[key] = false;
+// The strip on the Windows taskbar (taskbar-monitor.js): off until asked for, and then with all it can show - traffic,
+// CPU, memory - until some are unticked. Switched on, it always shows something: unticking the last one switches it
+// off, and switching it on with none ticked ticks them all. Each is a key of "changed" too.
+const TASKBAR_ITEMS = ["taskbarNet", "taskbarCpu", "taskbarMemory"];
+const TASKBAR = ["taskbarMonitor", ...TASKBAR_ITEMS];
+state.taskbarMonitor = false;
+for (const key of TASKBAR_ITEMS) state[key] = true;
+// The Claude sessions' CPU and memory at the end of their rows in the Agents list (proc-stats.js).
+state.agentLoad = true;
 
 // themeSource also gives native title bars and dialogs the chosen look: the theme's base (dark or light), or
 // "system", which follows Windows. It takes nothing else.
@@ -93,10 +99,12 @@ function load() {
   if (isObj(root.git) && GIT_SCOPES.includes(root.git.scope)) state.gitScope = root.git.scope;
   state.dayView = isObj(root.dayView) && root.dayView.show === true;
   const taskbar = isObj(root.taskbarMonitor) ? root.taskbarMonitor : {};
-  state.taskbarMonitor = process.platform === "win32" && taskbar.show === true;
-  state.taskbarNet = taskbar.net === true;
-  state.taskbarCpu = taskbar.cpu === true;
-  state.taskbarMemory = taskbar.memory === true;
+  state.taskbarNet = taskbar.net !== false;
+  state.taskbarCpu = taskbar.cpu !== false;
+  state.taskbarMemory = taskbar.memory !== false;
+  // Never on with nothing to show, nor outside Windows (there is no taskbar to lie on).
+  state.taskbarMonitor = process.platform === "win32" && taskbar.show === true && TASKBAR_ITEMS.some(key => state[key]);
+  state.agentLoad = ui.agentLoad !== false;
   // null: not saved here yet (main carries the earlier choice over).
   state.notify = isObj(root.notify) && typeof root.notify.on === "boolean" ? root.notify.on : null;
   i18n.setLanguage(state.language, { dev: !app.isPackaged });
@@ -166,12 +174,19 @@ async function set(patch) {
     state.notify = patch.notify;
     keys.push("notify");
   }
-  for (const key of TASKBAR) {
-    if (typeof patch[key] === "boolean" && patch[key] !== state[key]) {
-      state[key] = patch[key];
-      keys.push(key);
-    }
+  const change = (key, value) => {
+    if (typeof value !== "boolean" || value === state[key]) return;
+    state[key] = value;
+    keys.push(key);
+  };
+  for (const key of TASKBAR_ITEMS) change(key, patch[key]);
+  // Outside Windows the strip stays off whatever asks for it.
+  change("taskbarMonitor", process.platform === "win32" ? patch.taskbarMonitor : false);
+  if (state.taskbarMonitor && !TASKBAR_ITEMS.some(key => state[key])) {
+    if (keys.includes("taskbarMonitor")) for (const key of TASKBAR_ITEMS) change(key, true);
+    else change("taskbarMonitor", false);
   }
+  change("agentLoad", patch.agentLoad);
   if (typeof patch.dayView === "boolean" && patch.dayView !== state.dayView) {
     state.dayView = patch.dayView;
     keys.push("dayView");
@@ -197,7 +212,7 @@ function setHandlePosition(x, display) {
 // In effect at once; a file that cannot be written is only logged. `hoverEdge: undefined` drops the former key.
 function save() {
   return settings.writeRoot({
-    ui: { language: state.language, theme: state.theme, autoUpdate: state.autoUpdate, scale: state.uiScale, editor: state.editor },
+    ui: { language: state.language, theme: state.theme, autoUpdate: state.autoUpdate, scale: state.uiScale, editor: state.editor, agentLoad: state.agentLoad },
     edgeHandle: { show: state.edgeHandle, x: Math.round(handleX * 10000) / 10000, display: handleDisplay ?? undefined },
     terminal: {
       newWindow: state.newWindow,

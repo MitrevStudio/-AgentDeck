@@ -4,8 +4,10 @@
 // traffic is known.
 //
 // Only real adapters count: a VPN, a virtual switch or a filter driver carries the same bytes as the adapter under it
-// and would count them twice.
-// MIB_IF_ROW2 (netioapi.h), x64: 1352 bytes; MIB_IF_TABLE2 is a count followed, 8 bytes in, by the rows.
+// and would count them twice. Each adapter's own counters come along (`adapters`, by its LUID): the set of adapters
+// that are up changes, and a sum over a different set is no measure of what passed meanwhile (resources.js).
+// MIB_IF_ROW2 (netioapi.h), x64: 1352 bytes, the InterfaceLuid first; MIB_IF_TABLE2 is a count followed, 8 bytes in,
+// by the rows.
 const ROW = 1352, ROWS_AT = 8;
 const TYPE_AT = 1128, FLAGS_AT = 1152, OPER_AT = 1156, IN_AT = 1208, OUT_AT = 1280;
 const IF_TYPE_LOOPBACK = 24, OPER_UP = 1;
@@ -38,25 +40,27 @@ function readWindows() {
     const count = f.koffi.decode(out[0], "uint32_t");
     // Field by field: Electron's V8 does not allow a view onto memory it did not allocate (koffi.view).
     const u32 = at => f.koffi.decode(out[0], at, "uint32_t"), u64 = at => BigInt(f.koffi.decode(out[0], at, "uint64_t"));
-    const sum = { hardware: { rx: 0n, tx: 0n, n: 0 }, other: { rx: 0n, tx: 0n, n: 0 } };
+    const sum = { hardware: { rx: 0, tx: 0, adapters: {}, n: 0 }, other: { rx: 0, tx: 0, adapters: {}, n: 0 } };
     for (let i = 0; i < count; i++) {
       const at = ROWS_AT + i * ROW;
       const flags = f.koffi.decode(out[0], at + FLAGS_AT, "uint8_t");
       if (u32(at + OPER_AT) !== OPER_UP || u32(at + TYPE_AT) === IF_TYPE_LOOPBACK || flags & FILTER) continue;
       const to = flags & HARDWARE ? sum.hardware : sum.other;
-      to.rx += u64(at + IN_AT);
-      to.tx += u64(at + OUT_AT);
+      const rx = Number(u64(at + IN_AT)), tx = Number(u64(at + OUT_AT));
+      to.adapters[String(u64(at))] = { rx, tx };
+      to.rx += rx;
+      to.tx += tx;
       to.n++;
     }
     // A virtual machine may have no adapter marked as hardware: then every adapter that is up counts.
-    const use = sum.hardware.n ? sum.hardware : sum.other;
-    return { rx: Number(use.rx), tx: Number(use.tx) };
+    const { rx, tx, adapters } = sum.hardware.n ? sum.hardware : sum.other;
+    return { rx, tx, adapters };
   } finally {
     f.free(out[0]);
   }
 }
 
-// -> { rx, tx } in bytes since boot, or null.
+// -> { rx, tx, adapters: { id: { rx, tx } } } in bytes since boot (the sums, and each adapter that is up), or null.
 function read() {
   try {
     if (process.platform === "win32") return readWindows();

@@ -65,10 +65,9 @@ const REOPEN_AT_ONCE = 4;
 // host.launch, host.viewers (viewers.js), host.tabs(), host.liveSessions() (each with `term`), host.liveAgents(),
 // host.restoreTerminals() and host.tabsChanged(). terminals: a backend made with terminalEvents(host); launch:
 // launch.js over it; liveSessions(): the live status as live.js, codex-live.js and opencode-live.js read it;
-// linkTabs(): tab-links.js's, when the host has one; procStats: proc-stats.js's, which gives the Agents rows their
-// process CPU and memory, when the host has one; log(...parts): the launch log. createHost does this, and tests
+// linkTabs(): tab-links.js's, when the host has one; log(...parts): the launch log. createHost does this, and tests
 // make their hosts the same way.
-function equipTerminals(host, { terminals, launch, liveSessions, linkTabs = null, procStats = null, log = () => {} }) {
+function equipTerminals(host, { terminals, launch, liveSessions, linkTabs = null, log = () => {} }) {
   const viewers = createViewers({
     resize: (id, cols, rows) => terminals.resize(id, cols, rows), size: id => terminals.size(id),
     onSize: e => host.emit("terminal:size", e), onChange: () => tabsChanged()
@@ -112,15 +111,12 @@ function equipTerminals(host, { terminals, launch, liveSessions, linkTabs = null
       live = await host.liveSessions();
       loose = getLooseAgentTabs(live);
     }
-    const list = [...live, ...loose.map(x => ({
+    // Nothing that changes by the second belongs in here: mesh/serve.js pushes the list to peers and phones whenever
+    // it differs from the last one sent. (The sessions' CPU and memory are the manager window's own, ../proc-stats.js.)
+    return [...live, ...loose.map(x => ({
       agent: x.agent, id: x.sessionId || x.id, cwd: x.cwd, pid: x.pid || 0, status: "running", statusAt: x.createdAt || 0,
       startedAt: x.createdAt || 0, activityAt: 0, subagents: [], term: x.id, unlinked: !x.sessionId
     }))];
-    // Each row's process CPU and memory (proc-stats.js): the last figures measured, a new measurement asked for. Only
-    // a Claude session's PID is its agent's own process (live.js); a Codex or OpenCode session's, and a stand-in's,
-    // is its terminal's (the DockPty), whose figures would not be the agent's.
-    const own = new Set(live.filter(l => l.agent === "Claude"));
-    return procStats ? procStats.attach(list, x => own.has(x)) : list;
   }
   // The running agent terminals no live session accounts for. A second terminal on a session already listed is not
   // among them (it stays a terminal): one row a session.
@@ -202,7 +198,6 @@ function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () 
   const host = new EventEmitter();
   const limits = require("../limits").createAllLimits({ fetch: fetchLimits, findExecutable: require("./sessions").findOnPath, onChange: l => host.emit("limits", l) });
   const resources = require("./resources").createResources({ home, onChange: r => host.emit("resources", r) });
-  const procStats = require("./proc-stats").createProcStats();
   const search = createSearch(path.join(dataDir, "search.db"));
   let lastKeysSig = "", lastIndexAt = 0;
 
@@ -231,7 +226,7 @@ function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () 
   const openCodeLink = createOpenCodeLink({ help: async () => (await sessions.runOpenCode(["--help"], home, 15000)).stdout });
   const launch = createLaunch({ dataDir, terminals, sessions, liveSessions, findTranscript, log, noLauncher, openCodeIdentity: openCodeLink.launchIdentity });
   const tabLinks = createTabLinks({ terminals, liveSessions });
-  equipTerminals(host, { terminals, launch, liveSessions, linkTabs: tabLinks.linkTabs, procStats, log });
+  equipTerminals(host, { terminals, launch, liveSessions, linkTabs: tabLinks.linkTabs, log });
   const sendText = require("./send-text").createSendText({ terminals, liveSessions });
   const setup = createSetup({ agents: () => sessions.agents });
   gitStatus.configure(async () => ({
@@ -278,7 +273,6 @@ function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () 
     gitStatus.stop();
     limits.stop();
     resources.stop();
-    procStats.stop();
     sessions.stop();
   }
 

@@ -51,7 +51,9 @@
       </section>
       <div class="side-splitter" id="sideSplitter" role="separator" aria-orientation="horizontal" tabindex="0" data-i18n-title="manager.sideSplitter"></div>
       <section class="side-sec agents-sec" id="sideAgents">
-        <div class="side-sec-head"><h2 data-i18n="manager.agents.title"></h2><span class="count" id="agentCount">0</span></div>
+        <div class="side-sec-head"><h2 data-i18n="manager.agents.title"></h2><span class="count" id="agentCount">0</span>
+          <!-- The Claude sessions' CPU and memory at the end of their rows, on or off (renderer.js). -->
+          <span class="side-tools"><button class="icon-btn" id="agentLoad" aria-pressed="true"><span data-icon="pulse"></span></button></span></div>
         <div class="side-list" id="agents"></div>
       </section>
       <!-- Every running terminal of this and the online computers that Agents does not show (renderer.js renderTerms). -->

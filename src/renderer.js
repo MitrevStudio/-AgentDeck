@@ -333,7 +333,7 @@ function renderAgents(v) {
     html += agentHtml(s, l, v.toks);
   }
   patchChildren($("agents"), html);
-  fillProcTexts($("agents"), key => allLive.get(key));
+  fillProcTexts($("agents"), key => sessionLoad[key]);
 }
 // What a row calls the project of a folder: the deepest project in the list that holds it (ownerProject), or as its
 // computer lists it, else the folder's name.
@@ -351,7 +351,7 @@ function agentHtml(s, l, toks) {
   // One in a terminal of AgentDeck can be dragged onto a pane (workspace-ui.js); one outside cannot come here.
   const drag = getAgentTerm(s) ? 'draggable="true"' : "";
   return `<div class="agent ${here ? "here" : ""}" ${getPaneMark(tab?.id)} data-key="${esc(key)}" tabindex="0" ${drag} title="${esc(`${s.title}\n${s.cwd}${s.node ? `\n${s.nodeName || ""}` : ""}`)}">${agentMark(s.agent)}
-      <div class="agent-main"><div class="agent-title">${hl(s.title, toks)}</div><div class="agent-sub"><span class="agent-where">${esc(project)}${where}</span>${procMark(l)}</div></div>
+      <div class="agent-main"><div class="agent-title">${hl(s.title, toks)}</div><div class="agent-sub"><span class="agent-where">${esc(project)}${where}</span>${procMark(s)}</div></div>
       ${statusMark(l, isLoading(key, l))}
       <span class="agent-tools"><button class="icon-btn" data-action="agent-menu" title="${esc(t("manager.agents.more"))}" aria-haspopup="menu">${icon("more")}</button></span></div>
     ${l.subagents?.length ? subagentsHtml(key, l.subagents, "data-action", SIDEBAR_SUBAGENTS) : ""}`;
@@ -682,8 +682,44 @@ function updateLiveTexts() {
     el.className = getStatusClass(l);
     el.title = getStatusTitle(l);
   });
-  fillProcTexts(document, key => allLive.get(key));
 }
+
+// The Claude sessions' CPU and memory at the end of their rows (proc-stats.js), asked for only while someone can see
+// them: the setting on, this window in view and such a row on screen. Main measures on demand and answers null for a
+// window out of view; with nobody asking, nothing is measured.
+const LOAD_MS = 5000;
+let sessionLoad = {}, loadWanted = window.prefs?.agentLoad !== false;
+function isAgentLoadShown() {
+  if (!loadWanted || document.visibilityState !== "visible") return false;
+  const list = $("agents").getBoundingClientRect();
+  return list.height > 0 && [...document.querySelectorAll("#agents [data-proc]")].some(el => {
+    const r = el.getBoundingClientRect();
+    return r.bottom > list.top && r.top < list.bottom;
+  });
+}
+async function pollSessionLoad() {
+  let next = null;
+  if (isAgentLoadShown()) try { next = await window.manager.getSessionLoad(); } catch {}
+  sessionLoad = next || {};
+  fillProcTexts($("agents"), key => sessionLoad[key]);
+}
+// Switched on and off by the button in the list's heading (the setting is the app's, prefs.js agentLoad).
+function setLoadWanted(on) {
+  loadWanted = on;
+  const button = $("agentLoad");
+  button.classList.toggle("on", on);
+  button.setAttribute("aria-pressed", String(on));
+  button.title = t(on ? "manager.agents.load.hide" : "manager.agents.load.show");
+  pollSessionLoad();
+}
+$("agentLoad").addEventListener("click", () => {
+  setLoadWanted(!loadWanted);
+  window.terminals.setView({ agentLoad: loadWanted }).catch(() => {});
+});
+window.prefs?.onChanged?.(p => { if (loadWanted !== (p.agentLoad !== false)) setLoadWanted(p.agentLoad !== false); });
+setLoadWanted(loadWanted);
+// Back in view: at once, not up to LOAD_MS later (the figures of before are gone - they say nothing of now).
+document.addEventListener("visibilitychange", pollSessionLoad);
 
 // key: a project's normalized path (its space comes up with all its sessions), or "g:<id>" for a group (it folds or
 // opens). The command centre's space is its one terminal.
@@ -1348,3 +1384,4 @@ watchSectionSplitter($("termsSplitter"), $("sideTerms"), TERMS_SPLIT, MIN_TERMS_
 
 load();
 setInterval(pollLive, 2000);
+setInterval(pollSessionLoad, LOAD_MS);

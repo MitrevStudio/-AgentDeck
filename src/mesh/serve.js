@@ -43,8 +43,8 @@ const dim = v => {
 
 // host: host/index.js (equipTerminals: terminals, launch, viewers, tabs(), liveSessions()); env(): the environment
 // for a terminal opened for a peer (a promise; with the proxy, on a desktop); info(): what host.info adds (the node's
-// own description comes from the links).
-function createServed({ host, env = async () => terminalEnv(process.env), info = () => ({}) }) {
+// own description comes from the links); liveMs: how often the live status is looked at for the peers.
+function createServed({ host, env = async () => terminalEnv(process.env), info = () => ({}), liveMs = LIVE_MS }) {
   const { terminals, launch, sendText, sessions, git, setup, viewers } = host;
   const path = require("node:path");
   const fs = require("node:fs");
@@ -277,7 +277,8 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
     host.on("limits", l => links.notifyAll("limits", l));
     host.on("resources", r => links.notifyAll("resources", r));
     // The live status has no event of its own (the windows poll it): connected peers get it every few seconds,
-    // when it changed.
+    // when it changed. So it must hold nothing that changes by itself - a figure measured anew each time would send
+    // the whole list to every peer and phone on every round, for as long as a session runs.
     let lastLiveSig = "";
     setInterval(async () => {
       if (!links.nodes().some(n => n.status === "online")) return;
@@ -287,7 +288,7 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
         lastLiveSig = sig;
         links.notifyAll("live", live);
       }
-    }, LIVE_MS).unref();
+    }, liveMs).unref();
     // A peer's keystrokes and sizes, taken only from a peer that asked for terminals on this link (ctl) and may see
     // this computer. Keystrokes go to any running terminal; they count for the size only from a viewer. The terminal's
     // own answers (isReport: the device's xterm.js answering a program's question, also one replayed from the

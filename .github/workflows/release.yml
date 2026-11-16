@@ -36,7 +36,7 @@ jobs:
       - run: npm run check
       - run: node scripts/test-remote-state.js
       - run: node scripts/test-resources.js
-      - run: node scripts/test-proc-stats.js
+      - run: npm run test:load
       - run: node scripts/test-codex-live.js
       - run: node scripts/test-project-sessions.js
       - run: npm run test:limits

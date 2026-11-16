@@ -114,7 +114,7 @@ function renderGeneral() {
   $("dayView").checked = general.dayView === true;
   $("taskbarSection").hidden = general.windows !== true; // the Windows taskbar only
   $("taskbarMonitor").checked = general.taskbarMonitor === true;
-  for (const id of ["taskbarNet", "taskbarCpu", "taskbarMemory"]) { $(id).checked = general[id] === true; $(id).disabled = general.taskbarMonitor !== true; }
+  for (const id of ["taskbarNet", "taskbarCpu", "taskbarMemory"]) { $(id).checked = general[id] !== false; $(id).disabled = general.taskbarMonitor !== true; }
   $("notify").checked = general.notify !== false;
   if (["uiLanguage", "sessionsIn"].includes(focused)) $(focused).querySelector(".on")?.focus();
 }

@@ -5,17 +5,34 @@ const fs = require('node:fs');
 function createResources({ home = os.homedir(), onChange = () => {}, system = os, statfs = fs.promises.statfs,
   network = () => null, interval = 5000 } = {}) {
   let previous = null, current = null, timer = null, flight = null, disk = null, diskAt = 0, netPrevious = null;
-  // network(): the computer's traffic counters ({ rx, tx } in bytes since boot, net-counters.js), passed only by who
-  // shows traffic. Traffic since the last sample, in bytes a second; the counters themselves too (bytes since boot), for whoever adds
-  // them up. null without a source; no rate on the first sample, or when the counters went back (an adapter reset).
+  // network(): the computer's traffic counters ({ rx, tx, adapters: { id: { rx, tx } } } in bytes since boot,
+  // net-counters.js), passed only by who shows traffic. Traffic since the last sample, in bytes a second; the
+  // counters themselves too (bytes since boot), for whoever adds them up. null without a source; no rate on the
+  // first sample.
+  // Each adapter is compared with itself: one that came up since the last sample (Wi-Fi joining, a cable plugged
+  // in, a VPN) brings all its bytes since boot with it, which are not this second's traffic - it counts from the
+  // next sample on, and so does one whose counters went back (a reset). Without the adapters (a source that gives
+  // sums only), a sum that went back gives no rate.
   function traffic() {
     let now = null;
     try { now = network(); } catch {}
     if (!now) { netPrevious = null; return null; }
     const at = Date.now(), last = netPrevious, seconds = last ? (at - last.at) / 1000 : 0;
-    netPrevious = { at, rx: now.rx, tx: now.tx };
-    const ok = last && seconds > 0 && now.rx >= last.rx && now.tx >= last.tx;
-    return { rx: ok ? (now.rx - last.rx) / seconds : null, tx: ok ? (now.tx - last.tx) / seconds : null, rxBytes: now.rx, txBytes: now.tx };
+    netPrevious = { at, rx: now.rx, tx: now.tx, adapters: now.adapters || null };
+    const out = (rx, tx) => ({ rx, tx, rxBytes: now.rx, txBytes: now.tx });
+    if (!last || seconds <= 0) return out(null, null);
+    if (!now.adapters || !last.adapters) {
+      const ok = now.rx >= last.rx && now.tx >= last.tx;
+      return out(ok ? (now.rx - last.rx) / seconds : null, ok ? (now.tx - last.tx) / seconds : null);
+    }
+    let rx = 0, tx = 0;
+    for (const [id, a] of Object.entries(now.adapters)) {
+      const b = last.adapters[id];
+      if (!b || a.rx < b.rx || a.tx < b.tx) continue;
+      rx += a.rx - b.rx;
+      tx += a.tx - b.tx;
+    }
+    return out(rx / seconds, tx / seconds);
   }
   async function sample() {
     const cpus = system.cpus();

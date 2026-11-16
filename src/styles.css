@@ -207,10 +207,12 @@ main {
 .agent:focus-visible, .proj:focus-visible, .se-row:focus-visible { outline-offset: -2px; }
 .agent-title { font-size: 13px; font-weight: 550; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .agent-sub { font-size: 11.5px; color: var(--faint); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-/* The figures stay whole; the project and where it runs give way. */
-.agent-sub:has(> .agent-proc) { display: flex; min-width: 0; }
-.agent-where { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+/* A Claude session's CPU and memory, at the end of the line. The project and where it runs give way to them down to
+   a few letters; in a row too narrow for both, the figures wrap out of sight and the project stays. */
+.agent-sub:has(> .agent-proc) { display: flex; flex-wrap: wrap; height: 1lh; min-width: 0; }
+.agent-where { flex: 1 1 9ch; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .agent-proc { flex: none; font-variant-numeric: tabular-nums; }
+.agent-proc:not(:empty) { padding-left: 10px; }
 .agents-sec .subs { margin: 0 6px 4px 30px; }
 .agents-sec .sub-row { min-height: 20px; font-size: 11.5px; }
 .agents-sec .sub-row .when { display: none; }

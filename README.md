@@ -183,6 +183,8 @@ The catalog refreshes as local session files change. AgentDeck derives titles an
 
 The Agents list makes running sessions easier to find, with live states where the integration can determine them. A session waiting for you is different from one still working; notifications can bring you back when attention is needed. The row of the session in the focused pane is marked with an accent bar, the ones in the other panes of the tab are tinted, and each row names the most specific project that holds the session's folder.
 
+A Claude session running on this computer ends its row with its load, for example `CPU 2.3% · RAM 1.3%`: shares of the whole computer taken by the session's own process together with every process it started - its MCP servers, the shells, builds and tests it runs. The tooltip says how many processes that is and their memory in MB (working sets added up, so memory they share is counted for each). The figures are measured on this computer only while someone can see them - every five seconds while the Agents list is in view in a manager window that is neither hidden nor minimised - and they never leave it: paired computers and phones are not sent them, so sessions on other computers show none. Codex and OpenCode sessions show none either: AgentDeck knows their terminal's process, not the agent's. The button in the Agents heading switches the figures off and on.
+
 A Claude, Codex or OpenCode session started from AgentDeck is listed under **Agents** from the moment its terminal opens until it ends, as one row: *New session*, marked as started with no state claimed, until the agent has written its session (Codex and OpenCode do that with the first prompt), then under the session's title with its state. Working and ready are read from Claude Code's registry, Codex's rollout and OpenCode's database; only Claude Code reports that it needs you. **Terminals** lists everything else: shells, including one you start Codex or OpenCode in by hand (a Claude Code session typed into a shell is recognized while it runs).
 
 Removing a project from the catalog and deleting a session are separate actions. Discovery and previews read history; explicit session deletion can remove the corresponding agent history.
@@ -330,7 +332,7 @@ Costs are **API-equivalent estimates** using the application's price table in [`
 
 **Machine resources** show whole-computer CPU, memory and home-volume disk readings. Paired hosts publish resource, usage and limit information over their direct connection as well.
 
-**On the taskbar** (Windows): a small strip beside the tray icons can show this computer's network traffic (up/down), CPU and memory, updated every second; 90% and above turns red. It is **off by default**, with nothing chosen: switch it on and pick what it shows in **Settings → General → Taskbar**. Clicks pass through it to the taskbar, and it steps aside for full-screen apps.
+**On the taskbar** (Windows): a small strip beside the tray icons shows this computer's network traffic (up/down, over its physical adapters), CPU and memory, updated every second; 90% and above turns red. It is **off by default**: switch it on in **Settings → General → Taskbar**, where you can also untick what it should not show. Clicks pass through it to the taskbar, and it steps aside for full-screen apps. It lies on Windows' main taskbar only - the taskbars of other displays get none - and only on one that stays along the bottom edge: while the taskbar is set to hide itself, or stands on another edge (Windows 10), the strip is hidden. It is as wide as its text and does not know where the app buttons end, so on a taskbar full of buttons it is drawn over the last of them.
 
 ### Git awareness and daily activity
 
@@ -652,6 +654,7 @@ npm run check
 # Focused regression checks used by CI
 node scripts/test-remote-state.js
 node scripts/test-resources.js
+npm run test:load
 node scripts/test-codex-live.js
 npm run test:opencode-live
 node scripts/test-project-sessions.js
