@@ -27,7 +27,7 @@ const { createTabLinks } = require("./tab-links");
 const { createSetup } = require("./setup");
 const { liveSessions: claudeLiveSessions, findTranscript } = require("./live");
 const { createCodexLive } = require("./codex-live");
-const { readIdentity } = require("./codex-link");
+const { readIdentity, prune: pruneCodexLinks } = require("./codex-link");
 const { createOpenCodeLive } = require("./opencode-live");
 const { createOpenCodeLink } = require("./opencode-link");
 const sessionPreview = require("./session-preview");
@@ -36,6 +36,8 @@ const usage = require("./usage");
 
 // A light rescan refreshes the full-text index at most this often: the search worker re-reads grown transcripts.
 const LIGHT_INDEX_MS = 60000;
+// The Codex logs of terminals that are gone are removed at the start and this often after (codex-link.js prune).
+const CODEX_LINKS_PRUNE_MS = 6 * 60 * 60 * 1000;
 
 // The search needs node:sqlite (Node 22.5+); a host without it lists and previews sessions but does not search them.
 function createSearch(dbFile) {
@@ -248,8 +250,15 @@ function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () 
   const preview = (s, opts = {}) => sessionPreview.preview(s, { ...opts, openCodeDb: sessions.OPENCODE_DB });
 
   // The background work: watching the transcripts, the periodic full scan, linking tabs to their sessions, the usage
-  // figures, the git status, and the first scan.
+  // figures, the git status, the first scan, and the Codex logs no terminal needs any more.
+  let codexLinksTimer = null;
+  const pruneLinks = () => pruneCodexLinks(dataDir, { inUse: terminals.getTabs().map(x => x.codexLog) })
+    .catch(err => console.error("Pruning the Codex logs failed:", err.message));
   function start() {
+    pruneLinks();
+    clearInterval(codexLinksTimer);
+    codexLinksTimer = setInterval(pruneLinks, CODEX_LINKS_PRUNE_MS);
+    codexLinksTimer.unref();
     limits.start();
     resources.start();
     sessions.watchTranscripts();
@@ -270,6 +279,7 @@ function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () 
   // or stop.
   const flush = () => usage.flush();
   function stop() {
+    clearInterval(codexLinksTimer);
     gitStatus.stop();
     limits.stop();
     resources.stop();

@@ -22,6 +22,7 @@ jobs:
       - run: node scripts/test-resources.js
       - run: npm run test:load
       - run: node scripts/test-codex-live.js
+      - run: node scripts/test-codex-links.js
       - run: npm run test:opencode-live
       - run: node scripts/test-project-sessions.js
       - run: npm run test:limits
@@ -60,6 +61,7 @@ jobs:
       - run: node scripts/test-resources.js
       - run: npm run test:load
       - run: node scripts/test-codex-live.js
+      - run: node scripts/test-codex-links.js
       - run: npm run test:opencode-live
       - run: node scripts/test-project-sessions.js
       - run: npm run test:limits
