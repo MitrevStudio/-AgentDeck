@@ -55,8 +55,9 @@ function createCodexLive({ sessions, tabs = () => [], now = Date.now, link = () 
       if (!state || stat.size < state.offset || stat.ino !== state.ino || (stat.size === state.size && stat.mtimeMs !== state.mtime)) {
         state = { offset: 0, status: '', statusAt: 0, lastAt: 0, ino: stat.ino };
       }
+      // A rollout read to its end is not opened again until it grows: the status is asked for every second or so.
       let handle;
-      try {
+      if (state.offset < stat.size) try {
         handle = await fs.promises.open(s.file, 'r');
         for await (const lines of lineChunks(handle, state.offset, stat.size)) {
           const text = lines.toString('utf8');

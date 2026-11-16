@@ -214,7 +214,7 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
     // In a terminal of AgentDeck's own (here, maybe a pane on another device): that is the place to show it, never one
     // to stop it from.
     if (runningTab(agent, id)) fail("sessionRunning");
-    const entry = (await liveSessions()).find(l => l.agent === agent && l.id === id);
+    const entry = (await liveSessions({ fresh: true })).find(l => l.agent === agent && l.id === id);
     if (!entry) fail("moveNotRunning");
     if (entry.status === "busy") fail("moveBusy");
     // Checked before the session is stopped: one that cannot be resumed (no prompt sent yet) keeps running where it is.
@@ -240,7 +240,7 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
     checkSessionId(id);
     if (agent !== "Claude") fail("stopUnsupported");
     if (terminals.getTabs().some(x => x.agent === agent && x.sessionId === id && !x.exited)) fail("sessionRunning");
-    const entry = (await liveSessions()).find(l => l.agent === agent && l.id === id);
+    const entry = (await liveSessions({ fresh: true })).find(l => l.agent === agent && l.id === id);
     if (!entry) fail("moveNotRunning");
     log(`stop ${agent} ${id} pid ${entry.pid}${entry.jobId ? ` job ${entry.jobId}` : ""}`);
     if (entry.kind === "bg" && /^[\w-]{1,64}$/.test(entry.jobId)) {
@@ -283,7 +283,7 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
   async function deleteSession(agent, id, trash) {
     checkAgent(agent);
     checkSessionId(id);
-    if (runningTab(agent, id) || (await liveSessions()).some(l => l.agent === agent && l.id === id)) fail("sessionRunning");
+    if (runningTab(agent, id) || (await liveSessions({ fresh: true })).some(l => l.agent === agent && l.id === id)) fail("sessionRunning");
     if (agent === "OpenCode") {
       if (!/^[\w-]+$/.test(id)) fail("invalidSession");
       await sessions.runOpenCode(["session", "delete", id], path.dirname(sessions.CLAUDE_DIR), 15000);

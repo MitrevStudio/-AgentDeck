@@ -76,9 +76,10 @@ function createOpenCodeLive({ dbFile, tabs = () => [], now = Date.now, read = re
     }
     return result;
   }
-  return async () => {
+  // { fresh: true }: read now, for a caller that acts on the answer at once (shared-read.js has the rule).
+  return async ({ fresh = false } = {}) => {
     const sig = tabs().filter(t => t.agent === "OpenCode" && t.sessionId && !t.exited).map(t => t.id + t.sessionId).join(",");
-    if (!last || sig !== lastFor || now() - lastAt >= KEEP_MS) {
+    if (fresh || !last || sig !== lastFor || now() - lastAt >= KEEP_MS) {
       last = poll(); lastAt = now(); lastFor = sig;
     }
     return last.map(l => ({ ...l, subagents: [...l.subagents] }));

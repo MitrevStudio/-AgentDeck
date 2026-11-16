@@ -23,7 +23,8 @@ function createSendText({ terminals, liveSessions }) {
     if (!tab || tab.exited) return false;
     if (process.platform === "win32" && !tab.agentOnly) throw new HostError("terminalTooOld");
     if (!tab.sessionId) return false;
-    const l = (await liveSessions()).find(x => x.id === tab.sessionId);
+    // Asked anew each time: the text is typed on this answer, and the second look must see what the first changed.
+    const l = (await liveSessions({ fresh: true })).find(x => x.id === tab.sessionId);
     return Boolean(l && ["idle", "waiting"].includes(l.status));
   }
   // One line (line breaks become spaces: an Enter inside would submit half of it), at most TEXT_MAX characters.

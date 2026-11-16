@@ -27,6 +27,7 @@ const { createTabLinks } = require("./tab-links");
 const { createSetup } = require("./setup");
 const { liveSessions: claudeLiveSessions, findTranscript } = require("./live");
 const { createCodexLive } = require("./codex-live");
+const { createSharedRead } = require("./shared-read");
 const { readIdentity } = require("./codex-link");
 const { createOpenCodeLive } = require("./opencode-live");
 const { createOpenCodeLink } = require("./opencode-link");
@@ -86,8 +87,9 @@ function equipTerminals(host, { terminals, launch, liveSessions, linkTabs = null
     host.emit("terminals", tabs());
   }
   // The live sessions, each with the terminal here it runs in ("" when none: it runs elsewhere, or in none).
-  async function liveWithTerm() {
-    const live = await liveSessions();
+  // opts: { fresh: true } from a caller that acts on the answer at once (shared-read.js).
+  async function liveWithTerm(opts) {
+    const live = await liveSessions(opts);
     const running = new Map(terminals.getTabs().filter(x => !x.exited && x.sessionId).map(x => [`${x.agent}:${x.sessionId}`, x.id]));
     return live.map(l => ({ ...l, term: running.get(`${l.agent}:${l.id}`) || "" }));
   }
@@ -108,7 +110,7 @@ function equipTerminals(host, { terminals, launch, liveSessions, linkTabs = null
     // of its own terminal. tab-links.js looks at a session once, so this costs one process snapshot a new session.
     if (linkTabs && loose.some(x => x.agent === "Claude") && live.some(l => l.agent === "Claude" && !l.term)) {
       try { await linkTabs(); } catch (e) { console.error("Linking tabs failed:", e.message); }
-      live = await host.liveSessions();
+      live = await host.liveSessions(); // the same sessions (no new read): their terminals are what changed
       loose = getLooseAgentTabs(live);
     }
     // Nothing that changes by the second belongs in here: mesh/serve.js pushes the list to peers and phones whenever
@@ -219,9 +221,13 @@ function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () 
     }
   });
   const terminals = createTerminals({ userDataDir: dataDir, ...terminalEvents(host) });
-  const codexLive = createCodexLive({ sessions: () => sessions.get()?.sessions || [], tabs: () => terminals.getTabs(), link: terminals.link });
+  // Each of the three is one read for all who ask, kept for a second (shared-read.js; opencode-live.js keeps its own):
+  // the windows, the notifier, the tab links and the peers cost one read between them. opts: { fresh: true } from a
+  // caller that acts on the answer at once.
+  const codexLive = createSharedRead(createCodexLive({ sessions: () => sessions.get()?.sessions || [], tabs: () => terminals.getTabs(), link: terminals.link }),
+    { key: () => terminals.getTabs().filter(t => t.agent === "Codex" && !t.exited).map(t => `${t.id}:${t.sessionId || ""}`).join(",") });
   const openCodeLive = createOpenCodeLive({ dbFile: sessions.OPENCODE_DB, tabs: () => terminals.getTabs() });
-  const liveSessions = async () => (await Promise.all([claudeLiveSessions(), codexLive(), openCodeLive()])).flat();
+  const liveSessions = async opts => (await Promise.all([claudeLiveSessions(opts), codexLive(opts), openCodeLive(opts)])).flat();
   // A new OpenCode session gets its id at the launch, where the installed OpenCode takes one (opencode-link.js).
   const openCodeLink = createOpenCodeLink({ help: async () => (await sessions.runOpenCode(["--help"], home, 15000)).stdout });
   const launch = createLaunch({ dataDir, terminals, sessions, liveSessions, findTranscript, log, noLauncher, openCodeIdentity: openCodeLink.launchIdentity });
