@@ -656,6 +656,7 @@ node scripts/test-remote-state.js
 node scripts/test-resources.js
 npm run test:load
 node scripts/test-codex-live.js
+node scripts/test-codex-links.js
 npm run test:opencode-live
 node scripts/test-project-sessions.js
 npm run test:limits
