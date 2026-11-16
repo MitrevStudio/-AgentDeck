@@ -54,15 +54,32 @@ function trackViewport() {
 }
 
 // ---------- toasts, confirmations, the banner ----------
+// A toast stays as long as its text takes to read (a screen reader says it: role="status"); a failure at least 5 s.
 let toastTimer = 0;
-function toast(text) {
+function toast(text, least = 2600) {
   const el = $("#toast");
   el.textContent = text;
   el.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.hidden = true; }, 2600);
+  toastTimer = setTimeout(() => { el.hidden = true; }, Math.min(9000, Math.max(least, 1200 + 55 * String(text).length)));
 }
-const fail = e => toast(t("toast.failed", { error: errorText(e) }));
+const fail = e => toast(t("toast.failed", { error: errorText(e) }), 5000);
+
+// A sheet is a dialog: named by its text, Escape cancels it, and Tab stays among its own fields and buttons.
+let sheets = 0;
+function sheetKeys(el, cancel) {
+  const p = el.querySelector("p");
+  p.id = `sheet-text-${++sheets}`;
+  el.querySelector("[role='dialog']").setAttribute("aria-labelledby", p.id);
+  el.addEventListener("keydown", e => {
+    if (e.key === "Escape") { e.preventDefault(); return cancel(); }
+    if (e.key !== "Tab") return;
+    const stops = [...el.querySelectorAll("button, input, textarea")].filter(x => !x.disabled);
+    const first = stops[0], last = stops.at(-1);
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+}
 
 // confirmSheet(text, okLabel, { danger, extra: [label] }) -> true | false | the extra button's index (2, 3, ...).
 function confirmSheet(text, okLabel, { danger = false, extra = [] } = {}) {
@@ -80,6 +97,7 @@ function confirmSheet(text, okLabel, { danger = false, extra = [] } = {}) {
       if (b) done(b.dataset.v === "1" ? true : b.dataset.v === "0" ? false : Number(b.dataset.v));
       else if (e.target === el) done(false);
     });
+    sheetKeys(el, () => done(false));
     document.body.append(el);
     el.querySelector(`[data-v='${focusOn}']`).focus();
   });
@@ -101,6 +119,7 @@ function promptSheet(title, value, okLabel, { multiline = false } = {}) {
     el.querySelector("form").onsubmit = e => { e.preventDefault(); done((multiline ? input.value : input.value.trim()) || null); };
     el.querySelector("[data-v='0']").onclick = () => done(null);
     el.addEventListener("click", e => { if (e.target === el) done(null); });
+    sheetKeys(el, () => done(null));
     document.body.append(el);
     input.focus();
     input.select();
@@ -216,7 +235,7 @@ async function relay() {
     id = { publicKey: toHex(kp.publicKey), privateKey: toHex(kp.privateKey) };
     await keystore.setIdentity(id);
   }
-  const name = (await keystore.getName()) || (await deviceModel()) || "Phone";
+  const name = (await keystore.getName()) || (await deviceModel()) || t("phone.name");
   let saving = Promise.resolve();
   link = createRelayProvider({
     keypair: { publicKey: fromHex(id.publicKey), privateKey: fromHex(id.privateKey) },
@@ -245,7 +264,7 @@ async function rename(name) {
   link?.setName(name);
 }
 async function phoneName() {
-  return link?.name || (await keystore.getName()) || (await deviceModel()) || "Phone";
+  return link?.name || (await keystore.getName()) || (await deviceModel()) || t("phone.name");
 }
 
 const ctx = { store: null, go, back, toast, fail, confirm: confirmSheet, prompt: promptSheet, unpair, relay, rename, phoneName, secure: () => keystore.secure, version: pkg.version };
@@ -291,7 +310,8 @@ async function boot() {
   go("pair", {}, { root: true });
 }
 
+// The app could not start (the secure storage, most likely): said in words, the details in the console.
 boot().catch(e => {
   console.error(e);
-  app.textContent = String(e?.stack || e);
+  app.innerHTML = `<div class="boot"><p class="empty" role="alert">${esc(t("boot.failed"))}<br><span class="small">${esc(errorText(e))}</span></p></div>`;
 });

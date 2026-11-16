@@ -5,6 +5,8 @@
 const STRINGS = {
   en: {
     "app.name": "AgentDeck",
+    "boot.failed": "AgentDeck could not start.",
+    "phone.name": "Phone",
     "common.back": "Back",
     "common.cancel": "Cancel",
     "common.open": "Open",
@@ -309,6 +311,8 @@ const STRINGS = {
 
   bg: {
     "app.name": "AgentDeck",
+    "boot.failed": "AgentDeck не можа да тръгне.",
+    "phone.name": "Телефон",
     "common.back": "Назад",
     "common.cancel": "Отказ",
     "common.open": "Отвори",

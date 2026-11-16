@@ -21,7 +21,7 @@
   --backdrop: rgba(5, 7, 10, .6);
   --text: #e9edf3;
   --muted: #9aa5b5;
-  --faint: #6c7686;
+  --faint: #808b9c; /* small text on --bg and --panel: 5.5 and 5.2 to 1 */
   --accent: #7aa7ff;
   --accent-strong: #9dbdff;
   --accent-deep: #3b5fa9;
@@ -102,6 +102,8 @@
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden; overscroll-behavior: none; }
 body { font: 14px/1.4 var(--sans); -webkit-text-size-adjust: 100%; user-select: none; -webkit-user-select: none; }
 input, textarea, .msg .text, pre { user-select: text; -webkit-user-select: text; }
+/* What one may want to copy and that is no button's label: notes, errors, hints, the connection check's log. */
+.note-text, .form-state, .lead, .fine, .field-hint, .log, .sheet p, .empty, .term-over, div.node-row .row-sub { user-select: text; -webkit-user-select: text; }
 button, input, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
 h1, h2, p { margin: 0; }
@@ -181,7 +183,7 @@ h1, h2, p { margin: 0; }
 .tabbar button.on .tab-ic { background: var(--accent-weak); }
 .badge {
   position: absolute; top: -3px; left: calc(50% + 5px); min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px;
-  background: var(--needs); color: #fff; font: 700 10.5px/16px var(--sans); font-style: normal; text-align: center;
+  background: #d63c3c; color: #fff; font: 700 10.5px/16px var(--sans); font-style: normal; text-align: center; /* 4.6 to 1 */
   box-shadow: 0 0 0 2px var(--panel);
 }
 
@@ -566,6 +568,13 @@ button.node-row:active { background: var(--card-hover); border-color: var(--line
 .sheet-input { margin-bottom: 14px; }
 @keyframes rise { from { transform: translateY(100%); } }
 
+/* ---------- less motion, where the phone asks for it ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; }
+  .spinner { animation-duration: 2.4s; }
+  .dot.st-waiting, .banner.in, .sheet { animation: none; }
+}
+
 /* ---------- landscape and wide screens ---------- */
 @media (orientation: landscape) and (max-height: 500px) {
   .top { min-height: 46px; padding-top: 1px; padding-bottom: 1px; }
@@ -580,6 +589,16 @@ button.node-row:active { background: var(--card-hover); border-color: var(--line
   .logo { width: 40px; height: 40px; border-radius: 10px; }
   .hero h1 { font-size: 18px; margin-top: 4px; }
   .pair { padding-top: 6px; }
+}
+/* Hardly any height left (the phone on its side with the keyboard up - which .kb-open does not always tell there):
+   a session is its title, what it waits for on one line, and the reply box. */
+@media (max-height: 300px) {
+  .sess-head .top { min-height: 40px; padding-top: 0; padding-bottom: 0; }
+  .sess-head .top small { display: none; }
+  .status-line { padding-bottom: 3px; min-height: 0; }
+  .status-line:not(:has(.reason)) { display: none; }
+  .status-line .reason { -webkit-line-clamp: 1; }
+  .dock .keystrip { display: none; }
 }
 @media (min-width: 720px) {
   .inbox, .computers, .new, .diag, .routes, .pairing, .session .msgs { max-width: 760px; margin: 0 auto; width: 100%; }
