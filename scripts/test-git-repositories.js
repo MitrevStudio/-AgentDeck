@@ -4,7 +4,24 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const git = require('../src/host/git-status');
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agentdeck-git-'));
+// The fixture is reached through a link (a junction on Windows), as a project's folder can be: git names a checkout
+// by its real path, the watchers go by the path they were given. The Windows CI runner's temp folder is such a path
+// by itself (a short name, "RUNNER~1").
+const real = fs.mkdtempSync(path.join(os.tmpdir(), 'agentdeck-git-')), root = real + '-link';
+fs.symlinkSync(real, root, 'junction');
+// A watchers' pass comes when their delay lets it - two seconds, longer after a slow pass on a busy machine - so the
+// test waits for the state it reports (onChange, as the pages do), not for a time.
+let onChange = () => {};
+const until = (isDone, what) => new Promise((resolve, reject) => {
+  const timer = setTimeout(() => reject(new Error(`Timed out waiting for: ${what}`)), 120000);
+  onChange = () => {
+    if (!isDone()) return;
+    clearTimeout(timer);
+    onChange = () => {};
+    resolve();
+  };
+  onChange();
+});
 async function main() {
   try {
     const backend = path.join(root, 'apps', 'backend'), frontend = path.join(root, 'apps', 'frontend');
@@ -43,6 +60,23 @@ async function main() {
     // The overall ceiling: projects past it are named too.
     const capped = await git.discoverRepositories([big, path.join(scan, 'small')], { maxDirs: 10, maxTotal: 7 });
     assert.deepEqual(capped.truncatedIn.sort(), [big, path.join(scan, 'small')].sort());
+    // A repository's own tree is walked in full and spends no budget: a nested repository and an agent's worktree are
+    // found however deep they are, and one big repository is not reported as cut short.
+    const work = path.join(scan, 'work'), parent = path.join(work, 'parent-repo');
+    const child = path.join(parent, 'src', 'main', 'java', 'modules', 'child-app'), worktree = path.join(parent, '.claude', 'worktrees', 'fix-login');
+    for (let i = 0; i < 30; i++) fs.mkdirSync(path.join(parent, 'src', `package${i}`), { recursive: true });
+    for (const dir of [parent, child, worktree]) {
+      fs.mkdirSync(dir, { recursive: true });
+      execFileSync('git', ['init', '--quiet', dir], { windowsHide: true });
+    }
+    const nested = await git.discoverRepositories([work], { maxDepth: 2, maxDirs: 10 });
+    assert.deepEqual(nested.repos.sort(), [parent, child, worktree].sort(), 'nested repositories below the depth limit');
+    assert.equal(nested.truncated, false, 'a source tree is no reason for the note');
+    // The ceiling counts every folder. Where it stops the walk inside a repository, a nested one may be missed: the
+    // project is named.
+    const cut = await git.discoverRepositories([work], { maxTotal: 20 });
+    assert.deepEqual(cut.repos, [parent]);
+    assert.deepEqual(cut.truncatedIn, [work]);
     fs.rmSync(scan, { recursive: true, force: true });
     git.start({ dirs: () => [root], projects: () => [root] });
     const snapshot = await git.refresh({ force: true });
@@ -86,18 +120,17 @@ async function main() {
     assert.equal(large.filesTruncated, true);
     for (const noise of ['target/classes/A.class', 'node_modules/x/index.js', '.idea/workspace.xml', '.claude/worktrees/fix/src/a.js', 'sub/Build/out.txt']) assert.ok(git.WATCH_NOISE.test(noise), noise);
     for (const real of ['src/main/App.java', '.claude/settings.json', 'targets.txt', '.gitignore']) assert.equal(git.WATCH_NOISE.test(real), false, real);
-    git.start({ dirs: () => [root], projects: () => [root], active: () => true });
+    git.start({ dirs: () => [root], projects: () => [root], active: () => true, onChange: () => onChange() });
     await git.refresh({ force: true });
     git.get().repos[git.norm(frontend)].at = 0; // past TTL_MS: a full pass would check it again
     fs.mkdirSync(path.join(backend, 'target'), { recursive: true });
     fs.writeFileSync(path.join(backend, 'target', 'ignored.txt'), 'build output');
     fs.writeFileSync(path.join(backend, 'watched.txt'), 'new');
     const seen = () => git.get().repos[git.norm(backend)].files.some(f => f.path === 'watched.txt');
-    for (const deadline = Date.now() + 10000; !seen() && Date.now() < deadline;) await new Promise(r => setTimeout(r, 200));
-    assert.ok(seen(), 'a watched change refreshes its repository');
+    await until(seen, 'a watched change refreshes its repository');
     assert.equal(git.get().repos[git.norm(frontend)].at, 0, 'a watched change does not check the other repositories');
-    await git.refresh();
-    assert.ok(git.get().repos[git.norm(frontend)].at > 0, 'a plain refresh still checks a stale repository');
+    git.refresh(); // asked for while the watchers' pass is still reporting: it runs right after that one
+    await until(() => git.get().repos[git.norm(frontend)].at > 0, 'a plain refresh still checks a stale repository');
     // A linked worktree keeps its index in the main checkout's .git/worktrees/<name>: staging there changes no file in
     // the worktree's own folder, yet its status must follow.
     const linked = path.join(root, 'apps', 'backend-linked');
@@ -105,14 +138,15 @@ async function main() {
     fs.writeFileSync(path.join(linked, 'linked.txt'), 'new');
     await git.refresh({ force: true });
     assert.equal(git.get().repos[git.norm(linked)].untracked, 1);
-    await new Promise(r => setTimeout(r, 2500)); // the watchers' pass for what the fixture just wrote is over
     execFileSync('git', ['-C', linked, 'add', '--', 'linked.txt'], { windowsHide: true });
-    const staged = () => git.get().repos[git.norm(linked)].staged === 1;
-    for (const deadline = Date.now() + 10000; !staged() && Date.now() < deadline;) await new Promise(r => setTimeout(r, 200));
-    assert.ok(staged(), "staging in a linked worktree refreshes the worktree's status");
+    await until(() => git.get().repos[git.norm(linked)].staged === 1, "staging in a linked worktree refreshes the worktree's status");
     const delay = git.getWatchDelay();
     assert.ok(delay >= 2000 && delay <= 30000, 'the next watched pass waits at least two seconds, longer after a slow one');
     console.log('Nested repository discovery, real Git status, spaced names, renames, conflicts, limits, watched refreshes and linked worktrees passed');
-  } finally { git.stop(); fs.rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    git.stop();
+    fs.rmSync(root, { force: true });
+    fs.rmSync(real, { recursive: true, force: true });
+  }
 }
 main().catch(e => { console.error(e); process.exitCode = 1; });

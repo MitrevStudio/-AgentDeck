@@ -49,6 +49,8 @@ app.whenReady().then(async () => {
         return {output:'Done'};
       }};
     function toast(message){console.log(message);}
+    const prefsListeners=[];
+    window.prefs={gitScope:'open',onChanged:cb=>prefsListeners.push(cb)};
     localStorage.setItem('agentdeck.sidebarTab','git');
   `) + fixture('menu.js', menu) + script('git-workflow.js') + script('git-panel.js') + script('git-diff-ui.js') + '</body>');
   const file = path.join(temp, 'index.html'); fs.writeFileSync(file, html);
@@ -59,6 +61,8 @@ app.whenReady().then(async () => {
   const settle = () => evaluate('new Promise(r => setTimeout(r, 30))');
   const click = async selector => { await evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`); await settle(); };
   const capture = async name => {
+    // Two frames: the picture is of what is drawn now, not of the frame before the last change.
+    await evaluate('new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))');
     await settle();
     let bitmap;
     try { bitmap = await win.webContents.capturePage(); }
@@ -114,8 +118,93 @@ app.whenReady().then(async () => {
   assert.equal(await evaluate("document.activeElement.dataset.view"), 'sync', 'keyboard focus returns to the selected navigation button');
   win.setSize(680, 700); await capture('narrow');
   assert.equal(await evaluate("$('gitActionsDialog').getBoundingClientRect().right <= innerWidth"), true);
+  // Project groups, their filters and the keyboard focus. ClinicDesk is a project inside the Work project, so its
+  // repository is drawn in both groups; child-app has no terminal in it, Notes has no repository.
+  await evaluate("$('gitActionsClose').click()"); win.setSize(1100, 820); await settle();
+  await evaluate(`
+    data.projects=[{n:'work',name:'Work',path:'C:/work'},{n:'clinic',name:'ClinicDesk',path:'C:/work/clinicdesk'},{n:'notes',name:'Notes',path:'C:/notes'}];
+    ws={spaces:{},tabs:{a:{root:{term:'a'}},b:{root:{term:'b'}}},terminals:[{id:'a',cwd:'C:/work/agentdeck'},{id:'b',cwd:'C:/work/clinicdesk'}]};
+    git.repos.clinic={root:'C:/work/clinicdesk',branch:'main',at:Date.now(),staged:1,unstaged:1,untracked:0,conflicts:0,ahead:0,behind:0,files:[{path:'src/visits.js',status:'M.'},{path:'src/patients.js',status:'.M'}]};
+    git.repos.child={root:'C:/work/parent-repo/child-app',branch:'main',at:Date.now(),staged:0,unstaged:0,untracked:0,conflicts:0,ahead:0,behind:0,files:[]};
+    const groupOf=key=>[...document.querySelectorAll('.git-project')].find(d=>d.dataset.expand==='project:'+key);
+    const headOf=details=>details.querySelector(':scope > summary');
+    const copyOf=(project,root)=>[...groupOf(project).querySelectorAll('[data-repo]')].find(d=>JSON.parse(d.dataset.repo)[1]===root);
+    const menuItem=label=>[...document.querySelectorAll('.menu button')].find(b=>b.textContent.trim()===label);
+    const pressEscape=()=>document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+    const clinic='C:/work/clinicdesk';
+    // Something the panel shows changed: the list is drawn again.
+    const redraw=()=>{git.repos.demo.fileCount++;gitPanel.render();};
+    gitPanel.render();
+  `);
+  await click('#gitPanelMenu'); await evaluate("menuItem(gitText('byProject')).click()"); await settle();
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('.git-project-head')].map(h=>h.textContent.trim())"), ['ClinicDesk1', 'Work2'], 'a group per project, with its count');
+  assert.equal(await evaluate("document.querySelectorAll('.git-repository[open]').length"), 0, 'folded at first');
+  // A group's header keeps the focus when it is opened and when the list is drawn again.
+  await evaluate("headOf(groupOf('work')).focus();headOf(groupOf('work')).click()"); await settle();
+  assert.equal(await evaluate("groupOf('work').open && document.activeElement===headOf(groupOf('work'))"), true);
+  await evaluate('redraw()');
+  assert.equal(await evaluate("document.activeElement===headOf(groupOf('work'))"), true, 'a group header keeps the focus over a redraw');
+  // A folded repository is drawn without its body; opening it draws the list again, and its header keeps the focus -
+  // on that copy, not on the one in the other group.
+  assert.equal(await evaluate("copyOf('work',clinic).querySelector('.git-commit-box')"), null);
+  await evaluate("headOf(copyOf('work',clinic)).focus();headOf(copyOf('work',clinic)).click()"); await settle();
+  assert.equal(await evaluate("copyOf('work',clinic).open && Boolean(copyOf('work',clinic).querySelector('.git-commit-box'))"), true);
+  assert.equal(await evaluate("document.activeElement===headOf(copyOf('work',clinic))"), true, 'an opened repository keeps the focus on its header');
+  assert.equal(await evaluate("copyOf('clinic',clinic).open"), false, 'the copy in the other group stays folded');
+  // The same for a repository's menu button and for a project's filter button.
+  await evaluate("copyOf('work',clinic).querySelector('[data-repo-menu]').focus();redraw()");
+  assert.equal(await evaluate("document.activeElement===copyOf('work',clinic).querySelector('[data-repo-menu]')"), true, 'a menu button keeps the focus over a redraw');
+  await evaluate("groupOf('work').querySelector('[data-project-menu]').focus();redraw()");
+  assert.equal(await evaluate("document.activeElement===groupOf('work').querySelector('[data-project-menu]')"), true, 'a filter button keeps the focus over a redraw');
+  // A checkbox stages its file: the repository is drawn disabled while git works, then the checkbox has the focus again.
+  const patients = "[...copyOf('work',clinic).querySelectorAll('.git-check')].find(b=>b.dataset.checkPath==='src/patients.js')";
+  await evaluate(`${patients}.focus();${patients}.click()`); await settle();
+  assert.deepEqual(await evaluate('(({action,files})=>({action,files}))(commands.at(-1))'), { action: 'stage', files: ['src/patients.js'] });
+  assert.equal(await evaluate(`document.activeElement===${patients} && !${patients}.disabled`), true, 'a checkbox keeps the focus over the staging');
+  // A project's filter button opens the list of its repositories at once; a tick hides one from that group only and
+  // keeps the menu open, and Escape returns the focus to the button drawn in place of the one the menu opened from.
+  await evaluate("groupOf('work').querySelector('[data-project-menu]').click()"); await settle();
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('.menu button')].map(b=>[b.textContent.trim(),b.getAttribute('aria-checked')])"), [['agentdeck', 'true'], ['clinicdesk', 'true']]);
+  await evaluate("menuItem('clinicdesk').click()"); await settle();
+  assert.equal(await evaluate("document.querySelectorAll('.menu').length"), 1, 'the menu stays open');
+  assert.equal(await evaluate("copyOf('work',clinic)"), undefined, 'hidden from Work');
+  assert.equal(await evaluate("Boolean(copyOf('clinic',clinic))"), true, 'still under ClinicDesk');
+  assert.equal(await evaluate("headOf(groupOf('work')).querySelector('.git-count').textContent"), '1/2');
+  await evaluate('pressEscape()'); await settle();
+  assert.equal(await evaluate("document.querySelectorAll('.menu').length"), 0);
+  assert.equal(await evaluate("document.activeElement===groupOf('work').querySelector('[data-project-menu]')"), true, 'the menu returns the focus to its button');
+  await evaluate("groupOf('work').querySelector('[data-project-menu]').click()"); await settle();
+  await evaluate("menuItem('clinicdesk').click();pressEscape()"); await settle();
+  assert.equal(await evaluate("localStorage.getItem('agentdeck.gitHiddenRepos')"), '{}');
+  // The copies of a repository stay in step while the user types: the message, and the Commit buttons.
+  await evaluate("headOf(groupOf('clinic')).click()"); await settle();
+  await evaluate("headOf(copyOf('clinic',clinic)).click()"); await settle();
+  const copyState = project => evaluate(`(c=>[c.querySelector('[data-commit-message]').value,c.querySelector('[data-repo-action=commit]').disabled,c.querySelector('[data-quick=commit]').disabled])(copyOf('${project}',clinic))`);
+  assert.deepEqual(await copyState('clinic'), ['', true, true]);
+  await evaluate("(box=>{box.focus();box.value='Record visits';box.dispatchEvent(new Event('input',{bubbles:true}));})(copyOf('work',clinic).querySelector('[data-commit-message]'))");
+  assert.deepEqual(await copyState('work'), ['Record visits', false, false]);
+  assert.deepEqual(await copyState('clinic'), ['Record visits', false, false], 'the other copy follows the typing');
+  assert.equal(await evaluate("document.activeElement===copyOf('work',clinic).querySelector('[data-commit-message]')"), true);
+  await capture('groups');
+  // "All in the projects": child-app is listed without a terminal in it, and the panel's menu filters by project -
+  // only the projects that hold a repository. With every project hidden the panel says so and offers the way out.
+  await evaluate("prefsListeners.forEach(cb=>cb({gitScope:'all'}))"); await settle();
+  assert.equal(await evaluate("Boolean(copyOf('work','C:/work/parent-repo/child-app'))"), true);
+  await click('#gitPanelMenu'); await evaluate("menuItem(gitText('filterProjects')).click()"); await settle();
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('.menu-sub button')].map(b=>b.textContent.trim())"), ['ClinicDesk', 'Work']);
+  await evaluate("document.querySelectorAll('.menu-sub button')[0].click()"); await settle();
+  await evaluate("document.querySelectorAll('.menu-sub button')[1].click()"); await settle();
+  await evaluate('closeGroupMenu()');
+  assert.equal(await evaluate("document.querySelectorAll('.git-project').length"), 2, 'a repository a terminal is in stays, whatever the filter');
+  await evaluate("ws.tabs={};ws.terminals=[];gitPanel.render()");
+  assert.equal(await evaluate("document.querySelectorAll('[data-repo]').length"), 0);
+  assert.equal(await evaluate("$('gitRepositories').textContent.includes(I18N.t('git.panel.filtered'))"), true, 'the filter is named as the reason');
+  await capture('filtered');
+  await click('[data-show-projects]');
+  assert.equal(await evaluate("document.querySelectorAll('.git-project').length"), 2);
+  assert.equal(await evaluate("document.activeElement.id"), 'gitPanelMenu');
   assert.deepEqual(errors, []);
-  console.log('Electron Git UI: publish routing, remote selection, empty/filter states, operation visibility, stale review, drafts, busy state and narrow layout passed');
+  console.log('Electron Git UI: publish routing, remote selection, empty/filter states, operation visibility, stale review, drafts, busy state, narrow layout, project groups, filters and the keyboard focus passed');
   console.log('Screenshots: ' + screenshots);
   win.destroy(); app.exit(0);
 }).catch(error => { console.error(error); app.exit(1); });

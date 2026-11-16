@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
-const els = new Map();
+let els = new Map();
 function element(id) {
   if (!els.has(id)) els.set(id, { innerHTML: '', attributes: {}, listeners: {}, setAttribute(k, v) { this.attributes[k] = v; }, addEventListener(k, cb) { this.listeners[k] = cb; }, focus() {} });
   return els.get(id);
@@ -11,19 +11,20 @@ const buttons = ['projects', 'git'].map(name => Object.assign(element(name), { d
 const state = { repos: { one: { root: 'C:/app/backend', branch: 'main', files: [{ path: 'src/<script>.js', status: '.M' }] }, two: { root: 'C:/app/frontend', branch: 'feature', files: [] } } };
 let refreshed = false;
 let menuItems = [], executed = [], opened = [], prefsChanged = null;
+const source = fs.readFileSync(path.join(__dirname, '../src/git-panel.js'), 'utf8');
 const ctx = {
   $: element, document: { querySelectorAll: () => buttons },
-  localStorage: { getItem: () => 'git', setItem() {} },
+  localStorage: { getItem: key => (key === 'agentdeck.sidebarTab' ? 'git' : null), setItem() {} },
   normPath: p => p.replaceAll('\\', '/').toLowerCase().replace(/\/$/, ''),
   data: { projects: [{ n: 'c:/app', path: 'C:/app' }, { n: 'node:remote:c:/app', path: 'C:/app', node: 'remote' }] },
   ws: { spaces: { 'c:/app': { tabs: ['local-tab'] }, 'node:remote:c:/app': { tabs: ['remote-tab'] } }, tabs: { 'local-tab': {}, 'remote-tab': {} }, terminals: [] },
   git: state, nodes: [{ id: 'remote', name: 'REMOTE', status: 'offline', git: state }],
-  t: k => k, gitText: k => k, esc: s => String(s).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;'),
+  t: k => k, tn: (k, n) => `${k}:${n}`, gitText: k => k, esc: s => String(s).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;'),
   icon: () => '', gitHead: r => r.branch, gitCounts: () => [], gitAb: () => '', toast: e => { throw new Error(e); },
   groupMenu: { classList: { add() {} } }, openGroupMenu: (_button, _path, items) => { menuItems = items; },
   window: { prefs: { gitScope: 'open', onChanged: cb => { prefsChanged = cb; } }, gitWorkflow: { open: (...args) => { opened.push(args); } }, manager: { refreshGit: async force => { refreshed = force; }, getGit: async () => state, gitExecute: async (node, args) => { executed.push({ node, ...args }); } } },
 };
-vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/git-panel.js'), 'utf8'), ctx);
+vm.runInNewContext(source, ctx);
 assert.equal(element('gitRepoCount').textContent, 4, 'same paths on different computers stay separate');
 assert.match(element('gitRepositories').innerHTML, /backend/);
 assert.match(element('gitRepositories').innerHTML, /frontend/);
@@ -111,6 +112,54 @@ ctx.ws.tabs = {};
 ctx.window.gitPanel.render();
 assert.equal(element('gitRepoCount').textContent, 0, 'unattached terminal does not keep a repository visible');
 const settle = () => new Promise(resolve => setTimeout(resolve, 10));
+// A profile from before: the folder view was on for all repositories, and the filters still hold a removed project
+// and a deleted repository.
+async function testUpgrade() {
+  els = new Map();
+  const key = root => JSON.stringify(['local', root]), saved = new Map();
+  const stored = {
+    'agentdeck.sidebarTab': 'git', 'agentdeck.gitTree': '1', 'agentdeck.gitByProject': '1',
+    'agentdeck.gitHiddenProjects': JSON.stringify(['c:/removed', 'c:/work']),
+    'agentdeck.gitHiddenRepos': JSON.stringify({ 'c:/removed': [key('C:/removed/app')], 'c:/work': [key('C:/work/deleted-app'), key('C:/work/child-app'), JSON.stringify(['WORK-01', 'D:/src/tool'])] })
+  };
+  const files = () => [{ path: 'src/deep/a.js', status: '.M' }];
+  const repos = { one: { root: 'C:/work/parent-repo', branch: 'main', files: files() }, two: { root: 'C:/work/child-app', branch: 'main', files: files() } };
+  let items = [];
+  const upgraded = {
+    ...ctx, $: element, document: { querySelectorAll: () => [] },
+    localStorage: { getItem: k => stored[k] ?? null, setItem: (k, v) => saved.set(k, v) },
+    data: { projects: [{ n: 'c:/work', name: 'Work', path: 'C:/work' }] },
+    ws: { spaces: {}, tabs: { one: { root: { term: 'a' } }, two: { root: { term: 'b' } } }, terminals: [{ id: 'a', cwd: 'C:/work/parent-repo' }, { id: 'b', cwd: 'C:/work/child-app' }] },
+    git: { repos }, nodes: [{ id: 'WORK-01', name: 'WORK-01', status: 'offline' }],
+    openGroupMenu: (_button, _path, list) => { items = list; },
+    window: { ...ctx.window, prefs: { gitScope: 'all' } }
+  };
+  vm.runInNewContext(source, upgraded);
+  const html = () => element('gitRepositories').innerHTML, parentKey = key('C:/work/parent-repo');
+  const listeners = element('gitRepositories').listeners;
+  listeners.toggle({ target: { dataset: { expand: `in-project:c:/work:${parentKey}`, repo: parentKey }, open: true, querySelector: () => null } });
+  assert.match(html(), /git-check-folder/, 'the folder view stays on after the upgrade');
+  const openMenu = () => listeners.click({ target: { closest: () => ({ dataset: { repoMenu: '' }, closest: s => (s === '[data-repo]' ? { dataset: { repo: parentKey } } : null) }) }, preventDefault() {}, stopPropagation() {} });
+  openMenu();
+  assert.equal(items[0].label, 'asTree');
+  assert.equal(items[0].checked, true);
+  items[0].run();
+  assert.doesNotMatch(html(), /git-check-folder/, 'a repository can be switched to the flat list');
+  assert.deepEqual(JSON.parse(saved.get('agentdeck.gitRepoViews')), { [parentKey]: { tree: false } });
+  openMenu();
+  assert.equal(items[0].checked, false);
+  items[0].run();
+  assert.match(html(), /git-check-folder/, 'and back to the folders');
+  assert.equal(saved.get('agentdeck.gitRepoViews'), '{}', 'nothing is kept for a repository on the default view');
+  assert.ok(![...saved.keys()].includes('agentdeck.gitTree'), 'the old switch is only read');
+  // The filters forget the removed project and the deleted repository as soon as one of them changes; a repository
+  // of a computer that reports none now (offline) is kept.
+  assert.match(html(), /class="git-count">1\/2</, 'child-app is hidden from Work');
+  listeners.click({ target: { closest: s => (s === '[data-project-menu]' ? { dataset: { projectMenu: 'c:/work' } } : null) }, preventDefault() {}, stopPropagation() {} });
+  await items.find(x => x.label === 'parent-repo').run();
+  assert.deepEqual(JSON.parse(saved.get('agentdeck.gitHiddenProjects')), ['c:/work']);
+  assert.deepEqual(JSON.parse(saved.get('agentdeck.gitHiddenRepos')), { 'c:/work': [key('C:/work/child-app'), JSON.stringify(['WORK-01', 'D:/src/tool']), parentKey] });
+}
 element('gitPanelRefresh').onclick().then(async () => {
   assert.equal(refreshed, true);
   assert.equal(element('gitPanelRefresh').disabled, false);
@@ -191,10 +240,9 @@ element('gitPanelRefresh').onclick().then(async () => {
   assert.match(list, /data-project-menu="c:\/app"/);
   // A group's menu hides its repositories from that group only; the menu stays open while ticking.
   const openProjectMenu = projectMenu => element('gitRepositories').listeners.click({ target: { closest: s => (s === '[data-project-menu]' ? { dataset: { projectMenu } } : null) }, preventDefault() {}, stopPropagation() {} });
+  assert.match(list, /data-project-menu="c:\/app" title="filterRepos"/, 'the button says what its menu is');
   openProjectMenu('c:/app');
-  assert.deepEqual(plain(menuItems.map(x => x.label)), ['filterRepos']);
-  menuItems = menuItems[0].items;
-  assert.deepEqual(plain(menuItems.map(x => [x.label, x.checked, x.keepOpen])), [['app-wt', true, true], ['backend', true, true], ['frontend', true, true]]);
+  assert.deepEqual(plain(menuItems.map(x => [x.label, x.checked, x.keepOpen])), [['app-wt', true, true], ['backend', true, true], ['frontend', true, true]], 'the repositories at once, no menu of one item before them');
   await menuItems.find(x => x.label === 'backend').run();
   await menuItems.find(x => x.label === 'frontend').run();
   list = element('gitRepositories').innerHTML;
@@ -205,7 +253,6 @@ element('gitPanelRefresh').onclick().then(async () => {
   assert.match(list, /data-project-menu="c:\/app"[^>]*><\/button><\/span><span class="git-count">1\/3</, 'the group counts shown of all');
   assert.equal(element('gitRepoCount').textContent, 3);
   openProjectMenu('c:/app');
-  menuItems = menuItems[0].items;
   assert.equal(menuItems.find(x => x.label === 'frontend').checked, false);
   await menuItems.find(x => x.label === 'frontend').run();
   assert.deepEqual(JSON.parse(saved.get('agentdeck.gitHiddenRepos')), { 'c:/app': [backendKey] });
@@ -216,6 +263,7 @@ element('gitPanelRefresh').onclick().then(async () => {
   ctx.ws.terminals = [];
   ctx.window.gitPanel.render();
   assert.equal(element('gitRepoCount').textContent, 0);
+  assert.match(element('gitRepositories').innerHTML, /git\.panel\.empty</);
   element('gitPanelMenu').onclick();
   assert.ok(!menuItems.some(x => x.label === 'filterProjects'));
   // "All in the projects" (Settings > Git): every repository in a project, with a terminal or not; one outside the
@@ -226,7 +274,9 @@ element('gitPanelRefresh').onclick().then(async () => {
   assert.equal(element('gitRepoCount').textContent, 7, 'backend, frontend, the worktree of backend and Feature here; the first three on REMOTE');
   assert.ok(list.includes(`data-repo="${esc(frontendKey)}"`));
   assert.doesNotMatch(list, /C:\/other\/old/);
-  // The project filter: a repository goes when every project holding it is hidden.
+  // The project filter: a repository goes when every project holding it is hidden. A project with no repository is
+  // not offered.
+  ctx.data.projects.push({ n: 'c:/notes', name: 'Notes', path: 'C:/notes' });
   element('gitPanelMenu').onclick();
   const projectFilter = menuItems.find(x => x.label === 'filterProjects').items;
   assert.deepEqual(plain(projectFilter.map(x => [x.label, x.checked, x.keepOpen])), [['App', true, true], ['Backend', true, true], ['C:/app · REMOTE', true, true], ['Feature', true, true]]);
@@ -245,13 +295,36 @@ element('gitPanelRefresh').onclick().then(async () => {
   ctx.ws.terminals = [];
   await projectFilter.find(x => x.label === 'App').run();
   assert.deepEqual(JSON.parse(saved.get('agentdeck.gitHiddenProjects')), []);
-  // The scan-limit note names the projects whose budget ran out; an older computer's bare flag keeps the plain note.
+  // Every project hidden: the panel says it is the filter, with a button that shows them all again.
+  for (const x of projectFilter) await x.run();
+  list = element('gitRepositories').innerHTML;
+  assert.equal(element('gitRepoCount').textContent, 0);
+  assert.match(list, /git\.panel\.filtered<\/span><button [^>]*data-show-projects>git\.panel\.showAllProjects</);
+  assert.doesNotMatch(list, /git\.panel\.empty/);
+  let focused = '';
+  element('gitPanelMenu').focus = () => { focused = 'gitPanelMenu'; };
+  element('gitRepositories').listeners.click({ target: { closest: s => (s === '[data-show-projects]' ? { dataset: { showProjects: '' } } : null) } });
+  assert.equal(saved.get('agentdeck.gitHiddenProjects'), '[]');
+  assert.equal(element('gitRepoCount').textContent, 7);
+  assert.equal(focused, 'gitPanelMenu', 'the focus goes to the menu that holds the filter');
+  // With "all" and no repository at all, the text does not send the user to open a terminal.
+  const repos = state.repos;
+  state.repos = {};
+  ctx.window.gitPanel.render();
+  assert.match(element('gitRepositories').innerHTML, /git\.panel\.emptyAll</);
+  state.repos = repos;
+  // The scan-limit note names the projects not scanned in full, worded for one and for several; an older computer's
+  // bare flag keeps the plain note.
   state.discoveryTruncated = true;
   state.discoveryTruncatedIn = ['C:/app'];
   ctx.window.gitPanel.render();
-  assert.match(element('gitRepositories').innerHTML, /git\.panel\.scanLimitIn/);
+  assert.match(element('gitRepositories').innerHTML, /git\.panel\.scanLimitIn:1</);
+  state.discoveryTruncatedIn = ['C:/app', 'C:/feature-wt'];
+  ctx.window.gitPanel.render();
+  assert.match(element('gitRepositories').innerHTML, /git\.panel\.scanLimitIn:2</);
   delete state.discoveryTruncatedIn;
   ctx.window.gitPanel.render();
   assert.match(element('gitRepositories').innerHTML, /git\.panel\.scanLimit</);
+  await testUpgrade();
   console.log('Git sidebar tabs, local/remote identity, offline state, filename escaping, checkboxes, the folder view, refresh, scopes and filters passed');
 }).catch(e => { console.error(e); process.exitCode = 1; });

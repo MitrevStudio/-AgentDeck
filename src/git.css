@@ -271,3 +271,5 @@ details[open] > summary > .git-chevron { transform: rotate(90deg); }
 .git-project-head .git-count { margin-left: auto; }
 /* In line before the count (shown/all can be wide), not over the row's end as on a repository. */
 .git-project-head > .git-hover-actions { position: static; transform: none; padding-left: 0; background: none; }
+/* Every repository hidden by the project filter: the note, and under it the button that shows them again. */
+.git-filtered { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }

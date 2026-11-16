@@ -59,36 +59,49 @@ function parseStatus(out) {
 
 // Walk project folders, including nested independent repositories and worktrees.
 // Never follow junctions/symlinks or descend into dependency/build caches.
-// Each project has a budget of its own (maxDirs folders), so a big one cannot leave the others unscanned, within an
-// overall ceiling (maxTotal); a folder inside several projects counts for the one that reached it first. truncatedIn:
-// the projects not scanned in full - a budget spent, or folders below the depth limit outside any repository (below
-// it inside one, they are that repository's source tree).
+// Outside a repository the walk is bounded per project: maxDepth levels below the project's folder and maxDirs
+// folders, so a big folder of loose files cannot leave the other projects unscanned. A repository's own tree is walked
+// in full, whatever its depth and size, and spends none of that budget: a nested repository or a worktree can be
+// anywhere in it, and a source tree is deeper than any depth limit. All of it stays within one ceiling (maxTotal
+// folders read in a pass). A folder inside several projects counts for the one that reached it first; the walk is
+// level by level over all projects, so the ceiling cuts the deepest folders first. The folders are read a few at a
+// time (about three times faster than one by one); what is admitted and in which order stays that of a queue.
+// truncatedIn: the projects not scanned in full, where a repository may have been missed - a budget spent, folders
+// below the depth limit outside any repository, or folders left when the ceiling was reached.
 const SKIP = new Set([".git", "node_modules", ".venv", "venv", "vendor", "dist", "build", ".next", "coverage", "target", "__pycache__"]);
-async function discoverRepositories(dirs, { maxDepth = 5, maxDirs = 3000, maxTotal = maxDirs * 5 } = {}) {
+const MAX_DIRS = 3000, MAX_TOTAL = 15000;
+async function discoverRepositories(dirs, { maxDepth = 5, maxDirs = MAX_DIRS, maxTotal = MAX_TOTAL } = {}) {
   const queue = dirs.filter(d => typeof d === "string" && path.isAbsolute(d)).map(dir => ({ dir, depth: 0, project: dir, inRepo: false }));
   const seen = new Set(), found = new Set(), counts = new Map(), spent = new Set(), truncatedIn = new Set();
   let total = 0;
-  for (let i = 0; i < queue.length; i++) {
-    const { dir, depth, project } = queue[i], key = norm(dir);
-    if (seen.has(key) || spent.has(project)) continue;
-    seen.add(key);
-    const count = (counts.get(project) || 0) + 1;
-    counts.set(project, count);
-    if (count > maxDirs || ++total > maxTotal) {
-      spent.add(project);
-      truncatedIn.add(project);
-      continue;
+  for (let i = 0; i < queue.length;) {
+    const batch = [];
+    for (; i < queue.length && batch.length < PARALLEL; i++) {
+      const { dir, project } = queue[i], key = norm(dir);
+      if (seen.has(key) || spent.has(project)) continue;
+      seen.add(key);
+      const count = (counts.get(project) || 0) + (queue[i].inRepo ? 0 : 1);
+      counts.set(project, count);
+      if (count > maxDirs || ++total > maxTotal) {
+        spent.add(project);
+        truncatedIn.add(project);
+        continue;
+      }
+      batch.push(queue[i]);
     }
-    let entries;
-    try { entries = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { continue; }
-    const isRepo = entries.some(e => e.name === ".git"), inRepo = queue[i].inRepo || isRepo;
-    if (isRepo) found.add(dir);
-    const children = entries.filter(e => e.isDirectory() && !e.isSymbolicLink() && !SKIP.has(e.name.toLowerCase()));
-    if (depth >= maxDepth) {
-      if (children.length && !inRepo) truncatedIn.add(project);
-      continue;
-    }
-    for (const e of children) queue.push({ dir: path.join(dir, e.name), depth: depth + 1, project, inRepo });
+    const read = await Promise.all(batch.map(x => fs.promises.readdir(x.dir, { withFileTypes: true }).catch(() => null)));
+    batch.forEach(({ dir, depth, project, inRepo: inside }, n) => {
+      const entries = read[n];
+      if (!entries) return;
+      const isRepo = entries.some(e => e.name === ".git"), inRepo = inside || isRepo;
+      if (isRepo) found.add(dir);
+      const children = entries.filter(e => e.isDirectory() && !e.isSymbolicLink() && !SKIP.has(e.name.toLowerCase()));
+      if (depth >= maxDepth && !inRepo) {
+        if (children.length) truncatedIn.add(project);
+        return;
+      }
+      for (const e of children) queue.push({ dir: path.join(dir, e.name), depth: depth + 1, project, inRepo });
+    });
   }
   return { repos: [...found], truncated: truncatedIn.size > 0, truncatedIn: [...truncatedIn] };
 }
@@ -103,36 +116,46 @@ let snapshot = { at: 0, missing: false, dirs: {}, repos: {} };
 const watchers = new Map();
 let watchTimer = null;
 const changedRoots = new Set();    // norm(root) of the repositories a watcher saw change since the last pass
+const MAX_WATCHERS = 32;
 const WATCH_DELAY_MS = 2000;
 const WATCH_DELAY_MAX_MS = 30 * 1000;
 const WATCH_COST_FACTOR = 4;       // a watchers' pass that took 3 s is followed by the next one 12 s later at the earliest
 let watchCostMs = 0;               // how long the last watchers' pass took
-// A linked worktree by where the main checkout keeps its index and HEAD: norm(main root) + "\0" + <name> of
-// <main>/.git/worktrees/<name> -> norm(the worktree's root).
-const worktreeRoots = new Map();
+// A linked worktree by where the main checkout keeps its index and HEAD: the main root -> <name> of
+// <main>/.git/worktrees/<name> -> norm(the worktree's root). The main root is keyed by its real path: git names it
+// that way, while a watcher goes by the folder as the project gives it - through a junction or a symlink, or with a
+// Windows short name ("RUNNER~1"), another spelling of the same folder. realRoots: a watched root -> that key.
+const worktreeRoots = new Map(), realRoots = new Map();
+async function getRealKey(dir) {
+  try { return norm(await fs.promises.realpath(dir)); } catch { return norm(dir); }
+}
 // While files keep changing (an agent at work, a build), a repository whose `git status` is slow is not asked again
 // right away: git runs for at most 1/(WATCH_COST_FACTOR + 1) of the time.
 const getWatchDelay = () => Math.min(WATCH_DELAY_MAX_MS, Math.max(WATCH_DELAY_MS, watchCostMs * WATCH_COST_FACTOR));
-// The repository a change seen under `root` belongs to: a linked worktree's when it is in the main checkout's
+// The repositories a change seen under `root` belongs to: a linked worktree's when it is in the main checkout's
 // .git/worktrees/<name> (staging or committing there changes no file in the worktree's own folder), else root's.
-function getChangedRoot(root, name) {
+// Without a name the watcher lost track of what changed (too many changes at once): root's and its worktrees'.
+function getChangedRoots(root, name) {
+  const linked = worktreeRoots.get(realRoots.get(root));
+  if (!name) return [norm(root), ...(linked?.values() || [])];
   const worktree = /^\.git\/worktrees\/([^/]+)\//.exec(name)?.[1];
-  return (worktree && worktreeRoots.get(`${norm(root)}\0${worktree}`)) || norm(root);
+  return [(worktree && linked?.get(worktree)) || norm(root)];
 }
 // Build output, IDE state and the agents' worktrees (repositories of their own, with watchers of their own) change all
 // the time without changing what `git status` reports here.
 const WATCH_NOISE = new RegExp(`(^|/)(${[...SKIP].filter(d => d !== ".git").map(d => d.replace(".", "\\.")).join("|")}|\\.idea|\\.gradle|\\.claude/worktrees)(/|$)`, "i");
-function syncWatchers() {
+async function syncWatchers() {
   const wanted = new Set(Object.values(snapshot.repos).map(r => r.root));
-  for (const [root, watcher] of watchers) if (!wanted.has(root)) { watcher.close(); watchers.delete(root); }
+  for (const [root, watcher] of watchers) if (!wanted.has(root)) { watcher.close(); watchers.delete(root); realRoots.delete(root); }
   for (const root of wanted) {
-    if (watchers.has(root) || watchers.size >= 32) continue;
+    if (watchers.has(root) || watchers.size >= MAX_WATCHERS) continue;
+    if (!realRoots.has(root)) realRoots.set(root, await getRealKey(root));
     try {
       const watcher = fs.watch(root, { recursive: true, persistent: false }, (_event, filename) => {
         const name = String(filename || '').replaceAll('\\', '/');
         if (WATCH_NOISE.test(name) || /\.git\/(objects|logs)\//.test(name) || name.endsWith('.lock')) return;
         if (!opts?.active?.()) return;
-        changedRoots.add(getChangedRoot(root, name));
+        for (const changed of getChangedRoots(root, name)) changedRoots.add(changed);
         // At most one pass per getWatchDelay(), and only for the repositories that changed.
         watchTimer ??= setTimeout(() => {
           watchTimer = null;
@@ -175,7 +198,11 @@ async function readMainRoot(root) {
   if (at <= 0) return root;
   const main = path.resolve(root, gitdir.slice(0, at));
   const name = gitdir.slice(at).split("/")[3];
-  if (name) worktreeRoots.set(`${norm(main)}\0${name}`, norm(root));
+  if (name) {
+    const key = await getRealKey(main);
+    if (!worktreeRoots.has(key)) worktreeRoots.set(key, new Map());
+    worktreeRoots.get(key).set(name, norm(root));
+  }
   return main;
 }
 async function rootOf(dir, now) {
@@ -234,7 +261,9 @@ async function pass(force, changedOnly = false) {
   const dirs = [...new Set((opts.dirs() || []).filter(Boolean))];
   const projects = opts.projects?.() || dirs;
   const discoveryKey = JSON.stringify([...projects].sort());
-  if (force || discovery.key !== discoveryKey || t0 - discovery.at > ROOT_TTL_MS) discovery = { ...await discoverRepositories(projects), key: discoveryKey, at: t0 };
+  // Not in a watchers' pass (changedOnly): the walk would delay the status the user waits for after staging, and
+  // count as the cost that spaces the watchers' passes out. The background refresh does it.
+  if (force || discovery.key !== discoveryKey || (!changedOnly && t0 - discovery.at > ROOT_TTL_MS)) discovery = { ...await discoverRepositories(projects), key: discoveryKey, at: t0 };
   const dirRoot = {};
   for (const d of [...dirs, ...discovery.repos]) { if (force) roots.delete(norm(d)); const r = await rootOf(d, t0); if (r) dirRoot[norm(d)] = r; }
   const changed = new Set(changedRoots);
@@ -262,7 +291,7 @@ async function pass(force, changedOnly = false) {
     dirs: Object.fromEntries(Object.entries(dirRoot).map(([d, r]) => [d, norm(r)])),
     repos: Object.fromEntries(repos)
   };
-  syncWatchers();
+  await syncWatchers();
   if (signature(snapshot) !== signature(prev) || todo.length) opts.onChange?.(snapshot);
   return snapshot;
 }
@@ -326,6 +355,6 @@ async function diff({ root, file } = {}) {
 
 let actionContext = () => ({});
 const actions = require('./git-actions').createGitActions({ status: () => snapshot, refresh, refreshRepo, parseStatus, context: () => actionContext() });
-function stop() { clearInterval(timer); clearTimeout(watchTimer); watchTimer = null; changedRoots.clear(); watchCostMs = 0; for (const w of watchers.values()) w.close(); watchers.clear(); }
+function stop() { clearInterval(timer); clearTimeout(watchTimer); watchTimer = null; changedRoots.clear(); watchCostMs = 0; for (const w of watchers.values()) w.close(); watchers.clear(); realRoots.clear(); }
 module.exports = { start, stop, refresh, get: () => snapshot, parseStatus, norm, discoverRepositories, diff, WATCH_NOISE, getWatchDelay,
   query: actions.query, execute: actions.execute, configure: context => { actionContext = context; } };

@@ -30,15 +30,16 @@
   const hiddenProjects = new Set(readJson(HIDDEN_PROJECTS_KEY, [], Array.isArray));
   const hiddenRepos = readJson(HIDDEN_REPOS_KEY, {}, v => v && typeof v === 'object' && !Array.isArray(v));
   const projectRepos = new Map();
-  // How a repository lists its changes: by folders (tree) or as a flat list, set in that repository's own menu
-  // (repoViews, by its key). The default is the flat list - or the folders for whoever had them on for all
-  // repositories before (TREE_KEY, no longer set). Either way as IntelliJ's commit view: a checkbox on every file and
-  // folder, checked being staged.
-  const TREE_KEY = 'agentdeck.gitTree', REPO_VIEWS_KEY = 'agentdeck.gitRepoViews';
-  let tree = false, repoViews = {};
-  try { tree = localStorage.getItem(TREE_KEY) === '1'; } catch {}
+  // How a repository lists its changes: by folders or as a flat list, chosen in that repository's own menu and kept
+  // only where it differs from the default (repoViews, by its key). The default is the flat list; it is the folders
+  // for whoever had turned them on in a version where one choice applied to every repository (LEGACY_TREE_KEY, only
+  // read here: their repositories keep the view they had, and each can still be switched either way). In both views
+  // as IntelliJ's commit view: a checkbox on every file and folder, checked being staged.
+  const LEGACY_TREE_KEY = 'agentdeck.gitTree', REPO_VIEWS_KEY = 'agentdeck.gitRepoViews';
+  let treeByDefault = false, repoViews = {};
+  try { treeByDefault = localStorage.getItem(LEGACY_TREE_KEY) === '1'; } catch {}
   try { repoViews = JSON.parse(localStorage.getItem(REPO_VIEWS_KEY)) || {}; } catch {}
-  const isTree = key => repoViews[key]?.tree ?? tree;
+  const isTree = key => repoViews[key]?.tree ?? treeByDefault;
   // A folder or a group is open unless the user folded it; while a filter is typed, all are, so what it found shows.
   const isOpen = id => Boolean(filter) || expanded.get(id) !== false;
   function select(name) {
@@ -94,7 +95,7 @@
     if (sortMode === 'status') return files.sort((a, b) => statusKey(a).localeCompare(statusKey(b)) || a.path.localeCompare(b.path));
     return files.sort((a, b) => a.path.localeCompare(b.path));
   }
-  const more = (attributes, disabled = false) => `<button class="icon-btn git-more" type="button" ${attributes} title="${esc(gitText('manage'))}" aria-label="${esc(gitText('manage'))}" aria-haspopup="menu" ${disabled ? 'disabled' : ''}>${icon('more')}</button>`;
+  const more = (attributes, disabled = false, label = 'manage') => `<button class="icon-btn git-more" type="button" ${attributes} title="${esc(gitText(label))}" aria-label="${esc(gitText(label))}" aria-haspopup="menu" ${disabled ? 'disabled' : ''}>${icon('more')}</button>`;
   const quick = (action, glyph, label, disabled = false) => `<button type="button" class="icon-btn git-quick" data-quick="${action}" title="${esc(gitText(label))}" aria-label="${esc(gitText(label))}" ${disabled ? 'disabled' : ''}>${icon(glyph)}</button>`;
   function fileRow(f, node, group, disabled, check = '') {
     const filename = f.path.split(/[\\/]/).at(-1), folder = f.path.slice(0, f.path.length - filename.length).replace(/[\\/]$/, '');
@@ -183,7 +184,7 @@
   function getRepoProjects(sourceId, repo) {
     const root = normPath(repo.root), dirs = [normPath(repo.mainRoot || repo.root), root];
     const projects = (data.projects || []).filter(p => (p.node || 'local') === sourceId && dirs.some(d => within(d, normPath(p.path))));
-    if (projects.length) return projects.map(p => ({ key: p.n, name: p.name, real: true }));
+    if (projects.length) return projects.map(p => ({ key: p.n, name: p.name || p.path, real: true }));
     return [{ key: root, name: root.split('/').filter(Boolean).at(-1) || root, real: false }];
   }
   const isRepoHidden = (projectKey, repoKey) => (hiddenRepos[projectKey] || []).includes(repoKey);
@@ -211,7 +212,7 @@
     return [...groups.values()].sort((a, b) => a.name.localeCompare(b.name)).map(g => {
       const id = `project:${g.key}`, count = g.rows.length < g.repos.length ? `${g.rows.length}/${g.repos.length}` : g.rows.length;
       // A filter needs something to choose from: a single repository has none, unless it is the one hidden.
-      const actions = g.real && (g.repos.length > 1 || g.rows.length < g.repos.length) ? `<span class="git-hover-actions">${more(`data-project-menu="${esc(g.key)}"`)}</span>` : '';
+      const actions = g.real && (g.repos.length > 1 || g.rows.length < g.repos.length) ? `<span class="git-hover-actions">${more(`data-project-menu="${esc(g.key)}"`, false, 'filterRepos')}</span>` : '';
       return `<details class="git-project" data-expand="${esc(id)}" ${expanded.get(id) === true ? 'open' : ''}><summary class="git-project-head">`
         + `<span class="git-chevron">${icon('right')}</span>${icon('folder')}<span>${esc(g.name)}</span><span class="grow"></span>${actions}<span class="git-count">${count}</span>`
         + `</summary>${g.rows.join('')}</details>`;
@@ -225,21 +226,34 @@
   const saveViews = () => { try { localStorage.setItem(REPO_VIEWS_KEY, JSON.stringify(repoViews)); } catch {} };
   // One repository's view; nothing is kept for it once it is the default.
   function setRepoTree(key, on) {
-    if (on === tree) delete repoViews[key]; else repoViews[key] = { tree: on };
+    if (on === treeByDefault) delete repoViews[key]; else repoViews[key] = { tree: on };
     saveViews();
     render();
   }
-  // The projects whose scan budget ran out, by name. A computer on an older version reports only that one did.
+  // The projects not scanned in full, by name. A computer on an older version reports only that one was not.
   function getScanLimitNote(source) {
     const paths = source.git.discoveryTruncatedIn || [];
     if (!paths.length) return t('git.panel.scanLimit');
     const name = dir => (data.projects || []).find(p => (p.node || 'local') === source.id && normPath(p.path) === normPath(dir))?.name || dir;
-    return t('git.panel.scanLimitIn', { projects: paths.map(name).join(', ') });
+    return tn('git.panel.scanLimitIn', paths.length, { projects: paths.map(name).join(', ') });
   }
+  // The element that has the keyboard focus, by what it is: the list is drawn again as HTML, so the node itself is gone
+  // after every change. Its tag and data attributes, then those of every element around it that has any - its file's
+  // row, its folder, its copy of the repository, its project group. data-mixed is a checkbox's state, not what it is.
+  const getFocusId = el => el.tagName + JSON.stringify({ ...el.dataset, mixed: undefined });
+  function getFocusPath(el) {
+    const path = [getFocusId(el)];
+    for (let up = el.parentElement; up && up !== list; up = up.parentElement) if (Object.keys(up.dataset).length) path.push(getFocusId(up));
+    return { tag: el.tagName, path: path.join(' < ') };
+  }
+  const findFocus = focus => focus && [...list.querySelectorAll?.(focus.tag) || []].find(el => getFocusPath(el).path === focus.path);
+  // What had the focus when it was drawn disabled (its repository at work) and so could not keep it.
+  let lostFocus = null;
   function render() {
     if (selected !== 'git') return;
-    const sources = [{ id: 'local', name: t('git.panel.local'), status: 'online', git }, ...nodes], rows = [], open = openFolders();
+    const sources = [{ id: 'local', name: t('git.panel.local'), status: 'online', git }, ...nodes], rows = [], notes = [], open = openFolders();
     const tips = new Map();
+    let filteredOut = false; // the project filter hides a repository
     repositories.clear();
     projectRepos.clear();
     for (const source of sources) {
@@ -254,7 +268,7 @@
         const open = viaTerminal.has(normPath(repo.root)), holding = getRepoProjects(source.id, repo);
         if (!open && (scope !== 'all' || !holding[0].real)) continue;
         const projects = open || scope !== 'all' ? holding : holding.filter(p => !hiddenProjects.has(p.key));
-        if (!projects.length) continue;
+        if (!projects.length) { filteredOut = true; continue; }
         const key = JSON.stringify([source.id, repo.root]), name = repo.root.split(/[\\/]/).at(-1);
         if (byProject && projects.every(p => isRepoHidden(p.key, key))) { items.push({ key, name, projects, html: () => '' }); continue; }
         const node = { key, node: source.id === 'local' ? '' : source.id, repo, offline: source.status !== 'online', source: source.name, error: errors.get(key) || source.gitError || repo.error };
@@ -270,29 +284,38 @@
           ${repo.filesTruncated ? `<p class="git-panel-note">${esc(t('git.panel.truncated'))}</p>` : ''}`}</details>` });
       }
       rows.push(...getRepoRows(items));
-      if (source.git?.missing) rows.push(`<p class="git-panel-note">${esc(source.name)}: ${esc(t('git.panel.missing'))}</p>`);
-      if (source.git?.discoveryTruncated) rows.push(`<p class="git-panel-note">${esc(source.name)}: ${esc(getScanLimitNote(source))}</p>`);
+      if (source.git?.missing) notes.push(`<p class="git-panel-note">${esc(source.name)}: ${esc(t('git.panel.missing'))}</p>`);
+      if (source.git?.discoveryTruncated) notes.push(`<p class="git-panel-note">${esc(source.name)}: ${esc(getScanLimitNote(source))}</p>`);
     }
     $('gitRepoCount').textContent = repositories.size;
     if (!repositories.has(activeKey)) activeKey = repositories.keys().next().value || '';
     window.gitFooter?.render();
-    const html = rows.join('') || `<p class="git-panel-note">${esc(t('git.panel.empty'))}</p>`;
+    // Nothing to list: when it is the project filter that hides every repository, that is said, with the way out.
+    const empty = filteredOut
+      ? `<div class="git-panel-note git-filtered"><span>${esc(t('git.panel.filtered'))}</span><button type="button" class="btn sm" data-show-projects>${esc(t('git.panel.showAllProjects'))}</button></div>`
+      : notes.length ? '' : `<p class="git-panel-note">${esc(t(scope === 'all' ? 'git.panel.emptyAll' : 'git.panel.empty'))}</p>`;
+    const html = (rows.join('') || empty) + notes.join('');
     if (html !== last) {
-      const active = document.activeElement, focused = active?.dataset, scroll = list.scrollTop, selection = focused?.commitMessage ? [active.selectionStart, active.selectionEnd] : null;
-      // A repository in several groups is drawn once per group: the focus goes back to the same copy.
-      const copy = active?.closest?.('[data-repo]')?.dataset.expand;
+      // The focus goes back to what had it: a folded repository's header as it opens, a group's header, a checkbox, a
+      // button, the message with its selection. What is drawn disabled meanwhile gets it back when it is enabled again,
+      // if nothing else took it; an open menu returns to the button drawn in place of the one it was opened from.
+      const active = document.activeElement, scroll = list.scrollTop, anchor = groupMenu?.returnFocus;
+      const focus = list.contains?.(active) ? getFocusPath(active) : active === document.body ? lostFocus : null;
+      const selection = active?.dataset?.commitMessage ? [active.selectionStart, active.selectionEnd] : null;
+      const anchorPath = anchor && list.contains?.(anchor) ? getFocusPath(anchor) : null;
       list.innerHTML = html; last = html; list.scrollTop = scroll;
       for (const box of list.querySelectorAll?.('.git-check[data-mixed]') || []) box.indeterminate = true;
-      const copyEl = (copy && [...list.querySelectorAll('[data-repo]')].find(d => d.dataset.expand === copy)) || list;
-      if (focused?.commitMessage) {
-        const input = [...copyEl.querySelectorAll('[data-commit-message]')].find(b => b.dataset.commitMessage === focused.commitMessage);
-        input?.focus({ preventScroll: true }); if (input && selection) input.setSelectionRange(...selection);
-      } else if (focused?.diffFile) [...copyEl.querySelectorAll('[data-diff-file]')].find(b => b.dataset.diffFile === focused.diffFile && b.dataset.diffRoot === focused.diffRoot && b.dataset.diffNode === focused.diffNode)?.focus({ preventScroll: true });
+      const target = findFocus(focus);
+      target?.focus({ preventScroll: true });
+      const isFocused = target && document.activeElement === target;
+      if (isFocused && selection) target.setSelectionRange(...selection);
+      lostFocus = target && !isFocused && busy.size ? focus : null;
+      if (anchorPath) groupMenu.returnFocus = findFocus(anchorPath) || anchor;
     }
     // Outside the compared HTML: the time changes with every check, and the list must not be rebuilt for it.
     for (const summary of list.querySelectorAll?.('[data-repo] > summary') || []) {
       const tip = tips.get(summary.parentElement.dataset.repo);
-      if (tip && summary.dataset.tip !== tip) summary.title = tip;
+      if (tip && summary.title !== tip) summary.title = tip;
     }
   }
   function renderFooter() {
@@ -347,42 +370,71 @@
       item('showOutput', 'terminal', () => window.gitWorkflow.openOutput(node.node, node.repo.root), { disabled })
     ];
   }
+  // The computers listed here, each with the repositories it reports.
+  const getSources = () => [{ id: 'local', name: '', git }, ...nodes];
+  // A change of a filter saves both, without what they kept for a project that was removed or a repository that is
+  // gone - so the lists do not grow for ever. A computer that reports no repository now (offline, not read yet) keeps
+  // what was hidden on it.
+  function saveFilters() {
+    const projects = new Set((data.projects || []).map(p => p.n));
+    const known = new Map(getSources().map(s => [s.id, new Set(Object.values(s.git?.repos || {}).map(r => r.root))]));
+    const isGone = repoKey => {
+      try {
+        const [id, root] = JSON.parse(repoKey);
+        return Boolean(known.get(id)?.size) && !known.get(id).has(root);
+      } catch {
+        return true;
+      }
+    };
+    for (const key of [...hiddenProjects]) if (!projects.has(key)) hiddenProjects.delete(key);
+    for (const [projectKey, keys] of Object.entries(hiddenRepos)) {
+      const kept = projects.has(projectKey) && Array.isArray(keys) ? keys.filter(key => !isGone(key)) : [];
+      if (kept.length) hiddenRepos[projectKey] = kept; else delete hiddenRepos[projectKey];
+    }
+    try {
+      localStorage.setItem(HIDDEN_PROJECTS_KEY, JSON.stringify([...hiddenProjects]));
+      localStorage.setItem(HIDDEN_REPOS_KEY, JSON.stringify(hiddenRepos));
+    } catch {}
+  }
   function toggleProject(projectKey) {
     if (!hiddenProjects.delete(projectKey)) hiddenProjects.add(projectKey);
-    try { localStorage.setItem(HIDDEN_PROJECTS_KEY, JSON.stringify([...hiddenProjects])); } catch {}
+    saveFilters();
+    render();
+  }
+  function showAllProjects() {
+    hiddenProjects.clear();
+    saveFilters();
     render();
   }
   function toggleRepo(projectKey, repoKey) {
     const keys = new Set(hiddenRepos[projectKey] || []);
     if (!keys.delete(repoKey)) keys.add(repoKey);
-    if (keys.size) hiddenRepos[projectKey] = [...keys]; else delete hiddenRepos[projectKey];
-    try { localStorage.setItem(HIDDEN_REPOS_KEY, JSON.stringify(hiddenRepos)); } catch {}
+    hiddenRepos[projectKey] = [...keys];
+    saveFilters();
     render();
   }
-  // A checkbox per project of the computers listed (named with its computer when it is another one).
+  // A checkbox per project that holds a repository (one without any has nothing to show or hide), named with its
+  // computer when it is another one.
   function projectFilterItems() {
-    const sources = new Map([['local', ''], ...nodes.map(n => [n.id, n.name])]);
-    return (data.projects || []).filter(p => sources.has(p.node || 'local'))
-      .map(p => ({ label: p.node ? `${p.name || p.path} · ${sources.get(p.node)}` : p.name || p.path, key: p.n }))
-      .sort((a, b) => a.label.localeCompare(b.label))
-      .map(p => ({ label: p.label, icon: 'folder', checked: !hiddenProjects.has(p.key), keepOpen: true, run: async () => toggleProject(p.key) }));
+    const labels = new Map();
+    for (const source of getSources()) {
+      for (const repo of Object.values(source.git?.repos || {})) {
+        for (const p of getRepoProjects(source.id, repo)) if (p.real) labels.set(p.key, source.name ? `${p.name} · ${source.name}` : p.name);
+      }
+    }
+    return [...labels].sort((a, b) => a[1].localeCompare(b[1]))
+      .map(([key, label]) => ({ label, icon: 'folder', checked: !hiddenProjects.has(key), keepOpen: true, run: async () => toggleProject(key) }));
   }
-  // A project group's menu (only with "Group by Project"): its repositories to show or hide in this group.
+  // A project group's menu (only with "Group by Project"): its repositories, ticked to show in this group.
   function openProjectMenu(button) {
     const projectKey = button.dataset.projectMenu;
-    // The list is drawn again with each tick: the menu then returns the focus to the button drawn in place of its own.
-    const toggle = repoKey => {
-      toggleRepo(projectKey, repoKey);
-      const anchor = [...(list.querySelectorAll?.('[data-project-menu]') || [])].find(b => b.dataset.projectMenu === projectKey);
-      if (groupMenu && anchor) groupMenu.returnFocus = anchor;
-    };
-    const repos = (projectRepos.get(projectKey) || []).map(r => ({ label: r.name, icon: 'branch', checked: !isRepoHidden(projectKey, r.key), keepOpen: true, run: async () => toggle(r.key) }));
-    openGroupMenu(button, '', [{ label: gitText('filterRepos'), icon: 'eye', items: repos, disabled: !repos.length }]);
+    const repos = (projectRepos.get(projectKey) || []).map(r => ({ label: r.name, icon: 'branch', checked: !isRepoHidden(projectKey, r.key), keepOpen: true, run: async () => toggleRepo(projectKey, r.key) }));
+    openGroupMenu(button, '', repos);
     groupMenu.classList.add('git-context-menu');
   }
   function panelMenuItems() {
     const filterProjects = projectFilterItems();
-    const view = [
+    return [
       item('byProject', 'stack', () => setByProject(!byProject), { checked: byProject }),
       ...(scope === 'all' && filterProjects.length ? [{ label: gitText('filterProjects'), icon: 'eye', items: filterProjects }] : []),
       { label: gitText('viewSort'), icon: 'sliders', items: [
@@ -391,10 +443,8 @@
         item('sortStatus', 'alert', () => setSort('status'), { checked: sortMode === 'status' }),
         sep(),
         item('filter', 'search', () => { $('gitFilterBar').hidden = !$('gitFilterBar').hidden; if (!$('gitFilterBar').hidden) $('gitFilter').focus(); })
-      ] },
-      sep()
+      ] }
     ];
-    return view.slice(0, -1);
   }
   function menu(button, node, group, file) {
     if (!file && !group) {
@@ -416,11 +466,17 @@
   list.addEventListener('input', e => {
     const key = e.target.dataset.commitMessage; if (!key) return;
     drafts.set(key, e.target.value);
-    const node = repositories.get(key), commit = e.target.parentElement.querySelector('[data-repo-action="commit"]');
+    const node = repositories.get(key);
     if (node) window.gitWorkflow.rememberDraft?.(node.node, node.repo.root, e.target.value);
-    commit.disabled = !e.target.value.trim() || busy.has(key) || !(node?.repo.files || []).some(f => accepts('staged', f));
-    const headerCommit = e.target.closest('[data-repo]').querySelector('[data-quick="commit"]');
-    if (headerCommit) headerCommit.disabled = commit.disabled;
+    const disabled = !e.target.value.trim() || busy.has(key) || !(node?.repo.files || []).some(f => accepts('staged', f));
+    // Every copy of the repository (one in each project group holding it) follows as the user types: its message, and
+    // its Commit buttons - the header's also on a folded copy.
+    for (const copy of list.querySelectorAll?.('[data-repo]') || []) {
+      if (copy.dataset.repo !== key) continue;
+      const box = copy.querySelector('[data-commit-message]');
+      if (box && box !== e.target) box.value = e.target.value;
+      for (const button of copy.querySelectorAll('[data-repo-action="commit"], [data-quick="commit"]')) button.disabled = disabled;
+    }
   });
   // A checkbox stages what it stands for, or takes it out of the commit. Only the files that change are sent: an
   // untracked file cannot be unstaged, a staged one need not be staged again.
@@ -439,6 +495,8 @@
   });
   list.addEventListener('focusin', e => { const repo = e.target.closest('[data-repo]'); if (repo) { activeKey = repo.dataset.repo; window.gitFooter?.render(); } });
   list.addEventListener('click', e => {
+    // The filter is in the panel's menu: the focus goes there, as the button that had it is gone.
+    if (e.target.closest('[data-show-projects]')?.dataset.showProjects === '') { showAllProjects(); return $('gitPanelMenu').focus(); }
     const projectMenu = e.target.closest('[data-project-menu]');
     if (projectMenu?.dataset.projectMenu) { e.preventDefault(); e.stopPropagation(); return openProjectMenu(projectMenu); }
     const clickedRepo = e.target.closest('[data-repo]');
