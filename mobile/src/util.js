@@ -61,6 +61,14 @@ export const KEYS = {
   end: "\x1b[F"
 };
 
+// A file's path as it is pasted into a terminal for an agent (the desktop's workspace-ui.js has the same): a Windows
+// path with forward slashes - agent CLIs may read a backslash as an escape, and Windows takes either - a POSIX path
+// as it is (a backslash can be part of a name there); in quotes when it has a space.
+export function terminalFilePath(file) {
+  const value = /^(?:[a-z]:[\\/]|\\\\)/i.test(file) ? file.replace(/\\/g, "/") : file;
+  return /\s/.test(value) ? `"${value}"` : value;
+}
+
 export const debounce = (fn, ms) => {
   let t = 0;
   return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };

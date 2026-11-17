@@ -540,6 +540,21 @@ export function createStore(provider) {
       provider.sendFrame(id, { type: "input", id: termId, data: text });
       setTimeout(() => provider.sendFrame(id, { type: "input", id: termId, data: "\r" }), ENTER_AFTER_MS);
     },
+    // Settles once the computer is linked and its lists are in (at once when they are); rejects with "offline" when
+    // it is not within ms. For what the user started before the app went to the background and came back (a photo
+    // taken in the camera app: the links are made again as the app returns).
+    whenOnline(id, ms = 15000) {
+      const ok = () => isOnline(id) && nodes.get(id)?.loaded === true;
+      if (ok()) return Promise.resolve();
+      return new Promise((resolve, reject) => {
+        const done = () => { off(); clearTimeout(timer); };
+        const off = out.on("change", () => { if (ok()) { done(); resolve(); } });
+        const timer = setTimeout(() => { done(); reject(Object.assign(new Error("offline"), { code: "offline" })); }, ms);
+      });
+    },
+    // A file for a terminal there (a picture from the phone): name, data (base64, up to 10 MB of bytes) -> its path
+    // on that computer (files.put; a host without it answers unknownMethod). It may take a while on a mobile link.
+    putFile: (id, name, data) => provider.request(id, "files.put", { name, data }, { timeout: 120000 }),
     // Raw keys (the quick-key row) without attaching.
     keys: (id, termId, data) => provider.sendFrame(id, { type: "input", id: termId, data }),
     // How Stop ends a session: "terminal" - it runs in an AgentDeck terminal, which is closed (the agent with it);

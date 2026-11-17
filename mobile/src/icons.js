@@ -14,6 +14,16 @@ const P = {
   // A new terminal (a shell in a folder): the terminal with a plus where its cursor line is.
   termPlus: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m6.5 9.5 2.5 2.5-2.5 2.5"/><path d="M15 9.5v5M12.5 12h5"/>',
   chevDown: '<path d="m6 9 6 6 6-6"/>',
+  // The terminal's tools.
+  more: '<circle cx="5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="19" cy="12" r="1.4" fill="currentColor"/>',
+  chat: '<path d="M4 5h16v11H9.5L4 20z"/><path d="M8 9h8M8 12.5h5"/>',
+  image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="m4 18 5.5-5.5 4 4 2.5-2.5 4 4"/>',
+  camera: '<path d="M4 8h3.2l1.8-3h6l1.8 3H20v11H4z"/><circle cx="12" cy="13" r="3.4"/>',
+  copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
+  swap: '<path d="M4 8h13"/><path d="m14 5 3 3-3 3"/><path d="M20 16H7"/><path d="m10 13-3 3 3 3"/>',
+  insert: '<path d="M12 4v11"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M5 20h14"/>',
+  minus: '<path d="M5 12h14"/>',
+  textSize: '<path d="m3 18 5-12 5 12"/><path d="M5 14h6"/><path d="m14 18 3.5-8 3.5 8"/><path d="M15.2 15.5h4.6"/>',
   bolt: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
   send: '<path d="M21 3 10.5 13.5M21 3l-6.5 18-4-7.5L3 9.5z"/>',

@@ -418,7 +418,36 @@ textarea { resize: none; line-height: 1.35; }
 /* What the soft keyboard types into (terminal.js): out of sight, still focusable. */
 .term-input { position: absolute; left: 0; bottom: 0; width: 2px; height: 2px; min-height: 0; padding: 0; border: 0; opacity: 0; pointer-events: none; font-size: 16px; resize: none; }
 .term-over { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); padding: 9px 14px; border-radius: var(--r-md); background: var(--raised); border: 1px solid var(--line-2); color: var(--muted); box-shadow: var(--shadow-pop); text-align: center; font-size: 13px; }
-.xkeys { padding: 0 6px; background: var(--panel); border-top: 1px solid var(--line); margin: 0; }
+/* Under the terminal: the key row (a set of keys and, at its end, the switch to the other set), then the tool row
+   (the message field's opener, a picture, paste) - or, in its place, the message field itself. */
+.term-keys { display: flex; align-items: center; background: var(--panel); border-top: 1px solid var(--line); }
+.term-keys .keys-swap { margin-right: 2px; }
+.xkeys { flex: 1; min-width: 0; padding: 0 6px; background: var(--panel); margin: 0; }
+.term-tools { display: flex; align-items: center; padding: 0 2px 6px 8px; background: var(--panel); }
+.compose-open {
+  position: relative; flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; height: 38px; margin-right: 2px; padding: 0 12px; text-align: left;
+  border: 1px solid var(--line-2); border-radius: var(--r-md); background: var(--bg); color: var(--faint); font-size: 14.5px;
+}
+.compose-open::after { content: ""; position: absolute; inset: -3px 0; }
+.compose-open .ic { width: 15px; height: 15px; }
+.compose-open span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.compose-open.has-draft { color: var(--text); }
+.compose-open:active { border-color: var(--accent); }
+.term-compose { display: flex; align-items: flex-end; padding: 0 2px 6px 0; background: var(--panel); }
+.term-compose textarea { flex: 1; min-width: 0; min-height: 40px; max-height: 120px; padding: 9px 11px; scrollbar-width: none; }
+.term-compose .send { color: var(--accent); }
+.term-compose .send::before { background: var(--accent-weak); }
+/* Typing straight into the terminal: the tool row is out of the way, the terminal keeps its lines. */
+.kb-open .screen:not(.composing) .term-tools { display: none; }
+/* What the session waits for, under the terminal's header: two lines of it. */
+.term-status { background: var(--bg); border-bottom: 1px solid var(--line); padding-top: 6px; }
+.term-status .reason { -webkit-line-clamp: 2; }
+.term-head:has(.term-status) .top { border-bottom: 0; }
+/* A picture on its way. */
+.term-busy {
+  position: absolute; left: 8px; top: 8px; z-index: 4; display: inline-flex; align-items: center; gap: 8px; min-height: 32px; max-width: calc(100% - 16px); padding: 4px 12px;
+  border: 1px solid var(--line-3); border-radius: var(--r-pill); background: var(--raised); color: var(--text); font-size: 12.5px; font-weight: 600; box-shadow: var(--shadow-pop);
+}
 /* Narrower than the session's keys, so about nine show at 360px. */
 .xkeys .key { min-width: 38px; padding: 0 1px; }
 .xkeys .key > span { min-width: 30px; padding: 0 6px; }
@@ -554,11 +583,12 @@ button.node-row:active { background: var(--card-hover); border-color: var(--line
   box-shadow: var(--shadow-pop); font-size: 13.5px; pointer-events: none;
 }
 .kb-open .toast { bottom: auto; top: calc(58px + var(--sat)); }
-/* Where there is no tab bar the toast sits lower; over a session, above its reply box; over a terminal at the top,
-   clear of the prompt at the bottom and of the chip in the corner. */
+/* Where there is no tab bar the toast sits lower; over a session, above its reply box; over a terminal, above its
+   key and tool rows. */
 #app:not(.tabbed) ~ .toast { top: auto; bottom: calc(18px + var(--sab)); }
 #app.screen-session ~ .toast { top: auto; bottom: calc(118px + var(--sab)); }
-#app.screen-terminal ~ .toast { bottom: auto; top: calc(100px + var(--sat)); }
+#app.screen-terminal ~ .toast { top: auto; bottom: calc(108px + var(--sab)); }
+.kb-open #app.screen-terminal ~ .toast { bottom: calc(58px + var(--sab)); }
 
 .sheet-backdrop { position: fixed; z-index: 50; inset: 0; background: var(--backdrop); display: flex; align-items: flex-end; justify-content: center; }
 .sheet { width: 100%; max-width: 520px; padding: 18px 16px calc(14px + var(--sab)); background: var(--panel); border-radius: var(--r-xl) var(--r-xl) 0 0; border-top: 1px solid var(--line-2); animation: rise .2s ease-out; }
@@ -566,6 +596,16 @@ button.node-row:active { background: var(--card-hover); border-color: var(--line
 .sheet-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
 .sheet-actions .btn { height: var(--tap); min-width: 88px; }
 .sheet-input { margin-bottom: 14px; }
+/* A sheet that is a list of things to do. */
+.sheet.menu { padding: 8px 8px calc(8px + var(--sab)); }
+.menu-item { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 48px; padding: 0 12px; text-align: left; border: 0; border-radius: var(--r-md); background: none; color: var(--text); font-size: 14.5px; }
+button.menu-item:active { background: var(--panel-2); }
+.menu-item > .ic { color: var(--muted); }
+.menu-item.on > .ic { color: var(--accent); }
+.menu-item.danger, .menu-item.danger > .ic { color: var(--danger); }
+.menu-label { flex: 1; min-width: 0; }
+.menu-step { padding-right: 0; }
+.menu-value { min-width: 44px; text-align: center; font-size: 13px; font-weight: 650; font-variant-numeric: tabular-nums; }
 @keyframes rise { from { transform: translateY(100%); } }
 
 /* ---------- less motion, where the phone asks for it ---------- */
@@ -593,6 +633,8 @@ button.node-row:active { background: var(--card-hover); border-color: var(--line
 /* Hardly any height left (the phone on its side with the keyboard up - which .kb-open does not always tell there):
    a session is its title, what it waits for on one line, and the reply box. */
 @media (max-height: 300px) {
+  .term-tools { display: none; }
+  .composing .term-keys { display: none; }
   .sess-head .top { min-height: 40px; padding-top: 0; padding-bottom: 0; }
   .sess-head .top small { display: none; }
   .status-line { padding-bottom: 3px; min-height: 0; }

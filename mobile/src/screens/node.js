@@ -6,7 +6,7 @@
 import { t, tn, errorText } from "../i18n.js";
 import { esc, baseName, normPath } from "../util.js";
 import { icon, iconBtn } from "../icons.js";
-import { header, wireBack, sessionRow, terminalRow, projectMark, connNote, wireConn, wireTerminals } from "./parts.js";
+import { header, wireBack, sessionRow, terminalRow, projectMark, connNote, wireConn, wireTerminals, openSession } from "./parts.js";
 
 // Kept while the app runs: which projects the user folded open or shut (`${node}:${path}` -> bool; one never
 // touched is open while something runs in it), and those whose stopped sessions are all shown.
@@ -113,7 +113,7 @@ export function render(el, ctx, p) {
       draw();
     } else if (d.new) ctx.go("new", { node: p.node, project: d.new });
     else if (d.shell) shell(d.shell, baseName(d.shell));
-    else if (b.classList.contains("row")) ctx.go("session", { node: d.node, agent: d.agent, id: d.id });
+    else if (b.classList.contains("row")) openSession(ctx, d.node, d.agent, d.id);
   });
   wireTerminals(body, ctx);
   draw();

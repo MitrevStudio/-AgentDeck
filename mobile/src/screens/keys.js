@@ -11,9 +11,10 @@ const ICON_KEYS = {
   up: ["up", "key.up"], down: ["down", "key.down"], left: ["left", "key.left"], right: ["rightArrow", "key.right"]
 };
 
-// keys: [[label or one of ICON_KEYS, ...], ...]; the button's data-k is the key's index.
-export function keyStrip(keys, cls) {
-  return `<div class="${cls} keystrip" role="toolbar" aria-label="${esc(t("key.strip"))}">${keys.map(([label], i) => {
+// keys: [[label or one of ICON_KEYS, ...], ...]; the button's data-k is the key's index. attrs: more HTML attributes
+// of the strip ("hidden").
+export function keyStrip(keys, cls, attrs = "") {
+  return `<div class="${cls} keystrip" role="toolbar" aria-label="${esc(t("key.strip"))}" ${attrs}>${keys.map(([label], i) => {
     const ic = ICON_KEYS[label];
     return ic
       ? `<button class="key" type="button" data-k="${i}" aria-label="${esc(t(ic[1]))}" title="${esc(t(ic[1]))}"><span>${icon(ic[0])}</span></button>`

@@ -247,6 +247,11 @@ function makeHost() {
     assert.equal(store.inbox().waiting.length, 0, "nothing waits on a computer that is away");
     assert.equal(store.inbox().recent.find(x => x.node === selfH.id).id, "s-wait", "the unreachable ones come before the stopped ones");
     await wait(() => hostSize().join() === "100,30,", "the size goes back to the host's pane once the phone's link dropped");
+    // whenOnline: no at once for a computer that is away, and it gives up after its time; one asked now is settled by
+    // the computer coming back (below).
+    await assert.rejects(store.whenOnline(selfH.id, 200), e => e.code === "offline");
+    let cameBack = false;
+    const backOnline = store.whenOnline(selfH.id, 60000).then(() => { cameBack = true; });
     r = node("R", { kind: "host", relayOnly: true, port: rPort });
     all.push(r);
     await r.start();
@@ -266,6 +271,9 @@ function makeHost() {
     await wait(() => provider.nodes().find(n => n.id === selfR.id)?.status === "online", "the relay dialled at once by wake", 3000);
     offLinks();
     await wait(() => resets.length && states.at(-1) === true, "re-attached after the link came back", 60000);
+    await backOnline;
+    assert.ok(cameBack && store.computers().find(n => n.id === selfH.id).online, "whenOnline settled when the computer was back");
+    await store.whenOnline(selfH.id, 50); // at once now
     assert.deepEqual(await early, { cols: 40, rows: 15, driver: provider.id }, "a take right after the reconnect waits for the attach");
     assert.deepEqual(resizeAsks, ["terminals.attach", "terminals.resize"], "attached first, then the take - no notViewing");
     assert.deepEqual(hostSize(), [40, 15, provider.id]);

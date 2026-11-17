@@ -11,6 +11,7 @@ import { createRelayProvider } from "./provider-relay.js";
 import { keystore, lock, deviceModel } from "./keystore.js";
 import { generateKeypair } from "../../src/mesh/noise.js";
 import pkg from "../package.json";
+import { openSession } from "./screens/parts.js";
 import * as pairScreen from "./screens/pair.js";
 import * as pairingScreen from "./screens/pairing.js";
 import * as routesScreen from "./screens/routes.js";
@@ -69,8 +70,10 @@ const fail = e => toast(t("toast.failed", { error: errorText(e) }), 5000);
 let sheets = 0;
 function sheetKeys(el, cancel) {
   const p = el.querySelector("p");
-  p.id = `sheet-text-${++sheets}`;
-  el.querySelector("[role='dialog']").setAttribute("aria-labelledby", p.id);
+  if (p) {
+    p.id = `sheet-text-${++sheets}`;
+    el.querySelector("[role='dialog']").setAttribute("aria-labelledby", p.id);
+  }
   el.addEventListener("keydown", e => {
     if (e.key === "Escape") { e.preventDefault(); return cancel(); }
     if (e.key !== "Tab") return;
@@ -103,6 +106,35 @@ function confirmSheet(text, okLabel, { danger = false, extra = [] } = {}) {
   });
 }
 
+// menuSheet(items) -> the chosen item's key, or null: a list of things to do, each a row with its icon. An item is
+// { key, icon, label, danger, on } - or { stepper: true, label, value(), minus(), plus(), minusLabel, plusLabel }, a
+// row whose two buttons act at once and leave the sheet open (the text size).
+function menuSheet(items) {
+  return new Promise(resolve => {
+    const el = document.createElement("div");
+    el.className = "sheet-backdrop";
+    el.innerHTML = `<div class="sheet menu" role="dialog" aria-modal="true" aria-label="${esc(t("term.more"))}">${items.map((it, i) => (it.stepper
+      ? `<div class="menu-item menu-step" data-i="${i}">${icon("textSize")}<span class="menu-label">${esc(it.label)}</span>${iconBtn("minus", it.minusLabel, 'data-step="minus"')}<b class="menu-value">${esc(it.value())}</b>${iconBtn("plus", it.plusLabel, 'data-step="plus"')}</div>`
+      : `<button class="menu-item${it.danger ? " danger" : ""}${it.on ? " on" : ""}" data-i="${i}">${icon(it.icon)}<span class="menu-label">${esc(it.label)}</span></button>`)).join("")}</div>`;
+    const done = v => { el.remove(); resolve(v); };
+    el.addEventListener("click", e => {
+      const step = e.target.closest("[data-step]");
+      if (step) {
+        const row = step.closest("[data-i]"), it = items[row.dataset.i];
+        it[step.dataset.step]();
+        row.querySelector(".menu-value").textContent = it.value();
+        return;
+      }
+      const b = e.target.closest("button.menu-item");
+      if (b) done(items[b.dataset.i].key);
+      else if (e.target === el) done(null);
+    });
+    sheetKeys(el, () => done(null));
+    document.body.append(el);
+    el.querySelector("button.menu-item")?.focus();
+  });
+}
+
 // promptSheet(title, value, okLabel, { multiline }) -> the text, or null when cancelled. multiline: a few lines of
 // any length (text to paste into a terminal), kept as typed; else one short line, trimmed.
 function promptSheet(title, value, okLabel, { multiline = false } = {}) {
@@ -128,7 +160,10 @@ function promptSheet(title, value, okLabel, { multiline = false } = {}) {
 
 let bannerTimer = 0;
 function banner({ node, item }) {
-  if (current()?.name === "session" && current().params.node === node && current().params.id === item.id) return;
+  // Not over the session's own screen, nor over its terminal (the header there says what it waits for).
+  const top = current();
+  if (top?.name === "session" && top.params.node === node && top.params.id === item.id) return;
+  if (top?.name === "terminal" && top.params.node === node && item.term && top.params.term === item.term) return;
   const el = $("#banner");
   // The banner opens the session; its X puts it away (it lies over the header's tools). Over a terminal it goes
   // sooner: the header there is all the way out.
@@ -138,7 +173,7 @@ function banner({ node, item }) {
   el.classList.remove("in");
   void el.offsetWidth;
   el.classList.add("in");
-  el.querySelector(".banner-open").onclick = () => { el.hidden = true; go("session", { node, agent: item.agent, id: item.id }); };
+  el.querySelector(".banner-open").onclick = () => { el.hidden = true; openSession(ctx, node, item.agent, item.id); };
   el.querySelector("[data-act='dismiss']").onclick = () => { el.hidden = true; };
   buzz();
   clearTimeout(bannerTimer);
@@ -267,7 +302,7 @@ async function phoneName() {
   return link?.name || (await keystore.getName()) || (await deviceModel()) || t("phone.name");
 }
 
-const ctx = { store: null, go, back, toast, fail, confirm: confirmSheet, prompt: promptSheet, unpair, relay, rename, phoneName, secure: () => keystore.secure, version: pkg.version };
+const ctx = { store: null, go, back, toast, fail, confirm: confirmSheet, prompt: promptSheet, menu: menuSheet, unpair, relay, rename, phoneName, secure: () => keystore.secure, version: pkg.version };
 
 // ---------- the lifecycle ----------
 // The links do not survive the background reliably (and not at all on iOS): back in the foreground, or when the

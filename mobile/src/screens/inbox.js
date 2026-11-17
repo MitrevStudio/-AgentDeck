@@ -4,7 +4,7 @@
 import { t, errorText } from "../i18n.js";
 import { esc } from "../util.js";
 import { icon } from "../icons.js";
-import { header, sessionRow, terminalRow, connNote, wireConn, wireTerminals } from "./parts.js";
+import { header, sessionRow, terminalRow, connNote, wireConn, wireTerminals, openSession } from "./parts.js";
 
 let lastQuery = ""; // kept while the app runs, as a list's filter usually is
 
@@ -38,7 +38,7 @@ export function render(el, ctx) {
   }
   list.onclick = e => {
     const row = e.target.closest(".row");
-    if (row) ctx.go("session", { node: row.dataset.node, agent: row.dataset.agent, id: row.dataset.id });
+    if (row) openSession(ctx, row.dataset.node, row.dataset.agent, row.dataset.id);
   };
   wireTerminals(list, ctx);
   input.oninput = () => { lastQuery = input.value; draw(); };

@@ -6,7 +6,7 @@
 import { t } from "../i18n.js";
 import { esc, baseName } from "../util.js";
 import { icon, agentIcon } from "../icons.js";
-import { header, wireBack, sessionRow, projectMark } from "./parts.js";
+import { header, wireBack, sessionRow, projectMark, openSession } from "./parts.js";
 
 const pick = { node: "", project: "", agent: "", filter: "" }; // remembered while the app runs
 const FILTER_FROM = 8; // projects from which the list gets a filter
@@ -83,9 +83,9 @@ export function render(el, ctx, p) {
       const tab = await store.launch(pick.node, spec);
       ctx.toast(t("new.started", { name: store.nodeName(pick.node) }));
       prompt = "";
-      // The computer lists the session a moment later: until then the screen goes by the terminal's title.
-      if (!shell && tab?.sessionId) ctx.go("session", { node: pick.node, agent: tab.agent, id: tab.sessionId, title: tab.title || `${tab.agent} · ${baseName(pick.project)}` });
-      else if (tab?.id) ctx.go("terminal", { node: pick.node, term: tab.id, title: tab.title || baseName(pick.project) });
+      // Straight into its terminal, an agent's as well as a shell's (the terminal's header takes the session's title
+      // once the computer lists it).
+      if (tab?.id) ctx.go("terminal", { node: pick.node, term: tab.id, title: tab.title || (shell ? baseName(pick.project) : `${pick.agent} · ${baseName(pick.project)}`) });
     } catch (err) { ctx.fail(err); b.disabled = false; }
   }
 
@@ -95,7 +95,7 @@ export function render(el, ctx, p) {
     if (b.dataset.node) { pick.node = b.dataset.node; pick.project = ""; return draw(); }
     if (b.dataset.project) { pick.project = b.dataset.project; return draw(); }
     if (b.dataset.agent) { pick.agent = b.dataset.agent; return draw(); }
-    if (b.classList.contains("row")) return ctx.go("session", { node: b.dataset.node, agent: b.dataset.agent, id: b.dataset.id });
+    if (b.classList.contains("row")) return openSession(ctx, b.dataset.node, b.dataset.agent, b.dataset.id);
   };
 
   draw();

@@ -75,10 +75,19 @@ export function wireConn(el, store, ctx) {
   on("conn-add", () => ctx?.go("pair", { add: true }));
 }
 
+// Opens a session from a list, the banner or a new start: straight in its terminal while it runs in one on a
+// computer that is there - the terminal is where the work is done -, else on its own screen (its messages; a session
+// that stopped, or runs outside AgentDeck). The terminal's header leads to the messages and back.
+export function openSession(ctx, node, agent, id) {
+  const x = ctx.store.item(node, agent, id);
+  if (x?.online && x.term) ctx.go("terminal", { node, term: x.term, title: x.title });
+  else ctx.go("session", { node, agent, id });
+}
+
 // A terminal in a list (the inbox's Terminals, a computer's screen): its title, then computer · folder · who opened
 // it, "reopened after a restart" under that when the host opened it anew; at the end "ended" / "lost", or an eye with
-// the number of other devices that have it open. The row opens it (an agent's terminal: its session), the X at the
-// end closes it. wireTerminals(el, ctx) handles both.
+// the number of other devices that have it open. The row opens it, the X at the end closes it. wireTerminals(el, ctx)
+// handles both.
 export function terminalRow(x, { showNode = true } = {}) {
   const by = x.owner === "phone" ? t("terms.byPhone") : x.owner === "here" ? t("terms.byHere") : x.ownerName ? t("terms.byPeer", { name: x.ownerName }) : t("terms.byOther");
   const ended = x.exited ? "exited" : x.lost ? "lost" : "";
@@ -121,8 +130,7 @@ export function wireTerminals(el, ctx) {
     if (!open) return;
     e.stopPropagation();
     const d = open.dataset;
-    if (d.sid) ctx.go("session", { node: d.node, agent: d.agent, id: d.sid });
-    else ctx.go("terminal", { node: d.node, term: d.term, title: d.title });
+    ctx.go("terminal", { node: d.node, term: d.term, title: d.title });
   });
 }
 

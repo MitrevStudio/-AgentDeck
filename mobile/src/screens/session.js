@@ -2,7 +2,10 @@
 // the terminal it runs in, Stop, and the way to its terminal (or a shell in its folder). A session not in an
 // AgentDeck terminal can only be watched and stopped; one not running can be resumed. While its computer is away
 // nothing can be done to it: the tools go, the status says "unreachable", the messages loaded before stay.
-// params: node, agent, id; title - what to call it until the computer lists it (a session just started).
+// params: node, agent, id; title - what to call it until the computer lists it (a session just started); from -
+// "terminal" when the session's terminal opened it (its chat view). A session that runs in an AgentDeck terminal is
+// opened in that terminal from the lists (parts.js openSession); this screen is its messages, and what a session
+// with no terminal has.
 //
 // A reply being typed is kept per session (also across a lost link, leaving the screen, a restart of the app) until
 // it was sent. While the agent works the host refuses it (agentNotReady): it stays, and can be typed into the
@@ -12,25 +15,17 @@ import { esc, KEYS, buzz } from "../util.js";
 import { icon, iconBtn } from "../icons.js";
 import { header, wireBack, statusChip, metaLine, connNote, wireConn } from "./parts.js";
 import { keyStrip, wireStrip } from "./keys.js";
+import { getDraft, setDraft } from "../drafts.js";
 
 // [label or icon, what it sends]; a key with an icon is named by its aria label (keys.js).
 const QUICK = [
   ["1", "1"], ["2", "2"], ["3", "3"], ["enter", KEYS.enter], ["Esc", KEYS.esc], ["Ctrl+C", KEYS.ctrlC],
   ["up", KEYS.up], ["down", KEYS.down], ["left", KEYS.left], ["right", KEYS.right], ["tab", KEYS.tab], ["shiftTab", KEYS.shiftTab]
 ];
-const DRAFTS_KEY = "agentdeck.drafts";
 
 // Message text: escaped, `code` set apart, line breaks kept (by CSS).
 const fmt = s => esc(s).replace(/`([^`\n]+)`/g, "<code>$1</code>");
 
-// The drafts: { "node:agent:id": text } in localStorage (only on this phone; gone once sent).
-function drafts() { try { return JSON.parse(localStorage.getItem(DRAFTS_KEY) || "{}") || {}; } catch { return {}; } }
-function getDraft(k) { return drafts()[k] || ""; }
-function setDraft(k, text) {
-  const all = drafts();
-  if (text) all[k] = text; else delete all[k];
-  try { localStorage.setItem(DRAFTS_KEY, JSON.stringify(all)); } catch {}
-}
 
 export function render(el, ctx, p) {
   const store = ctx.store;
@@ -58,7 +53,8 @@ export function render(el, ctx, p) {
       ${x.status === "waiting" ? `<span class="reason">${esc(x.waitingFor || t("status.reasonUnknown"))}</span>` : `<span class="when">${esc(ago(x.updatedAt))}</span>`}</div>` : "");
     wireBack(head, ctx);
     const on = (act, fn) => { const b = head.querySelector(`[data-act='${act}']`); if (b) b.onclick = fn; };
-    on("term", () => ctx.go("terminal", { node: x.node, term: x.term, title: x.title }));
+    // Opened from its terminal (the chat view of a running session): the terminal is one step back.
+    on("term", () => (p.from === "terminal" ? ctx.back() : ctx.go("terminal", { node: x.node, term: x.term, title: x.title })));
     on("shell", openShell);
     on("stop", stop);
     on("resume", resume);
