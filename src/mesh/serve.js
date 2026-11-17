@@ -27,6 +27,10 @@ const { savePaste, MAX_BYTES } = require("../host/paste");
 const { localSnapshot } = require("./projects");
 const { SESSION_ID, isAgent } = require("../host/launch");
 const { TEXT_MAX } = require("../host/send-text");
+// The most of one message a peer may ask sessions.preview for. A preview is six messages: at this bound it is at
+// most about 100 000 characters (a few hundred kilobytes for text that is not Latin) - still quick over a mobile
+// link, which carries it through the relay in 32 KB pieces - and all but the longest answers fit whole.
+const PREVIEW_TEXT_MAX = 16000;
 
 const LIVE_MS = 3000;
 const LAG_HIGH = 4 * 1024 * 1024, LAG_LOW = 512 * 1024, LAG_CHECK_MS = 1000;
@@ -116,15 +120,18 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
     "resources.get": () => host.resources.get() || host.resources.refresh(),
     // A session running here without a terminal of this host's own, ended for a peer (launch.stopSession).
     "sessions.stop": p => launch.stopSession(str(p?.agent, 16), str(p?.id, 200)),
-    // A session's last messages and a few facts about it (host/session-preview.js): {agent, id} -> the preview (at
-    // most a few messages of a bounded length), or null when there is nothing to read. A session started since the
-    // last scan is looked up by its id.
+    // A session's last messages and a few facts about it (host/session-preview.js): {agent, id, textMax} -> the
+    // preview (at most a few messages of a bounded length), or null when there is nothing to read. A session started
+    // since the last scan is looked up by its id. textMax: how many characters of each message the peer wants - a
+    // phone's chat view asks for whole answers, where the desktop's preview pane shows their start (the default, and
+    // what a peer that names none gets, as before); never more than PREVIEW_TEXT_MAX, a message past it comes cut.
     "sessions.preview": p => {
       const agent = str(p?.agent, 16), id = str(p?.id, 200);
       if (!isAgent(agent) || !SESSION_ID.test(id)) throw new HostError("invalidSession");
       const s = sessions.get()?.sessions.find(x => x.agent === agent && x.id === id)
         ?? { agent, id, file: agent === "Claude" ? host.findTranscript(id) : "" };
-      return host.preview(s);
+      const textMax = Number.isInteger(p?.textMax) && p.textMax > 0 ? Math.min(p.textMax, PREVIEW_TEXT_MAX) : 0;
+      return textMax ? host.preview(s, { textMax }) : host.preview(s);
     },
     // Every terminal here, for every peer; `all` (what a phone asked for before) means nothing any more.
     "terminals.list": () => tabsOut(),

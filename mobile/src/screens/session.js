@@ -16,6 +16,7 @@ import { icon, iconBtn } from "../icons.js";
 import { header, wireBack, statusChip, metaLine, connNote, wireConn } from "./parts.js";
 import { keyStrip, wireStrip } from "./keys.js";
 import { getDraft, setDraft } from "../drafts.js";
+import { renderMarkdown } from "../markdown.js";
 
 // [label or icon, what it sends]; a key with an icon is named by its aria label (keys.js).
 const QUICK = [
@@ -23,15 +24,19 @@ const QUICK = [
   ["up", KEYS.up], ["down", KEYS.down], ["left", KEYS.left], ["right", KEYS.right], ["tab", KEYS.tab], ["shiftTab", KEYS.shiftTab]
 ];
 
-// Message text: escaped, `code` set apart, line breaks kept (by CSS).
-const fmt = s => esc(s).replace(/`([^`\n]+)`/g, "<code>$1</code>");
+// A message is markdown, as the agents write it (markdown.js: nothing of the source gets through as HTML).
+// A message the host sent cut: under OLD_CUT characters it is a host from before whole answers (it cuts at 1500) -
+// the note says to update it; else the message is longer than any host sends.
+const OLD_CUT = 2000;
+// While a session works its preview changes every few seconds: it is asked for again at most this often.
+const RELOAD_MS = 4000;
 
 
 export function render(el, ctx, p) {
   const store = ctx.store;
   const draftKey = `${p.node}:${p.agent}:${p.id}`;
   let item = store.item(p.node, p.agent, p.id);
-  let preview = null, previewAt = -1, loading = false;
+  let preview = null, previewAt = -1, loading = false, loadedAt = 0, reloadTimer = 0;
 
   el.innerHTML = `<div class="sess-head"></div><main class="body session"><div class="conn"></div><div class="msgs"></div></main><div class="dock"></div>`;
   const head = el.querySelector(".sess-head"), msgs = el.querySelector(".msgs"), dock = el.querySelector(".dock"), body = el.querySelector(".body"), conn = el.querySelector(".conn");
@@ -62,6 +67,7 @@ export function render(el, ctx, p) {
     wireConn(conn, store, ctx);
   }
 
+  const cutNote = (text, cut) => (cut ? `<p class="msg-cut">${esc(t(text.length < OLD_CUT ? "session.cutOld" : "session.cutLong", { name: item?.nodeName || "" }))}</p>` : "");
   // The view follows the newest message only while it is at the end (or on the first draw): someone reading further
   // up is left there when the session moves on.
   let drawn = false;
@@ -76,10 +82,10 @@ export function render(el, ctx, p) {
     drawn = true;
     const meta = [preview.model ? t("session.model", { model: preview.model }) : "", preview.prompts != null ? `${tn("session.prompts", preview.prompts)} · ${tn("session.replies", preview.replies ?? 0)}` : ""].filter(Boolean).join(" · ");
     msgs.innerHTML = `${preview.more ? `<p class="more muted small">${esc(t("session.more"))}</p>` : ""}
-      ${preview.firstPrompt ? `<div class="msg first"><div class="who">${esc(t("session.firstPrompt"))}</div><div class="text">${fmt(preview.firstPrompt)}</div></div>` : ""}
+      ${preview.firstPrompt ? `<div class="msg first"><div class="who">${esc(t("session.firstPrompt"))}</div><div class="text md">${renderMarkdown(preview.firstPrompt)}</div>${cutNote(preview.firstPrompt, preview.firstCut)}</div>` : ""}
       ${preview.messages.map(m => `<div class="msg ${m.role}">
         <div class="who">${esc(m.role === "user" ? t("common.you") : preview.agent)}<time>${m.at ? esc(formatTime(m.at)) : ""}</time></div>
-        <div class="text">${fmt(m.text)}${m.cut ? "…" : ""}</div></div>`).join("")}
+        <div class="text md">${renderMarkdown(m.text)}</div>${cutNote(m.text, m.cut)}</div>`).join("")}
       ${preview.messages.length ? "" : `<p class="empty">${esc(t("session.noMessages"))}</p>`}
       ${meta ? `<p class="muted small center">${esc(meta)}</p>` : ""}`;
     if (atEnd) body.scrollTop = body.scrollHeight;
@@ -88,6 +94,7 @@ export function render(el, ctx, p) {
   async function loadPreview() {
     if (!item?.online) { drawMsgs(); return; }
     loading = true;
+    loadedAt = Date.now();
     if (!preview) drawMsgs();
     try {
       previewAt = item.updatedAt;
@@ -200,10 +207,14 @@ export function render(el, ctx, p) {
     item = next;
     lastSig = sig(item);
     if (changedState) { drawHead(); drawDock(); }
-    if (item && (item.updatedAt !== previewAt || cameBack)) loadPreview();
+    if (!item || (item.updatedAt === previewAt && !cameBack)) return;
+    // Whole answers travel now: not more often than every RELOAD_MS, the last change always.
+    const wait = cameBack ? 0 : loadedAt + RELOAD_MS - Date.now();
+    clearTimeout(reloadTimer);
+    if (wait <= 0) loadPreview(); else reloadTimer = setTimeout(loadPreview, wait);
   });
   drawHead();
   drawDock();
   loadPreview();
-  return off;
+  return () => { off(); clearTimeout(reloadTimer); };
 }

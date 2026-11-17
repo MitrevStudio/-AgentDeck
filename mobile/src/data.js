@@ -48,7 +48,8 @@
 //                                                     while the agent works (or when no agent runs there)
 //        "sessions.stop"     { agent, id } -> true   a session running outside an AgentDeck terminal (Claude only;
 //                                                    others answer stopUnsupported, store.stopKind says "")
-//        "sessions.preview"  { agent, id } -> Preview | null (host/session-preview.js):
+//        "sessions.preview"  { agent, id, textMax } -> Preview | null (host/session-preview.js); textMax: characters
+//                               of each message (up to 16000; a host before it ignores it and cuts at 1500):
 //                               { agent, id, startedAt, lastAt, prompts, replies, model, subagents, firstPrompt,
 //                                 firstCut, more, messages: [{ role: "user" | "assistant", text, at, cut? }] }
 //   provider.sendFrame(node, frame)                  a binary frame (src/mesh/frames.js), decoded:
@@ -78,6 +79,9 @@ import { emitter, sessionKey, normPath, baseName } from "./util.js";
 // "unreachable": the session ran when its computer was last seen, and the computer is away now - what it does
 // meanwhile is not known. It is listed with the recent ones, before those that had stopped.
 const RANK = { waiting: 0, busy: 1, idle: 2, other: 2, unreachable: 2.5, stopped: 3 };
+// How much of each message the chat view asks a host for (sessions.preview textMax): whole answers, up to what the
+// host gives at most (src/mesh/serve.js PREVIEW_TEXT_MAX). A host from before this takes no notice and sends 1500.
+const PREVIEW_CHARS = 16000;
 // Why a computer cannot come back by itself (provider-relay.js, web-client.js): it does not know this phone any more,
 // another key answers there, or nothing is left to reach it through. What was loaded of it before is stale; it is
 // not shown as its sessions until it is paired again.
@@ -532,7 +536,7 @@ export function createStore(provider) {
     shared,
 
     // ---------- actions ----------
-    preview: (id, agent, sid) => provider.request(id, "sessions.preview", { agent, id: sid }),
+    preview: (id, agent, sid) => provider.request(id, "sessions.preview", { agent, id: sid, textMax: PREVIEW_CHARS }),
     // A reply typed into the session's agent and submitted (refused with agentNotReady while it works).
     send: (id, termId, text) => provider.request(id, "terminals.send", { id: termId, text }),
     // The same, straight into the terminal as keystrokes (the agent may queue it, or it lands in whatever runs).

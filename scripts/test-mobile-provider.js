@@ -65,7 +65,9 @@ function makeHost() {
   const at = new Date().toISOString();
   fs.writeFileSync(transcript, [
     { type: "user", sessionId: "s-wait", timestamp: at, message: { role: "user", content: "Build the APK" } },
-    { type: "assistant", sessionId: "s-wait", timestamp: at, message: { role: "assistant", content: [{ type: "text", text: "May I run npm?" }], id: "m1", model: "test" } }
+    { type: "assistant", sessionId: "s-wait", timestamp: at, message: { role: "assistant", content: [{ type: "text", text: "May I run npm?" }], id: "m1", model: "test" } },
+    // An answer far longer than a preview used to carry (1500 characters), and longer than a host ever sends (16000).
+    { type: "assistant", sessionId: "s-wait", timestamp: at, message: { role: "assistant", content: [{ type: "text", text: `${"long ".repeat(4000)}END` }], id: "m2", model: "test" } }
   ].map(x => JSON.stringify(x)).join("\n") + "\n");
   const now = Date.now();
   const data = {
@@ -166,7 +168,18 @@ function makeHost() {
     assert.equal(store.stopKind(selfO.id, "Codex", "o-1"), "");
     await assert.rejects(host.launch.stopSession("Codex", "o-1"), e => e.code === "stopUnsupported");
     const pv = await store.preview(selfH.id, "Claude", "s-wait");
-    assert.deepEqual(pv.messages.map(m => m.text), ["Build the APK", "May I run npm?"]);
+    assert.deepEqual(pv.messages.slice(0, 2).map(m => m.text), ["Build the APK", "May I run npm?"]);
+    // The chat view asks for whole answers (textMax): the host sends up to 16000 characters of a message and says
+    // when it cut one. A peer that names no textMax - a phone of the released version, the desktop - gets the 1500
+    // of before; one that asks for more than the host gives gets the host's most; nonsense is the default.
+    assert.deepEqual([pv.messages[2].text.length, pv.messages[2].cut], [16000, true]);
+    const ask = params => provider.request(selfH.id, "sessions.preview", { agent: "Claude", id: "s-wait", ...params }).then(x => [x.messages[2].text.length, x.messages[2].cut === true]);
+    assert.deepEqual(await ask({}), [1500, true], "as before for a peer that asks for nothing");
+    assert.deepEqual(await ask({ textMax: 1e9 }), [16000, true]);
+    assert.deepEqual(await ask({ textMax: 300 }), [300, true]);
+    assert.deepEqual(await ask({ textMax: "all" }), [1500, true]);
+    assert.deepEqual(await ask({ textMax: -5 }), [1500, true]);
+    assert.deepEqual(await ask({ textMax: 20004 }), [16000, true]);
     await assert.rejects(store.preview(selfO.id, "Codex", "o-1"), e => e.code === "unknownMethod");
 
     // ---------- a shell opened from the phone ----------

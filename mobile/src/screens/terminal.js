@@ -101,7 +101,7 @@ export function render(el, ctx, p) {
       <div class="term-busy" role="status" hidden><i class="spinner accent"></i><span></span></div></div>
     <div class="term-over" hidden></div>
     <textarea class="term-input" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="enter" aria-label="${esc(t("term.keyboard"))}"></textarea>
-    <div class="term-keys">${KEYSETS.map((set, i) => keyStrip(set, "xkeys", i ? "hidden" : "")).join("")}
+    <div class="term-dock"><div class="term-keys">${KEYSETS.map((set, i) => keyStrip(set, "xkeys", i ? "hidden" : "")).join("")}
       ${iconBtn("swap", t("term.moreKeys"), 'type="button" aria-pressed="false"', "keys-swap")}</div>
     <div class="term-tools">
       <button class="compose-open" type="button" aria-label="${esc(t("term.composeOpen"))}">${icon("pencil")}<span></span></button>
@@ -111,7 +111,7 @@ export function render(el, ctx, p) {
       ${iconBtn("x", t("term.composeClose"), 'type="button" data-act="compose-close"')}
       <textarea rows="1" enterkeyhint="enter" autocomplete="off" placeholder="${esc(t("term.compose"))}" aria-label="${esc(t("term.composeOpen"))}"></textarea>
       ${iconBtn("insert", t("term.insert"), 'type="button" data-act="insert"')}${iconBtn("send", t("term.sendEnter"), 'type="submit"', "send")}
-    </form>
+    </form></div>
     <input class="pick-gallery" type="file" accept="image/*" hidden><input class="pick-camera" type="file" accept="image/*" capture="environment" hidden>`;
   const head = el.querySelector(".term-head"), wrap = el.querySelector(".term-wrap"), pan = el.querySelector(".term-pan"), hostEl = el.querySelector(".term-host"), over = el.querySelector(".term-over");
   const fitChip = el.querySelector(".term-chip.fit"), endChip = el.querySelector(".term-chip.end");
