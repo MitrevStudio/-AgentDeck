@@ -2,7 +2,9 @@
 // it. It opens at a readable font, scrolled to the cursor (the bottom-left of the screen), and the view pans in both
 // directions with one finger; a pinch zooms (the font is set anew when the fingers lift, so the text stays sharp),
 // a double tap switches between the whole width and the readable size, a single tap brings up the keyboard. While
-// typing, the cursor is kept in view. Dragging down at the top scrolls back through the terminal's history.
+// typing, the cursor is kept in view. A drag up or down scrolls: the terminal's history, or - where a program has
+// the alternate screen or the mouse (the agents do) - by what that program reads as a wheel (see "touch" below); let
+// go at speed it runs on. Typing goes back to the end.
 // Landscape fits more: the whole width gets a bigger font, the readable size shows more columns.
 // A host size too wide to read at its whole width is said in a chip that offers "Fit to phone"; while the history
 // is in view another chip goes back to the end. The key row under the terminal: an arrow repeats while held, Paste
@@ -25,6 +27,11 @@ const READ_PX = 12;           // a readable font on a phone; also what "Fit to p
 const MIN_PX = 3, MAX_PX = 30;
 const PAD = 4;                // the wrap's padding around the terminal
 const TAP_MS = 300, DOUBLE_MS = 320, MOVE_PX = 8;
+// Scrolling: a wheel notch to a program for this many lines' height of a drag, at most so many notches or keys for one
+// move; a fling starts above FLING_FROM px/ms (measured over the drag's last TRAIL_MS), is capped at FLING_MAX, slows
+// down to 1/e in FLING_MS and ends below FLING_END.
+const WHEEL_LINES = 2, STEP_MAX = 10;
+const TRAIL_MS = 100, FLING_FROM = 0.25, FLING_MAX = 5, FLING_MS = 325, FLING_END = 0.03;
 const FONT = '"Cascadia Mono", "JetBrains Mono", "Roboto Mono", "Droid Sans Mono", ui-monospace, Menlo, Consolas, monospace';
 
 // The zoom the user chose last, kept while the app runs: "read" (readable), "fit" (whole width) or a font size.
@@ -58,6 +65,9 @@ function themeFromCss() {
   return theme;
 }
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+// What xterm sends by itself when a program asks it something (the cursor's position, its attributes, a mode, the
+// focus): no one's typing.
+const isAnswer = data => /^(?:\x1b\[\??\d+;\d+R|\x1b\[0n|\x1b\[[?>=][\d;]*c|\x1b\[\??\d+;\d+\$y|\x1b\[[IO]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1bP[^\x1b]*\x1b\\)+$/.test(data);
 
 export function render(el, ctx, p) {
   const store = ctx.store;
@@ -190,7 +200,7 @@ export function render(el, ctx, p) {
     const c = cell();
     const x = PAD + b.cursorX * c.w, y = PAD + b.cursorY * c.h;
     const W = wrap.clientWidth, H = wrap.clientHeight;
-    if (!rowOnly && (x < wrap.scrollLeft + c.w || x + 2 * c.w > wrap.scrollLeft + W)) wrap.scrollLeft = Math.max(0, x - W * 0.7);
+    if (!rowOnly && !cursorHidden && (x < wrap.scrollLeft + c.w || x + 2 * c.w > wrap.scrollLeft + W)) wrap.scrollLeft = Math.max(0, x - W * 0.7);
     if (y < wrap.scrollTop) wrap.scrollTop = Math.max(0, y - c.h);
     else if (y + 2 * c.h > wrap.scrollTop + H) wrap.scrollTop = y + 2 * c.h - H;
   }
@@ -247,19 +257,76 @@ export function render(el, ctx, p) {
     }
   }
 
-  // ---------- touch: pan, pinch, taps ----------
-  let g = null, tapTimer = 0, lastTap = null, scrollAcc = 0, kbRaisedAt = 0;
+  // ---------- touch: scroll, pan, pinch, taps ----------
+  // A one-finger drag keeps to the axis it started on. Sideways it pans a terminal wider than the screen. Up and down
+  // it scrolls - by what the program in the terminal expects, as the desktop's wheel does through xterm:
+  //   * the normal screen: xterm's own history;
+  //   * a program that asked for the mouse (Codex, Claude Code and OpenCode do, in the alternate screen, where there
+  //     is no history of xterm's to scroll): wheel reports at the cell under the finger, in the encoding it asked
+  //     for - it scrolls its own view;
+  //   * the alternate screen without the mouse (a pager, an editor): arrow keys, as terminals send for a wheel there.
+  // The view itself moves first, where the host's screen is taller than what shows. A drag let go at speed runs on
+  // and slows down (a fling); a touch stops it. The listeners are in the capture phase: xterm's own touch handling
+  // under them never gets to swallow a drag.
+  let g = null, tapTimer = 0, lastTap = null, scrollAcc = 0, kbRaisedAt = 0, fling = 0;
   const pt = (touch, r = wrap.getBoundingClientRect()) => ({ x: touch.clientX - r.left, y: touch.clientY - r.top });
-  // A drag's vertical part: the view first, what is left over scrolls the terminal's history.
-  function panBy(dx, dy) {
-    wrap.scrollLeft -= dx;
+  // The mouse encodings a program switches (DECSET 1006 SGR, 1016 SGR in pixels, 1015 urxvt): xterm keeps them to
+  // itself, so they are noted as they pass (the sequence stays xterm's to handle).
+  // The same way: whether the program hid the cursor (25) - a full-screen program's cursor is nothing to follow.
+  const mouseEnc = new Set();
+  let cursorHidden = false;
+  for (const [final, on] of [["h", true], ["l", false]]) {
+    term.parser.registerCsiHandler({ prefix: "?", final }, params => {
+      for (const v of params.flat()) {
+        if (v === 1006 || v === 1015 || v === 1016) { if (on) mouseEnc.add(v); else mouseEnc.delete(v); }
+        else if (v === 25) cursorHidden = !on;
+      }
+      return false;
+    });
+  }
+  // What a vertical drag scrolls: "history" (xterm's), "mouse" (wheel reports) or "keys" (arrows).
+  const wheelMode = () => (["vt200", "drag", "any"].includes(term.modes.mouseTrackingMode) ? "mouse" : term.buffer.active.type === "alternate" ? "keys" : "history");
+  // One wheel notch (up: towards the history) as the program reads it, at a point of the view.
+  function wheelReport(up, at) {
+    const c = cell(), px = at.x + wrap.scrollLeft - PAD, py = at.y + wrap.scrollTop - PAD;
+    const col = clamp(Math.floor(px / c.w) + 1, 1, term.cols), row = clamp(Math.floor(py / c.h) + 1, 1, term.rows);
+    const b = up ? 64 : 65;
+    if (mouseEnc.has(1016)) return `\x1b[<${b};${Math.max(1, Math.round(px))};${Math.max(1, Math.round(py))}M`;
+    if (mouseEnc.has(1006)) return `\x1b[<${b};${col};${row}M`;
+    if (mouseEnc.has(1015)) return `\x1b[${b + 32};${col};${row}M`;
+    return col > 223 || row > 223 ? "" : `\x1b[M${String.fromCharCode(b + 32, col + 32, row + 32)}`;
+  }
+  // lines < 0: towards the history. To a program at most STEP_MAX notches or keys at a time (a fling's frame).
+  function scrollLines(lines, at) {
+    const mode = wheelMode();
+    if (mode === "history") { term.scrollLines(lines); drawChips(); return; }
+    const up = lines < 0, n = Math.min(Math.abs(lines), STEP_MAX);
+    const one = mode === "mouse" ? wheelReport(up, at) : `\x1b${term.modes.applicationCursorKeysMode ? "O" : "["}${up ? "A" : "B"}`;
+    if (one && handle?.online && !closed) handle.write(one.repeat(n));
+  }
+  // The finger moved dy px (down: towards the history): the view first, what is left over as lines - of a program
+  // that scrolls by the wheel one notch for every WHEEL_LINES lines' height.
+  function scrollBy(dy, at) {
     const want = wrap.scrollTop - dy;
     wrap.scrollTop = want;
     const rest = want - wrap.scrollTop; // < 0: past the top (history), > 0: past the bottom
     if (!rest) { scrollAcc = 0; return; }
     scrollAcc += rest;
-    const h = cell().h, lines = Math.trunc(scrollAcc / h);
-    if (lines) { term.scrollLines(lines); scrollAcc -= lines * h; drawChips(); }
+    const unit = cell().h * (wheelMode() === "mouse" ? WHEEL_LINES : 1), lines = Math.trunc(scrollAcc / unit);
+    if (lines) { scrollLines(lines, at); scrollAcc -= lines * unit; }
+  }
+  const stopFling = () => { cancelAnimationFrame(fling); fling = 0; };
+  // vx, vy: px per ms as the finger left; one of them is 0 (the drag's axis).
+  function startFling(vx, vy, at) {
+    let last = performance.now();
+    const step = now => {
+      const dt = Math.min(48, now - last), k = Math.exp(-dt / FLING_MS);
+      last = now;
+      if (vx) wrap.scrollLeft -= vx * dt; else scrollBy(vy * dt, at);
+      vx *= k; vy *= k;
+      fling = Math.abs(vx) < FLING_END && Math.abs(vy) < FLING_END ? 0 : requestAnimationFrame(step);
+    };
+    fling = requestAnimationFrame(step);
   }
   function toggleZoomAt(at) {
     const fit = fitPx();
@@ -272,10 +339,11 @@ export function render(el, ctx, p) {
     ctx.toast(t(zoom === "fit" ? "term.zoomFit" : "term.zoomRead"));
   }
   wrap.addEventListener("touchstart", e => {
+    stopFling();
     const r = wrap.getBoundingClientRect();
     if (e.touches.length === 1) {
       const a = pt(e.touches[0], r);
-      g = { kind: "pan", x0: a.x, y0: a.y, x: a.x, y: a.y, moved: false, t0: Date.now() };
+      g = { kind: "pan", axis: "", x0: a.x, y0: a.y, x: a.x, y: a.y, moved: false, t0: Date.now(), trail: [{ t: performance.now(), x: a.x, y: a.y }] };
     } else if (e.touches.length === 2) {
       clearTimeout(tapTimer);
       const a = pt(e.touches[0], r), b = pt(e.touches[1], r);
@@ -283,24 +351,31 @@ export function render(el, ctx, p) {
       g = { kind: "pinch", d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, px0: term.options.fontSize, cx, cy, scale: 1 };
       pan.style.transformOrigin = `${wrap.scrollLeft + cx}px ${wrap.scrollTop + cy}px`;
     }
-  }, { passive: true });
+  }, { passive: true, capture: true });
   wrap.addEventListener("touchmove", e => {
     if (!g) return;
     e.preventDefault();
     const r = wrap.getBoundingClientRect();
     if (g.kind === "pan" && e.touches.length === 1) {
       const a = pt(e.touches[0], r);
-      if (!g.moved && Math.hypot(a.x - g.x0, a.y - g.y0) < MOVE_PX) return;
-      g.moved = true;
-      panBy(a.x - g.x, a.y - g.y);
+      if (!g.moved) {
+        if (Math.hypot(a.x - g.x0, a.y - g.y0) < MOVE_PX) return;
+        g.moved = true;
+        // Sideways only where there is something to pan to.
+        g.axis = Math.abs(a.x - g.x0) > Math.abs(a.y - g.y0) && wrap.scrollWidth > wrap.clientWidth + 1 ? "x" : "y";
+      }
+      if (g.axis === "x") wrap.scrollLeft -= a.x - g.x; else scrollBy(a.y - g.y, a);
       g.x = a.x; g.y = a.y;
+      const now = performance.now();
+      g.trail.push({ t: now, x: a.x, y: a.y });
+      while (g.trail.length > 2 && now - g.trail[0].t > TRAIL_MS) g.trail.shift();
     } else if (g.kind === "pinch" && e.touches.length === 2) {
       const a = pt(e.touches[0], r), b = pt(e.touches[1], r);
       const px = clamp(g.px0 * Math.hypot(a.x - b.x, a.y - b.y) / g.d0, Math.min(fitPx(), READ_PX), MAX_PX);
       g.scale = px / g.px0;
       pan.style.transform = `scale(${g.scale})`;
     }
-  }, { passive: false });
+  }, { passive: false, capture: true });
   wrap.addEventListener("touchend", e => {
     if (!g) return;
     if (g.kind === "pinch") {
@@ -313,8 +388,17 @@ export function render(el, ctx, p) {
       return;
     }
     const tap = !g.moved && Date.now() - g.t0 < 400;
-    const at = { x: g.x0, y: g.y0 };
+    const at = { x: g.x0, y: g.y0 }, was = g;
     g = null;
+    if (was.moved) {
+      // Let go while moving: the drag runs on along its axis.
+      const a = was.trail[0], b = was.trail.at(-1), dt = b.t - a.t;
+      if (dt > 0 && performance.now() - b.t < 80) {
+        const v = clamp((was.axis === "x" ? b.x - a.x : b.y - a.y) / dt, -FLING_MAX, FLING_MAX);
+        if (Math.abs(v) > FLING_FROM) startFling(was.axis === "x" ? v : 0, was.axis === "x" ? 0 : v, { x: b.x, y: b.y });
+      }
+      return;
+    }
     if (!tap) return;
     e.preventDefault(); // no emulated click: the taps are handled here
     if (lastTap && Date.now() - lastTap.t < DOUBLE_MS && Math.hypot(at.x - lastTap.x, at.y - lastTap.y) < 40) {
@@ -328,17 +412,21 @@ export function render(el, ctx, p) {
     lastTap = { ...at, t: Date.now() };
     clearTimeout(tapTimer);
     tapTimer = setTimeout(() => { if (!keyboardUp()) { kbRaisedAt = Date.now(); showKeyboard(); } }, TAP_MS);
-  }, { passive: false });
-  wrap.addEventListener("touchcancel", () => { pan.style.transform = ""; g = null; });
-  // A mouse / trackpad (the browser preview, a tablet): the wheel pans, Ctrl+wheel zooms.
+  }, { passive: false, capture: true });
+  wrap.addEventListener("touchcancel", () => { pan.style.transform = ""; g = null; }, { capture: true });
+  // A mouse / trackpad (the browser preview, a tablet): the wheel scrolls as a drag does, Ctrl+wheel zooms.
   wrap.addEventListener("wheel", e => {
     e.preventDefault();
+    e.stopPropagation(); // not xterm's as well
+    const r = wrap.getBoundingClientRect(), at = { x: e.clientX - r.left, y: e.clientY - r.top };
     if (e.ctrlKey) {
-      const r = wrap.getBoundingClientRect();
       zoom = clamp(term.options.fontSize * (e.deltaY < 0 ? 1.1 : 1 / 1.1), Math.min(fitPx(), READ_PX), MAX_PX);
       lastZoom = zoom;
-      applyZoom({ x: e.clientX - r.left, y: e.clientY - r.top });
-    } else panBy(-e.deltaX, -e.deltaY);
+      applyZoom(at);
+    } else {
+      wrap.scrollLeft += e.deltaX;
+      scrollBy(-e.deltaY, at);
+    }
   }, { passive: false, capture: true });
   wrap.addEventListener("dblclick", e => {
     const r = wrap.getBoundingClientRect();
@@ -348,8 +436,10 @@ export function render(el, ctx, p) {
   // ---------- keys ----------
   let typingUntil = 0, raf = 0;
   const followCursor = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => ensureCursor()); };
-  const send = data => {
+  // typed: the user's own input (not xterm's answers to a program) - the view goes back to the end of the history.
+  const send = (data, typed = true) => {
     if (!handle || closed || !handle.online) return;
+    if (typed && term.buffer.active.viewportY < term.buffer.active.baseY) { term.scrollToBottom(); drawChips(); }
     handle.write(data);
     typingUntil = Date.now() + 1500;
     followCursor();
@@ -364,7 +454,7 @@ export function render(el, ctx, p) {
   };
   // What xterm sends: its answers to the program's queries (cursor position, ...), and keys typed into its own
   // textarea (a hardware keyboard in the browser preview).
-  term.onData(data => send(withCtrl(data)));
+  term.onData(data => send(withCtrl(data), !isAnswer(data)));
 
   // The soft keyboard types into a field of our own, not into xterm's textarea: Android keyboards compose words
   // (autocorrect, suggestions) and xterm loses characters on the way. Whatever the field holds after each change is
@@ -456,7 +546,8 @@ export function render(el, ctx, p) {
   let lastW = 0;
   const ro = new ResizeObserver(() => {
     if (wrap.clientWidth !== lastW) { lastW = wrap.clientWidth; applyZoom(); drawChips(); }
-    followCursor();
+    // The keyboard came up or went: the cursor stays in sight. Else the view is left where the user put it.
+    if (keyboardUp() || Date.now() < typingUntil) followCursor();
   });
   ro.observe(wrap);
   const offs = [];
@@ -499,6 +590,7 @@ export function render(el, ctx, p) {
     endHold();
     clearTimeout(tapTimer);
     cancelAnimationFrame(raf);
+    stopFling();
     ro.disconnect();
     for (const off of offs) off();
     handle?.detach();
