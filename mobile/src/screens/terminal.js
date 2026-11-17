@@ -23,6 +23,7 @@
 // only the X in the header closes the terminal, after a confirmation.
 // The view outlives a lost link: it says so, and draws the screen again once it is attached anew.
 import { Terminal } from "@xterm/xterm";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { t, errorText } from "../i18n.js";
 import { esc, KEYS, buzz, baseName, terminalFilePath } from "../util.js";
 import { getDraft, setDraft } from "../drafts.js";
@@ -122,6 +123,10 @@ export function render(el, ctx, p) {
     cols: 120, rows: 30, fontFamily: FONT, fontSize: view.read, lineHeight: 1, scrollback: 3000, cursorBlink: false, cursorInactiveStyle: "block",
     allowProposedApi: true, theme: themeFromCss(), macOptionIsMeta: true, convertEol: false
   });
+  // Character widths as the agents count them (Unicode 11), as on the desktop: with xterm's own Unicode 6 an emoji
+  // such as ✅ takes one cell where the agent gave it two, and what it draws after one is shifted.
+  term.loadAddon(new Unicode11Addon());
+  term.unicode.activeVersion = "11";
   term.open(hostEl);
   // xterm draws no cursor until its own textarea was focused once ("cursor initialized"), which never happens here.
   // Private field (xterm 6 CoreService); without it the view merely shows no cursor.
