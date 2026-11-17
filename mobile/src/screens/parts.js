@@ -1,6 +1,6 @@
 // Pieces several screens draw: the header with its tool strip, a session's status (a mark in a row, a chip in the
 // session's header), agent and project labels, a session row, the relay link's note.
-import { t, ago, errorText } from "../i18n.js";
+import { t, ago, agoShort, errorText } from "../i18n.js";
 import { esc, hue } from "../util.js";
 import { icon, iconBtn, agentIcon } from "../icons.js";
 
@@ -40,9 +40,12 @@ const initials = name => {
 };
 export const projectMark = name => `<span class="pmono" style="--h:${hue(name)}" aria-hidden="true">${esc(initials(name))}</span>`;
 // "computer · project · agent" on one line. In a list row the agent is its glyph, first (as the desktop's sidebar
-// has it), so a narrow screen cuts the project rather than the agent.
-export const metaLine = (x, { showNode = true, glyph = false } = {}) => {
-  const parts = [showNode ? nodeTag(x.nodeName, x.online) : "", projectTag(x.project), glyph ? "" : agentTag(x.agent)].filter(Boolean).join('<i class="sep">·</i>');
+// has it), so a narrow screen cuts the project rather than the agent. Under a project's own heading (a computer's
+// screen) neither the computer nor the project is said again: the agent by its glyph and name.
+export const metaLine = (x, { showNode = true, showProject = true, glyph = false } = {}) => {
+  const lead = [showNode ? nodeTag(x.nodeName, x.online) : "", showProject ? projectTag(x.project) : ""].filter(Boolean);
+  if (!lead.length) return agentTag(x.agent);
+  const parts = [...lead, glyph ? "" : agentTag(x.agent)].filter(Boolean).join('<i class="sep">·</i>');
   return glyph ? `<span class="agent-mark" role="img" aria-label="${esc(x.agent)}" title="${esc(x.agent)}">${agentIcon(x.agent)}</span>${parts}` : parts;
 };
 
@@ -72,10 +75,19 @@ export function wireConn(el, store, ctx) {
   on("conn-add", () => ctx?.go("pair", { add: true }));
 }
 
+// Opens a session from a list, the banner or a new start: straight in its terminal while it runs in one on a
+// computer that is there - the terminal is where the work is done -, else on its own screen (its messages; a session
+// that stopped, or runs outside AgentDeck). The terminal's header leads to the messages and back.
+export function openSession(ctx, node, agent, id) {
+  const x = ctx.store.item(node, agent, id);
+  if (x?.online && x.term) ctx.go("terminal", { node, term: x.term, title: x.title });
+  else ctx.go("session", { node, agent, id });
+}
+
 // A terminal in a list (the inbox's Terminals, a computer's screen): its title, then computer · folder · who opened
 // it, "reopened after a restart" under that when the host opened it anew; at the end "ended" / "lost", or an eye with
-// the number of other devices that have it open. The row opens it (an agent's terminal: its session), the X at the
-// end closes it. wireTerminals(el, ctx) handles both.
+// the number of other devices that have it open. The row opens it, the X at the end closes it. wireTerminals(el, ctx)
+// handles both.
 export function terminalRow(x, { showNode = true } = {}) {
   const by = x.owner === "phone" ? t("terms.byPhone") : x.owner === "here" ? t("terms.byHere") : x.ownerName ? t("terms.byPeer", { name: x.ownerName }) : t("terms.byOther");
   const ended = x.exited ? "exited" : x.lost ? "lost" : "";
@@ -118,20 +130,19 @@ export function wireTerminals(el, ctx) {
     if (!open) return;
     e.stopPropagation();
     const d = open.dataset;
-    if (d.sid) ctx.go("session", { node: d.node, agent: d.agent, id: d.sid });
-    else ctx.go("terminal", { node: d.node, term: d.term, title: d.title });
+    ctx.go("terminal", { node: d.node, term: d.term, title: d.title });
   });
 }
 
-// A session in a list (inbox, new session's resume list): the title, what it waits for, computer · project · agent;
-// at the end the time and its status mark.
-export function sessionRow(x, { showNode = true } = {}) {
+// A session in a list (inbox, a computer's projects, new session's resume list): the title, what it waits for (two
+// lines of it), computer · project · agent; at the end the time in its short form and its status mark.
+export function sessionRow(x, { showNode = true, showProject = true } = {}) {
   return `<button class="row st-${esc(x.status)}" data-node="${esc(x.node)}" data-agent="${esc(x.agent)}" data-id="${esc(x.id)}">
     <span class="row-main">
       <span class="row-title">${esc(x.title)}</span>
       ${x.status === "waiting" ? `<span class="row-reason">${esc(x.waitingFor || t("status.reasonUnknown"))}</span>` : ""}
-      <span class="row-meta">${metaLine(x, { showNode, glyph: true })}</span>
+      <span class="row-meta">${metaLine(x, { showNode, showProject, glyph: true })}</span>
     </span>
-    <span class="row-end"><time>${esc(ago(x.updatedAt))}</time>${x.status !== "stopped" ? statusMark(x.status) : ""}</span>
+    <span class="row-end"><time title="${esc(ago(x.updatedAt))}">${esc(agoShort(x.updatedAt))}</time>${x.status !== "stopped" ? statusMark(x.status) : ""}</span>
   </button>`;
 }

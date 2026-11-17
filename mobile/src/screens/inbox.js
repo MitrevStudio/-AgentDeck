@@ -4,7 +4,7 @@
 import { t, errorText } from "../i18n.js";
 import { esc } from "../util.js";
 import { icon } from "../icons.js";
-import { header, sessionRow, terminalRow, connNote, wireConn, wireTerminals } from "./parts.js";
+import { header, sessionRow, terminalRow, connNote, wireConn, wireTerminals, openSession } from "./parts.js";
 
 let lastQuery = ""; // kept while the app runs, as a list's filter usually is
 
@@ -27,16 +27,18 @@ export function render(el, ctx) {
     const group = (name, items) => (items.length ? `${head(name, items.length)}<div class="rows">${items.map(x => sessionRow(x)).join("")}</div>` : "");
     // Nothing to list: said, unless the note says why already (nothing left to dial).
     const empty = !g.waiting.length && !g.working.length && !g.recent.length && !terms.length && !["nohub", "none"].includes(conn.state);
-    list.innerHTML = `${connNote(store)}${group("waiting", g.waiting)}${group("working", g.working)}
+    // The computers that are away are named first: further down, under the recent sessions, nobody would see it.
+    list.innerHTML = `${connNote(store)}
+      ${offline.map(n => `<p class="offline-note">${icon("computer")}<span>${esc(t("inbox.offline", { name: n.name }))}${n.error ? ` · ${esc(errorText(n.error))}` : ""}</span></p>`).join("")}
+      ${group("waiting", g.waiting)}${group("working", g.working)}
       ${terms.length ? `${head("terminals", terms.length)}<div class="rows">${terms.map(x => terminalRow(x)).join("")}</div>` : ""}
       ${group("recent", g.recent)}
-      ${empty ? `<p class="empty">${esc(lastQuery ? t("inbox.noMatch", { q: lastQuery }) : store.loading() || conn.state === "connecting" ? t("session.loading") : t("inbox.empty"))}</p>` : ""}
-      ${offline.map(n => `<p class="offline-note">${icon("computer")}<span>${esc(t("inbox.offline", { name: n.name }))}${n.error ? ` · ${esc(errorText(n.error))}` : ""}</span></p>`).join("")}`;
+      ${empty ? `<p class="empty">${esc(lastQuery ? t("inbox.noMatch", { q: lastQuery }) : store.loading() || conn.state === "connecting" ? t("session.loading") : t("inbox.empty"))}</p>` : ""}`;
     wireConn(list, store, ctx);
   }
   list.onclick = e => {
     const row = e.target.closest(".row");
-    if (row) ctx.go("session", { node: row.dataset.node, agent: row.dataset.agent, id: row.dataset.id });
+    if (row) openSession(ctx, row.dataset.node, row.dataset.agent, row.dataset.id);
   };
   wireTerminals(list, ctx);
   input.oninput = () => { lastQuery = input.value; draw(); };

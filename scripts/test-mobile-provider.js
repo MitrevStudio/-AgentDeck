@@ -65,7 +65,9 @@ function makeHost() {
   const at = new Date().toISOString();
   fs.writeFileSync(transcript, [
     { type: "user", sessionId: "s-wait", timestamp: at, message: { role: "user", content: "Build the APK" } },
-    { type: "assistant", sessionId: "s-wait", timestamp: at, message: { role: "assistant", content: [{ type: "text", text: "May I run npm?" }], id: "m1", model: "test" } }
+    { type: "assistant", sessionId: "s-wait", timestamp: at, message: { role: "assistant", content: [{ type: "text", text: "May I run npm?" }], id: "m1", model: "test" } },
+    // An answer far longer than a preview used to carry (1500 characters), and longer than a host ever sends (16000).
+    { type: "assistant", sessionId: "s-wait", timestamp: at, message: { role: "assistant", content: [{ type: "text", text: `${"long ".repeat(4000)}END` }], id: "m2", model: "test" } }
   ].map(x => JSON.stringify(x)).join("\n") + "\n");
   const now = Date.now();
   const data = {
@@ -166,7 +168,18 @@ function makeHost() {
     assert.equal(store.stopKind(selfO.id, "Codex", "o-1"), "");
     await assert.rejects(host.launch.stopSession("Codex", "o-1"), e => e.code === "stopUnsupported");
     const pv = await store.preview(selfH.id, "Claude", "s-wait");
-    assert.deepEqual(pv.messages.map(m => m.text), ["Build the APK", "May I run npm?"]);
+    assert.deepEqual(pv.messages.slice(0, 2).map(m => m.text), ["Build the APK", "May I run npm?"]);
+    // The chat view asks for whole answers (textMax): the host sends up to 16000 characters of a message and says
+    // when it cut one. A peer that names no textMax - a phone of the released version, the desktop - gets the 1500
+    // of before; one that asks for more than the host gives gets the host's most; nonsense is the default.
+    assert.deepEqual([pv.messages[2].text.length, pv.messages[2].cut], [16000, true]);
+    const ask = params => provider.request(selfH.id, "sessions.preview", { agent: "Claude", id: "s-wait", ...params }).then(x => [x.messages[2].text.length, x.messages[2].cut === true]);
+    assert.deepEqual(await ask({}), [1500, true], "as before for a peer that asks for nothing");
+    assert.deepEqual(await ask({ textMax: 1e9 }), [16000, true]);
+    assert.deepEqual(await ask({ textMax: 300 }), [300, true]);
+    assert.deepEqual(await ask({ textMax: "all" }), [1500, true]);
+    assert.deepEqual(await ask({ textMax: -5 }), [1500, true]);
+    assert.deepEqual(await ask({ textMax: 20004 }), [16000, true]);
     await assert.rejects(store.preview(selfO.id, "Codex", "o-1"), e => e.code === "unknownMethod");
 
     // ---------- a shell opened from the phone ----------
@@ -237,7 +250,21 @@ function makeHost() {
     r.stop();
     await wait(() => states.includes(false), "the view hears the link is gone");
     assert.notEqual(store.connection().state, "ok");
+    // What ran when the computer was last seen is "unreachable", not "stopped": it is not known what it does now. It
+    // is not waiting any more as far as the inbox goes, keeps its terminal (a reply being typed stays), and what had
+    // stopped before is still stopped.
+    await wait(() => store.item(selfH.id, "Claude", "s-wait")?.status === "unreachable", "a running session of a computer that is away is unreachable");
+    const away = store.item(selfH.id, "Claude", "s-wait");
+    assert.deepEqual([away.online, away.waitingFor, away.group, away.live, away.term], [false, "", "recent", null, local]);
+    assert.equal(store.item(selfH.id, "Claude", "s-old").status, "stopped");
+    assert.equal(store.inbox().waiting.length, 0, "nothing waits on a computer that is away");
+    assert.equal(store.inbox().recent.find(x => x.node === selfH.id).id, "s-wait", "the unreachable ones come before the stopped ones");
     await wait(() => hostSize().join() === "100,30,", "the size goes back to the host's pane once the phone's link dropped");
+    // whenOnline: no at once for a computer that is away, and it gives up after its time; one asked now is settled by
+    // the computer coming back (below).
+    await assert.rejects(store.whenOnline(selfH.id, 200), e => e.code === "offline");
+    let cameBack = false;
+    const backOnline = store.whenOnline(selfH.id, 60000).then(() => { cameBack = true; });
     r = node("R", { kind: "host", relayOnly: true, port: rPort });
     all.push(r);
     await r.start();
@@ -257,6 +284,9 @@ function makeHost() {
     await wait(() => provider.nodes().find(n => n.id === selfR.id)?.status === "online", "the relay dialled at once by wake", 3000);
     offLinks();
     await wait(() => resets.length && states.at(-1) === true, "re-attached after the link came back", 60000);
+    await backOnline;
+    assert.ok(cameBack && store.computers().find(n => n.id === selfH.id).online, "whenOnline settled when the computer was back");
+    await store.whenOnline(selfH.id, 50); // at once now
     assert.deepEqual(await early, { cols: 40, rows: 15, driver: provider.id }, "a take right after the reconnect waits for the attach");
     assert.deepEqual(resizeAsks, ["terminals.attach", "terminals.resize"], "attached first, then the take - no notViewing");
     assert.deepEqual(hostSize(), [40, 15, provider.id]);

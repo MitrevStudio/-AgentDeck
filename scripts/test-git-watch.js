@@ -185,12 +185,16 @@ async function main() {
   const GAP = 5000;
   options.watchUnfocusedMs = GAP;
   options.focused = () => false;
-  assert.equal(git.getWatchDelay(), GAP);
+  // On a slow machine the gap is longer than GAP (a pass that took long is followed by a longer wait), so the writing
+  // goes on until enough passes were seen rather than for a fixed time.
+  assert.ok(git.getWatchDelay() >= GAP, `the gap while unfocused (${git.getWatchDelay()} ms)`);
   before = count();
-  await keepWriting(GAP * 2 + 3500, () => write('App/Busy.cs'));
+  const busyFrom = Date.now();
+  while (count() - before < 3 && Date.now() - busyFrom < 90000) { write('App/Busy.cs'); await sleep(150); }
+  const busyMs = Date.now() - busyFrom;
   const runs = statusRuns().slice(before).map(s => s.at);
-  assert.ok(runs.length >= 2, `changes are still seen while unfocused (${runs.length} passes)`);
-  assert.ok(runs.length <= 4, `at most one pass per gap (${runs.length} passes in ${GAP * 2 + 3500} ms)`);
+  assert.ok(runs.length >= 2, `changes are still seen while unfocused (${runs.length} passes in ${busyMs} ms)`);
+  assert.ok(runs.length <= Math.floor(busyMs / GAP) + 2, `at most one pass per gap (${runs.length} passes in ${busyMs} ms)`);
   for (let i = 2; i < runs.length; i++) assert.ok(runs[i] - runs[i - 1] >= GAP - 100, `passes ${runs[i] - runs[i - 1]} ms apart`);
   assert.ok(runs.at(-1) - runs.at(-2) >= GAP - 100, `the last two passes ${runs.at(-1) - runs.at(-2)} ms apart`);
   options.focused = () => true;

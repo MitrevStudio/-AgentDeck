@@ -48,7 +48,8 @@
 //                                                     while the agent works (or when no agent runs there)
 //        "sessions.stop"     { agent, id } -> true   a session running outside an AgentDeck terminal (Claude only;
 //                                                    others answer stopUnsupported, store.stopKind says "")
-//        "sessions.preview"  { agent, id } -> Preview | null (host/session-preview.js):
+//        "sessions.preview"  { agent, id, textMax } -> Preview | null (host/session-preview.js); textMax: characters
+//                               of each message (up to 16000; a host before it ignores it and cuts at 1500):
 //                               { agent, id, startedAt, lastAt, prompts, replies, model, subagents, firstPrompt,
 //                                 firstCut, more, messages: [{ role: "user" | "assistant", text, at, cut? }] }
 //   provider.sendFrame(node, frame)                  a binary frame (src/mesh/frames.js), decoded:
@@ -75,7 +76,12 @@
 // that part is left empty and store.missing(node, method) says so.
 import { emitter, sessionKey, normPath, baseName } from "./util.js";
 
-const RANK = { waiting: 0, busy: 1, idle: 2, other: 2, stopped: 3 };
+// "unreachable": the session ran when its computer was last seen, and the computer is away now - what it does
+// meanwhile is not known. It is listed with the recent ones, before those that had stopped.
+const RANK = { waiting: 0, busy: 1, idle: 2, other: 2, unreachable: 2.5, stopped: 3 };
+// How much of each message the chat view asks a host for (sessions.preview textMax): whole answers, up to what the
+// host gives at most (src/mesh/serve.js PREVIEW_TEXT_MAX). A host from before this takes no notice and sends 1500.
+const PREVIEW_CHARS = 16000;
 // Why a computer cannot come back by itself (provider-relay.js, web-client.js): it does not know this phone any more,
 // another key answers there, or nothing is left to reach it through. What was loaded of it before is stale; it is
 // not shown as its sessions until it is paired again.
@@ -229,21 +235,23 @@ export function createStore(provider) {
   function makeItem(id, s, live) {
     const e = entry(id);
     const agent = s?.agent || live.agent, sid = s?.id || live.id, cwd = s?.cwd || live?.cwd || "";
-    const status = isOnline(id) ? statusOf(live) : "stopped";
+    const online = isOnline(id);
+    const status = online ? statusOf(live) : live ? "unreachable" : "stopped";
     return {
-      key: sessionKey(id, agent, sid), node: id, nodeName: nodeName(id), online: isOnline(id),
+      key: sessionKey(id, agent, sid), node: id, nodeName: nodeName(id), online,
       agent, id: sid, cwd, project: projectOf(e, cwd, s),
       // A terminal with no session yet (unlinked) goes by the terminal's title.
       title: s?.title || live?.name || (live?.unlinked && e.terminals.find(x => x.id === live.term)?.title) || `${agent} ${sid.slice(0, 8)}`,
       updatedAt: Math.max(s?.updatedAt || 0, live?.activityAt || 0, live?.statusAt || 0),
-      live: status === "stopped" ? null : live, status, waitingFor: live?.status === "waiting" ? live.waitingFor || "" : "",
-      term: termOf(id, agent, sid, (isOnline(id) && live) || null),
-      group: status === "waiting" ? "waiting" : status === "stopped" ? "recent" : "working"
+      live: online && status !== "stopped" ? live : null, status, waitingFor: online && live?.status === "waiting" ? live.waitingFor || "" : "",
+      term: termOf(id, agent, sid, (online && live) || null),
+      group: status === "waiting" ? "waiting" : status === "stopped" || status === "unreachable" ? "recent" : "working"
     };
   }
   function itemsOf(id) {
     const e = entry(id);
-    const liveMap = new Map((isOnline(id) ? e.live : []).map(l => [`${l.agent}:${l.id}`, l]));
+    // The live list of a computer that is away is what it said last: its sessions show as "unreachable".
+    const liveMap = new Map(e.live.map(l => [`${l.agent}:${l.id}`, l]));
     const items = (e.data?.sessions || []).map(s => {
       const k = `${s.agent}:${s.id}`, live = liveMap.get(k);
       liveMap.delete(k);
@@ -502,9 +510,12 @@ export function createStore(provider) {
     missing: (id, method) => entry(id).missing.has(method),
     // True while an online computer has not answered its first lists yet.
     loading: () => [...nodes.values()].some(e => e.node?.status === "online" && e.node.kind !== "relay" && !e.loaded),
-    // { waiting: Item[], working: Item[], recent: Item[] }; Item = see makeItem.
+    // { waiting: Item[], working: Item[], recent: Item[] }; Item = see makeItem. Item.status: "waiting" | "busy" |
+    // "idle" | "other" | "stopped", or "unreachable" for a session that ran when its computer went away.
     inbox,
     item: (id, agent, sid) => itemOf(id, agent, sid),
+    // Every session of one computer (Item[]), in no order.
+    sessions: id => itemsOf(id),
     // The node's projects (registry) and its sessions per project, newest first, for "New session".
     projects(id) {
       const e = entry(id);
@@ -525,7 +536,7 @@ export function createStore(provider) {
     shared,
 
     // ---------- actions ----------
-    preview: (id, agent, sid) => provider.request(id, "sessions.preview", { agent, id: sid }),
+    preview: (id, agent, sid) => provider.request(id, "sessions.preview", { agent, id: sid, textMax: PREVIEW_CHARS }),
     // A reply typed into the session's agent and submitted (refused with agentNotReady while it works).
     send: (id, termId, text) => provider.request(id, "terminals.send", { id: termId, text }),
     // The same, straight into the terminal as keystrokes (the agent may queue it, or it lands in whatever runs).
@@ -533,6 +544,21 @@ export function createStore(provider) {
       provider.sendFrame(id, { type: "input", id: termId, data: text });
       setTimeout(() => provider.sendFrame(id, { type: "input", id: termId, data: "\r" }), ENTER_AFTER_MS);
     },
+    // Settles once the computer is linked and its lists are in (at once when they are); rejects with "offline" when
+    // it is not within ms. For what the user started before the app went to the background and came back (a photo
+    // taken in the camera app: the links are made again as the app returns).
+    whenOnline(id, ms = 15000) {
+      const ok = () => isOnline(id) && nodes.get(id)?.loaded === true;
+      if (ok()) return Promise.resolve();
+      return new Promise((resolve, reject) => {
+        const done = () => { off(); clearTimeout(timer); };
+        const off = out.on("change", () => { if (ok()) { done(); resolve(); } });
+        const timer = setTimeout(() => { done(); reject(Object.assign(new Error("offline"), { code: "offline" })); }, ms);
+      });
+    },
+    // A file for a terminal there (a picture from the phone): name, data (base64, up to 10 MB of bytes) -> its path
+    // on that computer (files.put; a host without it answers unknownMethod). It may take a while on a mobile link.
+    putFile: (id, name, data) => provider.request(id, "files.put", { name, data }, { timeout: 120000 }),
     // Raw keys (the quick-key row) without attaching.
     keys: (id, termId, data) => provider.sendFrame(id, { type: "input", id: termId, data }),
     // How Stop ends a session: "terminal" - it runs in an AgentDeck terminal, which is closed (the agent with it);

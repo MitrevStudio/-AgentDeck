@@ -5,11 +5,17 @@
 const STRINGS = {
   en: {
     "app.name": "AgentDeck",
+    "boot.failed": "AgentDeck could not start.",
+    "phone.name": "Phone",
     "common.back": "Back",
     "common.cancel": "Cancel",
     "common.open": "Open",
     "common.you": "You",
     "common.search": "Search",
+    "common.done": "Done",
+    "common.dismiss": "Dismiss",
+    "common.yes": "yes",
+    "common.no": "no",
 
     "nav.inbox": "Sessions",
     "nav.new": "New",
@@ -22,16 +28,21 @@ const STRINGS = {
     "pair.paste": "Paste the code's text",
     "pair.pastePh": "AGENTDECK-PAIR:…",
     "pair.pair": "Pair",
-    "pair.manual": "Without a code from AgentDeck",
+    "pair.manual": "Connect to a relay by its address",
+    "pair.manualHint": "Then each computer behind it pairs with its own code.",
     "pair.relay": "Address of the relay (or of a computer)",
     "pair.relayPh": "192.168.1.10:7421",
     "pair.code": "Its code",
-    "pair.codePh": "the relay's long code (agentdeck-host pair) or a computer's six digits",
+    "pair.codePh": "long code or 6 digits",
+    "pair.codeHint": "A relay's long code (agentdeck-host pair), or a computer's six digits (Settings → Computers).",
+    "pair.byHand": "Pair by hand",
     "pair.connect": "Connect",
     "pair.diag": "Connection check",
     "pair.badInput": "Give the address with its port and the code.",
     "pair.badAddress": "Give the address with its port, e.g. 192.168.1.10:7421",
     "pair.notCode": "Not an AgentDeck pairing code: {why}",
+    "pair.badCode": "That is not an AgentDeck pairing code: its text starts with AGENTDECK-PAIR:",
+    "pair.otherVersion": "That code was made by another version of AgentDeck: update the app, or AgentDeck on the computer, and make a new code.",
     "pair.connecting": "Pairing with {addr}…",
     "pair.addTitle": "Add computers",
     "pair.name": "This phone's name",
@@ -68,6 +79,7 @@ const STRINGS = {
     "scan.noCamera": "No camera here, or no access to it. Allow the camera, or pair by hand.",
     "scan.insecure": "The camera needs a secure page (the app, or localhost in a browser).",
     "scan.found": "Code read",
+    "scan.torch": "Light",
 
     "inbox.title": "Sessions",
     "inbox.searchPh": "Session, project or computer",
@@ -92,18 +104,32 @@ const STRINGS = {
     "terms.none": "No terminals on {name}.",
 
     "node.newShell": "New terminal in the home folder",
-    "node.offline": "{name} is offline: its terminals show once it is connected.",
+    "node.offline": "{name} is offline: its projects and terminals show once it is connected.",
+    "node.projects": "Projects",
+    "node.otherFolders": "Other folders",
+    "node.noSessions": "No sessions here yet",
+    "node.newIn": "New session in {name}",
+    "node.shellIn": "Terminal in {name}",
+    "node.showAll": "Show all {n}",
+    "node.waiting.one": "{n} needs you",
+    "node.waiting.other": "{n} need you",
+    "node.running.one": "{n} running",
+    "node.running.other": "{n} running",
+    "node.noProjects": "No projects on {name}.",
 
     "status.waiting": "Needs you",
     "status.busy": "Working",
     "status.idle": "Ready",
     "status.other": "Running",
     "status.stopped": "Stopped",
+    "status.unreachable": "Unreachable",
     "status.reasonUnknown": "a question or a permission",
 
     "session.noMessages": "No messages to show",
     "session.firstPrompt": "First prompt",
     "session.more": "Older messages are on the computer",
+    "session.cutOld": "The rest of this message was not sent: AgentDeck on {name} is older. Update it to read whole answers here.",
+    "session.cutLong": "A very long message: the rest of it is in the terminal on {name}.",
     "session.replyPh": "Reply…",
     "session.send": "Send",
     "session.stop": "Stop",
@@ -119,6 +145,7 @@ const STRINGS = {
     "session.offline": "The computer is offline",
     "session.sent": "Sent",
     "session.loading": "Loading…",
+    "session.starting": "Starting…",
     "session.model": "Model {model}",
     "session.prompts.one": "{n} prompt",
     "session.prompts.other": "{n} prompts",
@@ -144,11 +171,39 @@ const STRINGS = {
     "term.viewers": "Also open on: {names}",
     "term.reopened": "Reopened after a restart",
     "term.keyboard": "Keyboard",
+    "term.fitChip": "{cols} columns · Fit to phone",
+    "term.toEnd": "To the end",
+    "term.itsWindow": "its window",
+    "term.pasteAsk": "The clipboard cannot be read from here. Paste the text into this field:",
+    "term.more": "More",
+    "term.moreKeys": "The other keys",
+    "term.chat": "Messages",
+    "term.stopSession": "Stop the session",
+    "term.textSize": "Text size",
+    "term.smaller": "Smaller text",
+    "term.larger": "Larger text",
+    "term.copyScreen": "Copy what is on the screen",
+    "term.copyLast": "Copy the last {n} lines",
+    "term.copied": "Copied",
+    "term.copyByHand": "The clipboard cannot be written from here. Select the text and copy it:",
+    "term.compose": "Message…",
+    "term.composeOpen": "Write a message",
+    "term.composeClose": "Close the message field",
+    "term.sendEnter": "Send it, with Enter",
+    "term.insert": "Put it in, without Enter",
+    "term.picture": "Send a picture",
+    "term.pictureCamera": "Take a photo",
+    "term.pictureGallery": "Choose a picture",
+    "term.picturePreparing": "Preparing the picture…",
+    "term.pictureSending": "Sending the picture ({size})…",
+    "term.pictureSent": "The picture is on {name}; its path is in the terminal",
     "term.close": "Close the terminal",
 
     "key.strip": "Keys for the terminal",
     "key.enter": "Enter",
     "key.tab": "Tab",
+    "key.shiftTab": "Shift+Tab",
+    "key.paste": "Paste",
     "key.up": "Arrow up",
     "key.down": "Arrow down",
     "key.left": "Arrow left",
@@ -170,6 +225,7 @@ const STRINGS = {
     "new.started": "Started on {name}",
     "new.resumeTitle": "Or resume one",
     "new.noProjects": "No projects on this computer",
+    "new.filterPh": "Filter the projects",
     "new.noComputers": "No computer is online",
 
     "computers.title": "Computers",
@@ -183,6 +239,10 @@ const STRINGS = {
     "computers.add": "Add computers: paste a code or type an address",
     "computers.scan": "Scan a code from AgentDeck",
     "computers.addBehind": "Pair a computer behind {name}",
+    "computers.refresh": "Refresh",
+    "computers.refreshed": "Asked the computers again",
+    "computers.outdated": "needs an update",
+    "computers.version": "App version {version}",
     "computers.phone": "This phone",
     "computers.rename": "Rename",
     "computers.renamed": "The computers will see “{name}”",
@@ -219,6 +279,7 @@ const STRINGS = {
     "diag.ok": "Connected in {ms} ms",
     "diag.okClosed": "The server closed it (code {code})",
     "diag.fail": "Failed after {ms} ms (code {code})",
+    "diag.addrPh": "ws://192.168.1.10:7421",
     "diag.timeout": "No answer in {s} s",
     "diag.bad": "Not a ws:// or wss:// address",
     "diag.message": "Received: {text}",
@@ -261,18 +322,32 @@ const STRINGS = {
     "err.notViewing": "The terminal is not open here yet. Try again in a moment.",
     "err.tooManyTerminals": "Too many terminals run on this computer. Stop some first.",
     "err.storeFailed": "The phone's secure storage failed.",
+    "err.pairOutdated": "That AgentDeck is older and pairs in a way this app no longer accepts – update it and pair again.",
+    "err.tooBig": "That is too big to send.",
+    "err.notPicture": "This phone cannot read that file as a picture.",
+    "err.unreadable": "That computer cannot read its own settings right now – try again in a moment.",
 
     "time.justNow": "just now",
+    "time.now": "now",
+    "time.min": "{n}m",
+    "time.hour": "{n}h",
+    "time.day": "{n}d",
     "time.none": "no date"
   },
 
   bg: {
     "app.name": "AgentDeck",
+    "boot.failed": "AgentDeck не можа да тръгне.",
+    "phone.name": "Телефон",
     "common.back": "Назад",
     "common.cancel": "Отказ",
     "common.open": "Отвори",
     "common.you": "Ти",
     "common.search": "Търси",
+    "common.done": "Готово",
+    "common.dismiss": "Скрий",
+    "common.yes": "да",
+    "common.no": "не",
 
     "nav.inbox": "Сесии",
     "nav.new": "Нова",
@@ -285,16 +360,21 @@ const STRINGS = {
     "pair.paste": "Постави текста на кода",
     "pair.pastePh": "AGENTDECK-PAIR:…",
     "pair.pair": "Сдвои",
-    "pair.manual": "Без код от AgentDeck",
+    "pair.manual": "Свържи се с релей по адреса му",
+    "pair.manualHint": "После всеки компютър зад него се сдвоява със своя код.",
     "pair.relay": "Адрес на релея (или на компютър)",
     "pair.relayPh": "192.168.1.10:7421",
     "pair.code": "Кодът му",
-    "pair.codePh": "дългият код на релея (agentdeck-host pair) или шестте цифри на компютър",
+    "pair.codePh": "дълъг код или 6 цифри",
+    "pair.codeHint": "Дългият код на релей (agentdeck-host pair) или шестте цифри на компютър (Настройки → Компютри).",
+    "pair.byHand": "Сдвои ръчно",
     "pair.connect": "Свържи",
     "pair.diag": "Проверка на връзката",
     "pair.badInput": "Дай адреса с порта и кода.",
     "pair.badAddress": "Дай адреса с порта, напр. 192.168.1.10:7421",
     "pair.notCode": "Не е код за сдвояване от AgentDeck: {why}",
+    "pair.badCode": "Това не е код за сдвояване от AgentDeck: текстът му започва с AGENTDECK-PAIR:",
+    "pair.otherVersion": "Кодът е направен от друга версия на AgentDeck: обнови приложението или AgentDeck на компютъра и направи нов код.",
     "pair.connecting": "Сдвоявам се с {addr}…",
     "pair.addTitle": "Добави компютри",
     "pair.name": "Име на телефона",
@@ -331,6 +411,7 @@ const STRINGS = {
     "scan.noCamera": "Няма камера или достъп до нея. Разреши камерата или сдвои ръчно.",
     "scan.insecure": "Камерата иска защитена страница (приложението или localhost в браузър).",
     "scan.found": "Кодът е прочетен",
+    "scan.torch": "Светлина",
 
     "inbox.title": "Сесии",
     "inbox.searchPh": "Сесия, проект или компютър",
@@ -355,18 +436,32 @@ const STRINGS = {
     "terms.none": "Няма терминали на {name}.",
 
     "node.newShell": "Нов терминал в домашната папка",
-    "node.offline": "{name} е офлайн: терминалите му ще се покажат, когато се свърже.",
+    "node.offline": "{name} е офлайн: проектите и терминалите му ще се покажат, когато се свърже.",
+    "node.projects": "Проекти",
+    "node.otherFolders": "Други папки",
+    "node.noSessions": "Тук още няма сесии",
+    "node.newIn": "Нова сесия в {name}",
+    "node.shellIn": "Терминал в {name}",
+    "node.showAll": "Покажи всичките {n}",
+    "node.waiting.one": "{n} те чака",
+    "node.waiting.other": "{n} те чакат",
+    "node.running.one": "{n} върви",
+    "node.running.other": "{n} вървят",
+    "node.noProjects": "Няма проекти на {name}.",
 
     "status.waiting": "Нужен си",
     "status.busy": "Работи",
     "status.idle": "Готова",
     "status.other": "Върви",
     "status.stopped": "Спряна",
+    "status.unreachable": "Няма връзка",
     "status.reasonUnknown": "въпрос или разрешение",
 
     "session.noMessages": "Няма съобщения за показване",
     "session.firstPrompt": "Първа задача",
     "session.more": "По-старите съобщения са на компютъра",
+    "session.cutOld": "Останалото от съобщението не е пратено: AgentDeck на {name} е по-стар. Обнови го, за да четеш тук целите отговори.",
+    "session.cutLong": "Много дълго съобщение: останалото е в терминала на {name}.",
     "session.replyPh": "Отговор…",
     "session.send": "Прати",
     "session.stop": "Спри",
@@ -382,6 +477,7 @@ const STRINGS = {
     "session.offline": "Компютърът е офлайн",
     "session.sent": "Пратено",
     "session.loading": "Зареждам…",
+    "session.starting": "Пуска се…",
     "session.model": "Модел {model}",
     "session.prompts.one": "{n} задача",
     "session.prompts.other": "{n} задачи",
@@ -407,11 +503,39 @@ const STRINGS = {
     "term.viewers": "Отворен и на: {names}",
     "term.reopened": "Отворен отново след рестарт",
     "term.keyboard": "Клавиатура",
+    "term.fitChip": "{cols} колони · Нагоди към телефона",
+    "term.toEnd": "Към края",
+    "term.itsWindow": "прозорецът му",
+    "term.pasteAsk": "Клипбордът не може да се прочете оттук. Постави текста в това поле:",
+    "term.more": "Още",
+    "term.moreKeys": "Другите клавиши",
+    "term.chat": "Съобщения",
+    "term.stopSession": "Спри сесията",
+    "term.textSize": "Размер на текста",
+    "term.smaller": "По-малък текст",
+    "term.larger": "По-голям текст",
+    "term.copyScreen": "Копирай това, което е на екрана",
+    "term.copyLast": "Копирай последните {n} реда",
+    "term.copied": "Копирано",
+    "term.copyByHand": "Клипбордът не може да се запише оттук. Маркирай текста и го копирай:",
+    "term.compose": "Съобщение…",
+    "term.composeOpen": "Напиши съобщение",
+    "term.composeClose": "Затвори полето за съобщение",
+    "term.sendEnter": "Прати го, с Enter",
+    "term.insert": "Сложи го, без Enter",
+    "term.picture": "Прати снимка",
+    "term.pictureCamera": "Снимай",
+    "term.pictureGallery": "Избери снимка",
+    "term.picturePreparing": "Подготвям снимката…",
+    "term.pictureSending": "Пращам снимката ({size})…",
+    "term.pictureSent": "Снимката е на {name}; пътят ѝ е в терминала",
     "term.close": "Затвори терминала",
 
     "key.strip": "Клавиши за терминала",
     "key.enter": "Enter",
     "key.tab": "Tab",
+    "key.shiftTab": "Shift+Tab",
+    "key.paste": "Постави",
     "key.up": "Стрелка нагоре",
     "key.down": "Стрелка надолу",
     "key.left": "Стрелка наляво",
@@ -433,6 +557,7 @@ const STRINGS = {
     "new.started": "Пусната на {name}",
     "new.resumeTitle": "Или продължи стара",
     "new.noProjects": "Няма проекти на този компютър",
+    "new.filterPh": "Филтрирай проектите",
     "new.noComputers": "Няма компютър онлайн",
 
     "computers.title": "Компютри",
@@ -446,6 +571,10 @@ const STRINGS = {
     "computers.add": "Добави компютри: постави код или въведи адрес",
     "computers.scan": "Сканирай код от AgentDeck",
     "computers.addBehind": "Сдвои компютър зад {name}",
+    "computers.refresh": "Опресни",
+    "computers.refreshed": "Попитах компютрите отново",
+    "computers.outdated": "трябва да се обнови",
+    "computers.version": "Версия на приложението {version}",
     "computers.phone": "Този телефон",
     "computers.rename": "Преименувай",
     "computers.renamed": "Компютрите ще виждат „{name}“",
@@ -482,6 +611,7 @@ const STRINGS = {
     "diag.ok": "Свързано за {ms} ms",
     "diag.okClosed": "Сървърът затвори (код {code})",
     "diag.fail": "Неуспех след {ms} ms (код {code})",
+    "diag.addrPh": "ws://192.168.1.10:7421",
     "diag.timeout": "Няма отговор за {s} s",
     "diag.bad": "Не е ws:// или wss:// адрес",
     "diag.message": "Получено: {text}",
@@ -524,8 +654,16 @@ const STRINGS = {
     "err.notViewing": "Терминалът още не е отворен тук. Опитай пак след малко.",
     "err.tooManyTerminals": "На този компютър работят твърде много терминали. Спри някои първо.",
     "err.storeFailed": "Защитеното хранилище на телефона даде грешка.",
+    "err.pairOutdated": "Този AgentDeck е по-стар и се сдвоява по начин, който приложението вече не приема – обнови го и сдвои пак.",
+    "err.tooBig": "Това е твърде голямо за пращане.",
+    "err.notPicture": "Телефонът не може да прочете този файл като снимка.",
+    "err.unreadable": "Компютърът не може да прочете настройките си в момента – опитай пак след малко.",
 
     "time.justNow": "току-що",
+    "time.now": "сега",
+    "time.min": "{n} мин",
+    "time.hour": "{n} ч",
+    "time.day": "{n} д",
     "time.none": "без дата"
   }
 };
@@ -542,12 +680,12 @@ function detect() {
   return "en";
 }
 
-let lang = detect();
+let lang = typeof navigator === "undefined" ? "en" : detect();
 const cache = new Map();
 
 export function setLanguage(next) {
   if (STRINGS[next]) { lang = next; cache.clear(); }
-  document.documentElement.lang = lang;
+  if (typeof document !== "undefined") document.documentElement.lang = lang;
   return lang;
 }
 export const language = () => lang;
@@ -590,6 +728,17 @@ export function ago(ms) {
   if (abs < 3600) return rel(Math.round(sec / 60), "minute");
   if (abs < 86400) return rel(Math.round(sec / 3600), "hour");
   if (abs < 7 * 86400) return rel(Math.round(sec / 86400), "day");
+  return new Date(ms).toLocaleDateString(LOCALES[lang], { day: "numeric", month: "short" });
+}
+// The same in a few characters - "now", "11m", "2h", "3d", then the date - for a list row, where the long form
+// would take the title's room (it is the row's tooltip).
+export function agoShort(ms, now = Date.now()) {
+  if (!ms) return "";
+  const sec = Math.max(0, (now - ms) / 1000);
+  if (sec < 45) return t("time.now");
+  if (sec < 3570) return t("time.min", { n: Math.max(1, Math.round(sec / 60)) });
+  if (sec < 84600) return t("time.hour", { n: Math.max(1, Math.round(sec / 3600)) });
+  if (sec < 7 * 86400) return t("time.day", { n: Math.max(1, Math.round(sec / 86400)) });
   return new Date(ms).toLocaleDateString(LOCALES[lang], { day: "numeric", month: "short" });
 }
 export const formatTime = ms => new Date(ms).toLocaleTimeString(LOCALES[lang], { hour: "2-digit", minute: "2-digit" });

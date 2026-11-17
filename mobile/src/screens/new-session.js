@@ -1,23 +1,35 @@
 // A new session: computer -> project -> agent -> task (optional), started in a terminal there; or one of the
 // project's earlier sessions resumed. Start sits in the header, so it stays in sight above the keyboard.
+// The computers and the agents are each one row that scrolls sideways; a project's path is cut at its start (the
+// folder is at its end); more than a few projects get a filter. params: node, project - chosen already (from a
+// computer's screen: "New session in <project>"), with a way back there.
 import { t } from "../i18n.js";
 import { esc, baseName } from "../util.js";
 import { icon, agentIcon } from "../icons.js";
-import { header, sessionRow, projectMark } from "./parts.js";
+import { header, wireBack, sessionRow, projectMark, openSession } from "./parts.js";
 
-const pick = { node: "", project: "", agent: "" }; // remembered while the app runs
+const pick = { node: "", project: "", agent: "", filter: "" }; // remembered while the app runs
+const FILTER_FROM = 8; // projects from which the list gets a filter
 
-export function render(el, ctx) {
+export function render(el, ctx, p) {
   const store = ctx.store;
   el.innerHTML = `<div class="new-head"></div><main class="body new"></main>`;
   const head = el.querySelector(".new-head"), body = el.querySelector(".new");
   let prompt = "";
+  if (p.node) { pick.node = p.node; pick.project = p.project || ""; pick.filter = ""; }
 
   function drawHead(canStart) {
     head.innerHTML = header(t("new.title"), {
+      back: Boolean(p.node),
       actions: canStart != null ? `<button class="btn sm primary" data-act="start" ${canStart ? "" : "disabled"}>${icon("play")}<span>${esc(t("new.start"))}</span></button>` : ""
     });
+    wireBack(head, ctx);
     head.querySelector("[data-act='start']")?.addEventListener("click", start);
+  }
+  // The projects the filter's text does not match are hidden (the chosen one stays).
+  function applyFilter() {
+    const q = pick.filter.trim().toLowerCase();
+    for (const b of body.querySelectorAll(".pick")) b.hidden = Boolean(q) && !b.classList.contains("on") && !b.textContent.toLowerCase().includes(q);
   }
 
   function draw() {
@@ -38,10 +50,11 @@ export function render(el, ctx) {
       ${step(1, "new.computer")}
       <div class="seg">${nodes.map(n => seg("node", n.id, n.name, n.id === pick.node, icon(n.kind === "headless" ? "server" : "computer"))).join("")}</div>
       ${step(2, "new.project")}
+      ${projects.length >= FILTER_FROM ? `<input class="proj-filter" type="search" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(pick.filter)}" placeholder="${esc(t("new.filterPh"))}" aria-label="${esc(t("new.filterPh"))}">` : ""}
       ${projects.length ? `<div class="list">${projects.map(x => {
         const name = x.name || baseName(x.path), on = x.path === pick.project;
         return `<button class="pick${on ? " on" : ""}" data-project="${esc(x.path)}" aria-pressed="${on}">${projectMark(name)}
-          <span class="pick-main"><b>${esc(name)}</b><small>${esc(x.path)}</small></span>${on ? icon("check", "pick-check") : ""}</button>`;
+          <span class="pick-main"><b>${esc(name)}</b><small class="path"><bdi>${esc(x.path)}</bdi></small></span>${on ? icon("check", "pick-check") : ""}</button>`;
       }).join("")}</div>`
         : `<p class="empty small">${esc(t("new.noProjects"))}</p>`}
       ${step(3, "new.agent")}
@@ -51,6 +64,14 @@ export function render(el, ctx) {
       ${old.length ? `<h2 class="group">${esc(t("new.resumeTitle"))}</h2><div class="rows">${old.map(x => sessionRow(x, { showNode: false })).join("")}</div>` : ""}`;
     const ta = body.querySelector(".prompt");
     if (ta) { ta.placeholder = t("new.promptPh"); ta.oninput = () => { prompt = ta.value; }; }
+    const filter = body.querySelector(".proj-filter");
+    if (filter) filter.oninput = () => { pick.filter = filter.value; applyFilter(); };
+    applyFilter();
+    // The chosen computer and agent are in sight in their rows.
+    for (const seg of body.querySelectorAll(".seg")) {
+      const on = seg.querySelector(".on");
+      if (on && (on.offsetLeft < seg.scrollLeft || on.offsetLeft + on.offsetWidth > seg.scrollLeft + seg.clientWidth)) seg.scrollLeft = Math.max(0, on.offsetLeft - 8);
+    }
   }
 
   async function start(e) {
@@ -62,8 +83,9 @@ export function render(el, ctx) {
       const tab = await store.launch(pick.node, spec);
       ctx.toast(t("new.started", { name: store.nodeName(pick.node) }));
       prompt = "";
-      if (!shell && tab?.sessionId) ctx.go("session", { node: pick.node, agent: tab.agent, id: tab.sessionId });
-      else if (tab?.id) ctx.go("terminal", { node: pick.node, term: tab.id, title: tab.title || baseName(pick.project) });
+      // Straight into its terminal, an agent's as well as a shell's (the terminal's header takes the session's title
+      // once the computer lists it).
+      if (tab?.id) ctx.go("terminal", { node: pick.node, term: tab.id, title: tab.title || (shell ? baseName(pick.project) : `${pick.agent} · ${baseName(pick.project)}`) });
     } catch (err) { ctx.fail(err); b.disabled = false; }
   }
 
@@ -73,7 +95,7 @@ export function render(el, ctx) {
     if (b.dataset.node) { pick.node = b.dataset.node; pick.project = ""; return draw(); }
     if (b.dataset.project) { pick.project = b.dataset.project; return draw(); }
     if (b.dataset.agent) { pick.agent = b.dataset.agent; return draw(); }
-    if (b.classList.contains("row")) return ctx.go("session", { node: b.dataset.node, agent: b.dataset.agent, id: b.dataset.id });
+    if (b.classList.contains("row")) return openSession(ctx, b.dataset.node, b.dataset.agent, b.dataset.id);
   };
 
   draw();

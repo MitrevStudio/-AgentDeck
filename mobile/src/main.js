@@ -5,12 +5,13 @@
 import { App } from "@capacitor/app";
 import { t, setLanguage, applyI18n, errorText } from "./i18n.js";
 import { $, esc, buzz } from "./util.js";
-import { icon } from "./icons.js";
+import { icon, iconBtn } from "./icons.js";
 import { createStore } from "./data.js";
 import { createRelayProvider } from "./provider-relay.js";
 import { keystore, lock, deviceModel } from "./keystore.js";
 import { generateKeypair } from "../../src/mesh/noise.js";
 import pkg from "../package.json";
+import { openSession } from "./screens/parts.js";
 import * as pairScreen from "./screens/pair.js";
 import * as pairingScreen from "./screens/pairing.js";
 import * as routesScreen from "./screens/routes.js";
@@ -30,8 +31,10 @@ const META_KEY = "agentdeck.nodes"; // provider-relay.js meta: which nodes are r
 const app = $("#app");
 let store = null;
 let link = null; // the relay provider, once there is an identity (paired, or pairing)
-let stack = []; // [{ name, params }]
+let stack = []; // [{ name, params, scroll }]
 let cleanup = null;
+let shown = null; // the stack entry on the screen now
+const tabScroll = new Map(); // a tab's name -> how far its list was scrolled when it was left
 
 // ---------- the soft keyboard ----------
 // The app is as tall as what is visible above the keyboard, so bottom bars (reply box, extra keys) sit right on it.
@@ -52,15 +55,34 @@ function trackViewport() {
 }
 
 // ---------- toasts, confirmations, the banner ----------
+// A toast stays as long as its text takes to read (a screen reader says it: role="status"); a failure at least 5 s.
 let toastTimer = 0;
-function toast(text) {
+function toast(text, least = 2600) {
   const el = $("#toast");
   el.textContent = text;
   el.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.hidden = true; }, 2600);
+  toastTimer = setTimeout(() => { el.hidden = true; }, Math.min(9000, Math.max(least, 1200 + 55 * String(text).length)));
 }
-const fail = e => toast(t("toast.failed", { error: errorText(e) }));
+const fail = e => toast(t("toast.failed", { error: errorText(e) }), 5000);
+
+// A sheet is a dialog: named by its text, Escape cancels it, and Tab stays among its own fields and buttons.
+let sheets = 0;
+function sheetKeys(el, cancel) {
+  const p = el.querySelector("p");
+  if (p) {
+    p.id = `sheet-text-${++sheets}`;
+    el.querySelector("[role='dialog']").setAttribute("aria-labelledby", p.id);
+  }
+  el.addEventListener("keydown", e => {
+    if (e.key === "Escape") { e.preventDefault(); return cancel(); }
+    if (e.key !== "Tab") return;
+    const stops = [...el.querySelectorAll("button, input, textarea")].filter(x => !x.disabled);
+    const first = stops[0], last = stops.at(-1);
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+}
 
 // confirmSheet(text, okLabel, { danger, extra: [label] }) -> true | false | the extra button's index (2, 3, ...).
 function confirmSheet(text, okLabel, { danger = false, extra = [] } = {}) {
@@ -71,31 +93,65 @@ function confirmSheet(text, okLabel, { danger = false, extra = [] } = {}) {
       <div class="sheet-actions"><button class="btn" data-v="0">${esc(t("common.cancel"))}</button>
       ${extra.map((label, i) => `<button class="btn" data-v="${i + 2}">${esc(label)}</button>`).join("")}
       <button class="btn ${danger ? "danger-solid" : "primary"}" data-v="1">${esc(okLabel)}</button></div></div>`;
+    const focusOn = danger ? "0" : "1"; // a hardware Enter never confirms what cannot be undone
     const done = v => { el.remove(); resolve(v); };
     el.addEventListener("click", e => {
       const b = e.target.closest("button");
       if (b) done(b.dataset.v === "1" ? true : b.dataset.v === "0" ? false : Number(b.dataset.v));
       else if (e.target === el) done(false);
     });
+    sheetKeys(el, () => done(false));
     document.body.append(el);
-    el.querySelector("[data-v='1']").focus();
+    el.querySelector(`[data-v='${focusOn}']`).focus();
   });
 }
 
-// promptSheet(title, value, okLabel) -> the text, or null when cancelled.
-function promptSheet(title, value, okLabel) {
+// menuSheet(items) -> the chosen item's key, or null: a list of things to do, each a row with its icon. An item is
+// { key, icon, label, danger, on } - or { stepper: true, label, value(), minus(), plus(), minusLabel, plusLabel }, a
+// row whose two buttons act at once and leave the sheet open (the text size).
+function menuSheet(items) {
+  return new Promise(resolve => {
+    const el = document.createElement("div");
+    el.className = "sheet-backdrop";
+    el.innerHTML = `<div class="sheet menu" role="dialog" aria-modal="true" aria-label="${esc(t("term.more"))}">${items.map((it, i) => (it.stepper
+      ? `<div class="menu-item menu-step" data-i="${i}">${icon("textSize")}<span class="menu-label">${esc(it.label)}</span>${iconBtn("minus", it.minusLabel, 'data-step="minus"')}<b class="menu-value">${esc(it.value())}</b>${iconBtn("plus", it.plusLabel, 'data-step="plus"')}</div>`
+      : `<button class="menu-item${it.danger ? " danger" : ""}${it.on ? " on" : ""}" data-i="${i}">${icon(it.icon)}<span class="menu-label">${esc(it.label)}</span></button>`)).join("")}</div>`;
+    const done = v => { el.remove(); resolve(v); };
+    el.addEventListener("click", e => {
+      const step = e.target.closest("[data-step]");
+      if (step) {
+        const row = step.closest("[data-i]"), it = items[row.dataset.i];
+        it[step.dataset.step]();
+        row.querySelector(".menu-value").textContent = it.value();
+        return;
+      }
+      const b = e.target.closest("button.menu-item");
+      if (b) done(items[b.dataset.i].key);
+      else if (e.target === el) done(null);
+    });
+    sheetKeys(el, () => done(null));
+    document.body.append(el);
+    el.querySelector("button.menu-item")?.focus();
+  });
+}
+
+// promptSheet(title, value, okLabel, { multiline }) -> the text, or null when cancelled. multiline: a few lines of
+// any length (text to paste into a terminal), kept as typed; else one short line, trimmed.
+function promptSheet(title, value, okLabel, { multiline = false } = {}) {
   return new Promise(resolve => {
     const el = document.createElement("div");
     el.className = "sheet-backdrop";
     el.innerHTML = `<form class="sheet" role="dialog" aria-modal="true"><p>${esc(title)}</p>
-      <input class="sheet-input" maxlength="60" autocomplete="off" value="${esc(value)}">
+      ${multiline ? `<textarea class="sheet-input" rows="4" autocomplete="off" autocapitalize="off" spellcheck="false">${esc(value)}</textarea>`
+        : `<input class="sheet-input" maxlength="60" autocomplete="off" value="${esc(value)}">`}
       <div class="sheet-actions"><button class="btn" type="button" data-v="0">${esc(t("common.cancel"))}</button>
       <button class="btn primary" type="submit">${esc(okLabel)}</button></div></form>`;
-    const input = el.querySelector("input");
+    const input = el.querySelector(".sheet-input");
     const done = v => { el.remove(); resolve(v); };
-    el.querySelector("form").onsubmit = e => { e.preventDefault(); done(input.value.trim() || null); };
+    el.querySelector("form").onsubmit = e => { e.preventDefault(); done((multiline ? input.value : input.value.trim()) || null); };
     el.querySelector("[data-v='0']").onclick = () => done(null);
     el.addEventListener("click", e => { if (e.target === el) done(null); });
+    sheetKeys(el, () => done(null));
     document.body.append(el);
     input.focus();
     input.select();
@@ -104,18 +160,24 @@ function promptSheet(title, value, okLabel) {
 
 let bannerTimer = 0;
 function banner({ node, item }) {
-  if (current()?.name === "session" && current().params.node === node && current().params.id === item.id) return;
+  // Not over the session's own screen, nor over its terminal (the header there says what it waits for).
+  const top = current();
+  if (top?.name === "session" && top.params.node === node && top.params.id === item.id) return;
+  if (top?.name === "terminal" && top.params.node === node && item.term && top.params.term === item.term) return;
   const el = $("#banner");
-  el.innerHTML = `<button class="banner-in" aria-label="${esc(`${t("common.open")}: ${t("banner.waiting", { title: item.title })}`)}"><i class="mark dot st-waiting"></i><span class="banner-text"><b>${esc(t("banner.waiting", { title: item.title }))}</b>
-    <small>${esc(item.nodeName)} · ${esc(item.project)}${item.waitingFor ? ` · ${esc(item.waitingFor)}` : ""}</small></span>${icon("right", "banner-go")}</button>`;
+  // The banner opens the session; its X puts it away (it lies over the header's tools). Over a terminal it goes
+  // sooner: the header there is all the way out.
+  el.innerHTML = `<div class="banner-in" role="alert"><button class="banner-open" aria-label="${esc(`${t("common.open")}: ${t("banner.waiting", { title: item.title })}`)}"><i class="mark dot st-waiting"></i><span class="banner-text"><b>${esc(t("banner.waiting", { title: item.title }))}</b>
+    <small>${esc(item.nodeName)} · ${esc(item.project)}${item.waitingFor ? ` · ${esc(item.waitingFor)}` : ""}</small></span></button>${iconBtn("x", t("common.dismiss"), 'data-act="dismiss"')}</div>`;
   el.hidden = false;
   el.classList.remove("in");
   void el.offsetWidth;
   el.classList.add("in");
-  el.querySelector("button").onclick = () => { el.hidden = true; go("session", { node, agent: item.agent, id: item.id }); };
+  el.querySelector(".banner-open").onclick = () => { el.hidden = true; openSession(ctx, node, item.agent, item.id); };
+  el.querySelector("[data-act='dismiss']").onclick = () => { el.hidden = true; };
   buzz();
   clearTimeout(bannerTimer);
-  bannerTimer = setTimeout(() => { el.hidden = true; }, 9000);
+  bannerTimer = setTimeout(() => { el.hidden = true; }, current()?.name === "terminal" ? 5000 : 9000);
 }
 
 // ---------- screens ----------
@@ -124,6 +186,11 @@ const current = () => stack.at(-1);
 function render() {
   const top = current();
   if (!top) return;
+  // Where the list being left was scrolled to: it is there again when the user comes back to it.
+  if (shown) {
+    shown.scroll = app.querySelector(".body")?.scrollTop || 0;
+    if (TABS.includes(shown.name)) tabScroll.set(shown.name, shown.scroll);
+  }
   cleanup?.();
   cleanup = null;
   const mod = SCREENS[top.name];
@@ -133,6 +200,9 @@ function render() {
   const el = app.firstElementChild;
   cleanup = mod.render(el, ctx, top.params || {}) || null;
   applyI18n(app);
+  shown = top;
+  const body = app.querySelector(".body");
+  if (body && top.scroll) body.scrollTop = top.scroll;
   if (tabbed) {
     for (const b of app.querySelectorAll(".tabbar [data-tab]")) b.onclick = () => go(b.dataset.tab, {}, { root: true });
   }
@@ -146,7 +216,10 @@ function tabBar(active) {
 // go(name, params, { replace, root }): root - a tab: the stack starts again from it.
 function go(name, params = {}, { replace = false, root = false } = {}) {
   if (root) {
-    stack = [{ name, params }];
+    // A tab is where it was left; pressed again while it shows, it goes to its top.
+    const again = stack.length === 1 && current().name === name;
+    if (again) shown = null;
+    stack = [{ name, params, scroll: again ? 0 : tabScroll.get(name) || 0 }];
     history.replaceState({ depth: 0 }, "");
   } else if (replace && stack.length) {
     stack[stack.length - 1] = { name, params };
@@ -197,7 +270,7 @@ async function relay() {
     id = { publicKey: toHex(kp.publicKey), privateKey: toHex(kp.privateKey) };
     await keystore.setIdentity(id);
   }
-  const name = (await keystore.getName()) || (await deviceModel()) || "Phone";
+  const name = (await keystore.getName()) || (await deviceModel()) || t("phone.name");
   let saving = Promise.resolve();
   link = createRelayProvider({
     keypair: { publicKey: fromHex(id.publicKey), privateKey: fromHex(id.privateKey) },
@@ -226,10 +299,10 @@ async function rename(name) {
   link?.setName(name);
 }
 async function phoneName() {
-  return link?.name || (await keystore.getName()) || (await deviceModel()) || "Phone";
+  return link?.name || (await keystore.getName()) || (await deviceModel()) || t("phone.name");
 }
 
-const ctx = { store: null, go, back, toast, fail, confirm: confirmSheet, prompt: promptSheet, unpair, relay, rename, phoneName, secure: () => keystore.secure };
+const ctx = { store: null, go, back, toast, fail, confirm: confirmSheet, prompt: promptSheet, menu: menuSheet, unpair, relay, rename, phoneName, secure: () => keystore.secure, version: pkg.version };
 
 // ---------- the lifecycle ----------
 // The links do not survive the background reliably (and not at all on iOS): back in the foreground, or when the
@@ -272,7 +345,8 @@ async function boot() {
   go("pair", {}, { root: true });
 }
 
+// The app could not start (the secure storage, most likely): said in words, the details in the console.
 boot().catch(e => {
   console.error(e);
-  app.textContent = String(e?.stack || e);
+  app.innerHTML = `<div class="boot"><p class="empty" role="alert">${esc(t("boot.failed"))}<br><span class="small">${esc(errorText(e))}</span></p></div>`;
 });

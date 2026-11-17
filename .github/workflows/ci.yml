@@ -42,6 +42,9 @@ jobs:
       - run: npm run test:pairing
       - run: npm run test:web-link
       - run: npm run test:phone-invites
+      - run: npm run test:mobile-provider
+      - run: npm run test:mobile-i18n
+      - run: npm run test:mobile-text
       - name: Package (unpacked, no installer)
         run: npx electron-builder --win --dir --publish never
         env:

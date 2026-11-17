@@ -14,7 +14,10 @@ export function render(el, ctx, p) {
   function draw(run) {
     if (gone) return;
     if (run.error) {
-      body.innerHTML = `<div class="note warn">${icon("alert")}<div class="note-text">${esc(t("pair.notCode", { why: errorText(run.error) }))}</div></div>
+      // Not a code at all, one of another version of the format, or the pairing itself failed (the link, the storage).
+      const e = run.error;
+      const why = e?.code !== "invalidData" ? errorText(e) : /another AgentDeck version/.test(e.message || "") ? t("pair.otherVersion") : t("pair.badCode");
+      body.innerHTML = `<div class="note warn">${icon("alert")}<div class="note-text">${esc(why)}</div></div>
         <div class="foot-actions"><button class="btn sm" data-act="again">${esc(t("pairing.again"))}</button></div>`;
       return;
     }

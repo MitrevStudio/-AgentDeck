@@ -43,10 +43,20 @@
         </provider>
     </application>
 
+    <!-- "Send a picture" from a terminal: <input type="file" capture> starts the camera app. Since Android 11 an app
+         sees another app's activity only when it names the intent here; without this Capacitor finds no camera app
+         and falls back to the file picker. No permission comes with it. -->
+    <queries>
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
+    </queries>
+
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- The QR scanner: getUserMedia in the WebView (Capacitor asks for the runtime permission when the page does). -->
+    <!-- The QR scanner: getUserMedia in the WebView (Capacitor asks for the runtime permission when the page does);
+         a photo taken for a terminal (Capacitor asks for it before it starts the camera app). -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <!-- navigator.vibrate when a session starts waiting for the user while the app is open. -->

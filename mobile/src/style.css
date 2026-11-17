@@ -21,7 +21,7 @@
   --backdrop: rgba(5, 7, 10, .6);
   --text: #e9edf3;
   --muted: #9aa5b5;
-  --faint: #6c7686;
+  --faint: #808b9c; /* small text on --bg and --panel: 5.5 and 5.2 to 1 */
   --accent: #7aa7ff;
   --accent-strong: #9dbdff;
   --accent-deep: #3b5fa9;
@@ -102,6 +102,8 @@
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden; overscroll-behavior: none; }
 body { font: 14px/1.4 var(--sans); -webkit-text-size-adjust: 100%; user-select: none; -webkit-user-select: none; }
 input, textarea, .msg .text, pre { user-select: text; -webkit-user-select: text; }
+/* What one may want to copy and that is no button's label: notes, errors, hints, the connection check's log. */
+.note-text, .form-state, .lead, .fine, .field-hint, .log, .sheet p, .empty, .term-over, div.node-row .row-sub { user-select: text; -webkit-user-select: text; }
 button, input, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
 h1, h2, p { margin: 0; }
@@ -137,6 +139,9 @@ h1, h2, p { margin: 0; }
 .top-actions { flex: none; display: flex; align-items: center; }
 .top-actions .btn.sm { margin: 0 6px 0 4px; }
 .top-actions .tag { margin-right: 12px; }
+/* Until the first screen is drawn (the keys are read, the links started). */
+.boot { flex: 1; display: grid; place-items: center; }
+.boot .spinner { width: 22px; height: 22px; }
 
 /* ---------- icon buttons ----------
    The button box is the touch target (44px); the chip drawn in it (::before) is the desktop's small icon button.
@@ -159,7 +164,7 @@ h1, h2, p { margin: 0; }
 .icon-btn.accent { color: var(--accent); }
 .icon-btn.danger:active { color: var(--danger); }
 .icon-btn.danger:active::before { border-color: var(--danger-line); background: var(--danger-bg); }
-.icon-btn[data-act="stop"] { color: var(--danger); }
+.icon-btn[data-act="stop"], .term-head .icon-btn[data-act="close"] { color: var(--danger); }
 .icon-btn:disabled { opacity: .4; }
 
 /* ---------- tab bar ---------- */
@@ -178,7 +183,7 @@ h1, h2, p { margin: 0; }
 .tabbar button.on .tab-ic { background: var(--accent-weak); }
 .badge {
   position: absolute; top: -3px; left: calc(50% + 5px); min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px;
-  background: var(--needs); color: #fff; font: 700 10.5px/16px var(--sans); font-style: normal; text-align: center;
+  background: #d63c3c; color: #fff; font: 700 10.5px/16px var(--sans); font-style: normal; text-align: center; /* 4.6 to 1 */
   box-shadow: 0 0 0 2px var(--panel);
 }
 
@@ -210,6 +215,7 @@ h1, h2, p { margin: 0; }
 .form-title { font-size: 13px; font-weight: 650; }
 .form-foot { display: flex; justify-content: flex-end; gap: 8px; }
 .form-state { font-size: 12.5px; color: var(--muted); }
+.form-state.bad { color: var(--danger); }
 .inline-field { display: flex; align-items: center; gap: 8px; }
 .inline-field input { flex: 1; min-width: 0; }
 input, textarea {
@@ -235,6 +241,7 @@ textarea { resize: none; line-height: 1.35; }
 .dot.st-idle, .dot.st-other { background: var(--ready); }
 .dot.st-waiting { background: var(--needs); animation: attn 1.6s ease-out infinite; }
 .dot.st-stopped { background: var(--faint); }
+.dot.st-unreachable { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
 .spinner {
   width: 12px; height: 12px; flex: none; border-radius: 50%;
   border: 2px solid color-mix(in srgb, var(--working) 25%, transparent); border-top-color: var(--working); animation: spin .8s linear infinite;
@@ -250,7 +257,7 @@ textarea { resize: none; line-height: 1.35; }
 .live.st-waiting { color: var(--needs); background: var(--needs-bg); }
 .live.st-busy { color: var(--working); background: var(--working-bg); }
 .live.st-idle, .live.st-other { color: var(--ready); background: var(--ready-bg); }
-.live.st-stopped { color: var(--muted); background: var(--panel-2); }
+.live.st-stopped, .live.st-unreachable { color: var(--muted); background: var(--panel-2); }
 .live .dot { width: 7px; height: 7px; }
 .live .spinner { width: 10px; height: 10px; }
 
@@ -290,7 +297,8 @@ textarea { resize: none; line-height: 1.35; }
 .row.st-waiting:active { background: color-mix(in srgb, var(--needs) 12%, var(--panel-2)); }
 .row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .row-title { font-weight: 600; font-size: 14.5px; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.row-reason { color: var(--needs); font-size: 12.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* What it waits for is what the user came to read: two lines of it. */
+.row-reason { color: var(--needs); font-size: 12.5px; font-weight: 500; line-height: 1.3; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
 .row-meta { display: block; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row-end { flex: none; display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 7px; min-width: 44px; }
 .row-end time { color: var(--faint); font-size: 11.5px; white-space: nowrap; }
@@ -306,7 +314,7 @@ textarea { resize: none; line-height: 1.35; }
 .agent .ic { width: 12px; height: 12px; margin-top: 2px; }
 .agent-mark { display: inline-block; margin-right: 6px; vertical-align: -2px; }
 .agent-mark .ic { width: 13px; height: 13px; }
-.offline-note { display: flex; align-items: center; gap: 8px; color: var(--faint); font-size: 12px; margin: 12px 10px 0; }
+.offline-note { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; margin: 6px 10px 0; }
 .offline-note .ic { width: 14px; height: 14px; }
 /* A terminal in a list: the row opens it (as a session row does), the X at its end closes it. */
 .trow { display: flex; align-items: center; gap: 2px; border-radius: var(--r-md); }
@@ -326,8 +334,18 @@ textarea { resize: none; line-height: 1.35; }
 /* ---------- a session ---------- */
 .screen-session .screen { overflow: hidden; }
 .sess-head .top small { display: block; }
-.status-line { display: flex; align-items: center; gap: 8px; padding: 0 16px 8px; min-height: 30px; }
-.status-line .reason { flex: 1; min-width: 0; color: var(--needs); font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The title on up to two lines (three tools stand beside it); what the session waits for whole, up to five. */
+.sess-head .top h1 { font-size: 15.5px; line-height: 1.25; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
+.status-line { display: flex; align-items: flex-start; gap: 8px; padding: 0 16px 8px; min-height: 30px; }
+.status-line .reason { flex: 1; min-width: 0; padding-top: 2px; color: var(--needs); font-weight: 600; font-size: 13px; line-height: 1.35; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5; overflow-wrap: anywhere; }
+.status-line .when { padding-top: 3px; }
+/* The keyboard is up: the messages get the room - the title on one line, no line under it, the reason on one. */
+.kb-open .sess-head .top { min-height: 44px; padding-top: 0; padding-bottom: 0; }
+.kb-open .sess-head .top h1 { -webkit-line-clamp: 1; }
+.kb-open .sess-head .top small { display: none; }
+.kb-open .status-line { padding-bottom: 4px; min-height: 0; }
+.kb-open .status-line:not(:has(.reason)) { display: none; }
+.kb-open .status-line .reason { -webkit-line-clamp: 1; }
 .status-line .when { color: var(--faint); font-size: 12px; }
 .session { padding-top: 4px; border-top: 1px solid var(--line); }
 .msgs { display: flex; flex-direction: column; gap: 8px; padding: 6px 0; }
@@ -338,6 +356,35 @@ textarea { resize: none; line-height: 1.35; }
 .msg .who time { font-weight: 400; color: var(--faint); }
 .msg .text { white-space: pre-wrap; word-wrap: break-word; overflow-wrap: anywhere; font-size: 14.5px; line-height: 1.45; }
 .msg code { font: 12.5px var(--mono); background: rgba(255, 255, 255, .07); padding: 1px 4px; border-radius: 4px; }
+.msg-cut { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--line-2); color: var(--muted); font-size: 12px; }
+/* A message as markdown (markdown.js): paragraphs, headings, lists, quotes; code and tables keep their lines and
+   scroll sideways inside the bubble. */
+.msg .text.md { white-space: normal; }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p { margin: 0 0 .6em; }
+.md-h { margin: .9em 0 .4em; font-weight: 700; line-height: 1.3; }
+.md-h1 { font-size: 17px; }
+.md-h2 { font-size: 16px; }
+.md-h3 { font-size: 15px; }
+.md ul, .md ol { margin: 0 0 .6em; padding-left: 1.35em; }
+.md li { margin: .15em 0; }
+.md li > ul, .md li > ol { margin: .15em 0 0; }
+.md li > p { margin: .3em 0; }
+.md li.md-task { list-style: none; margin-left: -1.35em; }
+.md-box { display: inline-block; width: 1.35em; color: var(--muted); }
+.md blockquote { margin: 0 0 .6em; padding: 2px 0 2px 10px; border-left: 3px solid var(--line-3); color: var(--muted); }
+.md hr { margin: .8em 0; border: 0; border-top: 1px solid var(--line-2); }
+.md a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
+.md del { color: var(--muted); }
+.md-code { margin: 0 0 .6em; padding: 8px 10px; overflow-x: auto; white-space: pre; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--term-bg); font: 12.5px/1.45 var(--mono); -webkit-overflow-scrolling: touch; }
+.md-code code { padding: 0; background: none; font: inherit; white-space: pre; }
+.md-table { margin: 0 0 .6em; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.md-table table { border-collapse: collapse; font-size: 13.5px; }
+.md-table th, .md-table td { padding: 4px 9px; border: 1px solid var(--line-2); text-align: left; vertical-align: top; white-space: nowrap; }
+.md-table th { background: var(--panel-2); font-weight: 650; }
+.md-table .md-right { text-align: right; }
+.md-table .md-center { text-align: center; }
 .more { text-align: center; color: var(--faint); font-size: 12px; }
 .msgs > .muted.small { color: var(--faint); font-size: 12px; }
 
@@ -362,20 +409,36 @@ textarea { resize: none; line-height: 1.35; }
   font: 600 12.5px var(--mono); white-space: nowrap;
 }
 .key .ic { width: 15px; height: 15px; }
+/* More keys to the right: the strip's edge fades (keys.js wireStrip). */
+.keystrip.more { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 30px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 30px), transparent); }
 .key:active > span, .key.on > span { background: var(--accent-deep); border-color: var(--accent); color: var(--on-solid); }
 
 /* ---------- terminal ---------- */
 .screen-terminal .screen { background: var(--term-bg); position: relative; }
 .term-head .top { background: var(--bg); border-bottom: 1px solid var(--line); }
-/* "Also open on: …" under the size line. */
-.term-viewers { display: flex; align-items: center; gap: 4px; margin-top: 1px; }
-.term-viewers .ic { flex: none; width: 12px; height: 12px; }
-.term-viewers > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* "Also open on: …" at the end of the line under the title (after the size and the computer). */
+.term-viewers .ic { width: 12px; height: 12px; margin-right: 4px; vertical-align: -2px; }
 /* After the name of the device whose size the terminal has. */
 .term-viewers .ic.drives { width: 11px; height: 11px; margin: 0 0 0 3px; vertical-align: -1px; color: var(--accent); }
+/* Little room above the terminal (the keyboard is up, or the phone lies on its side): the header is its title only. */
+.kb-open .screen-terminal .top small { display: none; }
+.kb-open .screen-terminal .top { min-height: 44px; padding-top: 0; padding-bottom: 0; }
 /* The terminal keeps the host's size and is panned inside the wrap by script (screens/terminal.js): no native
    scrolling, zooming or scrollbars here. */
-.term-wrap { flex: 1; min-height: 0; position: relative; overflow: hidden; background: var(--term-bg); padding: 4px; touch-action: none; overscroll-behavior: contain; }
+.term-area { flex: 1; min-height: 0; position: relative; display: flex; }
+.term-wrap { flex: 1; min-width: 0; min-height: 0; position: relative; overflow: hidden; background: var(--term-bg); padding: 4px; touch-action: none; overscroll-behavior: contain; }
+/* Chips over the terminal's corners: the offer to fit a size too wide to read (top), the way back to the end of
+   the history (bottom). Drawn small, 44px to the touch. */
+.term-chip {
+  position: absolute; right: 8px; z-index: 4; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; max-width: calc(100% - 16px); padding: 0 11px;
+  border: 1px solid var(--line-3); border-radius: var(--r-pill); background: var(--raised); color: var(--text);
+  font-size: 12.5px; font-weight: 600; white-space: nowrap; box-shadow: var(--shadow-pop);
+}
+.term-chip::after { content: ""; position: absolute; inset: -6px 0; }
+.term-chip:active { border-color: var(--accent); }
+.term-chip .ic { width: 14px; height: 14px; color: var(--accent); }
+.term-chip.fit { top: 8px; }
+.term-chip.end { bottom: 8px; width: 36px; padding: 0; }
 .term-pan { width: max-content; }
 .term-host { display: inline-block; }
 .term-host .xterm { padding: 0; }
@@ -384,13 +447,48 @@ textarea { resize: none; line-height: 1.35; }
 /* What the soft keyboard types into (terminal.js): out of sight, still focusable. */
 .term-input { position: absolute; left: 0; bottom: 0; width: 2px; height: 2px; min-height: 0; padding: 0; border: 0; opacity: 0; pointer-events: none; font-size: 16px; resize: none; }
 .term-over { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); padding: 9px 14px; border-radius: var(--r-md); background: var(--raised); border: 1px solid var(--line-2); color: var(--muted); box-shadow: var(--shadow-pop); text-align: center; font-size: 13px; }
-.xkeys { padding: 0 6px; background: var(--panel); border-top: 1px solid var(--line); margin: 0; }
+/* Under the terminal: the key row (a set of keys and, at its end, the switch to the other set), then the tool row
+   (the message field's opener, a picture, paste) - or, in its place, the message field itself. */
+.term-dock { background: var(--panel); border-top: 1px solid var(--line); }
+.term-keys { display: flex; align-items: center; background: var(--panel); }
+.term-keys .keys-swap { margin-right: 2px; }
+.xkeys { flex: 1; min-width: 0; padding: 0 6px; background: var(--panel); margin: 0; }
+.term-tools { display: flex; align-items: center; padding: 0 2px 6px 8px; background: var(--panel); }
+.compose-open {
+  position: relative; flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; height: 38px; margin-right: 2px; padding: 0 12px; text-align: left;
+  border: 1px solid var(--line-2); border-radius: var(--r-md); background: var(--bg); color: var(--faint); font-size: 14.5px;
+}
+.compose-open::after { content: ""; position: absolute; inset: -3px 0; }
+.compose-open .ic { width: 15px; height: 15px; }
+.compose-open span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.compose-open.has-draft { color: var(--text); }
+.compose-open:active { border-color: var(--accent); }
+.term-compose { display: flex; align-items: flex-end; padding: 0 2px 6px 0; background: var(--panel); }
+.term-compose textarea { flex: 1; min-width: 0; min-height: 40px; max-height: 120px; padding: 9px 11px; scrollbar-width: none; }
+.term-compose .send { color: var(--accent); }
+.term-compose .send::before { background: var(--accent-weak); }
+/* Typing straight into the terminal: the tool row is out of the way, the terminal keeps its lines. */
+.kb-open .screen:not(.composing) .term-tools { display: none; }
+/* What the session waits for, under the terminal's header: two lines of it. */
+.term-status { background: var(--bg); border-bottom: 1px solid var(--line); padding-top: 6px; }
+.term-status .reason { -webkit-line-clamp: 2; }
+.term-head:has(.term-status) .top { border-bottom: 0; }
+/* A picture on its way. */
+.term-busy {
+  position: absolute; left: 8px; top: 8px; z-index: 4; display: inline-flex; align-items: center; gap: 8px; min-height: 32px; max-width: calc(100% - 16px); padding: 4px 12px;
+  border: 1px solid var(--line-3); border-radius: var(--r-pill); background: var(--raised); color: var(--text); font-size: 12.5px; font-weight: 600; box-shadow: var(--shadow-pop);
+}
+/* Narrower than the session's keys, so about nine show at 360px. */
+.xkeys .key { min-width: 38px; padding: 0 1px; }
+.xkeys .key > span { min-width: 30px; padding: 0 6px; }
 
 /* ---------- new session ---------- */
 .step { gap: 7px; }
 .step-n { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--accent-weak); color: var(--accent); font-size: 10px; letter-spacing: 0; }
 /* A choice among a few (computer, agent): the desktop's segmented chips. */
-.seg { display: flex; flex-wrap: wrap; padding: 0 3px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; }
+/* One row, whatever their number: it scrolls sideways. */
+.seg { display: flex; overflow-x: auto; scrollbar-width: none; padding: 0 3px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; }
+.seg::-webkit-scrollbar { display: none; }
 .seg > button {
   position: relative; flex: 1 0 auto; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: var(--tap); padding: 0 12px;
   border: 0; background: transparent; color: var(--muted); font-size: 13.5px; font-weight: 550; white-space: nowrap;
@@ -408,6 +506,9 @@ textarea { resize: none; line-height: 1.35; }
 .pick-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .pick-main b { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pick-main small { color: var(--faint); font: 11.5px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A path is cut at its start: the folder that tells it apart is at its end. */
+.pick-main small.path { direction: rtl; text-align: left; }
+.proj-filter { min-height: 38px; margin: 0 0 4px; padding: 6px 11px; background: var(--panel); border-color: var(--line); font-size: 15px; }
 .pick-check { color: var(--accent); width: 16px; height: 16px; }
 .pmono { --h: 215; flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: var(--r-sm); font-size: 10.5px; font-weight: 700; letter-spacing: .02em; background: hsl(var(--h) var(--tile-bg)); color: hsl(var(--h) var(--tile-fg)); }
 .new .prompt { min-height: 76px; }
@@ -416,9 +517,9 @@ textarea { resize: none; line-height: 1.35; }
 .cards { display: flex; flex-direction: column; gap: 6px; }
 .node-row { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 4px 2px 4px 12px; background: var(--card); border: 1px solid var(--line); border-radius: var(--r-md); }
 .node-row > .row-main { padding: 4px 0; }
-/* A computer's main part opens its screen. */
-.node-open { min-height: 44px; margin: 0; padding: 4px 0; text-align: left; background: transparent; border: 0; border-radius: var(--r-sm, 6px); color: var(--text); font: inherit; }
-.node-open:active { background: var(--panel-2); }
+/* A computer's row opens its screen. */
+button.node-row { width: 100%; padding-right: 2px; text-align: left; color: var(--text); font: inherit; }
+button.node-row:active { background: var(--card-hover); border-color: var(--line-2); }
 .node-row > .mark { margin-right: 14px; }
 .node-ic { display: grid; place-items: center; flex: none; color: var(--accent); }
 .node-ic .ic { width: 17px; height: 17px; }
@@ -433,6 +534,22 @@ textarea { resize: none; line-height: 1.35; }
 .end-ic.ok { color: var(--busy); }
 .end-ic.bad { color: var(--danger); }
 .computers > .group { margin-top: 18px; }
+.node-row .tag { flex: none; height: 18px; padding: 0 7px; font-size: 11px; color: var(--wait); background: var(--wait-bg); }
+.end-ic.go { width: 32px; color: var(--faint); }
+.computers .foot-actions { justify-content: space-between; }
+/* A computer's projects: a heading that folds its sessions open and shut, its tools at the end. */
+.proj-block { border-radius: var(--r-md); }
+.proj-head { display: flex; align-items: center; }
+.proj-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 5px 4px 5px 4px; text-align: left; background: transparent; border: 0; border-radius: var(--r-md); color: var(--text); }
+.proj-open:active { background: var(--panel-2); }
+.proj-open .fold-ic { width: 14px; height: 14px; color: var(--faint); transition: transform var(--dur); transform: rotate(-90deg); }
+.proj-open[aria-expanded="true"] .fold-ic { transform: none; }
+.proj-open .count { flex: none; }
+.proj-open .count.waiting { color: var(--needs); background: var(--needs-bg); }
+.proj-open .count.running { color: var(--working); background: var(--working-bg); }
+.proj-rows { margin: 0 0 6px 13px; padding-left: 9px; border-left: 1px solid var(--line); }
+.proj-rows .empty.small { text-align: left; padding: 6px 8px; }
+.more-row { min-height: var(--tap); padding: 0 10px; text-align: left; border: 0; background: none; color: var(--accent); font-size: 13px; font-weight: 600; }
 .route-pair { flex: none; display: flex; align-items: center; }
 .route-pair input { width: 92px; min-height: 36px; padding: 6px 8px; font: 14px var(--mono); letter-spacing: .05em; }
 .route-pair input.long { width: 132px; letter-spacing: 0; }
@@ -446,6 +563,18 @@ textarea { resize: none; line-height: 1.35; }
 .hint { text-align: center; color: var(--faint); font-size: 12.5px; }
 .pair > .group { margin: 10px 4px 0; }
 .pair .link { align-self: center; }
+/* The ways to pair by hand: a card each, folded shut until it is chosen. */
+.fold > summary { display: flex; align-items: center; gap: 10px; min-height: 44px; margin: -12px; padding: 6px 12px; list-style: none; border-radius: var(--r-lg); color: var(--text); }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary:active { background: var(--card-hover); }
+.fold > summary > .ic { width: 17px; height: 17px; color: var(--accent); }
+.fold > summary > .ic.fold-ic { width: 14px; height: 14px; color: var(--faint); transition: transform var(--dur); transform: rotate(-90deg); }
+.fold[open] > summary > .ic.fold-ic { transform: none; }
+.fold[open] > summary { margin-bottom: 0; }
+.fold-title { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.fold-title b { font-size: 14px; font-weight: 600; }
+.fold-title small { font-size: 12px; color: var(--muted); }
+.field-hint { font-size: 12px; font-weight: 400; color: var(--muted); line-height: 1.35; }
 
 /* ---------- scanner ---------- */
 .scan { display: flex; flex-direction: column; gap: 12px; align-items: stretch; }
@@ -454,6 +583,7 @@ textarea { resize: none; line-height: 1.35; }
 .viewfinder .frame { position: absolute; inset: 16%; border: 2px solid rgba(255, 255, 255, .85); border-radius: var(--r-lg); box-shadow: 0 0 0 999px rgba(0, 0, 0, .35); }
 .scan .hint { display: flex; gap: 8px; justify-content: center; align-items: center; color: var(--muted); font-size: 13px; }
 .scan .hint .ic { width: 16px; height: 16px; }
+.scan .note { margin: 4px 0 0; }
 
 /* ---------- diagnostics ---------- */
 .diag { display: flex; flex-direction: column; gap: 10px; }
@@ -468,13 +598,13 @@ textarea { resize: none; line-height: 1.35; }
 .banner { position: fixed; z-index: 30; left: calc(8px + var(--sal)); right: calc(8px + var(--sar)); top: calc(6px + var(--sat)); }
 .banner.in { animation: drop .28s ease-out; }
 .banner-in {
-  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 8px 10px 8px 14px; text-align: left; color: var(--text);
+  display: flex; align-items: center; width: 100%; min-height: 52px; color: var(--text);
   border: 1px solid color-mix(in srgb, var(--needs) 45%, transparent); border-radius: var(--r-lg); background: var(--raised); box-shadow: var(--shadow-pop);
 }
+.banner-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 8px 0 8px 14px; text-align: left; border: 0; background: none; color: inherit; }
 .banner-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .banner-text b { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.banner-text small { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.banner-go { color: var(--muted); width: 16px; height: 16px; }
+.banner-text small { color: var(--muted); font-size: 12px; line-height: 1.35; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
 @keyframes drop { from { transform: translateY(-120%); opacity: 0; } }
 
 .toast {
@@ -483,6 +613,12 @@ textarea { resize: none; line-height: 1.35; }
   box-shadow: var(--shadow-pop); font-size: 13.5px; pointer-events: none;
 }
 .kb-open .toast { bottom: auto; top: calc(58px + var(--sat)); }
+/* Where there is no tab bar the toast sits lower; over a session, above its reply box; over a terminal, above its
+   key and tool rows. */
+#app:not(.tabbed) ~ .toast { top: auto; bottom: calc(18px + var(--sab)); }
+#app.screen-session ~ .toast { top: auto; bottom: calc(118px + var(--sab)); }
+#app.screen-terminal ~ .toast { top: auto; bottom: calc(108px + var(--sab)); }
+.kb-open #app.screen-terminal ~ .toast { bottom: calc(58px + var(--sab)); }
 
 .sheet-backdrop { position: fixed; z-index: 50; inset: 0; background: var(--backdrop); display: flex; align-items: flex-end; justify-content: center; }
 .sheet { width: 100%; max-width: 520px; padding: 18px 16px calc(14px + var(--sab)); background: var(--panel); border-radius: var(--r-xl) var(--r-xl) 0 0; border-top: 1px solid var(--line-2); animation: rise .2s ease-out; }
@@ -490,18 +626,65 @@ textarea { resize: none; line-height: 1.35; }
 .sheet-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
 .sheet-actions .btn { height: var(--tap); min-width: 88px; }
 .sheet-input { margin-bottom: 14px; }
+/* A sheet that is a list of things to do. */
+.sheet.menu { padding: 8px 8px calc(8px + var(--sab)); }
+.menu-item { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 48px; padding: 0 12px; text-align: left; border: 0; border-radius: var(--r-md); background: none; color: var(--text); font-size: 14.5px; }
+button.menu-item:active { background: var(--panel-2); }
+.menu-item > .ic { color: var(--muted); }
+.menu-item.on > .ic { color: var(--accent); }
+.menu-item.danger, .menu-item.danger > .ic { color: var(--danger); }
+.menu-label { flex: 1; min-width: 0; }
+.menu-step { padding-right: 0; }
+.menu-value { min-width: 44px; text-align: center; font-size: 13px; font-weight: 650; font-variant-numeric: tabular-nums; }
 @keyframes rise { from { transform: translateY(100%); } }
+
+/* ---------- less motion, where the phone asks for it ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; }
+  .spinner { animation-duration: 2.4s; }
+  .dot.st-waiting, .banner.in, .sheet { animation: none; }
+}
 
 /* ---------- landscape and wide screens ---------- */
 @media (orientation: landscape) and (max-height: 500px) {
   .top { min-height: 46px; padding-top: 1px; padding-bottom: 1px; }
+  .screen-terminal .top small { display: none; }
+  .screen-terminal .top { min-height: 44px; padding-top: 0; padding-bottom: 0; }
+  /* The phone on its side is wide and low: the keys and the tool row (or the message field) share one row. */
+  .term-dock { display: flex; align-items: flex-end; }
+  .term-dock .term-keys { flex: 1 1 54%; min-width: 0; }
+  .term-dock .term-tools, .term-dock .term-compose { flex: 1 1 46%; min-width: 0; padding-top: 3px; padding-bottom: 3px; }
+  .term-status { padding-top: 2px; }
+  .term-status .reason { -webkit-line-clamp: 1; }
   .tabbar button { min-height: 44px; flex-direction: row; justify-content: center; gap: 6px; font-size: 12px; padding: 2px 4px; }
   .tab-ic { width: 40px; height: 26px; }
   .status-line { padding-bottom: 4px; min-height: 26px; }
+  .sess-head .top h1 { -webkit-line-clamp: 1; }
+  .status-line .reason { -webkit-line-clamp: 2; }
   .hero { padding: 0 0 6px; }
   .logo { width: 40px; height: 40px; border-radius: 10px; }
   .hero h1 { font-size: 18px; margin-top: 4px; }
   .pair { padding-top: 6px; }
+}
+/* Hardly any height left (the phone on its side with the keyboard up - which .kb-open does not always tell there):
+   a session is its title, what it waits for on one line, and the reply box. */
+@media (max-height: 300px) {
+  .term-tools { display: none; }
+  .composing .term-keys { display: none; }
+  .term-status { display: none; }
+}
+/* And less still (on its side, the keyboard up, a small phone): the terminal's header goes too - what is left is the
+   terminal's lines and the keys (the phone's Back leaves, as ever). */
+@media (max-height: 200px) {
+  .screen-terminal .term-head, .screen-terminal .term-chip.fit { display: none; }
+}
+@media (max-height: 300px) {
+  .sess-head .top { min-height: 40px; padding-top: 0; padding-bottom: 0; }
+  .sess-head .top small { display: none; }
+  .status-line { padding-bottom: 3px; min-height: 0; }
+  .status-line:not(:has(.reason)) { display: none; }
+  .status-line .reason { -webkit-line-clamp: 1; }
+  .dock .keystrip { display: none; }
 }
 @media (min-width: 720px) {
   .inbox, .computers, .new, .diag, .routes, .pairing, .session .msgs { max-width: 760px; margin: 0 auto; width: 100%; }
