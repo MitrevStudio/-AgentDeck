@@ -116,10 +116,16 @@ function createTermView(id) {
     cursorBlink: true,
     scrollback: 10000,
     theme: getTermTheme(),
-    minimumContrastRatio: getTermMinContrast()
+    minimumContrastRatio: getTermMinContrast(),
+    allowProposedApi: true // term.unicode, below
   });
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
+  // Character widths as the agents count them (Unicode 11, as Windows Terminal): xterm's own Unicode 6 gives an emoji
+  // such as ✅ one cell where the agent gave it two, and every line it draws after one is shifted - tables skewed,
+  // lines starting at the right edge and cut on the left.
+  term.loadAddon(new Unicode11Addon.Unicode11Addon());
+  term.unicode.activeVersion = "11";
   term.open(host);
   term.attachCustomKeyEventHandler(e => handleTermKey(term, e, id));
   term.onData(d => window.terminals.input(id, d));

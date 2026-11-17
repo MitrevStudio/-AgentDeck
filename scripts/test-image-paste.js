@@ -20,10 +20,12 @@ const ctx = vm.createContext({
   document: { documentElement: {}, createElement: () => ({ events: {}, addEventListener(name, fn) { this.events[name] = fn; } }) },
   getComputedStyle: () => ({ getPropertyValue: () => '' }),
   Terminal: class {
+    constructor(options) { this.options = options; this.unicode = { activeVersion: '6' }; this.parser = { registerOscHandler() {} }; }
     loadAddon() {} open() {} attachCustomKeyEventHandler() {} onData() {} focus() {}
     paste(value) { pasted.push(value); }
   },
   FitAddon: { FitAddon: class {} },
+  Unicode11Addon: { Unicode11Addon: class {} },
   toast: message => errors.push(message),
 });
 vm.runInContext(source.slice(0, source.indexOf('// The same keys when the keyboard')), ctx);
@@ -34,6 +36,9 @@ const settle = () => new Promise(resolve => setImmediate(resolve));
   image = file;
   vm.runInContext(`globalThis.view = createTermView('tab'); handleTermKey(view.term, { type: 'keydown', ctrlKey: true, code: 'KeyV' }, 'tab');`, ctx);
   await settle();
+  // Agents count an emoji such as ✅ as two cells (Unicode 11); with xterm's own Unicode 6 their screens come out skewed.
+  assert.equal(vm.runInContext('view.term.unicode.activeVersion', ctx), '11', 'terminals count character widths as Unicode 11');
+  assert.equal(vm.runInContext('view.term.options.allowProposedApi', ctx), true);
   assert.equal(pasted.pop(), file.replace(/\\/g, '/'), 'clipboard preserves every path separator');
   image = 'C:\\Users\\Test User\\Temp\\image.png';
   vm.runInContext(`handleTermKey(view.term, { type: 'keydown', ctrlKey: true, code: 'KeyV' }, 'tab');`, ctx);
