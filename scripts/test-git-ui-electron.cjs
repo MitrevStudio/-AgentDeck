@@ -195,10 +195,10 @@ app.whenReady().then(async () => {
   await evaluate("document.querySelectorAll('.menu-sub button')[0].click()"); await settle();
   await evaluate("document.querySelectorAll('.menu-sub button')[1].click()"); await settle();
   await evaluate('closeGroupMenu()');
-  assert.equal(await evaluate("document.querySelectorAll('.git-project').length"), 2, 'a repository a terminal is in stays, whatever the filter');
-  await evaluate("ws.tabs={};ws.terminals=[];gitPanel.render()");
+  assert.equal(await evaluate("document.querySelectorAll('.git-project').length"), 0, 'the filter hides a repository a terminal is in too');
   assert.equal(await evaluate("document.querySelectorAll('[data-repo]').length"), 0);
-  assert.equal(await evaluate("$('gitRepositories').textContent.includes(I18N.t('git.panel.filtered'))"), true, 'the filter is named as the reason');
+  assert.equal(await evaluate("$('gitRepositories').textContent.includes(I18N.t('git.panel.filtered'))"), true, 'the filter is named as the reason, terminals open or not');
+  await evaluate("ws.tabs={};ws.terminals=[];gitPanel.render()");
   await capture('filtered');
   await click('[data-show-projects]');
   assert.equal(await evaluate("document.querySelectorAll('.git-project').length"), 2);

@@ -264,10 +264,10 @@
       const items = [];
       for (const repo of repos) {
         // Listed: the repositories an open terminal is in and, with "all", every one in a project - unless every
-        // project holding it is hidden by the project filter (which never hides one a terminal is in).
+        // project holding it is hidden by the project filter, a terminal in it or not.
         const open = viaTerminal.has(normPath(repo.root)), holding = getRepoProjects(source.id, repo);
         if (!open && (scope !== 'all' || !holding[0].real)) continue;
-        const projects = open || scope !== 'all' ? holding : holding.filter(p => !hiddenProjects.has(p.key));
+        const projects = scope !== 'all' ? holding : holding.filter(p => !p.real || !hiddenProjects.has(p.key));
         if (!projects.length) { filteredOut = true; continue; }
         const key = JSON.stringify([source.id, repo.root]), name = repo.root.split(/[\\/]/).at(-1);
         if (byProject && projects.every(p => isRepoHidden(p.key, key))) { items.push({ key, name, projects, html: () => '' }); continue; }
