@@ -211,6 +211,44 @@ app.whenReady().then(async () => {
   assert.deepEqual(await searchState(), ['W', false, true, true]);
   await pressKey('Enter'); await settle();
   assert.equal(await evaluate("document.querySelector('.menu-sub button[data-i=\"1\"]').getAttribute('aria-checked')"), 'true');
+  // The field drawn again after Enter keeps the caret at the end of the search, or the selection it had.
+  const caret = () => evaluate("(f=>[document.activeElement===f,f.selectionStart,f.selectionEnd])(document.querySelector('.menu-sub .menu-search'))");
+  await evaluate("(f=>{f.value='Wo';f.dispatchEvent(new Event('input'));f.setSelectionRange(2,2)})(document.querySelector('.menu-sub .menu-search'))");
+  await pressKey('Enter'); await settle();
+  assert.deepEqual(await caret(), [true, 2, 2], 'the caret stays at the end after Enter');
+  await evaluate("document.querySelector('.menu-sub .menu-search').setSelectionRange(0,1)");
+  await pressKey('Enter'); await settle();
+  assert.deepEqual(await caret(), [true, 0, 1], 'a selection in the field is kept after Enter');
+  assert.equal(await evaluate("document.querySelector('.menu-sub .menu-empty').getAttribute('role')"), 'status', 'the "no matches" line is announced');
+  // A space on an item ticks it while a search is on (real key presses: the tick is the button's own answer to the
+  // key), the search and the focus staying; a letter after it goes on at the end of the search.
+  const key = async (keyCode, char) => {
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode });
+    if (char) win.webContents.sendInputEvent({ type: 'char', keyCode: char });
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode });
+    await settle();
+  };
+  const workItem = "document.querySelector('.menu-sub button[data-i=\"1\"]')";
+  win.webContents.focus();
+  await pressKey('ArrowDown');
+  assert.equal(await evaluate(`document.activeElement===${workItem}`), true, 'ArrowDown from the field: the first match');
+  await key('Space', ' ');
+  assert.deepEqual(await evaluate(`[${workItem}.getAttribute('aria-checked'),document.activeElement===${workItem}]`), [null, true], 'a space unticks the focused item, which keeps the focus');
+  assert.deepEqual(await shownItems(), ['Work']);
+  assert.equal((await searchState())[0], 'Wo', 'the space is not added to the search');
+  await key('Space', ' ');
+  assert.equal(await evaluate(`${workItem}.getAttribute('aria-checked')`), 'true', 'and ticks it again');
+  await key('r', 'r');
+  assert.deepEqual([(await searchState())[0], await caret()], ['Wor', [true, 3, 3]], 'a letter typed on the list is added at the end');
+  await key('Space', ' ');
+  assert.equal((await searchState())[0], 'Wor ', 'a space typed in the field goes into the search');
+  // A click on an item while searching: ticked, the search kept, the focus on the item.
+  await evaluate("(f=>{f.value='Wor';f.dispatchEvent(new Event('input'))})(document.querySelector('.menu-sub .menu-search'))");
+  await evaluate(`${workItem}.click()`); await settle();
+  assert.deepEqual(await evaluate(`[${workItem}.getAttribute('aria-checked'),document.activeElement===${workItem}]`), [null, true]);
+  assert.equal((await searchState())[0], 'Wor', 'a click keeps the search');
+  await evaluate(`${workItem}.click()`); await settle();
+  await evaluate("document.querySelector('.menu-sub .menu-search').focus()");
   await pressKey('Escape');
   assert.deepEqual(await shownItems(), ['ClinicDesk', 'Work']);
   assert.deepEqual(await searchState(), ['', false, false, true], 'Escape clears the search, the menu stays');
@@ -226,6 +264,11 @@ app.whenReady().then(async () => {
   await click('[data-show-projects]');
   assert.equal(await evaluate("document.querySelectorAll('.git-project').length"), 2);
   assert.equal(await evaluate("document.activeElement.id"), 'gitPanelMenu');
+  // A menu with no search field closes on the first Escape.
+  await click('#gitPanelMenu');
+  assert.deepEqual(await evaluate("[document.querySelectorAll('.menu').length,document.querySelectorAll('.menu-search').length]"), [1, 0]);
+  await evaluate("document.querySelector('.menu button').focus();pressEscape()"); await settle();
+  assert.equal(await evaluate("document.querySelectorAll('.menu').length"), 0, 'a menu without a search closes on the first Escape');
   // A long filter list opened from a button low at the right edge: inside the window, its search field pinned on top
   // while the list scrolls, an item reached with the keyboard not behind the field, ArrowUp from the field to the last.
   assert.deepEqual(await evaluate(`(() => {

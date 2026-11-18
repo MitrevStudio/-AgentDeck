@@ -1047,7 +1047,7 @@ const isSearchable = items => items.length > 0 && items.every(x => x.keepOpen);
 function renderMenuSearch(menu) {
   const query = menu.__query || "";
   return `<input class="input menu-search" type="search" spellcheck="false" placeholder="${esc(t("menu.search"))}" aria-label="${esc(t("menu.search"))}" value="${esc(query)}">`
-    + `<p class="menu-empty" hidden>${esc(t("menu.noMatches"))}</p>`;
+    + `<p class="menu-empty" role="status" hidden>${esc(t("menu.noMatches"))}</p>`;
 }
 function applyMenuSearch(menu) {
   const query = (menu.__query || "").toLocaleLowerCase();
@@ -1071,8 +1071,13 @@ function wireMenuSearch(menu) {
   field.onkeydown = e => {
     if (e.key !== "Enter") return;
     e.preventDefault();
+    // The tick draws the layer again: the new field takes the focus with the caret (or the selection) where it was,
+    // so the typing goes on at the same place.
+    const { selectionStart, selectionEnd, selectionDirection } = field;
     menu.querySelector("button[data-i]:not([hidden]):not(:disabled)")?.click();
-    menu.querySelector(".menu-search").focus();
+    const next = menu.querySelector(".menu-search");
+    next.focus();
+    next.setSelectionRange(selectionStart, selectionEnd, selectionDirection);
   };
   applyMenuSearch(menu);
 }
@@ -1178,8 +1183,10 @@ document.addEventListener("keydown", e => {
     focusFirst(searched);
     return;
   }
-  // Typing on a filter's list starts its search (a space still ticks the focused item).
-  const typed = e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey && !(e.key === " " && !query);
+  // Typing on a filter's list goes to its search. A space on an item ticks it, as in any menu, with a search under
+  // way too; it joins the search only from the field itself, or when the focus is on no item.
+  const onItem = searched.contains(document.activeElement) && Boolean(document.activeElement.closest("button"));
+  const typed = e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey && !(e.key === " " && (!query || onItem));
   if (field && document.activeElement !== field && (typed || (e.key === "Backspace" && query))) {
     e.preventDefault();
     e.stopPropagation();
