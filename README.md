@@ -384,11 +384,13 @@ A terminal belongs to the computer it runs on, whoever started it. Any of your p
 
 Sessions that run outside an AgentDeck terminal (for example in Windows Terminal) cannot be shared this way; **Move here** brings one in. See [docs/SHARED-SESSIONS.md](docs/SHARED-SESSIONS.md).
 
-### AgentDeck on your phone (Android)
+### AgentDeck on your phone (Android and iPhone)
 
-The Android app shows the sessions of all your computers in one list — the ones waiting for you on top — lets you reply, start and stop sessions, and opens any terminal. It connects to **your own relay** by address and port: no account, no cloud service, no push provider.
+The phone app shows the sessions of all your computers in one list — the ones waiting for you on top — lets you reply, start and stop sessions, and opens any terminal. It connects to **your own relay** by address and port: no account, no cloud service, no push provider.
 
-1. Install `AgentDeck-<version>.apk` from the [latest release](https://github.com/MitrevStudio/-AgentDeck/releases/latest) (Android asks to allow installing from your browser or file manager).
+1. Install the app:
+   - **Android** — `AgentDeck-<version>.apk` from the [latest release](https://github.com/MitrevStudio/-AgentDeck/releases/latest) (Android asks to allow installing from your browser or file manager).
+   - **iPhone** (iOS 16 or newer) — a beta named **AgentDeck Remote**, through Apple's TestFlight: install [TestFlight](https://apps.apple.com/app/testflight/id899247664) from the App Store, then open [testflight.apple.com/join/erWU4dAU](https://testflight.apple.com/join/erWU4dAU) on the phone. An iPhone takes apps only from Apple, so there is no file to download.
 2. On a desktop open **Settings → Computers → Phones → Add phone**, tick the computers the phone should reach and check the relay address as the phone will reach it.
 3. In the app choose **Scan** and point it at the code — or paste the text shown under it. One code pairs the phone with the relay and every ticked computer; it is valid for ten minutes and works once.
 
