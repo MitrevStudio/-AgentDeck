@@ -23,11 +23,11 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<!-- Export compliance: the app encrypts what it sends with its own implementation (in JavaScript) of standard
-	     algorithms - Noise XX over X25519, ChaCha20-Poly1305 and SHA-256 (docs/MOBILE.md 3.1) - not with the
-	     encryption of iOS, so it is not exempt. -->
-	<key>ITSAppUsesNonExemptEncryption</key>
-	<true/>
+	<!-- Export compliance is not answered here (no ITSAppUsesNonExemptEncryption): App Store Connect asks for every
+	     build, and the answer is the account holder's to give. The app encrypts what it sends with its own
+	     implementation (in JavaScript) of standard algorithms - Noise XX over X25519, ChaCha20-Poly1305 and SHA-256
+	     (docs/MOBILE.md 3.1) - not with the encryption of iOS. "Yes" here is taken only together with the code of
+	     the encryption documentation filed for the app (ITSEncryptionExportComplianceCode); docs/MOBILE.md 11. -->
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<!-- The app talks plain ws:// to the user's relay at any address, an IP or a host name, in the house or on the
