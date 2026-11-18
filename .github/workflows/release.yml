@@ -183,7 +183,6 @@ jobs:
     continue-on-error: true
     env:
       AGENTDECK_VERSION: ${{ needs.release.outputs.version }}
-      APPSTORE_API_KEY_FILE: ${{ runner.temp }}/AuthKey.p8
       APPSTORE_API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
       APPSTORE_API_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -195,7 +194,8 @@ jobs:
             echo "::warning::The App Store Connect secrets are not set (APPSTORE_API_KEY_BASE64, APPSTORE_API_KEY_ID, APPSTORE_API_ISSUER_ID, APPLE_TEAM_ID): the iPhone app is not built"
             exit 0
           fi
-          echo "$APPSTORE_API_KEY_BASE64" | base64 --decode > "$APPSTORE_API_KEY_FILE"
+          echo "$APPSTORE_API_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
+          echo "APPSTORE_API_KEY_FILE=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
           echo "found=true" >> "$GITHUB_OUTPUT"
         env:
           APPSTORE_API_KEY_BASE64: ${{ secrets.APPSTORE_API_KEY_BASE64 }}
@@ -227,7 +227,7 @@ jobs:
       - if: failure()
         run: echo "::warning::The iPhone app of v$AGENTDECK_VERSION did not reach TestFlight - see the build-ios job"
       - if: always()
-        run: rm -f "$APPSTORE_API_KEY_FILE"
+        run: rm -f "$RUNNER_TEMP/AuthKey.p8"
 
   docker-relay:
     needs: release

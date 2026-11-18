@@ -170,7 +170,9 @@ const VIEW = `JSON.stringify({ active: document.activeElement?.className || docu
     // ---------- pairing by hand: a field, the keyboard ----------
     await page(`document.querySelector("details.relay").open = true; await new Promise(r => setTimeout(r, 1500)); return "open"`);
     const typing = await json(`return JSON.stringify({ active: document.activeElement?.name, inner: innerHeight, visible: Math.round(visualViewport.height), scale: visualViewport.scale, classes: document.documentElement.className })`);
+    typing.field = await json(`const r = document.activeElement.getBoundingClientRect(); return JSON.stringify([Math.round(r.top), Math.round(r.bottom)])`);
     note("a field with the keyboard", typing);
+    check("the field that took the keyboard is in what the keyboard leaves", () => assert.ok(typing.field[0] > 0 && typing.field[1] < typing.visible, String(typing.field)));
     check("a field that takes the keyboard is not zoomed into", () => assert.equal(typing.scale, 1));
     await shot("pair-by-hand-keyboard");
     await page(`document.activeElement?.blur(); document.querySelector("details.relay").open = false; return "closed"`);

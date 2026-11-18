@@ -10,16 +10,17 @@
 // CFBundleShortVersionString "1.23.4", CFBundleVersion 1023004 - App Store Connect takes a build only when its
 // number is higher than the last one's. A local build is 0.0.0 (1).
 //
-// Signing (ipa, upload) is Xcode's own, in Apple's cloud: the App Store Connect API key in the environment lets
-// xcodebuild make the distribution certificate and the provisioning profile it needs there and sign with them, so
-// no certificate or its private key is kept anywhere. APPSTORE_API_KEY_FILE (the .p8), APPSTORE_API_KEY_ID,
-// APPSTORE_API_ISSUER_ID, APPLE_TEAM_ID.
+// Signing (ipa) and the upload need only the App Store Connect API key in the environment - APPSTORE_API_KEY_FILE
+// (the .p8), APPSTORE_API_KEY_ID, APPSTORE_API_ISSUER_ID, APPLE_TEAM_ID: the certificate and the profile to sign
+// with are made from it for each release (ios-signing.mjs), so no certificate or its private key is kept anywhere.
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
 import path from "node:path";
+import { prepare } from "./ios-signing.mjs";
 
+const BUNDLE = "com.mitrevstudio.agentdeck";
 const ios = path.join(path.dirname(path.dirname(fileURLToPath(import.meta.url))), "ios");
 const project = path.join(ios, "App", "App.xcodeproj");
 const out = path.join(ios, "build");
@@ -57,13 +58,14 @@ if (what === "sim") {
   console.log(`\nApp: ${app}`);
 } else if (what === "archive") {
   rmSync(archive, { recursive: true, force: true });
-  // Not signed here: signing at this step would want a development certificate and a phone registered with the
-  // team. The archive is signed for the App Store when it is exported (ipa).
+  // Not signed here: signing settings on the command line would reach the packages' targets too. The archive is
+  // signed for the App Store when it is exported (ipa).
   run("xcodebuild", ["-project", project, "-scheme", "App", "-configuration", "Release", "-destination", "generic/platform=iOS",
     "-derivedDataPath", path.join(out, "derived"), "-archivePath", archive, "CODE_SIGNING_ALLOWED=NO", ...settings, "archive"]);
   console.log(`\nArchive: ${archive}`);
 } else if (what === "ipa") {
   const [key, keyId, issuer, team] = need(["APPSTORE_API_KEY_FILE", "APPSTORE_API_KEY_ID", "APPSTORE_API_ISSUER_ID", "APPLE_TEAM_ID"]);
+  const signing = await prepare({ keyFile: key, keyId, issuer, bundleId: BUNDLE });
   const options = path.join(out, "export.plist");
   writeFileSync(options, `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -71,7 +73,9 @@ if (what === "sim") {
 <dict>
 	<key>method</key><string>app-store-connect</string>
 	<key>destination</key><string>export</string>
-	<key>signingStyle</key><string>automatic</string>
+	<key>signingStyle</key><string>manual</string>
+	<key>signingCertificate</key><string>Apple Distribution</string>
+	<key>provisioningProfiles</key><dict><key>${BUNDLE}</key><string>${signing.profile}</string></dict>
 	<key>teamID</key><string>${team}</string>
 	<key>manageAppVersionAndBuildNumber</key><false/>
 	<key>uploadSymbols</key><true/>
@@ -79,8 +83,9 @@ if (what === "sim") {
 </plist>
 `);
   rmSync(path.dirname(ipa), { recursive: true, force: true });
-  run("xcodebuild", ["-exportArchive", "-archivePath", archive, "-exportPath", path.dirname(ipa), "-exportOptionsPlist", options,
-    "-allowProvisioningUpdates", "-authenticationKeyPath", key, "-authenticationKeyID", keyId, "-authenticationKeyIssuerID", issuer]);
+  const r = spawnSync("xcodebuild", ["-exportArchive", "-archivePath", archive, "-exportPath", path.dirname(ipa), "-exportOptionsPlist", options], { cwd: ios, stdio: "inherit" });
+  signing.remove();
+  if (r.status !== 0) process.exit(r.status ?? 1);
   const made = readdirSync(path.dirname(ipa)).find(f => f.endsWith(".ipa"));
   if (!made) { console.error("xcodebuild made no .ipa"); process.exit(1); }
   console.log(`\nIPA: ${path.join(path.dirname(ipa), made)}`);

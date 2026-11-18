@@ -43,9 +43,11 @@ const tabScroll = new Map(); // a tab's name -> how far its list was scrolled wh
 // page keeps its height, the keyboard covers its lower part and the view is moved up over it - so there the app is
 // also put where the visible part begins (--vvt), and the heights the stylesheet asks about with max-height (a
 // phone on its side with the keyboard up) are classes (.vv-low, .vv-tiny), since the media query sees the page.
+// A field that took the keyboard is brought into what is left of its list, which Android does by itself.
 function trackViewport() {
   const vv = window.visualViewport;
   const root = document.documentElement;
+  let last = 0;
   const set = () => {
     const h = vv ? vv.height : window.innerHeight;
     root.style.setProperty("--vvh", `${Math.round(h)}px`);
@@ -55,6 +57,9 @@ function trackViewport() {
       root.style.setProperty("--vvt", `${Math.max(0, Math.round(vv.offsetTop))}px`);
       root.classList.toggle("vv-low", h <= 300);
       root.classList.toggle("vv-tiny", h <= 200);
+      const field = document.activeElement;
+      if (h < last - 100 && field?.matches?.("input, textarea") && field.closest(".body")) requestAnimationFrame(() => field.scrollIntoView({ block: "center" }));
+      last = h;
     }
   };
   set();
