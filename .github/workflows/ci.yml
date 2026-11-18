@@ -115,6 +115,48 @@ jobs:
           path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 7
 
+  # The iPhone app (mobile/ios), on a Mac of GitHub's - there is none here. Built for the simulator and run in one
+  # against a throwaway relay (scripts/ios-simulator.js): what must work there is checked, and the screenshots of its
+  # screens are kept for a week - the only way to see the app before TestFlight. Then built for a phone as the
+  # release workflow builds it, up to the signing (which needs the App Store Connect key).
+  mobile-ios:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            mobile/package-lock.json
+      # The app bundles src/mesh, and the relay of the simulator run is the repository's own: the root's packages,
+      # nothing of the desktop built. node-pty comes with a built helper for macOS that npm unpacks without its
+      # executable bit.
+      - run: npm ci --ignore-scripts
+      - run: chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper
+      - run: npm ci
+        working-directory: mobile
+      - run: npm run ios:sim
+        working-directory: mobile
+      - name: Run it in the simulator
+        run: node scripts/ios-simulator.js mobile/ios/build/sim/AgentDeck.app ios-screenshots
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: agentdeck-ios-screenshots
+          path: ios-screenshots
+          retention-days: 7
+      - name: Build it for a phone (not signed)
+        working-directory: mobile
+        run: |
+          node scripts/xcode.mjs archive
+          plist=ios/build/AgentDeck.xcarchive/Products/Applications/AgentDeck.app/Info.plist
+          [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")" = "1.23.4" ]
+          [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist")" = "1023004" ]
+        env:
+          AGENTDECK_VERSION: 1.23.4
+
   # The relay's Docker image builds, starts and answers on its port (it is published by the release workflow).
   docker-relay:
     runs-on: ubuntu-26.04

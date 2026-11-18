@@ -9,6 +9,11 @@
 # The Android app (mobile/) is built with the same version, signed with the release key from the repository's secrets
 # (ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD) and attached to the
 # same release as AgentDeck-<version>.apk. Like the AppImage it does not hold the release back.
+# The iPhone app (mobile/ios) is built with the same version on a Mac of GitHub's, signed for the App Store and sent to
+# TestFlight with the App Store Connect API key from the repository's secrets (APPSTORE_API_KEY_BASE64,
+# APPSTORE_API_KEY_ID, APPSTORE_API_ISSUER_ID, APPLE_TEAM_ID). Nothing of it is attached to the release (an iPhone
+# takes an app only from Apple), and it never holds the release back or fails it: without the secrets it is skipped,
+# and a build or an upload that goes wrong is a warning on the run.
 name: Release
 
 on:
@@ -170,6 +175,60 @@ jobs:
           GH_TOKEN: ${{ github.token }}
       - if: always()
         run: rm -f "$RUNNER_TEMP/release.jks"
+
+  build-ios:
+    needs: release
+    if: needs.release.outputs.published == 'true'
+    runs-on: macos-26
+    # Whatever happens here, the release is whole without it: the run stays green and says what went wrong.
+    continue-on-error: true
+    env:
+      AGENTDECK_VERSION: ${{ needs.release.outputs.version }}
+      APPSTORE_API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+      APPSTORE_API_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - id: key
+        name: App Store Connect key
+        run: |
+          if [ -z "$APPSTORE_API_KEY_BASE64" ] || [ -z "$APPSTORE_API_KEY_ID" ] || [ -z "$APPSTORE_API_ISSUER_ID" ] || [ -z "$APPLE_TEAM_ID" ]; then
+            echo "::warning::The App Store Connect secrets are not set (APPSTORE_API_KEY_BASE64, APPSTORE_API_KEY_ID, APPSTORE_API_ISSUER_ID, APPLE_TEAM_ID): the iPhone app is not built"
+            exit 0
+          fi
+          echo "$APPSTORE_API_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
+          echo "APPSTORE_API_KEY_FILE=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
+          echo "found=true" >> "$GITHUB_OUTPUT"
+        env:
+          APPSTORE_API_KEY_BASE64: ${{ secrets.APPSTORE_API_KEY_BASE64 }}
+      - uses: actions/checkout@v7
+        if: steps.key.outputs.found
+        with:
+          ref: v${{ needs.release.outputs.version }}
+      - uses: actions/setup-node@v7
+        if: steps.key.outputs.found
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            mobile/package-lock.json
+      # The app bundles src/mesh, whose packages live in the root; nothing of the desktop is built here.
+      - run: npm ci --ignore-scripts
+        if: steps.key.outputs.found
+      - run: npm ci
+        if: steps.key.outputs.found
+        working-directory: mobile
+      - name: Build, sign for the App Store, send to TestFlight
+        if: steps.key.outputs.found
+        working-directory: mobile
+        run: |
+          npm run ios:archive
+          node scripts/xcode.mjs ipa
+          node scripts/xcode.mjs upload
+      - if: failure()
+        run: echo "::warning::The iPhone app of v$AGENTDECK_VERSION did not reach TestFlight - see the build-ios job"
+      - if: always()
+        run: rm -f "$RUNNER_TEMP/AuthKey.p8"
 
   docker-relay:
     needs: release

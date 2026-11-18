@@ -1,5 +1,5 @@
 // The phone app: starts the provider (the user's relay), runs the screens, and keeps the shell
-// around them - the screen stack with the Android back button, the tab bar, the "waiting" banner, toasts,
+// around them - the screen stack with the Android back button (on an iPhone: a swipe from the left edge), the tab bar, the "waiting" banner, toasts,
 // confirmations and the visual viewport (the soft keyboard) - and the link's lifecycle: connected on start, checked
 // and made again when the app comes back to the foreground or the network changes.
 import { App } from "@capacitor/app";
@@ -9,6 +9,7 @@ import { icon, iconBtn } from "./icons.js";
 import { createStore } from "./data.js";
 import { createRelayProvider } from "./provider-relay.js";
 import { keystore, lock, deviceModel } from "./keystore.js";
+import { isIos, setupPhone } from "./phone.js";
 import { generateKeypair } from "../../src/mesh/noise.js";
 import pkg from "../package.json";
 import { openSession } from "./screens/parts.js";
@@ -38,13 +39,28 @@ const tabScroll = new Map(); // a tab's name -> how far its list was scrolled wh
 
 // ---------- the soft keyboard ----------
 // The app is as tall as what is visible above the keyboard, so bottom bars (reply box, extra keys) sit right on it.
+// Android's WebView makes the page itself that tall (interactive-widget=resizes-content). An iPhone's does not: the
+// page keeps its height, the keyboard covers its lower part and the view is moved up over it - so there the app is
+// also put where the visible part begins (--vvt), and the heights the stylesheet asks about with max-height (a
+// phone on its side with the keyboard up) are classes (.vv-low, .vv-tiny), since the media query sees the page.
+// A field that took the keyboard is brought into what is left of its list, which Android does by itself.
 function trackViewport() {
   const vv = window.visualViewport;
+  const root = document.documentElement;
+  let last = 0;
   const set = () => {
     const h = vv ? vv.height : window.innerHeight;
-    document.documentElement.style.setProperty("--vvh", `${Math.round(h)}px`);
-    document.documentElement.classList.toggle("kb-open", window.innerHeight - h > 120 || (screen.height - h > 260 && document.activeElement?.matches?.("input, textarea")));
+    root.style.setProperty("--vvh", `${Math.round(h)}px`);
+    root.classList.toggle("kb-open", window.innerHeight - h > 120 || (screen.height - h > 260 && document.activeElement?.matches?.("input, textarea")));
     if (vv) window.scrollTo(0, 0);
+    if (isIos && vv) {
+      root.style.setProperty("--vvt", `${Math.max(0, Math.round(vv.offsetTop))}px`);
+      root.classList.toggle("vv-low", h <= 300);
+      root.classList.toggle("vv-tiny", h <= 200);
+      const field = document.activeElement;
+      if (h < last - 100 && field?.matches?.("input, textarea") && field.closest(".body")) requestAnimationFrame(() => field.scrollIntoView({ block: "center" }));
+      last = h;
+    }
   };
   set();
   vv?.addEventListener("resize", set);
@@ -233,7 +249,13 @@ function back() {
   if (stack.length > 1) history.back();
 }
 window.addEventListener("popstate", () => {
-  if (stack.length > 1) { stack.pop(); render(); }
+  if (stack.length <= 1) return;
+  // A swipe back on an iPhone with a sheet open (the Android back button is told below): the sheet goes, the screen
+  // stays - its place in the history is taken again.
+  const sheet = $(".sheet-backdrop");
+  if (sheet) { history.pushState({ depth: stack.length - 1 }, ""); sheet.click(); return; }
+  stack.pop();
+  render();
 });
 
 // ---------- the provider ----------
@@ -321,6 +343,7 @@ function pause() {
 // ---------- start ----------
 async function boot() {
   setLanguage();
+  setupPhone();
   trackViewport();
   document.body.classList.toggle("native", Boolean(window.Capacitor?.isNativePlatform?.()));
   await lock.unlock();

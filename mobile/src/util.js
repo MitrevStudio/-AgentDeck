@@ -38,8 +38,11 @@ export function hue(s) {
   return h;
 }
 
-// Vibration where the WebView has it (Android); iOS has none (a haptics plugin later).
+// Vibration where the WebView has it (Android). An iPhone's has none: there phone.js puts the Taptic Engine here.
+let haptic = null;
+export const setHaptic = fn => { haptic = fn; };
 export function buzz(pattern = [60, 60, 120]) {
+  if (haptic) return haptic(pattern);
   try { navigator.vibrate?.(pattern); } catch {}
 }
 

@@ -28,6 +28,7 @@ import { t, errorText } from "../i18n.js";
 import { esc, KEYS, buzz, baseName, terminalFilePath } from "../util.js";
 import { getDraft, setDraft } from "../drafts.js";
 import { shrink, toBase64, sizeText } from "../picture.js";
+import { isIos, copyText as toClipboard, pasteText as fromClipboard, plainKeys } from "../phone.js";
 import { icon, iconBtn } from "../icons.js";
 import { header, wireBack, closeAsk } from "./parts.js";
 import { keyStrip, wireStrip } from "./keys.js";
@@ -241,7 +242,7 @@ export function render(el, ctx, p) {
   async function copyText(text) {
     if (!text) return;
     try {
-      await navigator.clipboard.writeText(text);
+      await toClipboard(text);
       ctx.toast(t("term.copied"));
     } catch {
       await ctx.prompt(t("term.copyByHand"), text, t("common.done"), { multiline: true });
@@ -577,7 +578,10 @@ export function render(el, ctx, p) {
   // The soft keyboard types into a field of our own, not into xterm's textarea: Android keyboards compose words
   // (autocorrect, suggestions) and xterm loses characters on the way. Whatever the field holds after each change is
   // compared with what it held before and the difference goes out as keys - backspaces for what went, then the new
-  // text - so a word the keyboard corrects is corrected in the terminal too.
+  // text - so a word the keyboard corrects is corrected in the terminal too. An iPhone's keyboard also turns what is
+  // typed into print - curly quotes, a long dash for two hyphens - which no shell reads: there the keys go out as
+  // they were typed (asKeys).
+  const asKeys = isIos ? plainKeys : s => s;
   const input = el.querySelector(".term-input");
   let shadow = "", composing = false;
   const clearInput = () => { input.value = ""; shadow = ""; };
@@ -587,7 +591,7 @@ export function render(el, ctx, p) {
     const v = input.value;
     let i = 0;
     while (i < shadow.length && i < v.length && shadow[i] === v[i]) i++;
-    const gone = shadow.length - i, added = v.slice(i);
+    const gone = asKeys(shadow.slice(i)).length, added = asKeys(v.slice(i));
     shadow = v;
     let out = "\x7f".repeat(gone);
     for (const ch of added) out += ch === "\n" ? "\r" : withCtrl(ch);
@@ -720,7 +724,7 @@ export function render(el, ctx, p) {
   // the page read the clipboard gets a field to paste into by hand instead.
   async function paste() {
     let text = "";
-    try { text = await navigator.clipboard.readText(); } catch {}
+    try { text = await fromClipboard(); } catch {}
     if (!text) text = await ctx.prompt(t("term.pasteAsk"), "", t("key.paste"), { multiline: true });
     if (text && !closed) term.paste(text);
   }

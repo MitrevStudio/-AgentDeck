@@ -1,0 +1,3 @@
+/* What iOS shows when it asks for a permission (Info.plist has the same English texts). */
+"NSCameraUsageDescription" = "AgentDeck uses the camera to scan the pairing code from your computer, and to take a photo you send to a session.";
+"NSLocalNetworkUsageDescription" = "AgentDeck connects to your own relay and computers, which may be on this network.";
