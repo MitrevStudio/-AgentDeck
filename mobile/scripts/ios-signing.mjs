@@ -62,6 +62,9 @@ export async function prepare({ keyFile, keyId, issuer, bundleId }) {
   }
   if (old.length) console.log(`Removed ${old.length} earlier "${NAME}" profile(s) and their certificates`);
 
+  const bundle = (await call("GET", `/v1/bundleIds?filter[identifier]=${bundleId}&fields[bundleIds]=identifier`)).data.find(b => b.attributes.identifier === bundleId);
+  if (!bundle) throw new Error(`the App ID ${bundleId} is not registered with the team`);
+
   // 1. The certificate.
   const keyPem = path.join(dir, "key.pem"), csr = path.join(dir, "request.csr"), certPem = path.join(dir, "cert.pem"), p12 = path.join(dir, "identity.p12");
   run("/usr/bin/openssl", ["req", "-new", "-newkey", "rsa:2048", "-nodes", "-keyout", keyPem, "-out", csr, "-subj", `/CN=${NAME}`], { quiet: true });
@@ -70,11 +73,16 @@ export async function prepare({ keyFile, keyId, issuer, bundleId }) {
   console.log(`Certificate: ${cert.attributes.certificateType}, until ${String(cert.attributes.expirationDate).slice(0, 10)}`);
 
   // 2. The profile.
-  const bundle = (await call("GET", `/v1/bundleIds?filter[identifier]=${bundleId}&fields[bundleIds]=identifier`)).data.find(b => b.attributes.identifier === bundleId);
-  if (!bundle) throw new Error(`the App ID ${bundleId} is not registered with the team`);
   const name = `${NAME} ${new Date().toISOString().slice(0, 19).replace(/[-:]/g, "").replace("T", "-")}`;
-  const profile = (await call("POST", "/v1/profiles", { data: { type: "profiles", attributes: { name, profileType: "IOS_APP_STORE" },
-    relationships: { bundleId: { data: { type: "bundleIds", id: bundle.id } }, certificates: { data: [{ type: "certificates", id: cert.id }] } } } })).data;
+  let profile;
+  try {
+    profile = (await call("POST", "/v1/profiles", { data: { type: "profiles", attributes: { name, profileType: "IOS_APP_STORE" },
+      relationships: { bundleId: { data: { type: "bundleIds", id: bundle.id } }, certificates: { data: [{ type: "certificates", id: cert.id }] } } } })).data;
+  } catch (e) {
+    // A certificate in no profile would not be found by the next release: it goes now.
+    try { await call("DELETE", `/v1/certificates/${cert.id}`); } catch {}
+    throw e;
+  }
   const folders = [path.join(os.homedir(), "Library", "Developer", "Xcode", "UserData", "Provisioning Profiles"), path.join(os.homedir(), "Library", "MobileDevice", "Provisioning Profiles")];
   const files = folders.map(f => path.join(f, `${profile.attributes.uuid}.mobileprovision`));
   for (const f of files) { mkdirSync(path.dirname(f), { recursive: true }); writeFileSync(f, Buffer.from(profile.attributes.profileContent, "base64")); }

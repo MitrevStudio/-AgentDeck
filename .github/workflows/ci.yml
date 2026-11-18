@@ -178,6 +178,13 @@ jobs:
         run: echo "$APPSTORE_API_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
         env:
           APPSTORE_API_KEY_BASE64: ${{ secrets.APPSTORE_API_KEY_BASE64 }}
+      - name: What App Store Connect made of the earlier uploads
+        continue-on-error: true
+        run: node mobile/scripts/appstore-builds.mjs
+        env:
+          APPSTORE_API_KEY_FILE: ${{ runner.temp }}/AuthKey.p8
+          APPSTORE_API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          APPSTORE_API_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
       - run: npm run ios:archive
         working-directory: mobile
       - name: Sign for the App Store
