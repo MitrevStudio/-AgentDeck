@@ -9,8 +9,10 @@
 // last push: a part that was skipped for five releases is compared with where it was built five releases ago.
 // Each job of release.yml that gets its part out leaves a tag on the commit it built, <part>-v<version>
 // (android-v1.29.0); the newest such tag below HEAD is where the part stands. A part with no tag of its own yet
-// stands at BASELINE, the last release in which everything was built together. A part whose build failed gets
-// no tag, so the next release builds it again.
+// stands at the last release in which everything was still built together: the newest version tag whose commit
+// does not have this file - the releases before this file existed were made by a workflow that built every part
+// each time, and every release since is made by the one that asks here. A part whose build failed gets no tag, so
+// the next release builds it again.
 //
 // What goes into a part is read from what its build takes (and the test holds it against package.json's
 // build.files, the Dockerfile's COPY lines and the phone app's imports):
@@ -29,7 +31,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const PARTS = ["desktop", "android", "ios", "relay"];
-const BASELINE = "v1.28.0";
+const SELF = "scripts/release-parts.js"; // a release whose commit has it was built part by part
 const PHONE_ENTRY = "mobile/src/main.js";
 
 const under = (file, dir) => file.startsWith(`${dir}/`);
@@ -122,10 +124,15 @@ function plan({ cwd = process.cwd(), force = [], head = "HEAD" } = {}) {
   const phone = phoneBundle(cwd);
   const changes = new Map(); // tag -> the files that differ from it
   const result = {};
+  // The last release of everything, for the parts with no tag of their own.
+  const has = (ref, file) => { try { git("cat-file", "-e", `${ref}:${file}`); return true; } catch { return false; } };
+  const versions = merged.filter(t => versionOf(t, "")).sort((a, b) => newer(versionOf(b, ""), versionOf(a, "")));
+  let whole; // found when first needed
+  const baseline = () => (whole === undefined ? (whole = versions.find(t => !has(t, SELF)) || null) : whole);
 
   for (const part of PARTS) {
     const own = merged.filter(t => versionOf(t, `${part}-`)).sort((a, b) => newer(versionOf(a, `${part}-`), versionOf(b, `${part}-`))).pop();
-    const since = own || (merged.includes(BASELINE) ? BASELINE : null);
+    const since = own || baseline();
     const r = result[part] = { build: false, forced: force.includes(part), since, files: [], why: "" };
     const isPhone = part === "android" || part === "ios";
     if (!since) r.why = "no earlier release of it is known";
@@ -229,4 +236,4 @@ if (require.main === module) {
   try { main(process.argv.slice(2)); } catch (e) { console.error(e.message || e); process.exitCode = 1; }
 }
 
-module.exports = { PARTS, BASELINE, partsOfPath, phoneBundle, lockSlice, samePackage, plan, describe, apkCarry };
+module.exports = { PARTS, partsOfPath, phoneBundle, lockSlice, samePackage, plan, describe, apkCarry };

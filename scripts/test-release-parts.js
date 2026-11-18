@@ -21,10 +21,13 @@ const write = files => {
   }
 };
 const commit = (files, message = "change") => { write(files); git("add", "-A"); git("commit", "-q", "-m", message); };
-// Every scenario starts from the last release that built everything, with no part tags left from the one before.
+const BASELINE = "v1.28.0"; // the made-up repository's last release that built everything
+const clearTags = () => { for (const tag of git("tag").split("\n").filter(t => t && t !== BASELINE)) git("tag", "-d", tag); };
+// Every scenario starts right after the last release that built everything - with the commit that brought
+// release-parts.js on top of it - and with no tags left from the scenario before.
 const start = () => {
-  git("checkout", "-q", "-B", "work", parts.BASELINE);
-  for (const tag of git("tag").split("\n").filter(t => t && t !== parts.BASELINE)) git("tag", "-d", tag);
+  git("checkout", "-q", "-B", "work", "part-by-part");
+  clearTags();
 };
 const plan = (force = []) => parts.plan({ cwd: repo, force });
 const built = (force = []) => Object.entries(plan(force)).filter(([, r]) => r.build).map(([part]) => part);
@@ -72,12 +75,14 @@ try {
     "mobile/android/app/build.gradle": "// Android\n",
     "mobile/ios/App/Info.plist": "<plist/>\n"
   }, "the app");
-  git("tag", parts.BASELINE);
+  git("tag", BASELINE);
+  commit({ "scripts/release-parts.js": "// from here on a release builds part by part\n" }, "ci: release by part");
+  git("branch", "part-by-part");
 
   // Nothing changed: nothing is built, and every part is compared with the last release of everything.
   start();
   assert.deepEqual(built(), []);
-  assert.deepEqual(Object.values(plan()).map(r => r.since), Array(4).fill(parts.BASELINE));
+  assert.deepEqual(Object.values(plan()).map(r => r.since), Array(4).fill(BASELINE));
 
   // One kind of change at a time.
   const cases = [
@@ -155,7 +160,7 @@ try {
   commit({ "src/renderer.js": "// 1.28.2\n" }, "fix: the window again");
   assert.deepEqual(built(), ["desktop", "ios"]);
   const piled = plan();
-  assert.deepEqual([piled.desktop.since, piled.android.since, piled.ios.since, piled.relay.since], ["desktop-v1.28.1", "android-v1.28.1", parts.BASELINE, parts.BASELINE]);
+  assert.deepEqual([piled.desktop.since, piled.android.since, piled.ios.since, piled.relay.since], ["desktop-v1.28.1", "android-v1.28.1", BASELINE, BASELINE]);
   assert.deepEqual(piled.ios.files, ["mobile/src/screen.js"]);
   assert.deepEqual(piled.desktop.files, ["src/renderer.js"]);
   // 1.28.2: this time the iPhone build gets through.
@@ -173,10 +178,10 @@ try {
   start();
   commit({ "mobile/ios/App/Info.plist": "<plist>elsewhere</plist>\n" });
   git("tag", "ios-v1.30.0");
-  git("checkout", "-q", "-B", "other", parts.BASELINE);
+  git("checkout", "-q", "-B", "other", "part-by-part");
   commit({ "mobile/ios/App/Info.plist": "<plist>here</plist>\n" });
   assert.deepEqual(built(), ["ios"]);
-  assert.equal(plan().ios.since, parts.BASELINE);
+  assert.equal(plan().ios.since, BASELINE);
   git("tag", "-d", "ios-v1.30.0");
 
   // Asked for by hand: built whatever changed, next to what changed anyway.
@@ -200,13 +205,35 @@ try {
   assert.deepEqual(built(), ["android", "ios"]);
   assert.match(plan().ios.why, /could not be followed/);
 
-  // Without the last release of everything, and without a tag of its own, a part is built.
+  // The last release of everything is the newest version whose commit has no release-parts.js - not a fixed one.
+  // Here the old workflow went on releasing (1.28.1, 1.28.2) before the new one was merged over it.
+  git("checkout", "-q", "-B", "old", BASELINE);
+  clearTags();
+  commit({ "mobile/src/screen.js": "export const screen = 2;\n" }, "fix: the screen");
+  git("tag", "v1.28.1");
+  commit({ "src/renderer.js": "// 1.28.2\n" }, "fix: the window");
+  git("tag", "v1.28.2");
+  git("merge", "-q", "--no-edit", "part-by-part");
+  assert.deepEqual(built(), []);
+  assert.deepEqual(Object.values(plan()).map(r => r.since), Array(4).fill("v1.28.2"));
+  // The first release of the new workflow: only the desktop changed, and its build fails - no part tag at all.
+  // v1.28.3 is not taken for a release of everything: the desktop is still to be built, the rest stands at 1.28.2.
+  commit({ "src/renderer.js": "// 1.28.3\n" }, "fix: the window");
+  git("tag", "v1.28.3");
+  assert.deepEqual(built(), ["desktop"]);
+  assert.deepEqual(Object.values(plan()).map(r => r.since), Array(4).fill("v1.28.2"));
+  commit({ "mobile/ios/App/Info.plist": "<plist>1.28.4</plist>\n" }, "fix: the iPhone app");
+  git("tag", "v1.28.4"); git("tag", "desktop-v1.28.4"); git("tag", "ios-v1.28.4");
+  assert.deepEqual(built(), []);
+  assert.deepEqual([plan().desktop.since, plan().android.since, plan().ios.since], ["desktop-v1.28.4", "v1.28.2", "ios-v1.28.4"]);
+
+  // No release from before release-parts.js is below HEAD, and a part has no tag of its own: it is built.
   start();
   git("tag", "relay-v1.28.1");
-  git("tag", "-d", parts.BASELINE);
+  git("tag", "-d", BASELINE);
   assert.deepEqual(built(), ["desktop", "android", "ios"]);
   assert.match(plan().desktop.why, /no earlier release/);
-  git("tag", parts.BASELINE, "main");
+  git("tag", BASELINE, "part-by-part~1");
 
   // The command itself: the outputs of the job.
   start();
