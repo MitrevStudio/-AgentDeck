@@ -1,8 +1,9 @@
 // Where the phone keeps its identity and what it is paired with (docs/MOBILE.md 3.4, 5), and the seam of the app lock.
 //
-// On the phone: the app's own SecureStore plugin (android/.../SecureStorePlugin.java) - an AES-GCM key in the Android
-// Keystore wraps one file per entry in the app's no-backup folder; nothing leaves the device. iOS will need the same
-// four calls over the Keychain (kSecClassGenericPassword, kSecAttrAccessibleWhenUnlockedThisDeviceOnly).
+// On the phone: the app's own SecureStore plugin, the same four calls on both systems; nothing leaves the device.
+// Android (android/.../SecureStorePlugin.java): an AES-GCM key in the Android Keystore wraps one file per entry in the
+// app's no-backup folder. iOS (ios/App/App/SecureStorePlugin.swift): one Keychain item per entry
+// (kSecClassGenericPassword, kSecAttrAccessibleWhenUnlockedThisDeviceOnly, not synchronised).
 //
 // In a browser (npm run dev) there is no secure storage: the entries go to localStorage, which anyone with the
 // profile's files can read. DEV ONLY - `keystore.secure` is false there and the Computers screen says so.
@@ -59,7 +60,7 @@ export const keystore = {
   async clear() { for (const n of ["identity", "peers"]) await write(n, null); }
 };
 
-// The device's model ("Pixel 8"), for the name the phone gives itself; "" when unknown (a browser).
+// The device's model ("Pixel 8", "iPhone"), for the name the phone gives itself; "" when unknown (a browser).
 export async function deviceModel() {
   if (!native()) return "";
   try {
@@ -71,7 +72,8 @@ export async function deviceModel() {
 }
 
 // The lock in front of the app (fingerprint / face): not built yet, always open. The seam: unlock() runs before the
-// identity is read (main.js boot); the real one would make the Keystore key require user authentication.
+// identity is read (main.js boot); the real one would make the Keystore key (the Keychain items) require user
+// authentication.
 export const lock = {
   async available() { return false; },
   async unlock() { return true; }

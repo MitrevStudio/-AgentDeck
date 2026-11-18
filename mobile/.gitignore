@@ -12,6 +12,15 @@ android/*.iml
 android/app/*.iml
 android/captures/
 android/app/release/
+
+# iOS build outputs (the project itself is kept in git; what cap sync copies into it is ignored by ios/.gitignore)
+ios/build/
+*.ipa
+*.xcarchive
+*.p8
+*.p12
+*.mobileprovision
+
 *.apk
 *.aab
 *.keystore

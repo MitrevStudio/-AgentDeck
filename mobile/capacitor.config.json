@@ -8,6 +8,10 @@
     "captureInput": false,
     "webContentsDebuggingEnabled": true
   },
+  "ios": {
+    "backgroundColor": "#0d1015",
+    "webContentsDebuggingEnabled": false
+  },
   "plugins": {
     "SystemBars": {
       "insetsHandling": "css",
