@@ -177,6 +177,11 @@ main {
 .menu button.danger .i { color: var(--danger); }
 .menu button.danger:hover, .menu button.danger:focus { background: var(--danger-bg); }
 .menu-sep { height: 1px; margin: 4px 6px; background: var(--line); }
+.menu-search { position: sticky; top: -4px; z-index: 1; flex: none; margin: -4px -4px 4px; width: calc(100% + 8px); height: 30px; font-size: 12px; border-radius: var(--r-sm) var(--r-sm) 0 0; }
+.menu-search:focus { box-shadow: inset 0 0 0 1px var(--accent); }
+/* An item reached by the keyboard stops below the pinned search field, not behind it. */
+.menu:has(> .menu-search) { scroll-padding-top: 34px; }
+.menu-empty { margin: 4px 8px; font-size: 12px; color: var(--muted); }
 .menu-sub { animation: menu-in .09s ease-out; }
 @keyframes menu-in { from { opacity: 0; transform: translateX(-4px); } to { opacity: 1; transform: none; } }
 .rename {

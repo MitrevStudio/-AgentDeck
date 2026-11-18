@@ -119,7 +119,7 @@ async function testUpgrade() {
   const key = root => JSON.stringify(['local', root]), saved = new Map();
   const stored = {
     'agentdeck.sidebarTab': 'git', 'agentdeck.gitTree': '1', 'agentdeck.gitByProject': '1',
-    'agentdeck.gitHiddenProjects': JSON.stringify(['c:/removed', 'c:/work']),
+    'agentdeck.gitHiddenProjects': JSON.stringify(['c:/removed', 'c:/notes']),
     'agentdeck.gitHiddenRepos': JSON.stringify({ 'c:/removed': [key('C:/removed/app')], 'c:/work': [key('C:/work/deleted-app'), key('C:/work/child-app'), JSON.stringify(['WORK-01', 'D:/src/tool'])] })
   };
   const files = () => [{ path: 'src/deep/a.js', status: '.M' }];
@@ -128,7 +128,7 @@ async function testUpgrade() {
   const upgraded = {
     ...ctx, $: element, document: { querySelectorAll: () => [] },
     localStorage: { getItem: k => stored[k] ?? null, setItem: (k, v) => saved.set(k, v) },
-    data: { projects: [{ n: 'c:/work', name: 'Work', path: 'C:/work' }] },
+    data: { projects: [{ n: 'c:/work', name: 'Work', path: 'C:/work' }, { n: 'c:/notes', name: 'Notes', path: 'C:/notes' }] },
     ws: { spaces: {}, tabs: { one: { root: { term: 'a' } }, two: { root: { term: 'b' } } }, terminals: [{ id: 'a', cwd: 'C:/work/parent-repo' }, { id: 'b', cwd: 'C:/work/child-app' }] },
     git: { repos }, nodes: [{ id: 'WORK-01', name: 'WORK-01', status: 'offline' }],
     openGroupMenu: (_button, _path, list) => { items = list; },
@@ -157,7 +157,7 @@ async function testUpgrade() {
   assert.match(html(), /class="git-count">1\/2</, 'child-app is hidden from Work');
   listeners.click({ target: { closest: s => (s === '[data-project-menu]' ? { dataset: { projectMenu: 'c:/work' } } : null) }, preventDefault() {}, stopPropagation() {} });
   await items.find(x => x.label === 'parent-repo').run();
-  assert.deepEqual(JSON.parse(saved.get('agentdeck.gitHiddenProjects')), ['c:/work']);
+  assert.deepEqual(JSON.parse(saved.get('agentdeck.gitHiddenProjects')), ['c:/notes']);
   assert.deepEqual(JSON.parse(saved.get('agentdeck.gitHiddenRepos')), { 'c:/work': [key('C:/work/child-app'), JSON.stringify(['WORK-01', 'D:/src/tool']), parentKey] });
 }
 element('gitPanelRefresh').onclick().then(async () => {
@@ -286,11 +286,32 @@ element('gitPanelRefresh').onclick().then(async () => {
   assert.doesNotMatch(list, /data-expand="project:c:\/app"/, 'the hidden project has no group');
   assert.ok(list.includes(`data-expand="${expandOf('c:/app/backend', backendKey)}"`), 'backend stays under Backend');
   assert.ok(!list.includes(`data-repo="${esc(frontendKey)}"`), 'frontend was only in App');
-  // A repository a terminal is in stays, whatever the filter.
-  ctx.ws.tabs = { f: { root: { term: 't' } } };
-  ctx.ws.terminals = [{ id: 't', cwd: 'C:/app/frontend' }];
+  // The filter wins over an open terminal: no group for the hidden project, and a repository only in it goes.
+  ctx.ws.tabs = { f: { root: { term: 't' } }, b: { root: { term: 'b' } } };
+  ctx.ws.terminals = [{ id: 't', cwd: 'C:/app/frontend' }, { id: 'b', cwd: 'C:/app/backend' }];
   ctx.window.gitPanel.render();
-  assert.ok(element('gitRepositories').innerHTML.includes(`data-repo="${esc(frontendKey)}"`));
+  list = element('gitRepositories').innerHTML;
+  assert.ok(!list.includes(`data-repo="${esc(frontendKey)}"`), 'frontend goes, a terminal in it or not');
+  assert.doesNotMatch(list, /data-expand="project:c:\/app"/, 'a terminal does not bring the hidden project back');
+  assert.ok(list.includes(`data-expand="${expandOf('c:/app/backend', backendKey)}"`), 'backend stays under Backend');
+  assert.equal(element('gitRepoCount').textContent, 6, 'the hidden frontend is not counted, its terminal or not');
+  // A linked worktree goes only when its own project is hidden too, not only its main checkout's.
+  ctx.data.projects.push({ n: 'c:/app-wt', name: 'Fix', path: 'C:/app-wt' });
+  await projectFilter.find(x => x.label === 'Backend').run();
+  list = element('gitRepositories').innerHTML;
+  assert.ok(!list.includes(`data-repo="${esc(backendKey)}"`), 'backend goes with App and Backend hidden, its terminal or not');
+  assert.match(list, /data-expand="project:c:\/app-wt"/, 'the worktree stays under its own project');
+  await projectFilter.find(x => x.label === 'Backend').run();
+  ctx.data.projects.pop();
+  // A repository in no project that a terminal is in stays, even when a removed project's hidden key is its folder.
+  ctx.data.projects.push({ n: 'c:/other/old', name: 'Old', path: 'C:/other/old' });
+  element('gitPanelMenu').onclick();
+  await menuItems.find(x => x.label === 'filterProjects').items.find(x => x.label === 'Old').run();
+  ctx.data.projects.pop();
+  ctx.ws.tabs.o = { root: { term: 'o' } };
+  ctx.ws.terminals.push({ id: 'o', cwd: 'C:/other/old' });
+  ctx.window.gitPanel.render();
+  assert.match(element('gitRepositories').innerHTML, /C:\/other\/old/, 'a stale hidden key does not hide a repository in no project');
   ctx.ws.tabs = {};
   ctx.ws.terminals = [];
   await projectFilter.find(x => x.label === 'App').run();
@@ -301,6 +322,14 @@ element('gitPanelRefresh').onclick().then(async () => {
   assert.equal(element('gitRepoCount').textContent, 0);
   assert.match(list, /git\.panel\.filtered<\/span><button [^>]*data-show-projects>git\.panel\.showAllProjects</);
   assert.doesNotMatch(list, /git\.panel\.empty/);
+  // "Only with an open terminal" has no project filter: what is still saved hides nothing there.
+  ctx.ws.tabs = { f: { root: { term: 't' } } };
+  ctx.ws.terminals = [{ id: 't', cwd: 'C:/app/frontend' }];
+  prefsChanged({ gitScope: 'open' });
+  assert.ok(element('gitRepositories').innerHTML.includes(`data-repo="${esc(frontendKey)}"`), 'the filter applies only with "all"');
+  ctx.ws.tabs = {};
+  ctx.ws.terminals = [];
+  prefsChanged({ gitScope: 'all' });
   let focused = '';
   element('gitPanelMenu').focus = () => { focused = 'gitPanelMenu'; };
   element('gitRepositories').listeners.click({ target: { closest: s => (s === '[data-show-projects]' ? { dataset: { showProjects: '' } } : null) } });

@@ -822,6 +822,17 @@ app.whenReady().then(async () => {
   assert.deepEqual(await termKeys(), ['term:q3', 'term:q5'], 'Terminals as it was');
   assert.equal(await evaluate("Number($('agentCount').textContent) === document.querySelectorAll('#agents .agent').length"), true);
   await capture('agent-terminals');
+  // The device filter narrows both lists. Only the other computer chosen: no terminal of it is listed (its one is an
+  // agent's), so the section stays, counts "0 / 2" and says why it is empty; the agents count reads the same way.
+  await click('#projectView'); await click('#deviceChips [data-device-filter="node-a"]');
+  assert.deepEqual(await termKeys(), []);
+  assert.deepEqual(await evaluate("[$('sideTerms').hidden, $('termCount').textContent, document.querySelector('#terms .side-empty')?.textContent]"),
+    [false, '0 / 2', 'No terminal is open on the chosen computers.'], 'every terminal filtered out: the section stays and says so');
+  assert.equal(await evaluate("(([n, m]) => n === document.querySelectorAll('#agents .agent').length && m > n)($('agentCount').textContent.split(' / ').map(Number))"), true, 'the agents count is "n / m" too');
+  // The toggle stays, lit, with no project listed: the filter is still cleared from it.
+  assert.deepEqual(await evaluate("(() => { const kept = data.projects; data.projects = []; render(); const el = $('projectView'), seen = [el.hidden, el.getAttribute('aria-pressed')]; data.projects = kept; render(); return seen; })()"), [false, 'true']);
+  await click('#deviceChips [data-device-filter=""]'); await click('#projectView');
+  assert.deepEqual([await termKeys(), await evaluate("$('termCount').textContent")], [['term:q3', 'term:q5'], '2'], 'the filter cleared: every terminal again');
 
   await settle(3200);
   assert.equal(await evaluate("document.querySelectorAll('.toast-item').length"), 0, 'messages leave by themselves');

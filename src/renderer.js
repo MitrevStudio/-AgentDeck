@@ -42,8 +42,12 @@ function compute() {
   const projects = data.projects.map(p => ({ p, count: p.sessions.length }));
   // The agents: running sessions, those that need the user first.
   const running = hits.filter(liveOf).sort((a, b) => getLiveRank(liveOf(a)) - getLiveRank(liveOf(b)) || lastSign(liveOf(b)) - lastSign(liveOf(a)));
+  // The device filter of the projects list (device-view.js) also narrows the Agents and Terminals lists to its computers.
+  const devices = listDevices(data.projects, nodes);
+  const deviceFilter = deviceViewState(deviceView, devices).filter;
+  const agents = keepDevices(running, devices, deviceFilter);
   const liveCounts = countLiveGroups(data.sessions.map(liveOf).filter(Boolean));
-  return { toks, hits, hitSet, projects, running, liveCounts };
+  return { toks, hits, hitSet, projects, running, agents, devices, deviceFilter, liveCounts };
 }
 
 // ---------- rendering ----------
@@ -92,7 +96,7 @@ function renderCentre() {
 function renderProjects(v) {
   const total = data.projects.length;
   // By device (device-view.js): a section per computer, only the chosen ones when the filter is on.
-  const devices = listDevices(data.projects, nodes);
+  const devices = v.devices;
   const view = deviceViewState(deviceView, devices), filter = view.filter;
   grouped = view.grouped;
   $("projectCount").textContent = v.toks.length ? `${v.projects.length} / ${total}`
@@ -251,13 +255,15 @@ function renderDeviceToggle(devices, view) {
   const names = devices.filter(d => view.filter.includes(d.id)).map(deviceName).join(", ");
   el.title = view.filtered ? `${t("manager.devices.filter")}: ${names}\n${t("manager.devices.byDeviceTitle")}`
     : `${t("manager.devices.group")}: ${t(view.grouped ? "manager.devices.byDevice" : "manager.devices.none")}\n${t(view.grouped ? "manager.devices.byDeviceTitle" : "manager.devices.noneTitle")}`;
-  // Only worth having with another computer paired (or to turn it off again).
-  el.hidden = !data.projects.length || (devices.length < 2 && !view.grouped);
+  // Only worth having with another computer paired (or to turn it off again). A filter in effect keeps it there with
+  // no projects listed too: it narrows the agents and the terminals as well, and this is where it is cleared.
+  el.hidden = (!data.projects.length && !view.filtered) || (devices.length < 2 && !view.grouped);
 }
-// The filter: "All" and a chip per device, shown while the toggle has them open and there is more than this computer.
+// The filter: "All" and a chip per device, shown while the toggle has them open and there is more than this computer
+// (or a filter to clear).
 function renderDeviceChips(devices, view) {
   const el = $("deviceChips");
-  const show = view.picker && devices.length > 1;
+  const show = view.picker && (devices.length > 1 || view.filtered);
   const chosen = new Set(view.filter);
   const chip = (id, on, label, tip, extra = "") =>
     `<button class="dev-chip ${on ? "on" : ""} ${extra}" data-device-filter="${esc(id)}" aria-pressed="${on}" title="${esc(tip)}">${label}</button>`;
@@ -320,13 +326,16 @@ function renderTitle(v) {
 // started as an agent is among them from its launch on: until its session reports, as the host's stand-in for it
 // ("New session", started, no state yet - host/index.js liveAgents), which the session's own row then replaces.
 function renderAgents(v) {
-  $("agentCount").textContent = v.running.length;
-  if (!v.running.length) {
-    patchChildren($("agents"), `<div class="side-empty">${esc(t(ui.loaded ? "manager.agents.none" : "manager.status.scanning"))}</div>`);
+  // "3 / 7" while the device filter leaves some out, as the projects count.
+  const filtered = v.agents.length !== v.running.length;
+  $("agentCount").textContent = filtered ? `${v.agents.length} / ${v.running.length}` : v.running.length;
+  if (!v.agents.length) {
+    const none = !ui.loaded ? "manager.status.scanning" : filtered ? "manager.agents.noneOnDevices" : "manager.agents.none";
+    patchChildren($("agents"), `<div class="side-empty">${esc(t(none))}</div>`);
     return;
   }
   let last = "", html = "";
-  for (const s of v.running) {
+  for (const s of v.agents) {
     const l = liveOf(s), group = getSessionGroup(s, l);
     if (group !== last) html += `<div class="agroup">${esc(group)}</div>`;
     last = group;
@@ -364,8 +373,11 @@ function agentHtml(s, l, toks) {
 function getSideTerms(v) {
   const shown = new Set(v.running.flatMap(s => [findSessionTab(s)?.id, liveOf(s)?.term]).filter(Boolean));
   const rank = x => (x.node ? 1 + nodes.findIndex(n => n.id === x.node) : 0);
-  return ws.terminals.filter(x => !x.exited && !shown.has(x.id) && (!x.node || getNode(x.node)?.status === "online"))
-    .sort((a, b) => rank(a) - rank(b) || (b.createdAt || 0) - (a.createdAt || 0));
+  const open = ws.terminals.filter(x => !x.exited && !shown.has(x.id) && (!x.node || getNode(x.node)?.status === "online"));
+  // Only the computers of the device filter; an agent it leaves out stays out of here too (shown counts every one).
+  // total: how many there are without that filter, for the count.
+  const list = keepDevices(open, v.devices, v.deviceFilter).sort((a, b) => rank(a) - rank(b) || (b.createdAt || 0) - (a.createdAt || 0));
+  return { list, total: open.length };
 }
 // A remote terminal's title carries its computer's name (main adds it); the row says the computer below.
 function getBareTermTitle(x) {
@@ -382,10 +394,12 @@ function termRowHtml(x) {
       <span class="agent-tools"><button class="icon-btn danger" data-action="term-stop" title="${esc(t("term.stopAll"))}" aria-label="${esc(t("term.stopAll"))}">${icon("stop")}</button></span></div>`;
 }
 function renderTerms(v) {
-  const list = getSideTerms(v);
-  $("sideTerms").hidden = !list.length;
-  $("termCount").textContent = list.length;
-  patchChildren($("terms"), list.map(termRowHtml).join(""));
+  const { list, total } = getSideTerms(v);
+  // "3 / 7" while the device filter leaves some out, as the agents count; with all of them left out the section
+  // stays and says why it is empty.
+  $("sideTerms").hidden = !total;
+  $("termCount").textContent = list.length !== total ? `${list.length} / ${total}` : total;
+  patchChildren($("terms"), list.length || !total ? list.map(termRowHtml).join("") : `<div class="side-empty">${esc(t("manager.terms.noneOnDevices"))}</div>`);
 }
 const termOfRow = row => row?.dataset.key?.startsWith("term:") ? row.dataset.key.slice(5) : "";
 // The sidebar lists only the newest few of a session's subagents.
@@ -950,11 +964,12 @@ $("deviceChips").addEventListener("click", e => {
 
 // ---------- projects: the group menu ----------
 // Moves a project into another group (Move to a group, then the group), a new one, or out of its own.
-function openMenu(btn, path, items) {
+// A class that changes the menu's size (the Git panel's wider menus) is set before the menu is placed.
+function openMenu(btn, path, items, className = "") {
   closeGroupMenu();
   btn?.closest?.(".proj, .agent")?.classList.add("menu-open");
   const root = document.createElement("div");
-  root.className = "menu";
+  root.className = `menu ${className}`.trim();
   root.dataset.path = path;
   root.returnFocus = btn;
   root.setAttribute("role", "menu");
@@ -966,7 +981,7 @@ function openMenu(btn, path, items) {
   placeGroupMenu(btn);
   focusFirst(root);
 }
-function openGroupMenu(btn, path, items = getGroupMenuItems(path)) { openMenu(btn, path, items); }
+function openGroupMenu(btn, path, items = getGroupMenuItems(path), className = "") { openMenu(btn, path, items, className); }
 // A project's menu closes when its project leaves the list (prepare); any other menu stays until the user closes it.
 function openOwnedMenu(btn, path, items) {
   openMenu(btn, path, items);
@@ -1033,13 +1048,54 @@ function getGroupMenuItems(path) {
     ...(own ? [{ label: t("manager.projectGroup.leave"), icon: "x", run: () => leaveGroup(path) }] : [])
   ];
 }
+// A layer of only checkboxes that stay open (a filter's list) has a search field on top; typing on the list fills it.
+const isSearchable = items => items.length > 0 && items.every(x => x.keepOpen);
+function renderMenuSearch(menu) {
+  const query = menu.__query || "";
+  return `<input class="input menu-search" type="search" spellcheck="false" placeholder="${esc(t("menu.search"))}" aria-label="${esc(t("menu.search"))}" value="${esc(query)}">`
+    + `<p class="menu-empty" role="status" hidden>${esc(t("menu.noMatches"))}</p>`;
+}
+function applyMenuSearch(menu) {
+  const query = (menu.__query || "").toLocaleLowerCase();
+  let shown = 0;
+  for (const button of menu.querySelectorAll("button[data-i]")) {
+    button.hidden = Boolean(query) && !menu.__items[Number(button.dataset.i)].label.toLocaleLowerCase().includes(query);
+    if (!button.hidden) shown++;
+  }
+  menu.querySelector(".menu-empty").hidden = shown > 0;
+}
+function setMenuQuery(menu, query) {
+  const field = menu.querySelector(".menu-search");
+  if (!menu.__query) menu.style.minWidth = menu.offsetWidth + "px";
+  menu.__query = query;
+  field.value = query;
+  applyMenuSearch(menu);
+}
+function wireMenuSearch(menu) {
+  const field = menu.querySelector(".menu-search");
+  field.oninput = () => setMenuQuery(menu, field.value);
+  field.onkeydown = e => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    // The tick draws the layer again: the new field takes the focus with the caret (or the selection) where it was,
+    // so the typing goes on at the same place.
+    const { selectionStart, selectionEnd, selectionDirection } = field;
+    menu.querySelector("button[data-i]:not([hidden]):not(:disabled)")?.click();
+    const next = menu.querySelector(".menu-search");
+    next.focus();
+    next.setSelectionRange(selectionStart, selectionEnd, selectionDirection);
+  };
+  applyMenuSearch(menu);
+}
 // One menu layer. An item with `items` opens a flyout beside the menu on hover (and on click), as Source Control does.
 function renderMenuLayer(menu, items) {
   menu.__items = items;
-  menu.innerHTML = items.map((x, i) => x.separator
+  const searchable = isSearchable(items);
+  menu.innerHTML = (searchable ? renderMenuSearch(menu) : "") + items.map((x, i) => x.separator
     ? '<div class="menu-sep" role="separator"></div>'
     : `<button role="${x.checked !== undefined ? "menuitemcheckbox" : "menuitem"}" data-i="${i}" ${x.danger ? 'class="danger"' : ""} ${x.items ? 'aria-haspopup="menu"' : ""} ${x.checked ? 'aria-checked="true"' : ""} ${x.disabled ? "disabled" : ""}>
     ${icon(x.icon)}<span>${esc(x.label)}</span>${x.checked ? `<span class="menu-check">${icon("check")}</span>` : ""}${x.items ? icon("right") : ""}</button>`).join("");
+  if (searchable) wireMenuSearch(menu);
   menu.onclick = e => {
     const button = e.target.closest("[data-i]");
     if (!button) return;
@@ -1087,7 +1143,7 @@ function openSubMenu(parent, button, items, shouldFocus = false) {
 function placeGroupMenu(btn) {
   const r = btn.getBoundingClientRect();
   const below = r.bottom + groupMenu.offsetHeight + 4 <= window.innerHeight;
-  groupMenu.style.top = (below ? r.bottom + 4 : r.top - groupMenu.offsetHeight - 4) + "px";
+  groupMenu.style.top = Math.max(8, below ? r.bottom + 4 : r.top - groupMenu.offsetHeight - 4) + "px";
   groupMenu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - groupMenu.offsetWidth - 8)) + "px";
 }
 function placeSubMenu(sub, parent, button) {
@@ -1123,6 +1179,28 @@ document.addEventListener("keydown", e => {
   if (!groupMenu) return;
   let layer = groupMenu;
   for (const menu of menuLayers) if (menu.contains(document.activeElement)) layer = menu;
+  // A filter's list opened by hovering its item still has the focus on that item: the typing goes to the list.
+  const searched = layer.querySelector(".menu-search") ? layer : menuLayers.at(-1);
+  const field = searched.querySelector(".menu-search"), query = searched.__query || "";
+  if (field && e.key === "Escape" && query) {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenuQuery(searched, "");
+    focusFirst(searched);
+    return;
+  }
+  // Typing on a filter's list goes to its search. A space on an item ticks it, as in any menu, with a search under
+  // way too; it joins the search only from the field itself, or when the focus is on no item.
+  const onItem = searched.contains(document.activeElement) && Boolean(document.activeElement.closest("button"));
+  const typed = e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey && !(e.key === " " && (!query || onItem));
+  if (field && document.activeElement !== field && (typed || (e.key === "Backspace" && query))) {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenuQuery(searched, e.key === "Backspace" ? query.slice(0, -1) : query + e.key);
+    if (searched.__query) field.focus(); else focusFirst(searched);
+    return;
+  }
+  if (document.activeElement === field && (e.key === "ArrowLeft" || e.key === "ArrowRight")) return;
   if (e.key === "Escape") {
     e.stopPropagation();
     if (menuLayers.length > 1) {
@@ -1141,9 +1219,11 @@ document.addEventListener("keydown", e => {
   if (e.key === "ArrowDown" || e.key === "ArrowUp") {
     e.preventDefault();
     e.stopPropagation();
-    const all = [...layer.querySelectorAll("button:not(:disabled)")];
+    const all = [...layer.querySelectorAll("button:not(:disabled):not([hidden])")];
     if (!all.length) return;
-    const i = all.indexOf(document.activeElement) + (e.key === "ArrowDown" ? 1 : -1);
+    const down = e.key === "ArrowDown", current = all.indexOf(document.activeElement);
+    // From the search field (not in the list): down to the first match, up to the last.
+    const i = current < 0 ? (down ? 0 : all.length - 1) : current + (down ? 1 : -1);
     all[(i + all.length) % all.length]?.focus();
     return;
   }

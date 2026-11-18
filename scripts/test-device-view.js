@@ -63,6 +63,14 @@ assert.deepEqual(dv.toggleFilter([H], B), [H, B]);
 assert.equal(dv.countInSections(projects, devices, [H, B]), 3);
 assert.equal(dv.countInSections(projects, devices, []), 6);
 
+// ---------- the same filter on the agents and terminals ----------
+const running = [{ id: 's1' }, { id: 's2', node: B }, { id: 's3', node: H }, { id: 's4' }, { id: 's5', node: GONE }];
+assert.deepEqual(dv.keepDevices(running, devices, [dv.LOCAL_DEVICE]).map(s => s.id), ['s1', 's4'], 'only this computer: its agents, in the order given');
+assert.deepEqual(dv.keepDevices(running, devices, [H, B]).map(s => s.id), ['s2', 's3'], 'the chosen computers');
+assert.equal(dv.keepDevices(running, devices, []), running, 'no filter: every agent');
+assert.equal(dv.keepDevices(running, devices, ['unknown']), running, 'a filter of computers no longer known: every agent');
+assert.deepEqual(dv.keepDevices(running, devices, ['unknown', B, 'e'.repeat(64)]).map(s => s.id), ['s2'], 'known and unknown computers mixed: only the known ones count');
+
 // ---------- view state (this computer only) ----------
 assert.deepEqual(dv.normalizeDeviceView(null), { mode: 'none', filter: [], collapsed: [] });
 assert.deepEqual(dv.normalizeDeviceView('garbage'), { mode: 'none', filter: [], collapsed: [] });

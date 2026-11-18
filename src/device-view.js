@@ -45,6 +45,12 @@ function buildSections(projects, devices, filter) {
   return devices.filter(d => !chosen.size || chosen.has(d.id)).map(d => ({ device: d, projects: by.get(d.id) }));
 }
 const countInSections = (projects, devices, filter) => buildSections(projects, devices, filter).reduce((n, s) => n + s.projects.length, 0);
+// The items of the filtered devices (running sessions, terminals: each with its `node`, none on this computer), in the
+// order given; all of them when no filter is active.
+function keepDevices(items, devices, filter) {
+  const chosen = new Set(activeFilter(filter, devices));
+  return chosen.size ? items.filter(x => chosen.has(deviceOf(x))) : items;
+}
 
 // The stored view state, whatever was stored: { mode: "none" | "device", filter: [id], collapsed: [id] }.
 function normalizeDeviceView(raw) {
@@ -61,5 +67,5 @@ function deviceViewState(view, devices) {
 }
 
 if (typeof module === "object" && module.exports) {
-  module.exports = { LOCAL_DEVICE, deviceOf, listDevices, activeFilter, toggleFilter, toggleCollapsedDevice, buildSections, countInSections, normalizeDeviceView, deviceViewState };
+  module.exports = { LOCAL_DEVICE, deviceOf, listDevices, activeFilter, toggleFilter, toggleCollapsedDevice, buildSections, countInSections, keepDevices, normalizeDeviceView, deviceViewState };
 }
