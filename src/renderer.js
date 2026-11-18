@@ -255,13 +255,15 @@ function renderDeviceToggle(devices, view) {
   const names = devices.filter(d => view.filter.includes(d.id)).map(deviceName).join(", ");
   el.title = view.filtered ? `${t("manager.devices.filter")}: ${names}\n${t("manager.devices.byDeviceTitle")}`
     : `${t("manager.devices.group")}: ${t(view.grouped ? "manager.devices.byDevice" : "manager.devices.none")}\n${t(view.grouped ? "manager.devices.byDeviceTitle" : "manager.devices.noneTitle")}`;
-  // Only worth having with another computer paired (or to turn it off again).
-  el.hidden = !data.projects.length || (devices.length < 2 && !view.grouped);
+  // Only worth having with another computer paired (or to turn it off again). A filter in effect keeps it there with
+  // no projects listed too: it narrows the agents and the terminals as well, and this is where it is cleared.
+  el.hidden = (!data.projects.length && !view.filtered) || (devices.length < 2 && !view.grouped);
 }
-// The filter: "All" and a chip per device, shown while the toggle has them open and there is more than this computer.
+// The filter: "All" and a chip per device, shown while the toggle has them open and there is more than this computer
+// (or a filter to clear).
 function renderDeviceChips(devices, view) {
   const el = $("deviceChips");
-  const show = view.picker && devices.length > 1;
+  const show = view.picker && (devices.length > 1 || view.filtered);
   const chosen = new Set(view.filter);
   const chip = (id, on, label, tip, extra = "") =>
     `<button class="dev-chip ${on ? "on" : ""} ${extra}" data-device-filter="${esc(id)}" aria-pressed="${on}" title="${esc(tip)}">${label}</button>`;
@@ -373,7 +375,9 @@ function getSideTerms(v) {
   const rank = x => (x.node ? 1 + nodes.findIndex(n => n.id === x.node) : 0);
   const open = ws.terminals.filter(x => !x.exited && !shown.has(x.id) && (!x.node || getNode(x.node)?.status === "online"));
   // Only the computers of the device filter; an agent it leaves out stays out of here too (shown counts every one).
-  return keepDevices(open, v.devices, v.deviceFilter).sort((a, b) => rank(a) - rank(b) || (b.createdAt || 0) - (a.createdAt || 0));
+  // total: how many there are without that filter, for the count.
+  const list = keepDevices(open, v.devices, v.deviceFilter).sort((a, b) => rank(a) - rank(b) || (b.createdAt || 0) - (a.createdAt || 0));
+  return { list, total: open.length };
 }
 // A remote terminal's title carries its computer's name (main adds it); the row says the computer below.
 function getBareTermTitle(x) {
@@ -390,10 +394,12 @@ function termRowHtml(x) {
       <span class="agent-tools"><button class="icon-btn danger" data-action="term-stop" title="${esc(t("term.stopAll"))}" aria-label="${esc(t("term.stopAll"))}">${icon("stop")}</button></span></div>`;
 }
 function renderTerms(v) {
-  const list = getSideTerms(v);
-  $("sideTerms").hidden = !list.length;
-  $("termCount").textContent = list.length;
-  patchChildren($("terms"), list.map(termRowHtml).join(""));
+  const { list, total } = getSideTerms(v);
+  // "3 / 7" while the device filter leaves some out, as the agents count; with all of them left out the section
+  // stays and says why it is empty.
+  $("sideTerms").hidden = !total;
+  $("termCount").textContent = list.length !== total ? `${list.length} / ${total}` : total;
+  patchChildren($("terms"), list.length || !total ? list.map(termRowHtml).join("") : `<div class="side-empty">${esc(t("manager.terms.noneOnDevices"))}</div>`);
 }
 const termOfRow = row => row?.dataset.key?.startsWith("term:") ? row.dataset.key.slice(5) : "";
 // The sidebar lists only the newest few of a session's subagents.

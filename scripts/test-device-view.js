@@ -69,6 +69,7 @@ assert.deepEqual(dv.keepDevices(running, devices, [dv.LOCAL_DEVICE]).map(s => s.
 assert.deepEqual(dv.keepDevices(running, devices, [H, B]).map(s => s.id), ['s2', 's3'], 'the chosen computers');
 assert.equal(dv.keepDevices(running, devices, []), running, 'no filter: every agent');
 assert.equal(dv.keepDevices(running, devices, ['unknown']), running, 'a filter of computers no longer known: every agent');
+assert.deepEqual(dv.keepDevices(running, devices, ['unknown', B, 'e'.repeat(64)]).map(s => s.id), ['s2'], 'known and unknown computers mixed: only the known ones count');
 
 // ---------- view state (this computer only) ----------
 assert.deepEqual(dv.normalizeDeviceView(null), { mode: 'none', filter: [], collapsed: [] });
