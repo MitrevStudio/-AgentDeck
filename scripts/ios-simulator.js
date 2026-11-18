@@ -81,6 +81,11 @@ async function until(expr, what, ms = 30000) {
   }
   throw new Error(`timeout: ${what}`);
 }
+// The keyboard takes its time on a busy runner: the page has seen it (main.js trackViewport) and has settled.
+async function keyboardUp() {
+  try { await until(`document.documentElement.classList.contains("kb-open")`, "the keyboard", 20000); } catch {}
+  await sleep(1000);
+}
 let shots = 0;
 async function shot(name, { landscape = false } = {}) {
   await sleep(700); // what was just asked for is drawn
@@ -103,7 +108,7 @@ const TAP = `const w = document.querySelector(".term-wrap"), r = w.getBoundingCl
   const t = new Touch({ identifier: 1, target: w, clientX: r.left + 60, clientY: r.top + 60 });
   w.dispatchEvent(new TouchEvent("touchstart", { touches: [t], targetTouches: [t], changedTouches: [t], bubbles: true, cancelable: true }));
   w.dispatchEvent(new TouchEvent("touchend", { touches: [], targetTouches: [], changedTouches: [t], bubbles: true, cancelable: true }));
-  await new Promise(r => setTimeout(r, 2500));`;
+  await new Promise(r => setTimeout(r, 600));`;
 const VIEW = `JSON.stringify({ active: document.activeElement?.className || document.activeElement?.tagName, inner: innerHeight, visible: Math.round(visualViewport.height), top: Math.round(visualViewport.offsetTop),
   scale: visualViewport.scale, app: Math.round(document.querySelector("#app").getBoundingClientRect().height), appTop: Math.round(document.querySelector("#app").getBoundingClientRect().top),
   classes: document.documentElement.className, wrap: Math.round(document.querySelector(".term-wrap")?.clientHeight || 0) })`;
@@ -168,7 +173,8 @@ const VIEW = `JSON.stringify({ active: document.activeElement?.className || docu
     check("the phone names itself and the pasteboard works", () => { assert.equal(store.device.model, "iPhone"); assert.equal(store.paste, "from the app"); });
 
     // ---------- pairing by hand: a field, the keyboard ----------
-    await page(`document.querySelector("details.relay").open = true; await new Promise(r => setTimeout(r, 1500)); return "open"`);
+    await page(`document.querySelector("details.relay").open = true; return "open"`);
+    await keyboardUp();
     const typing = await json(`return JSON.stringify({ active: document.activeElement?.name, inner: innerHeight, visible: Math.round(visualViewport.height), scale: visualViewport.scale, classes: document.documentElement.className })`);
     typing.field = await json(`const r = document.activeElement.getBoundingClientRect(); return JSON.stringify([Math.round(r.top), Math.round(r.bottom)])`);
     note("a field with the keyboard", typing);
@@ -213,7 +219,9 @@ const VIEW = `JSON.stringify({ active: document.activeElement?.className || docu
     await until(`document.querySelector(".term-host .xterm-rows")?.textContent.replace(/\\u00a0/g, " ").includes("line 40")`, "the terminal's text", 60000);
     await shot("terminal");
     const before = await json(`return ${VIEW}`);
-    const after = await json(`${TAP} return ${VIEW}`);
+    await page(`${TAP} return "tapped"`);
+    await keyboardUp();
+    const after = await json(`return ${VIEW}`);
     note("terminal, no keyboard", before);
     note("terminal, tapped", after);
     check("a tap on the terminal gives the keyboard to its field", () => assert.match(String(after.active), /term-input/));
