@@ -155,64 +155,6 @@ jobs:
         env:
           AGENTDECK_VERSION: 1.23.4
 
-  # TEMPORARY (this branch only, removed before the pull request is ready): the signing and the upload to TestFlight
-  # that build-ios of release.yml does, tried here because that workflow runs on main only.
-  ios-testflight-trial:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/feat/mobile-ios'
-    runs-on: macos-26
-    env:
-      AGENTDECK_VERSION: 0.0.${{ github.run_number }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            mobile/package-lock.json
-      - run: npm ci --ignore-scripts
-      - run: npm ci
-        working-directory: mobile
-      - name: App Store Connect key
-        run: echo "$APPSTORE_API_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
-        env:
-          APPSTORE_API_KEY_BASE64: ${{ secrets.APPSTORE_API_KEY_BASE64 }}
-      - name: What App Store Connect made of the earlier uploads
-        continue-on-error: true
-        run: node mobile/scripts/appstore-builds.mjs
-        env:
-          APPSTORE_API_KEY_FILE: ${{ runner.temp }}/AuthKey.p8
-          APPSTORE_API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
-          APPSTORE_API_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
-      - run: npm run ios:archive
-        working-directory: mobile
-      - name: Sign for the App Store
-        working-directory: mobile
-        run: node scripts/xcode.mjs ipa
-        env:
-          APPSTORE_API_KEY_FILE: ${{ runner.temp }}/AuthKey.p8
-          APPSTORE_API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
-          APPSTORE_API_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      - name: What was signed
-        working-directory: mobile/ios/build/ipa
-        run: |
-          unzip -q -o AgentDeck.ipa -d unpacked
-          codesign -d --entitlements - --xml unpacked/Payload/AgentDeck.app 2>/dev/null | plutil -convert json -o - - | sed -E 's/[A-Z0-9]{10}[.]/TEAM./g'
-          codesign -dvv unpacked/Payload/AgentDeck.app 2>&1 | grep -E "^(Identifier|Format|Authority=Apple (Root|Worldwide)|Signed Time)" || true
-          codesign --verify --deep --strict unpacked/Payload/AgentDeck.app && echo "signature valid"
-          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' -c 'Print :CFBundleVersion' unpacked/Payload/AgentDeck.app/Info.plist
-      - name: Upload to TestFlight
-        working-directory: mobile
-        run: node scripts/xcode.mjs upload
-        env:
-          APPSTORE_API_KEY_FILE: ${{ runner.temp }}/AuthKey.p8
-          APPSTORE_API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
-          APPSTORE_API_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
-      - if: always()
-        run: rm -f "$RUNNER_TEMP/AuthKey.p8"
-
   # The relay's Docker image builds, starts and answers on its port (it is published by the release workflow).
   docker-relay:
     runs-on: ubuntu-26.04
