@@ -42,8 +42,12 @@ function compute() {
   const projects = data.projects.map(p => ({ p, count: p.sessions.length }));
   // The agents: running sessions, those that need the user first.
   const running = hits.filter(liveOf).sort((a, b) => getLiveRank(liveOf(a)) - getLiveRank(liveOf(b)) || lastSign(liveOf(b)) - lastSign(liveOf(a)));
+  // The device filter of the projects list (device-view.js) also narrows the Agents and Terminals lists to its computers.
+  const devices = listDevices(data.projects, nodes);
+  const deviceFilter = deviceViewState(deviceView, devices).filter;
+  const agents = keepDevices(running, devices, deviceFilter);
   const liveCounts = countLiveGroups(data.sessions.map(liveOf).filter(Boolean));
-  return { toks, hits, hitSet, projects, running, liveCounts };
+  return { toks, hits, hitSet, projects, running, agents, devices, deviceFilter, liveCounts };
 }
 
 // ---------- rendering ----------
@@ -92,7 +96,7 @@ function renderCentre() {
 function renderProjects(v) {
   const total = data.projects.length;
   // By device (device-view.js): a section per computer, only the chosen ones when the filter is on.
-  const devices = listDevices(data.projects, nodes);
+  const devices = v.devices;
   const view = deviceViewState(deviceView, devices), filter = view.filter;
   grouped = view.grouped;
   $("projectCount").textContent = v.toks.length ? `${v.projects.length} / ${total}`
@@ -320,13 +324,16 @@ function renderTitle(v) {
 // started as an agent is among them from its launch on: until its session reports, as the host's stand-in for it
 // ("New session", started, no state yet - host/index.js liveAgents), which the session's own row then replaces.
 function renderAgents(v) {
-  $("agentCount").textContent = v.running.length;
-  if (!v.running.length) {
-    patchChildren($("agents"), `<div class="side-empty">${esc(t(ui.loaded ? "manager.agents.none" : "manager.status.scanning"))}</div>`);
+  // "3 / 7" while the device filter leaves some out, as the projects count.
+  const filtered = v.agents.length !== v.running.length;
+  $("agentCount").textContent = filtered ? `${v.agents.length} / ${v.running.length}` : v.running.length;
+  if (!v.agents.length) {
+    const none = !ui.loaded ? "manager.status.scanning" : filtered ? "manager.agents.noneOnDevices" : "manager.agents.none";
+    patchChildren($("agents"), `<div class="side-empty">${esc(t(none))}</div>`);
     return;
   }
   let last = "", html = "";
-  for (const s of v.running) {
+  for (const s of v.agents) {
     const l = liveOf(s), group = getSessionGroup(s, l);
     if (group !== last) html += `<div class="agroup">${esc(group)}</div>`;
     last = group;
@@ -364,8 +371,9 @@ function agentHtml(s, l, toks) {
 function getSideTerms(v) {
   const shown = new Set(v.running.flatMap(s => [findSessionTab(s)?.id, liveOf(s)?.term]).filter(Boolean));
   const rank = x => (x.node ? 1 + nodes.findIndex(n => n.id === x.node) : 0);
-  return ws.terminals.filter(x => !x.exited && !shown.has(x.id) && (!x.node || getNode(x.node)?.status === "online"))
-    .sort((a, b) => rank(a) - rank(b) || (b.createdAt || 0) - (a.createdAt || 0));
+  const open = ws.terminals.filter(x => !x.exited && !shown.has(x.id) && (!x.node || getNode(x.node)?.status === "online"));
+  // Only the computers of the device filter; an agent it leaves out stays out of here too (shown counts every one).
+  return keepDevices(open, v.devices, v.deviceFilter).sort((a, b) => rank(a) - rank(b) || (b.createdAt || 0) - (a.createdAt || 0));
 }
 // A remote terminal's title carries its computer's name (main adds it); the row says the computer below.
 function getBareTermTitle(x) {
