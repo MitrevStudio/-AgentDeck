@@ -35,6 +35,7 @@ jobs:
       - run: npm run test:editors
       - run: npm run test:taskbar
       - run: npm run test:scratchpads
+      - run: npm run test:release
       - run: npm run test:taskbar-ui
       - run: npm run test:noise
       - run: npm run test:terminal-viewers
@@ -82,12 +83,14 @@ jobs:
       - run: npm run test:editors
       - run: npm run test:taskbar
       - run: npm run test:scratchpads
+      - run: npm run test:release
       - run: npm run test:audit
       - name: Package (unpacked, no AppImage)
         run: npx electron-builder --linux --dir --publish never
 
   # The Android app (mobile/): the web bundle and a debug APK, kept for a week to try on a phone. The signed APK is
-  # built by the release workflow.
+  # built by the release workflow, and so is the bundle (.aab) it sends to Google Play - built here too, without the
+  # release key, so a change that breaks it shows before a release.
   mobile-android:
     runs-on: ubuntu-26.04
     steps:
@@ -109,6 +112,13 @@ jobs:
         working-directory: mobile
       - run: npm run apk
         working-directory: mobile
+      - name: Build the bundle for Google Play (not signed)
+        working-directory: mobile
+        run: |
+          node scripts/gradle.mjs bundleRelease
+          unzip -l android/app/build/outputs/bundle/release/app-release.aab | grep "base/manifest/AndroidManifest.xml"
+        env:
+          AGENTDECK_VERSION: 1.23.4
       - uses: actions/upload-artifact@v7
         with:
           name: agentdeck-android-debug

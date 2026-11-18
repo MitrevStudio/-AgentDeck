@@ -1,25 +1,65 @@
-# Every push to main: check → semantic-release decides the next version from the commit messages
-# (fix: → patch, feat: → minor, BREAKING CHANGE → major), pushes the tag and creates the GitHub release as a draft →
-# the Windows installer is built from that tag, attached to the release, and only then is the release published.
-# The installed app updates itself from the latest published release (electron-updater reads its latest.yml), so a
-# release must never be public without its installer; a failed build leaves a draft nobody sees.
-# The Linux AppImage (experimental) is built alongside and attached to the same release. It does not hold the
-# release back: the app does not update itself on Linux, so a release without it misleads no one.
+# Every push to main: check → what changed is looked at → semantic-release decides the next version from the commit
+# messages (fix: → patch, feat: → minor, BREAKING CHANGE → major), pushes the tag and creates the GitHub release as a
+# draft → only the parts that changed are built from that tag and published.
+#
+# The parts (scripts/release-parts.js decides, and says why in the summary of the run): the desktop app (Windows
+# installer, Linux AppImage), the Android app, the iPhone app, the relay's Docker image. A part is built when
+# something that goes into it changed since that part was last released - a job that gets its part out leaves a tag
+# on the commit it built (desktop-v1.29.0, android-v…, ios-v…, relay-v…), and the next run compares with it. So a
+# change of the desktop makes no new phone apps, a change of the phone app no new installer, and a push that
+# changes none of them (docs, tests, the workflows) releases nothing: semantic-release is not even asked, no tag is
+# made, and the commits wait for the next release. There is one line of versions for everything; a part that is not
+# built skips that version.
+#
+# With the desktop app: the Windows installer is built, attached to the release, and only then is the release
+# published and marked as the latest. The installed app updates itself from the latest release (electron-updater
+# reads its latest.yml), so a release must never be public without its installer; a failed build leaves a draft
+# nobody sees. The Linux AppImage (experimental) is built alongside and attached to the same release. It does not
+# hold the release back: the app does not update itself on Linux, so a release without it misleads no one.
+# Without the desktop app (only the phone apps or the relay changed): the release is published too, but NOT marked
+# as the latest - the latest release stays the last one with an installer, so the installed app and the download
+# links see nothing new. The latest release always carries the newest APK (the README sends Android users there):
+# the latest-apk job copies it over when the two are not the same release.
+#
 # The relay's Docker image (host/Dockerfile) goes to the GitHub Container Registry with the same version, and as latest.
 # The Android app (mobile/) is built with the same version, signed with the release key from the repository's secrets
 # (ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD) and attached to the
-# same release as AgentDeck-<version>.apk. Like the AppImage it does not hold the release back.
+# release as AgentDeck-<version>.apk. Like the AppImage it does not hold the release back. The same build, as a
+# bundle (.aab), goes to a testing track of Google Play with the key of a service account (PLAY_SERVICE_ACCOUNT_JSON;
+# docs/MOBILE.md §12): without the secret that step is skipped, and an upload that goes wrong is a warning on the run.
 # The iPhone app (mobile/ios) is built with the same version on a Mac of GitHub's, signed for the App Store and sent to
 # TestFlight with the App Store Connect API key from the repository's secrets (APPSTORE_API_KEY_BASE64,
 # APPSTORE_API_KEY_ID, APPSTORE_API_ISSUER_ID, APPLE_TEAM_ID). Nothing of it is attached to the release (an iPhone
 # takes an app only from Apple), and it never holds the release back or fails it: without the secrets it is skipped,
 # and a build or an upload that goes wrong is a warning on the run.
+#
+# By hand (Run workflow): the ticked parts are built whatever changed. With commits that ask for a new version they
+# go out with it, next to what changed anyway. With none, the ticked parts are built again from the newest version's
+# tag and under its number - a desktop or relay build can be repeated like that, an APK attached again; Apple and
+# Google Play take a number only once, so a phone app that already reached them needs a new version.
 name: Release
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      desktop:
+        description: Build the desktop app (Windows installer, Linux AppImage) whatever changed
+        type: boolean
+        default: false
+      android:
+        description: Build the Android app (APK, Google Play) whatever changed
+        type: boolean
+        default: false
+      ios:
+        description: Build the iPhone app (TestFlight) whatever changed
+        type: boolean
+        default: false
+      relay:
+        description: Build the relay's Docker image whatever changed
+        type: boolean
+        default: false
 
 concurrency:
   group: release
@@ -27,6 +67,10 @@ concurrency:
 
 permissions:
   contents: write
+
+env:
+  # The Google Play track the Android app is released to: internal, alpha (closed testing) or beta (open testing).
+  PLAY_TRACK: internal
 
 jobs:
   check:
@@ -50,13 +94,51 @@ jobs:
       - run: npm run test:noise
       - run: npm run test:terminal-viewers
       - run: npm run test:desktop-terminals
+      - run: npm run test:release
 
+  # Which parts changed since each of them was last released (or were asked for by hand).
+  plan:
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+    outputs:
+      any: ${{ steps.parts.outputs.any }}
+      forced: ${{ steps.parts.outputs.forced }}
+      desktop: ${{ steps.parts.outputs.desktop }}
+      android: ${{ steps.parts.outputs.android }}
+      ios: ${{ steps.parts.outputs.ios }}
+      relay: ${{ steps.parts.outputs.relay }}
+      force_desktop: ${{ steps.parts.outputs.force_desktop }}
+      force_android: ${{ steps.parts.outputs.force_android }}
+      force_ios: ${{ steps.parts.outputs.force_ios }}
+      force_relay: ${{ steps.parts.outputs.force_relay }}
+    steps:
+      # The whole history and the tags: each part is compared with the tag of its own last release.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - id: parts
+        run: node scripts/release-parts.js plan --force "$FORCE"
+        env:
+          FORCE: ${{ inputs.desktop && 'desktop' || '' }},${{ inputs.android && 'android' || '' }},${{ inputs.ios && 'ios' || '' }},${{ inputs.relay && 'relay' || '' }}
+
+  # Skipped, and everything after it, when no part is to be built: no version, no tag, no release.
   release:
-    needs: check
+    needs: [check, plan]
+    if: github.ref == 'refs/heads/main' && needs.plan.outputs.any == 'true'
     runs-on: ubuntu-26.04
     outputs:
-      published: ${{ steps.semrel.outputs.new_release_published }}
-      version: ${{ steps.semrel.outputs.new_release_version }}
+      # version: what the jobs below build - empty when there is nothing to build. fresh: the version is new (its
+      # release is a draft until it is published below). The parts: what is built under that version.
+      version: ${{ steps.version.outputs.version }}
+      fresh: ${{ steps.version.outputs.fresh }}
+      desktop: ${{ steps.version.outputs.desktop }}
+      android: ${{ steps.version.outputs.android }}
+      ios: ${{ steps.version.outputs.ios }}
+      relay: ${{ steps.version.outputs.relay }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -68,10 +150,40 @@ jobs:
           semantic_version: 24
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # A new version: the parts that changed, and the ones asked for by hand. No new version (the commits ask for
+      # none): nothing on a push; by hand, the parts asked for are built again from the newest version's tag.
+      - id: version
+        run: |
+          if [ "$PUBLISHED" = true ]; then
+            echo "version=$NEW" >> "$GITHUB_OUTPUT"
+            echo "fresh=true" >> "$GITHUB_OUTPUT"
+            parts="desktop=$DESKTOP android=$ANDROID ios=$IOS relay=$RELAY"
+          elif [ "$FORCED" = true ]; then
+            last=$(git tag --merged HEAD --list 'v[0-9]*' --sort=-v:refname | head -1)
+            echo "version=${last#v}" >> "$GITHUB_OUTPUT"
+            parts="desktop=$FORCE_DESKTOP android=$FORCE_ANDROID ios=$FORCE_IOS relay=$FORCE_RELAY"
+            echo "::notice::The commits since $last ask for no new version: the parts asked for by hand are built again as $last"
+          else
+            parts=""
+            echo "::notice::The commits since the last release ask for no new version (no fix: or feat: among them): nothing is published, and what changed waits for the next release"
+          fi
+          for part in $parts; do echo "$part" >> "$GITHUB_OUTPUT"; done
+        env:
+          PUBLISHED: ${{ steps.semrel.outputs.new_release_published }}
+          NEW: ${{ steps.semrel.outputs.new_release_version }}
+          FORCED: ${{ needs.plan.outputs.forced }}
+          DESKTOP: ${{ needs.plan.outputs.desktop }}
+          ANDROID: ${{ needs.plan.outputs.android }}
+          IOS: ${{ needs.plan.outputs.ios }}
+          RELAY: ${{ needs.plan.outputs.relay }}
+          FORCE_DESKTOP: ${{ needs.plan.outputs.force_desktop }}
+          FORCE_ANDROID: ${{ needs.plan.outputs.force_android }}
+          FORCE_IOS: ${{ needs.plan.outputs.force_ios }}
+          FORCE_RELAY: ${{ needs.plan.outputs.force_relay }}
 
   build:
     needs: release
-    if: needs.release.outputs.published == 'true'
+    if: needs.release.outputs.version != '' && needs.release.outputs.desktop == 'true'
     runs-on: windows-latest
     env:
       VERSION: ${{ needs.release.outputs.version }}
@@ -98,10 +210,16 @@ jobs:
           gh release edit "v$VERSION" --draft=false --latest
         env:
           GH_TOKEN: ${{ github.token }}
+      # What the next run compares the desktop with (scripts/release-parts.js). Without the tag it is only built again.
+      - name: Mark the commit as the desktop's last release
+        shell: bash
+        run: |
+          git tag -f "desktop-v$VERSION"
+          git push origin "refs/tags/desktop-v$VERSION" || echo "::warning::The tag desktop-v$VERSION was not pushed: the next release builds the desktop app again"
 
   build-linux:
     needs: release
-    if: needs.release.outputs.published == 'true'
+    if: needs.release.outputs.version != '' && needs.release.outputs.desktop == 'true'
     runs-on: ubuntu-26.04
     env:
       VERSION: ${{ needs.release.outputs.version }}
@@ -126,7 +244,7 @@ jobs:
 
   build-android:
     needs: release
-    if: needs.release.outputs.published == 'true'
+    if: needs.release.outputs.version != '' && needs.release.outputs.android == 'true'
     runs-on: ubuntu-26.04
     env:
       VERSION: ${{ needs.release.outputs.version }}
@@ -173,12 +291,56 @@ jobs:
           gh release upload "v$VERSION" "AgentDeck-$VERSION.apk" --clobber
         env:
           GH_TOKEN: ${{ github.token }}
+      - name: Mark the commit as the Android app's last release
+        run: |
+          git tag -f "android-v$VERSION"
+          git push origin "refs/tags/android-v$VERSION" || echo "::warning::The tag android-v$VERSION was not pushed: the next release builds the Android app again"
+      # Google Play, the track of PLAY_TRACK (above), takes the same app as a bundle (.aab), signed with the same key.
+      # Nothing from here on fails the release: without the key of the service account the upload is skipped, and a
+      # bundle or an upload that goes wrong is a warning. The bundle is kept with the run for a month as well - the
+      # very first one of an app has to be uploaded in Play Console by hand (docs/MOBILE.md §12).
+      - name: Build the signed bundle
+        id: bundle
+        continue-on-error: true
+        working-directory: mobile
+        run: |
+          node scripts/gradle.mjs bundleRelease
+          signed=$(jarsigner -verify android/app/build/outputs/bundle/release/app-release.aab)
+          echo "$signed"
+          case "$signed" in *"jar verified"*) ;; *) exit 1 ;; esac
+          cp android/app/build/outputs/bundle/release/app-release.aab "$GITHUB_WORKSPACE/AgentDeck-$VERSION.aab"
+        env:
+          AGENTDECK_VERSION: ${{ needs.release.outputs.version }}
+          ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      - uses: actions/upload-artifact@v7
+        if: steps.bundle.outcome == 'success'
+        with:
+          name: agentdeck-android-bundle
+          path: AgentDeck-${{ env.VERSION }}.aab
+          retention-days: 30
+      - name: Send the bundle to Google Play
+        id: play
+        if: steps.bundle.outcome == 'success'
+        continue-on-error: true
+        run: |
+          if [ -z "$PLAY_SERVICE_ACCOUNT_JSON" ]; then
+            echo "::warning::The PLAY_SERVICE_ACCOUNT_JSON secret is not set: the Android app is not sent to Google Play"
+            exit 0
+          fi
+          node mobile/scripts/play-upload.mjs "AgentDeck-$VERSION.aab"
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+      - if: steps.bundle.outcome == 'failure' || steps.play.outcome == 'failure'
+        run: echo "::warning::The Android app of v$VERSION did not reach Google Play - see the build-android job"
       - if: always()
         run: rm -f "$RUNNER_TEMP/release.jks"
 
   build-ios:
     needs: release
-    if: needs.release.outputs.published == 'true'
+    if: needs.release.outputs.version != '' && needs.release.outputs.ios == 'true'
     runs-on: macos-26
     # Whatever happens here, the release is whole without it: the run stays green and says what went wrong.
     continue-on-error: true
@@ -225,6 +387,12 @@ jobs:
           npm run ios:archive
           node scripts/xcode.mjs ipa
           node scripts/xcode.mjs upload
+      # Only a build that reached TestFlight counts as released: one that failed is built again with the next release.
+      - name: Mark the commit as the iPhone app's last release
+        if: steps.key.outputs.found
+        run: |
+          git tag -f "ios-v$AGENTDECK_VERSION"
+          git push origin "refs/tags/ios-v$AGENTDECK_VERSION" || echo "::warning::The tag ios-v$AGENTDECK_VERSION was not pushed: the next release builds the iPhone app again"
       - if: failure()
         run: echo "::warning::The iPhone app of v$AGENTDECK_VERSION did not reach TestFlight - see the build-ios job"
       - if: always()
@@ -232,10 +400,11 @@ jobs:
 
   docker-relay:
     needs: release
-    if: needs.release.outputs.published == 'true'
+    if: needs.release.outputs.version != '' && needs.release.outputs.relay == 'true'
     runs-on: ubuntu-26.04
+    # contents: write for the tag that marks the relay's last release.
     permissions:
-      contents: read
+      contents: write
       packages: write
     env:
       IMAGE: ghcr.io/mitrevstudio/agentdeck-relay
@@ -267,3 +436,38 @@ jobs:
             org.opencontainers.image.description=Routes mesh traffic between paired AgentDecks; runs nothing of its own
             org.opencontainers.image.licenses=MIT
             org.opencontainers.image.version=${{ env.VERSION }}
+      - name: Mark the commit as the relay's last release
+        run: |
+          git tag -f "relay-v$VERSION"
+          git push origin "refs/tags/relay-v$VERSION" || echo "::warning::The tag relay-v$VERSION was not pushed: the next release builds the relay's image again"
+
+  # A new release without the desktop app: published once the Android job is over (its APK is on it then), and not
+  # as the latest - that stays the last release with an installer. A release with the desktop app is published by
+  # the Windows job. A failed Android or relay build leaves the draft, as a failed installer does.
+  publish:
+    needs: [release, build-android, docker-relay]
+    if: ${{ !cancelled() && needs.release.result == 'success' && needs.release.outputs.fresh == 'true' && needs.release.outputs.desktop != 'true' && needs.build-android.result != 'failure' && needs.docker-relay.result != 'failure' }}
+    runs-on: ubuntu-26.04
+    steps:
+      - run: gh release edit "v$VERSION" --draft=false --latest=false
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+
+  # The release marked as the latest carries the newest APK: copied onto it after a release without the Android app,
+  # replaced on it after a release without the desktop app (scripts/release-parts.js, apkCarry). Like the phone jobs
+  # it never fails the release.
+  latest-apk:
+    needs: [release, build, build-android, publish]
+    if: ${{ !cancelled() && needs.release.result == 'success' && needs.release.outputs.version != '' }}
+    runs-on: ubuntu-26.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - run: node scripts/release-parts.js carry-apk
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+      - if: failure()
+        run: echo "::warning::The latest release may not carry the newest APK - see the latest-apk job"
