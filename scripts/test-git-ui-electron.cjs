@@ -192,17 +192,63 @@ app.whenReady().then(async () => {
   assert.equal(await evaluate("Boolean(copyOf('work','C:/work/parent-repo/child-app'))"), true);
   await click('#gitPanelMenu'); await evaluate("menuItem(gitText('filterProjects')).click()"); await settle();
   assert.deepEqual(await evaluate("[...document.querySelectorAll('.menu-sub button')].map(b=>b.textContent.trim())"), ['ClinicDesk', 'Work']);
+  // Typing on the list searches it; Enter ticks the first match and keeps the search; Escape clears it first.
+  const pressKey = k => evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'${k}',bubbles:true,cancelable:true}))`);
+  const shownItems = () => evaluate("[...document.querySelectorAll('.menu-sub button[data-i]')].filter(b=>!b.hidden).map(b=>b.textContent.trim())");
+  const searchState = () => evaluate("(f=>[f.value,f.hidden,document.activeElement===f,document.querySelector('.menu-sub .menu-empty').hidden])(document.querySelector('.menu-sub .menu-search'))");
+  assert.deepEqual(await searchState(), ['', false, false, true], 'the search field is there from the start, the focus on the list');
+  await pressKey('w');
+  assert.deepEqual(await shownItems(), ['Work']);
+  assert.deepEqual(await searchState(), ['w', false, true, true], 'the field shows what was typed and takes the typing');
+  await evaluate("(f=>{f.value='wx';f.dispatchEvent(new Event('input'))})(document.querySelector('.menu-sub .menu-search'))");
+  assert.deepEqual(await shownItems(), []);
+  assert.deepEqual(await searchState(), ['wx', false, true, false], 'no match says so');
+  await evaluate("(f=>{f.value='W';f.dispatchEvent(new Event('input'))})(document.querySelector('.menu-sub .menu-search'))");
+  assert.deepEqual(await shownItems(), ['Work'], 'the search ignores case');
+  await pressKey('Enter'); await settle();
+  assert.equal(await evaluate("document.querySelector('.menu-sub button[data-i=\"1\"]').getAttribute('aria-checked')"), null, 'Enter unticks the match');
+  assert.deepEqual(await shownItems(), ['Work'], 'the search stays while ticking');
+  assert.deepEqual(await searchState(), ['W', false, true, true]);
+  await pressKey('Enter'); await settle();
+  assert.equal(await evaluate("document.querySelector('.menu-sub button[data-i=\"1\"]').getAttribute('aria-checked')"), 'true');
+  await pressKey('Escape');
+  assert.deepEqual(await shownItems(), ['ClinicDesk', 'Work']);
+  assert.deepEqual(await searchState(), ['', false, false, true], 'Escape clears the search, the menu stays');
+  assert.equal(await evaluate("document.querySelectorAll('.menu-sub').length"), 1);
   await evaluate("document.querySelectorAll('.menu-sub button')[0].click()"); await settle();
   await evaluate("document.querySelectorAll('.menu-sub button')[1].click()"); await settle();
   await evaluate('closeGroupMenu()');
-  assert.equal(await evaluate("document.querySelectorAll('.git-project').length"), 2, 'a repository a terminal is in stays, whatever the filter');
-  await evaluate("ws.tabs={};ws.terminals=[];gitPanel.render()");
+  assert.equal(await evaluate("document.querySelectorAll('.git-project').length"), 0, 'the filter hides a repository a terminal is in too');
   assert.equal(await evaluate("document.querySelectorAll('[data-repo]').length"), 0);
-  assert.equal(await evaluate("$('gitRepositories').textContent.includes(I18N.t('git.panel.filtered'))"), true, 'the filter is named as the reason');
+  assert.equal(await evaluate("$('gitRepositories').textContent.includes(I18N.t('git.panel.filtered'))"), true, 'the filter is named as the reason, terminals open or not');
+  await evaluate("ws.tabs={};ws.terminals=[];gitPanel.render()");
   await capture('filtered');
   await click('[data-show-projects]');
   assert.equal(await evaluate("document.querySelectorAll('.git-project').length"), 2);
   assert.equal(await evaluate("document.activeElement.id"), 'gitPanelMenu');
+  // A long filter list opened from a button low at the right edge: inside the window, its search field pinned on top
+  // while the list scrolls, an item reached with the keyboard not behind the field, ArrowUp from the field to the last.
+  assert.deepEqual(await evaluate(`(() => {
+    const b = document.createElement('button');
+    b.style.cssText = 'position:fixed;right:2px;bottom:2px';
+    document.body.append(b);
+    openGroupMenu(b, '', Array.from({ length: 60 }, (_, i) => ({ label: 'repo-' + i, icon: 'branch', checked: true, keepOpen: true, run: () => {} })), 'git-context-menu');
+    const m = groupMenu, r = m.getBoundingClientRect(), field = m.querySelector('.menu-search'), items = [...m.querySelectorAll('button[data-i]')];
+    const scrolls = m.scrollHeight > m.clientHeight;
+    const inside = r.top >= 8 && r.left >= 8 && r.right <= innerWidth - 8 && r.bottom <= innerHeight - 7;
+    m.scrollTop = m.scrollHeight;
+    const f = field.getBoundingClientRect();
+    const pinned = f.top >= r.top && document.elementFromPoint(f.left + f.width / 2, f.top + f.height / 2) === field;
+    // Scrolled to the top edge (as the focus does when an item above comes into view): it stops below the field.
+    items[30].scrollIntoView({ block: 'start' });
+    const clear = items[30].getBoundingClientRect().top >= field.getBoundingClientRect().bottom - 1;
+    field.focus();
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true }));
+    const last = document.activeElement === items.at(-1);
+    closeGroupMenu();
+    b.remove();
+    return [scrolls, inside, pinned, clear, last];
+  })()`), [true, true, true, true, true], 'a long list scrolls; inside the window, field pinned, focused item clear of it, ArrowUp from it to the last');
   assert.deepEqual(errors, []);
   console.log('Electron Git UI: publish routing, remote selection, empty/filter states, operation visibility, stale review, drafts, busy state, narrow layout, project groups, filters and the keyboard focus passed');
   console.log('Screenshots: ' + screenshots);
