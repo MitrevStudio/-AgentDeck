@@ -83,7 +83,10 @@ const host = createHost({
   // ignore is looked at within seconds while the user is at one of the two (gitFocused), within half a minute while
   // the manager window is only in view.
   gitActive: () => Boolean(bar?.isVisible() || (managerWin && !managerWin.isDestroyed() && managerWin.isVisible() && !managerWin.isMinimized())),
-  gitFocused: () => Boolean(bar?.isVisible() || (managerWin && !managerWin.isDestroyed() && managerWin.isFocused()))
+  gitFocused: () => Boolean(bar?.isVisible() || (managerWin && !managerWin.isDestroyed() && managerWin.isFocused())),
+  // What the panel lists is what is asked about: with "Only with an open terminal" (the default) no repository nested
+  // in a project is.
+  gitScope: () => prefs.get().gitScope
 });
 const { sessions, terminals, launch, liveSessions, findTranscript, usage, limits, resources, git: gitStatus, search: fullText } = host;
 const sessionLoad = require("./proc-stats").createSessionLoad({
@@ -1502,6 +1505,7 @@ function onPrefsChanged(p, keys) {
   if (keys.some(k => k.startsWith("taskbar"))) taskbarMonitor?.sync();
   if (keys.includes("uiScale") && managerWin && !managerWin.isDestroyed()) managerWin.webContents.setZoomFactor(p.uiScale);
   if (keys.includes("autoUpdate")) updater.setAuto(p.autoUpdate);
+  if (keys.includes("gitScope")) gitStatus.refresh().catch(err => console.error("Git status failed:", err.message)); // the repositories of the new scope
   buildTrayMenu();
 }
 

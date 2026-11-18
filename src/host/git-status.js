@@ -7,6 +7,9 @@
 // by another user is refused by git itself (safe.directory). A folder inside a repository shares the repository's
 // status; one outside any is ruled out with a few stat calls, without starting git.
 //
+// Which repositories. Those of the projects' and the sessions' folders and of the open terminals', and - with
+// "All in the projects" in Settings > Git (opts.scope) - every repository found inside a project, however deep.
+//
 // When it runs. Every start of git is a process (on Windows with a console host of its own) that security software
 // inspects, so a status is asked for only when it can have changed: after a full scan of the
 // sessions, when a page asks (the manager window gets the focus, the edge menu opens), every BACKGROUND_MS while a
@@ -81,7 +84,9 @@ function parseStatus(out) {
 // below the depth limit outside any repository, or folders left when the ceiling was reached.
 const SKIP = new Set([".git", "node_modules", ".venv", "venv", "vendor", "dist", "build", ".next", "coverage", "target", "__pycache__"]);
 const MAX_DIRS = 3000, MAX_TOTAL = 15000;
-async function discoverRepositories(dirs, { maxDepth = 5, maxDirs = MAX_DIRS, maxTotal = MAX_TOTAL } = {}) {
+// shallow: only what the panel lists with the scope "open" - a folder that is a repository, or the repositories right
+// in a folder that is none. Nothing inside a repository is looked at, and nothing is reported as cut short.
+async function discoverRepositories(dirs, { shallow = false, maxDepth = shallow ? 1 : 5, maxDirs = MAX_DIRS, maxTotal = MAX_TOTAL } = {}) {
   const queue = dirs.filter(d => typeof d === "string" && path.isAbsolute(d)).map(dir => ({ dir, depth: 0, project: dir, inRepo: false }));
   const seen = new Set(), found = new Set(), counts = new Map(), spent = new Set(), truncatedIn = new Set();
   let total = 0;
@@ -106,9 +111,10 @@ async function discoverRepositories(dirs, { maxDepth = 5, maxDirs = MAX_DIRS, ma
       if (!entries) return;
       const isRepo = entries.some(e => e.name === ".git"), inRepo = inside || isRepo;
       if (isRepo) found.add(dir);
+      if (isRepo && shallow) return;
       const children = entries.filter(e => e.isDirectory() && !e.isSymbolicLink() && !SKIP.has(e.name.toLowerCase()));
       if (depth >= maxDepth && !inRepo) {
-        if (children.length) truncatedIn.add(project);
+        if (children.length && !shallow) truncatedIn.add(project);
         return;
       }
       for (const e of children) queue.push({ dir: path.join(dir, e.name), depth: depth + 1, project, inRepo });
@@ -348,11 +354,14 @@ async function pass(force, changedOnly = false) {
   const t0 = Date.now();
   if (!force && missingAt && t0 - missingAt < MISSING_RETRY_MS) return snapshot;
   const dirs = [...new Set((opts.dirs() || []).filter(Boolean))];
-  const projects = opts.projects?.() || dirs;
-  const discoveryKey = JSON.stringify([...projects].sort());
+  // With the scope "open" the projects are not searched for the repositories nested in them: a project that holds a
+  // hundred reference clones would have each of them asked about, a process apiece, for a list that shows none of them.
+  const shallow = opts.scope?.() === "open";
+  const projects = [...new Set([...(opts.projects?.() || dirs), ...(shallow ? (opts.open?.() || []).filter(Boolean) : [])])];
+  const discoveryKey = JSON.stringify([shallow, [...projects].sort()]);
   // Not in a watchers' pass (changedOnly): the walk would delay the status the user waits for after staging, and
   // count as the cost that spaces the watchers' passes out. The background refresh does it.
-  if (force || discovery.key !== discoveryKey || (!changedOnly && t0 - discovery.at > ROOT_TTL_MS)) discovery = { ...await discoverRepositories(projects), key: discoveryKey, at: t0 };
+  if (force || discovery.key !== discoveryKey || (!changedOnly && t0 - discovery.at > ROOT_TTL_MS)) discovery = { ...await discoverRepositories(projects, { shallow }), key: discoveryKey, at: t0 };
   const dirRoot = {};
   for (const d of [...dirs, ...discovery.repos]) { if (force) roots.delete(norm(d)); const r = await rootOf(d, t0); if (r) dirRoot[norm(d)] = r; }
   const changed = new Set(changedRoots);
@@ -393,7 +402,10 @@ async function pass(force, changedOnly = false) {
 const sorted = o => Object.entries(o || {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
 const signature = s => JSON.stringify([s.missing, s.discoveryTruncatedIn, sorted(s.dirs), sorted(s.repos).map(([k, v]) => [k, { ...v, at: 0 }])]);
 
-// dirs(): the folders to report on; onChange(snapshot); active(): whether a window that shows the state is open
+// dirs(): the folders to report on; projects(): those searched for the repositories in them (without it: dirs());
+// scope(): "open" - none of the repositories nested in a repository, only a folder's own and those right in a folder
+// that is in none, for projects() and open() (the folders of the open terminals) - else every one in projects();
+// onChange(snapshot); active(): whether a window that shows the state is open
 // (the background refresh and the watchers' passes run only then); focused(): whether the user is at such a window
 // (without it: always) - else the watchers' passes are WATCH_UNFOCUSED_MS apart (watchUnfocusedMs: another gap, for
 // the tests; watchDelayMs likewise for the focused minimum WATCH_DELAY_MS, watchSettleMs for WATCH_SETTLE_MS).
