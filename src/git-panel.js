@@ -429,8 +429,7 @@
   function openProjectMenu(button) {
     const projectKey = button.dataset.projectMenu;
     const repos = (projectRepos.get(projectKey) || []).map(r => ({ label: r.name, icon: 'branch', checked: !isRepoHidden(projectKey, r.key), keepOpen: true, run: async () => toggleRepo(projectKey, r.key) }));
-    openGroupMenu(button, '', repos);
-    groupMenu.classList.add('git-context-menu');
+    openGroupMenu(button, '', repos, 'git-context-menu');
   }
   function panelMenuItems() {
     const filterProjects = projectFilterItems();
@@ -448,14 +447,12 @@
   }
   function menu(button, node, group, file) {
     if (!file && !group) {
-      openGroupMenu(button, node.repo.root, repoMenuItems(node));
-      groupMenu.classList.add('git-context-menu'); return;
+      openGroupMenu(button, node.repo.root, repoMenuItems(node), 'git-context-menu'); return;
     }
     const files = group ? (node.repo.files || []).filter(f => accepts(group, f) && f.path.toLocaleLowerCase().includes(filter)).map(f => f.path) : [];
     const items = group !== 'conflicts' && file ? [] : [item(file ? (group === 'staged' ? 'unstageFile' : 'stageFile') : (group === 'staged' ? 'unstageAll' : 'stageAll'), group === 'staged' ? 'undo' : 'plus', () => mutate(node, group === 'staged' ? 'unstage' : 'stage', file ? [file] : files))];
     if (file && !node.node) items.push(item('editor', 'open', () => window.manager.gitOpenFile(node.node, node.repo.root, file)));
-    openGroupMenu(button, node.repo.root, items);
-    groupMenu.classList.add('git-context-menu');
+    openGroupMenu(button, node.repo.root, items, 'git-context-menu');
   }
   list.addEventListener('toggle', e => {
     if (!e.target.dataset.expand) return;
@@ -522,7 +519,7 @@
   $('gitPanelTitle').textContent = gitText('sourceControl');
   $('gitPanelMenu').title = gitText('panelActions');
   $('gitFilter').oninput = e => { filter = e.target.value.toLocaleLowerCase(); render(); };
-  $('gitPanelMenu').onclick = () => { openGroupMenu($('gitPanelMenu'), '', panelMenuItems()); groupMenu.classList.add('git-context-menu'); };
+  $('gitPanelMenu').onclick = () => openGroupMenu($('gitPanelMenu'), '', panelMenuItems(), 'git-context-menu');
   $('gitPanelRefresh').onclick = async () => {
     const button = $('gitPanelRefresh'); button.disabled = true;
     try { await window.manager.refreshGit(true); git = await window.manager.getGit(); errors.clear(); render(); }
