@@ -1,0 +1,71 @@
+# TEMPORARY - a trial of the upload to Google Play from this branch; removed again before the pull request is merged.
+# Builds the signed bundle as build-android of release.yml does and sends it with the same script to the internal
+# track as a draft release, under a version code far below any real one (0.0.x -> x). No tag, no GitHub release.
+name: Play trial
+
+on:
+  push:
+    branches: [feat/release-by-part]
+    paths: [.github/workflows/play-trial.yml]
+
+permissions:
+  contents: read
+
+env:
+  PLAY_TRACK: internal
+  VERSION: 0.0.1
+
+jobs:
+  trial:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            mobile/package-lock.json
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci --ignore-scripts
+      - run: npm ci
+        working-directory: mobile
+      - name: Release key
+        run: |
+          [ -n "$ANDROID_KEYSTORE_BASE64" ] || { echo "::error::The ANDROID_KEYSTORE_BASE64 secret is not set"; exit 1; }
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      - name: Build the signed bundle
+        working-directory: mobile
+        run: |
+          npm run android
+          node scripts/gradle.mjs bundleRelease
+          signed=$(jarsigner -verify android/app/build/outputs/bundle/release/app-release.aab)
+          echo "$signed"
+          case "$signed" in *"jar verified"*) ;; *) exit 1 ;; esac
+          cp android/app/build/outputs/bundle/release/app-release.aab "$GITHUB_WORKSPACE/AgentDeck-$VERSION.aab"
+        env:
+          AGENTDECK_VERSION: ${{ env.VERSION }}
+          ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: agentdeck-android-bundle-trial
+          path: AgentDeck-${{ env.VERSION }}.aab
+          retention-days: 3
+      - name: Send the bundle to Google Play (a draft release)
+        run: |
+          [ -n "$PLAY_SERVICE_ACCOUNT_JSON" ] || { echo "::error::The PLAY_SERVICE_ACCOUNT_JSON secret is not set"; exit 1; }
+          node mobile/scripts/play-upload.mjs "AgentDeck-$VERSION.aab"
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          PLAY_RELEASE_STATUS: draft
+      - if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks"
