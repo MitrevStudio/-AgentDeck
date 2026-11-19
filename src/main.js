@@ -78,11 +78,11 @@ const host = createHost({
   untitled: (agent, id) => t("session.untitled", { agent, id }),
   noLauncher: exe => t("voice.command.error.noLauncher", { exe }),
   log: (...parts) => launchLog(...parts),
-  // Git: refreshed after each scan, when the edge menu opens or the manager window gets the focus (the pages ask),
-  // and every two minutes while either is in view. In between, the folders are watched: a change that git does not
-  // ignore is looked at within seconds while the user is at one of the two (gitFocused), within half a minute while
-  // the manager window is only in view.
-  gitActive: () => Boolean(bar?.isVisible() || (managerWin && !managerWin.isDestroyed() && managerWin.isVisible() && !managerWin.isMinimized())),
+  // Git is started in the background only while the user is at what shows its state: the manager window has the
+  // focus, or the edge menu is open (bar.isVisible() is the menu itself, shown on hover or by the hotkey and hidden
+  // again - not its handle, which is always there). Then the repositories in use are watched and a change is looked
+  // at within seconds; otherwise changes are only remembered, and the page's request as the window gets the focus
+  // or the menu opens takes them (git-status.js).
   gitFocused: () => Boolean(bar?.isVisible() || (managerWin && !managerWin.isDestroyed() && managerWin.isFocused())),
   // What the panel lists is what is asked about: with "Only with an open terminal" (the default) no repository nested
   // in a project is.
@@ -608,6 +608,7 @@ function startMesh() {
 // What the other computers show - their last list, live status and git - kept per node and pushed to the manager
 // window with the nodes themselves ("mesh:nodes").
 const remote = new Map(); // node id -> { data, live, git }
+const GIT_SHOWN_MAX = 200; // folders in one request of a page for the git status of what it shows
 // The paired computers. Phones (kind "mobile", docs/MOBILE.md) are peers too, but no computers: they have no projects,
 // sessions or git and take no clones, so they show only under Settings -> Computers -> Phones.
 const computers = () => links.nodes().filter(n => n.kind !== "mobile");
@@ -1448,9 +1449,28 @@ function registerIpc() {
     await shell.openExternal('vscode://file/' + realFile.replaceAll('\\', '/').split('/').map(encodeURIComponent).join('/'));
     return true;
   });
-  handle("git:refresh", async force => {
+  // force: the user's Refresh - every listed repository, here and on the other computers. Else a page tells what it
+  // shows now (shown: [{ node, path }], node "" for this computer; why: "focus" as its window got the focus or the
+  // edge menu opened, else "page"): only those are asked about, each on its own computer, and only when their status
+  // is not fresh (git-status.js). The answer of another computer comes as its "git" event.
+  handle("git:refresh", async (force, shown, why) => {
     const errors = [];
-    await Promise.all([gitStatus.refresh({ force: force === true }), ...(force === true ? computers().filter(n => n.status === "online").map(n => links.call(n.id, "git.refresh").then(git => { remote.set(n.id, { ...remote.get(n.id), git, gitError: '' }); nodesChanged(); }).catch(e => { errors.push(`${n.name}: ${e.message}`); remote.set(n.id, { ...remote.get(n.id), gitError: e.message }); nodesChanged(); })) : [])]);
+    if (force !== true) {
+      const byNode = new Map();
+      for (const x of (Array.isArray(shown) ? shown : []).slice(0, GIT_SHOWN_MAX)) {
+        const node = typeof x?.node === "string" ? x.node.slice(0, 64) : "", dir = typeof x?.path === "string" && x.path.length <= 4096 ? x.path : "";
+        if (dir) byNode.set(node, [...(byNode.get(node) || []), dir]);
+      }
+      for (const n of computers()) {
+        // A computer on a version without "git.shown" refuses it, and asks about all its repositories by itself.
+        // With the focus every computer is told, also one nothing is shown of: somebody is looking again, and it takes
+        // what changed in its repositories in use meanwhile.
+        if (n.status === "online" && (why === "focus" || byNode.has(n.id))) links.call(n.id, "git.shown", { dirs: byNode.get(n.id) || [] }).catch(() => {});
+      }
+      await gitStatus.refresh({ reason: why === "focus" ? "focus" : "page", shown: byNode.get("") || [] });
+      return true;
+    }
+    await Promise.all([gitStatus.refresh({ force: true }), ...(force === true ? computers().filter(n => n.status === "online").map(n => links.call(n.id, "git.refresh").then(git => { remote.set(n.id, { ...remote.get(n.id), git, gitError: '' }); nodesChanged(); }).catch(e => { errors.push(`${n.name}: ${e.message}`); remote.set(n.id, { ...remote.get(n.id), gitError: e.message }); nodesChanged(); })) : [])]);
     if (errors.length) throw new Error(errors.join('\n'));
     return true;
   });
@@ -1505,7 +1525,7 @@ function onPrefsChanged(p, keys) {
   if (keys.some(k => k.startsWith("taskbar"))) taskbarMonitor?.sync();
   if (keys.includes("uiScale") && managerWin && !managerWin.isDestroyed()) managerWin.webContents.setZoomFactor(p.uiScale);
   if (keys.includes("autoUpdate")) updater.setAuto(p.autoUpdate);
-  if (keys.includes("gitScope")) gitStatus.refresh().catch(err => console.error("Git status failed:", err.message)); // the repositories of the new scope
+  if (keys.includes("gitScope")) gitStatus.refresh({ reason: "scan" }).catch(err => console.error("Git status failed:", err.message)); // the repositories of the new scope
   buildTrayMenu();
 }
 

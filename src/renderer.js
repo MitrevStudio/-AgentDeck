@@ -67,6 +67,7 @@ function render() {
   const input = document.querySelector(".rename");
   if (input && document.activeElement !== input) { input.focus(); input.select(); }
   syncAnimations();
+  askGitShown(); // a repository drawn for the first time has no status until main is told it is shown
 }
 
 // The command centre (orchestrator.js): its space, its terminal and the state of its session.
@@ -741,6 +742,7 @@ function selectProject(key) {
   if (key.startsWith("g:")) return toggleCollapsed(key.slice(2));
   ui.selected = key;
   render();
+  askGitShown(true); // the chosen project's repository, afresh
   runWorkspace("space", { space: key, sessions: key !== CENTRE });
 }
 
@@ -1389,7 +1391,29 @@ window.manager.onDataChanged(d => {
   if (ui.renaming) pendingRender = true; else render();
 });
 // Git branches beside projects and session folders, and a session's last messages on hover (git-ui.js, preview-ui.js).
-watchGit(() => { if (!ui.loaded) return; if (ui.renaming) pendingRender = true; else render(); });
+// What the window shows of git, for main to look at (git-ui.js): the chosen project's repository afresh; the
+// repositories on screen in the Git panel when that is the open tab; else those of the project rows on screen that
+// have no status yet or one older than GIT_SEEN_MS - a row shows its changes in passing, and asking about every row
+// whenever the window gets the focus would be a sweep of all the projects. all: for a fresh look (the window got the
+// focus, a list was scrolled); else only what has no status yet.
+function getShownGit(all) {
+  const out = [];
+  const add = (p, maxAge) => {
+    if (gitNeedsLook(p.path, p.node ? getNode(p.node)?.git : git, maxAge)) out.push({ node: p.node || "", path: p.path });
+  };
+  const chosen = data.projects.find(p => p.n === ui.selected);
+  if (chosen) add(chosen, all ? 0 : Infinity);
+  const inPanel = window.gitPanel?.getShown(all);
+  if (inPanel) return [...out, ...inPanel];
+  const byRef = new Map(data.projects.map(p => [refOf(p), p]));
+  for (const row of gitOnScreen($("projects"), ".proj[data-path]")) {
+    const p = byRef.get(row.dataset.path);
+    if (p && p !== chosen) add(p, all ? GIT_SEEN_MS : Infinity);
+  }
+  return out;
+}
+watchGit(() => { if (!ui.loaded) return; if (ui.renaming) pendingRender = true; else render(); }, { shown: getShownGit });
+$("projects").addEventListener("scroll", () => askGitShown(true), { passive: true });
 
 // ---------- dividers: dragged, moved with the arrow keys, reset by a double-click ----------
 // projects | sessions sets --projects-w on <main>; projects / agents sets --agents-h and agents / terminals --terms-h on

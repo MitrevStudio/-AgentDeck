@@ -62,13 +62,63 @@ function gitLine(dir) {
     ${counts.length ? counts.join("") : `<span class="gc">${esc(t("git.clean"))}</span>`}</span>`;
 }
 
-// Calls onChange() when the state changes. Asks main for a fresh look (it skips repositories checked moments ago)
-// when the page's window gets the focus and when the edge menu opens.
-function watchGit(onChange) {
+// ---------- what the page shows ----------
+// Main starts git by itself only for the repositories in use - a live session, an open terminal (git-status.js). Of
+// any other it has a status once a page said it shows that repository, and a fresh one when the page says so again.
+// So a page names what it shows: [{ node, path }], node "" for this computer, path a repository or a folder in one.
+const GIT_SEEN_MS = 10 * 60 * 1000; // a status a list shows in passing (a project's row, a tile) is left alone this long
+const GIT_SHOWN_MAX = 40;           // folders in one request: about what fits on a screen
+const GIT_ASK_AGAIN_MS = 20 * 1000; // the same folders are not named again sooner, whatever is drawn meanwhile
+
+// Whether a folder's repository wants a look: it is listed and has no status yet, or one older than maxAge. A folder
+// outside any repository never does. state: that of the folder's computer.
+function gitNeedsLook(dir, state = git, maxAge = Infinity) {
+  const repo = dir && state?.dirs?.[normPath(dir)];
+  if (!repo) return false;
+  const g = state.repos?.[repo];
+  return !g || Date.now() - (g.at || 0) > maxAge;
+}
+// The elements matching `selector` in `box` that are on screen now - not scrolled out of it, not in a folded or hidden
+// part. Where the page cannot tell, all of them.
+function gitOnScreen(box, selector) {
+  const els = [...box?.querySelectorAll?.(selector) || []], area = box?.getBoundingClientRect?.();
+  if (!area) return els;
+  return els.filter(el => { const r = el.getBoundingClientRect(); return r.height > 0 && r.bottom > area.top && r.top < area.bottom; });
+}
+
+let gitShown = () => [], gitLooking = () => true, gitAskTimer = 0, gitAsked = "", gitAskedAt = 0;
+// Names what the page shows to main. why: "focus" - somebody has just come to the page; "page" - something on it
+// changed. all: also what has a status already, for a fresh one; else only what has none yet.
+function sendGitShown(why, all) {
+  const shown = gitShown(all).slice(0, GIT_SHOWN_MAX);
+  gitAsked = JSON.stringify(shown);
+  gitAskedAt = Date.now();
+  return window.manager.refreshGit(false, shown, why).catch(() => {});
+}
+// After the page drew something, or its list was scrolled: a moment later (a burst is one request), only while
+// somebody is at the page, and only when it names folders it has not just named.
+function askGitShown(all = false) {
+  clearTimeout(gitAskTimer);
+  gitAskTimer = setTimeout(() => {
+    if (!gitLooking()) return;
+    const shown = gitShown(all).slice(0, GIT_SHOWN_MAX);
+    if (!shown.length || (JSON.stringify(shown) === gitAsked && Date.now() - gitAskedAt < GIT_ASK_AGAIN_MS)) return;
+    sendGitShown("page", all);
+  }, 300);
+}
+
+// Calls onChange() when the state changes, and asks main to look at what the page shows: when its window gets the
+// focus and when the edge menu opens (then main also takes what changed in the repositories in use while nobody was
+// there), and through askGitShown() as the page draws. shown(all): what the page shows now, as sendGitShown() names
+// it; isLooking(): whether somebody is at the page.
+function watchGit(onChange, { shown = () => [], isLooking = () => document.hasFocus() } = {}) {
   const apply = g => { if (!g) return; git = g; onChange(); };
-  const refresh = () => window.manager.refreshGit().catch(() => {});
+  gitShown = shown;
+  gitLooking = isLooking;
+  // A moment later: the page draws what it shows now first.
+  const look = () => setTimeout(() => sendGitShown("focus", true), 50);
   window.manager.onGitChanged(apply);
   window.manager.getGit().then(apply).catch(() => {});
-  window.addEventListener("focus", refresh);
-  window.manager.onBarEvent(ev => { if (ev.type === "show") refresh(); });
+  window.addEventListener("focus", look);
+  window.manager.onBarEvent(ev => { if (ev.type === "show") look(); });
 }

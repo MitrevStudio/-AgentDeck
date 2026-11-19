@@ -80,7 +80,8 @@ async function main() {
     fs.rmSync(scan, { recursive: true, force: true });
     // The scope of Settings > Git. "open": a folder's own repository and those right in a folder that is in none -
     // what the panel lists then; the repositories nested in a repository (reference clones, say) are neither looked
-    // for nor asked about. "all": every one in a project. A change of the scope is taken by the next refresh.
+    // for nor asked about. "all": every one in a project. A change of the scope is taken by the next refresh - which
+    // lists the repositories of the new scope and asks about none of them: nobody works in them, no page shows them.
     const scoped = fs.mkdtempSync(path.join(os.tmpdir(), 'agentdeck-scope-'));
     const project = path.join(scoped, 'project'), reference = path.join(project, 'refs', 'a', 'b', 'reference');
     const plain = path.join(scoped, 'plain'), direct = path.join(plain, 'direct'), inner = path.join(direct, 'inner'), far = path.join(plain, 'x', 'far');
@@ -93,16 +94,20 @@ async function main() {
     assert.equal(shallow.truncated, false, 'a shallow walk is not a scan cut short');
     let scope = 'open', open = [];
     const keys = dirs => dirs.map(git.norm).sort();
+    const listed = s => [...Object.keys(s.repos), ...Object.keys(s.unchecked)].sort();
     git.start({ dirs: () => [project, plain, ...open], projects: () => [project, plain], open: () => open, scope: () => scope });
     assert.deepEqual(Object.keys((await git.refresh({ force: true })).repos).sort(), keys([project, direct]), 'the open scope leaves nested repositories alone');
     assert.equal(git.get().discoveryTruncated, false);
     open = [path.join(plain, 'x')];
-    assert.deepEqual(Object.keys((await git.refresh()).repos).sort(), keys([project, direct, far]), 'a repository right in a folder with an open terminal');
+    const asked = git.stats().total;
+    assert.deepEqual(listed(await git.refresh()), keys([project, direct, far]), 'a repository right in a folder with an open terminal');
     scope = 'all';
-    assert.deepEqual(Object.keys((await git.refresh()).repos).sort(), keys([project, reference, direct, inner, far]), 'the scope "all" lists every repository in the projects');
+    assert.deepEqual(listed(await git.refresh()), keys([project, reference, direct, inner, far]), 'the scope "all" lists every repository in the projects');
+    assert.deepEqual(Object.keys(git.get().unchecked).sort(), keys([reference, inner, far]), 'listed without a status until somebody shows them');
+    assert.equal(git.stats().total, asked, 'and listing them started no git');
     scope = 'open';
     open = [];
-    assert.deepEqual(Object.keys((await git.refresh()).repos).sort(), keys([project, direct]), 'back to the open scope');
+    assert.deepEqual(listed(await git.refresh()), keys([project, direct]), 'back to the open scope');
     git.stop();
     fs.rmSync(scoped, { recursive: true, force: true });
     git.start({ dirs: () => [root], projects: () => [root] });
@@ -147,7 +152,9 @@ async function main() {
     assert.equal(large.filesTruncated, true);
     for (const noise of ['target/classes/A.class', 'node_modules/x/index.js', '.idea/workspace.xml', '.claude/worktrees/fix/src/a.js', 'sub/Build/out.txt']) assert.ok(git.WATCH_NOISE.test(noise), noise);
     for (const real of ['src/main/App.java', '.claude/settings.json', 'targets.txt', '.gitignore']) assert.equal(git.WATCH_NOISE.test(real), false, real);
-    git.start({ dirs: () => [root], projects: () => [root], active: () => true, onChange: () => onChange() });
+    // Both repositories are in use (a terminal open in each), so both are watched.
+    const inUse = [backend, frontend];
+    git.start({ dirs: () => [root], projects: () => [root], activeDirs: () => inUse, onChange: () => onChange() });
     await git.refresh({ force: true });
     git.get().repos[git.norm(frontend)].at = 0; // past TTL_MS: a full pass would check it again
     fs.mkdirSync(path.join(backend, 'target'), { recursive: true });
@@ -156,12 +163,13 @@ async function main() {
     const seen = () => git.get().repos[git.norm(backend)].files.some(f => f.path === 'watched.txt');
     await until(seen, 'a watched change refreshes its repository');
     assert.equal(git.get().repos[git.norm(frontend)].at, 0, 'a watched change does not check the other repositories');
-    git.refresh(); // asked for while the watchers' pass is still reporting: it runs right after that one
-    await until(() => git.get().repos[git.norm(frontend)].at > 0, 'a plain refresh still checks a stale repository');
+    git.refresh({ shown: [frontend] }); // asked for while the watchers' pass is still reporting: it runs right after that one
+    await until(() => git.get().repos[git.norm(frontend)].at > 0, 'a page that shows a repository has its stale status checked');
     // A linked worktree keeps its index in the main checkout's .git/worktrees/<name>: staging there changes no file in
     // the worktree's own folder, yet its status must follow.
     const linked = path.join(root, 'apps', 'backend-linked');
     run('worktree', 'add', '--quiet', '-b', 'linked', linked);
+    inUse.push(linked);
     fs.writeFileSync(path.join(linked, 'linked.txt'), 'new');
     await git.refresh({ force: true });
     assert.equal(git.get().repos[git.norm(linked)].untracked, 1);

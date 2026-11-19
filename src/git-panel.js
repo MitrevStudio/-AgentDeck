@@ -47,8 +47,22 @@
     for (const [id, panel] of Object.entries(panels)) panel.hidden = id !== selected;
     for (const b of buttons) { const active = b.dataset.sideTab === selected; b.setAttribute('aria-selected', active); b.tabIndex = active ? 0 : -1; }
     try { localStorage.setItem('agentdeck.sidebarTab', selected); } catch {}
-    if (selected === 'git') render();
+    if (selected === 'git') { render(); askShown(true); }
   }
+  // A computer's repositories as the panel lists them: those with a status, and those listed that nobody asked
+  // about yet (git-status.js `unchecked`) - drawn without a branch or a count, with "not checked yet" in place of
+  // the changes, until main has looked. The panel names what it shows, so that takes a moment.
+  const reposOf = source => [...Object.values(source.git?.repos || {}), ...Object.values(source.git?.unchecked || {}).map(r => ({ ...r, pending: true }))];
+  // What the panel shows now, for main to look at (git-ui.js): the repositories whose rows are on screen - not those
+  // scrolled away or in a folded project, of which there can be hundreds. all: also those that have a status; else
+  // only those without one. null while the panel is not the open tab.
+  function getShown(all) {
+    if (selected !== 'git') return null;
+    const rows = typeof gitOnScreen === 'function' ? gitOnScreen(list, '[data-repo]') : [];
+    return [...new Set(rows.map(el => el.dataset.repo))].map(key => repositories.get(key))
+      .filter(node => node && !node.offline && (all || node.repo.pending)).map(node => ({ node: node.node, path: node.repo.root }));
+  }
+  const askShown = all => { if (typeof askGitShown === 'function') askGitShown(all); };
   buttons.forEach(b => {
     b.onclick = () => select(b.dataset.sideTab);
     b.onkeydown = e => {
@@ -259,7 +273,7 @@
     for (const source of sources) {
       const paths = open.filter(p => (p.node || 'local') === source.id).map(p => normPath(p.path));
       if (!paths.length && scope !== 'all') continue;
-      const repos = Object.values(source.git?.repos || {}).sort((a, b) => a.root.localeCompare(b.root));
+      const repos = reposOf(source).sort((a, b) => a.root.localeCompare(b.root));
       const viaTerminal = openRoots(paths, repos.map(repo => normPath(repo.root)));
       const items = [];
       for (const repo of repos) {
@@ -273,14 +287,14 @@
         if (byProject && projects.every(p => isRepoHidden(p.key, key))) { items.push({ key, name, projects, html: () => '' }); continue; }
         const node = { key, node: source.id === 'local' ? '' : source.id, repo, offline: source.status !== 'online', source: source.name, error: errors.get(key) || source.gitError || repo.error };
         repositories.set(key, node);
-        const offline = source.status !== 'online', disabled = offline || busy.has(key), files = repo.files || [], staged = files.some(f => accepts('staged', f));
-        tips.set(key, `${source.name}\n${repo.root}\n${gitText('checked')}: ${repo.at ? new Date(repo.at).toLocaleTimeString() : '—'}${offline || Date.now() - (repo.at || 0) > 150000 ? '\n' + gitText('stale') : ''}`);
+        const offline = source.status !== 'online', disabled = offline || busy.has(key) || Boolean(repo.pending), files = repo.files || [], staged = files.some(f => accepts('staged', f));
+        tips.set(key, `${source.name}\n${repo.root}\n${gitText('checked')}: ${repo.at ? new Date(repo.at).toLocaleTimeString() : '—'}${offline ? '\n' + gitText('stale') : ''}`);
         // In a group a copy is folded until opened: its body is drawn once it is (the toggle listener renders again).
         items.push({ key, name, projects, html: expandId => `<details class="git-repository ${offline ? 'offline' : ''}" data-repo="${esc(key)}" data-expand="${esc(expandId)}" ${isRepoOpen(expandId) ? 'open' : ''}>
-          <summary><span class="git-chevron">${icon('right')}</span><strong>${esc(name)}</strong><span class="git-repo-branch">${icon('branch')}${esc(repo.error ? '' : gitHead(repo))}</span>${gitAb(repo)}${source.id === 'local' ? '' : `<span class="proj-node ${offline ? 'offline' : 'online'}">${icon('nodes')}${esc(source.name)}</span>`}${offline ? `<span class="git-offline">${icon('alert')}</span>` : ''}<span class="grow"></span><span class="git-hover-actions">${quick('preview', 'eye', 'commit', disabled)}${quick('commit', 'check', 'commitMenu', disabled || !staged || !(drafts.get(key) || '').trim())}${quick('branches', 'branch', 'branches', disabled)}${quick('refresh', 'refresh', 'refresh', disabled)}${more('data-repo-menu', disabled)}</span><span class="git-count">${repo.fileCount ?? files.length}</span></summary>${byProject && !isRepoOpen(expandId) ? '' : `
+          <summary><span class="git-chevron">${icon('right')}</span><strong>${esc(name)}</strong><span class="git-repo-branch">${icon('branch')}${esc(repo.error || repo.pending ? '' : gitHead(repo))}</span>${repo.pending ? '' : gitAb(repo)}${source.id === 'local' ? '' : `<span class="proj-node ${offline ? 'offline' : 'online'}">${icon('nodes')}${esc(source.name)}</span>`}${offline ? `<span class="git-offline">${icon('alert')}</span>` : ''}<span class="grow"></span><span class="git-hover-actions">${quick('preview', 'eye', 'commit', disabled)}${quick('commit', 'check', 'commitMenu', disabled || !staged || !(drafts.get(key) || '').trim())}${quick('branches', 'branch', 'branches', disabled)}${quick('refresh', 'refresh', 'refresh', disabled)}${more('data-repo-menu', disabled)}</span><span class="git-count">${repo.pending ? '' : repo.fileCount ?? files.length}</span></summary>${byProject && !isRepoOpen(expandId) ? '' : `
           <div class="git-commit-box"><textarea class="textarea" data-commit-message="${esc(key)}" rows="1" spellcheck="false" aria-label="${esc(gitText('message'))}" placeholder="${esc(gitText('commitHint'))}" ${disabled ? 'disabled' : ''}>${esc(drafts.get(key) || '')}</textarea><div class="git-commit-split"><button type="button" class="btn sm primary git-commit-button" data-repo-action="commit" ${disabled || !staged || !(drafts.get(key) || '').trim() ? 'disabled' : ''}>${icon('check')}<span>${esc(gitText(busy.has(key) ? 'loading' : 'commitMenu'))}</span></button></div></div>
           ${errors.has(key) || repo.error || source.gitError ? `<p class="git-panel-error" role="status">${esc(errors.get(key) || repo.error || source.gitError)}</p>` : ''}
-          ${grouped(node, disabled)}${!files.length && !repo.error ? `<p class="git-clean">${esc(gitText('empty'))}</p>` : filter && !files.some(f => f.path.toLocaleLowerCase().includes(filter)) ? `<p class="git-clean">${esc(gitText('noMatches'))}</p>` : ''}
+          ${grouped(node, disabled)}${repo.pending ? `<p class="git-clean">${esc(t('git.panel.pending'))}</p>` : !files.length && !repo.error ? `<p class="git-clean">${esc(gitText('empty'))}</p>` : filter && !files.some(f => f.path.toLocaleLowerCase().includes(filter)) ? `<p class="git-clean">${esc(gitText('noMatches'))}</p>` : ''}
           ${repo.filesTruncated ? `<p class="git-panel-note">${esc(t('git.panel.truncated'))}</p>` : ''}`}</details>` });
       }
       rows.push(...getRepoRows(items));
@@ -317,13 +331,14 @@
       const tip = tips.get(summary.parentElement.dataset.repo);
       if (tip && summary.title !== tip) summary.title = tip;
     }
+    askShown(false); // a repository listed for the first time has no status until main is told it is shown
   }
   function renderFooter() {
     const node = repositories.get(activeKey);
     if (!node) { footer.hidden = true; footer.innerHTML = ''; return; }
     footer.hidden = false;
-    const repo = node.repo, disabled = node.offline || busy.has(node.key), branch = repo.error ? '' : gitHead(repo);
-    footer.innerHTML = `<button type="button" class="git-footer-branch" data-footer-action="branches" title="${esc(gitText('branches'))}" ${disabled ? 'disabled' : ''}>${icon('branch')}<span class="git-footer-name">${esc(branch || '—')}</span>${gitAb(repo)}</button><span class="grow"></span><button type="button" class="git-footer-sync" data-footer-action="sync" title="${esc(gitText('sync'))}" aria-label="${esc(gitText('sync'))}" ${disabled ? 'disabled' : ''}>${icon('refresh')}</button><button type="button" class="git-footer-graph" data-footer-action="graph" title="${esc(gitText('graph'))}" ${disabled ? 'disabled' : ''}>${icon('history')}<span>${esc(gitText('graph'))}</span></button>`;
+    const repo = node.repo, disabled = node.offline || busy.has(node.key) || Boolean(repo.pending), branch = repo.error || repo.pending ? '' : gitHead(repo);
+    footer.innerHTML = `<button type="button" class="git-footer-branch" data-footer-action="branches" title="${esc(gitText('branches'))}" ${disabled ? 'disabled' : ''}>${icon('branch')}<span class="git-footer-name">${esc(branch || '—')}</span>${repo.pending ? '' : gitAb(repo)}</button><span class="grow"></span><button type="button" class="git-footer-sync" data-footer-action="sync" title="${esc(gitText('sync'))}" aria-label="${esc(gitText('sync'))}" ${disabled ? 'disabled' : ''}>${icon('refresh')}</button><button type="button" class="git-footer-graph" data-footer-action="graph" title="${esc(gitText('graph'))}" ${disabled ? 'disabled' : ''}>${icon('history')}<span>${esc(gitText('graph'))}</span></button>`;
   }
   footer.addEventListener('click', e => {
     const button = e.target.closest('[data-footer-action]');
@@ -377,7 +392,7 @@
   // what was hidden on it.
   function saveFilters() {
     const projects = new Set((data.projects || []).map(p => p.n));
-    const known = new Map(getSources().map(s => [s.id, new Set(Object.values(s.git?.repos || {}).map(r => r.root))]));
+    const known = new Map(getSources().map(s => [s.id, new Set(reposOf(s).map(r => r.root))]));
     const isGone = repoKey => {
       try {
         const [id, root] = JSON.parse(repoKey);
@@ -418,7 +433,7 @@
   function projectFilterItems() {
     const labels = new Map();
     for (const source of getSources()) {
-      for (const repo of Object.values(source.git?.repos || {})) {
+      for (const repo of reposOf(source)) {
         for (const p of getRepoProjects(source.id, repo)) if (p.real) labels.set(p.key, source.name ? `${p.name} · ${source.name}` : p.name);
       }
     }
@@ -457,6 +472,7 @@
   list.addEventListener('toggle', e => {
     if (!e.target.dataset.expand) return;
     expanded.set(e.target.dataset.expand, e.target.open);
+    if (e.target.open) askShown(true); // a project's repositories came on screen
     // A repository opened inside a group was drawn without its body.
     if (e.target.open && e.target.dataset.repo && !e.target.querySelector?.('.git-commit-box')) render();
   }, true);
@@ -526,6 +542,8 @@
     catch (e) { toast(e.message, true); } finally { button.disabled = false; }
   };
   window.gitFooter = { render: renderFooter };
-  window.gitPanel = { render, setDraft: (node, root, message) => { const key = JSON.stringify([node || 'local', root]); if (message) drafts.set(key, message); else drafts.delete(key); render(); }, getActive: () => repositories.get(activeKey), getRepos: () => [...repositories.values()], setActive: key => { if (repositories.has(key)) { activeKey = key; window.gitFooter?.render(); } } };
+  // Scrolled: other rows are on screen now.
+  list.addEventListener('scroll', () => askShown(true), { passive: true });
+  window.gitPanel = { render, getShown, setDraft: (node, root, message) => { const key = JSON.stringify([node || 'local', root]); if (message) drafts.set(key, message); else drafts.delete(key); render(); }, getActive: () => repositories.get(activeKey), getRepos: () => [...repositories.values()], setActive: key => { if (repositories.has(key)) { activeKey = key; window.gitFooter?.render(); } } };
   select(selected);
 })();

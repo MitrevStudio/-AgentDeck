@@ -33,6 +33,7 @@ const { TEXT_MAX } = require("../host/send-text");
 const PREVIEW_TEXT_MAX = 16000;
 
 const LIVE_MS = 3000;
+const GIT_SHOWN_MAX = 200; // folders in one "git.shown": more than a page can show at a time
 const LAG_HIGH = 4 * 1024 * 1024, LAG_LOW = 512 * 1024, LAG_CHECK_MS = 1000;
 const MAX_SIZE = 1000;
 
@@ -115,6 +116,10 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
     "git.execute": p => git.execute(p),
     "git.status": () => git.get(),
     "git.refresh": () => git.refresh({ force: true }),
+    // What the peer shows now of this host's repositories ({ dirs }: their folders): those are asked about, when
+    // their status is not fresh - the others stay as they are (git-status.js). With no folders it still says that
+    // somebody is looking: what changed here meanwhile is taken. What it brings goes out as the "git" event.
+    "git.shown": p => git.refresh({ reason: "page", shown: (Array.isArray(p?.dirs) ? p.dirs : []).slice(0, GIT_SHOWN_MAX).map(d => str(d, 4096)) }).then(() => true),
     "usage.get": () => host.usage.get(),
     "limits.get": () => { host.limits.refresh().catch(() => {}); return host.limits.get(); },
     "resources.get": () => host.resources.get() || host.resources.refresh(),

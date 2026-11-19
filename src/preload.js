@@ -43,7 +43,7 @@ contextBridge.exposeInMainWorld("manager", {
   gitExecute: (node, params) => ipcRenderer.invoke('git:execute', node, params),
   gitOpenFile: (node, root, file) => ipcRenderer.invoke('git:open-file', node, root, file),
   getGit: () => ipcRenderer.invoke("git:get"),
-  refreshGit: (force = false) => ipcRenderer.invoke("git:refresh", force),
+  refreshGit: (force = false, shown = [], why = "page") => ipcRenderer.invoke("git:refresh", force, shown, why),
   onGitChanged: cb => ipcRenderer.on("git:changed", (_e, g) => cb(g)),
   focusTerminal: (agent, id) => ipcRenderer.invoke("terminal:focus", agent, id),
   // The command centre (orchestrator.js): its terminal, and a typed command for it.

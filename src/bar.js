@@ -132,6 +132,7 @@ function render({ strip = true } = {}) {
   if (strip) renderStrip(toks);
   markTiles();
   renderDetail(cur, toks);
+  askGitShown();
   renderLiveSum();
   renderHiddenToggle();
   syncAnimations();
@@ -384,6 +385,7 @@ function selectTile(key) {
   if (!key || key === st.tile) return;
   st.tile = key; st.row = q.value ? 0 : -1; st.confirm = ""; st.del = "";
   render({ strip: false });
+  askGitShown(true);
   document.querySelector(`.tile[data-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 function moveTile(delta) {
@@ -469,7 +471,15 @@ function openHint({ hotkey, handle }) {
 window.manager.onDataChanged(applyData);
 window.manager.onLaunch(() => setTimeout(() => st.shown && render({ strip: false }), LOADING_MAX_MS + 1000));
 watchUsage(() => { if (st.shown) render({ strip: false }); });
-watchGit(() => { if (st.shown) render(); });
+// Git, of what the menu shows (git-ui.js): the chosen project's repository afresh whenever the menu opens or another
+// tile is chosen, and those of the other tiles when they have no status yet or an old one - the chosen one first, as
+// only so many are named at a time.
+function getShownGit(all) {
+  const cur = tiles.find(tile => tile.key === st.tile);
+  const wants = tile => tile.kind === "project" && gitNeedsLook(tile.p.path, git, tile !== cur ? (all ? GIT_SEEN_MS : Infinity) : all ? 0 : Infinity);
+  return [cur, ...tiles.filter(tile => tile !== cur)].filter(tile => tile && wants(tile)).map(tile => ({ node: "", path: tile.p.path }));
+}
+watchGit(() => { if (st.shown) render(); }, { shown: getShownGit, isLooking: () => st.shown });
 window.manager.onBarEvent(ev => {
   if (ev.type === "show") {
     st.shown = true; st.opened++; st.tile = ""; st.row = -1; st.confirm = ""; st.del = ""; st.dir = ""; q.value = "";

@@ -38,6 +38,28 @@ assert.match(element('gitRepositories').innerHTML, /git-check-tree/, 'the change
 assert.match(element('gitRepositories').innerHTML, /type="checkbox" class="git-check"/);
 assert.match(element('gitRepositories').innerHTML, /class="git-repository[^>]*\sopen>/, 'without grouping the repositories start open');
 const repoKey = JSON.stringify(['local', 'C:/app/backend']);
+// A repository that is listed but was not asked about yet (nobody works in it, no page showed it): it has a row,
+// without a branch, a count or a claim that it is clean, and its actions wait. The panel names the rows on screen for
+// main to look at - only those without a status after a mere redraw, all of them for a fresh look - and none of a
+// computer that is away.
+{
+  state.unchecked = { three: { root: 'C:/app/tools' } };
+  ctx.window.gitPanel.render();
+  const toolsKey = JSON.stringify(['local', 'C:/app/tools']);
+  const row = element('gitRepositories').innerHTML.split('<details class="git-repository').find(part => part.includes(ctx.esc(toolsKey)));
+  assert.ok(row, 'an unchecked repository is listed');
+  assert.match(row, /git\.panel\.pending/, 'as not checked yet');
+  assert.doesNotMatch(row, />empty</, 'not as one without changes');
+  assert.match(row, /<span class="git-count"><\/span>/, 'with no count');
+  assert.match(row, /data-repo-action="commit" disabled/, 'and nothing to do in it yet');
+  const keys = ['local', 'remote'].flatMap(id => ['C:/app/backend', 'C:/app/frontend', 'C:/app/tools'].map(root => JSON.stringify([id, root])));
+  ctx.gitOnScreen = (_box, selector) => (selector === '[data-repo]' ? keys.map(repo => ({ dataset: { repo } })) : []);
+  assert.deepEqual(JSON.parse(JSON.stringify(ctx.window.gitPanel.getShown(false))), [{ node: '', path: 'C:/app/tools' }], 'after a redraw: what has no status yet');
+  assert.deepEqual(JSON.parse(JSON.stringify(ctx.window.gitPanel.getShown(true))).map(x => x.path), ['C:/app/backend', 'C:/app/frontend', 'C:/app/tools'], 'for a fresh look: every row on screen here');
+  delete ctx.gitOnScreen;
+  delete state.unchecked;
+  ctx.window.gitPanel.render();
+}
 const fileButton = { dataset: {}, closest: selector => selector === '[data-repo]' ? { dataset: { repo: repoKey } } : selector === '[data-file]' ? { dataset: { file: 'src/<script>.js' } } : { dataset: { group: 'changes' } } };
 element('gitRepositories').listeners.click({ target: { closest: () => fileButton }, preventDefault() {}, stopPropagation() {} });
 assert.equal(menuItems.map(x => x.label).join(), 'editor', 'a checkbox stages a file: its menu only opens it');

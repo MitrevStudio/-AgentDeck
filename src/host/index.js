@@ -196,11 +196,13 @@ function equipTerminals(host, { terminals, launch, liveSessions, linkTabs = null
 
 // dataDir: the host's own files (registry, caches, terminals, prompts); home: the user's home (the agents' folders);
 // isExcluded(cwd): folders whose sessions are not the user's work; untitled(agent, shortId) and noLauncher(exe):
-// texts in the user's language; log(...parts): the launch log; gitActive(): whether anything shows the git status
-// now (it is refreshed in the background only then); gitFocused(): whether the user is at what shows it (else changes
-// in the folders are looked at less often); gitScope(): "open" or "all" (Settings > Git) - with "open" the
-// repositories nested in the projects are not looked for (git-status.js).
-function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () => {}, gitActive = () => true, gitFocused = () => true, gitScope = () => "all", fetch: fetchLimits = globalThis.fetch }) {
+// texts in the user's language; log(...parts): the launch log; gitFocused(): whether somebody is at what shows the
+// git status (git is started in the background only then, and only for the repositories a session or a terminal is
+// in); gitScope(): "open" or "all" (Settings > Git) - with "open" the repositories nested in the projects are not
+// looked for (git-status.js).
+// With AGENTDECK_GIT_LOG=1 in the environment every start of git for a status or a diff is a line of logs/git.log
+// under dataDir: the time, why it was started, the repository.
+function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () => {}, gitFocused = () => true, gitScope = () => "all", fetch: fetchLimits = globalThis.fetch }) {
   const host = new EventEmitter();
   const limits = require("../limits").createAllLimits({ fetch: fetchLimits, findExecutable: require("./sessions").findOnPath, onChange: l => host.emit("limits", l) });
   const resources = require("./resources").createResources({ home, onChange: r => host.emit("resources", r) });
@@ -221,7 +223,9 @@ function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () 
       }
       // Transcripts may have grown too, and there may be new folders: their results come as events of their own.
       usage.refresh().catch(err => console.error("Usage scan failed:", err.message));
-      if (full) gitStatus.refresh().catch(err => console.error("Git status failed:", err.message));
+      // Git: the folders are listed anew after a full scan; in between, only when a session started or ended.
+      if (full) refreshGit();
+      else refreshGitIfActiveChanged();
     }
   });
   const terminals = createTerminals({ userDataDir: dataDir, ...terminalEvents(host) });
@@ -256,6 +260,32 @@ function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () 
     }
   }));
   const preview = (s, opts = {}) => sessionPreview.preview(s, { ...opts, openCodeDb: sessions.OPENCODE_DB });
+  // Git looks after the repositories that are in use (git-status.js "active"): those of the folders a session is live
+  // in - where it was started and where it works now - and of the open terminals'. Reading the live sessions starts
+  // no process.
+  async function gitActiveDirs() {
+    const known = new Map((sessions.get()?.sessions || []).map(s => [`${s.agent}:${s.id}`, s]));
+    const live = await liveSessions().catch(() => []);
+    return [
+      ...live.flatMap(l => { const s = known.get(`${l.agent}:${l.id}`); return [l.cwd, s?.cwd, s?.workDir]; }),
+      ...terminals.getTabs().filter(x => !x.exited).map(x => x.cwd)
+    ].filter(Boolean);
+  }
+  const refreshGit = () => gitStatus.refresh({ reason: "scan" }).catch(err => console.error("Git status failed:", err.message));
+  // A session that started or ended, a terminal opened or closed: the repositories in use are others now. Asked for
+  // often (every scan, every change of the tabs), so the folders are compared first, a moment after the last call.
+  let gitActiveSig = "", gitActiveTimer = null;
+  function refreshGitIfActiveChanged() {
+    clearTimeout(gitActiveTimer);
+    gitActiveTimer = setTimeout(async () => {
+      const sig = [...new Set((await gitActiveDirs()).map(d => gitStatus.norm(d)))].sort().join("|");
+      if (sig === gitActiveSig) return;
+      gitActiveSig = sig;
+      refreshGit();
+    }, 500);
+    gitActiveTimer.unref?.();
+  }
+  host.on("terminals", refreshGitIfActiveChanged);
 
   // The background work: watching the transcripts, the periodic full scan, linking tabs to their sessions, the usage
   // figures, the git status, the first scan, and the Codex logs no terminal needs any more.
@@ -279,8 +309,10 @@ function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () 
       projects: () => sessions.get()?.registry.projects.filter(p => !p.node).map(p => p.path) || [],
       dirs: () => { const data = sessions.get(); return data ? [...data.registry.projects.filter(p => !p.node).map(p => p.path), ...data.sessions.flatMap(s => [s.cwd, s.workDir]), ...terminals.getTabs().map(x => x.cwd)] : []; },
       open: () => terminals.getTabs().map(x => x.cwd),
+      activeDirs: gitActiveDirs,
       onChange: g => host.emit("git", g),
-      active: gitActive, focused: gitFocused, scope: gitScope
+      focused: gitFocused, scope: gitScope,
+      log: process.env.AGENTDECK_GIT_LOG === "1" ? require("../shared/log-file").createLog("git.log", path.join(dataDir, "logs")) : null
     });
     sessions.scan().catch(err => console.error("Initial scan failed:", err.message));
   }
@@ -289,6 +321,7 @@ function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () 
   const flush = () => usage.flush();
   function stop() {
     clearInterval(codexLinksTimer);
+    clearTimeout(gitActiveTimer);
     gitStatus.stop();
     limits.stop();
     resources.stop();

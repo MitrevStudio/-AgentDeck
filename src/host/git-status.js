@@ -7,28 +7,45 @@
 // by another user is refused by git itself (safe.directory). A folder inside a repository shares the repository's
 // status; one outside any is ruled out with a few stat calls, without starting git.
 //
-// Which repositories. Those of the projects' and the sessions' folders and of the open terminals', and - with
-// "All in the projects" in Settings > Git (opts.scope) - every repository found inside a project, however deep.
+// Which repositories are listed. Those of the projects' and the sessions' folders and of the open terminals', and -
+// with "All in the projects" in Settings > Git (opts.scope) - every repository found inside a project, however deep.
+// Listing one costs a few stat calls and no process; until its status is asked for the first time it is reported
+// under `unchecked`, with no status at all rather than a made-up clean one.
 //
-// When it runs. Every start of git is a process (on Windows with a console host of its own) that security software
-// inspects, so a status is asked for only when it can have changed: after a full scan of the
-// sessions, when a page asks (the manager window gets the focus, the edge menu opens), every BACKGROUND_MS while a
-// window shows it, and when a watcher on the repository's folder reports a change - unless git ignores the changed
-// path (git-ignore.js): an IDE and a build write into ignored folders all the time. The watchers' passes are at least
-// WATCH_DELAY_MS apart, WATCH_UNFOCUSED_MS while the status is in view but nobody is at the window (opts.focused);
-// a change that comes after a quiet while is looked at WATCH_SETTLE_MS later.
-// Known limit: a change of a file that is tracked although an ignore pattern matches it is not seen by the watchers;
-// the next of the other refreshes shows it.
-const { execFile } = require("node:child_process");
+// When it runs. Every start of git is a process that security software inspects, and a folder can hold hundreds of
+// repositories, so being listed is no reason to ask. There are two kinds:
+// - Active: the repository of a folder a session is live in, or a terminal is open in (opts.activeDirs). These, and
+//   only these, are looked after in the background: each gets a watcher (at most MAX_WATCHERS of them), and its status
+//   is asked for the first time, when it becomes active, and when its watcher reports a change - unless git ignores
+//   the changed path (git-ignore.js): an IDE and a build write into ignored folders all the time. The watchers' passes
+//   are at least WATCH_DELAY_MS apart; a change that comes after a quiet while is looked at WATCH_SETTLE_MS later.
+//   Every ACTIVE_FALLBACK_MS they are asked once more: where folders cannot be watched in depth, and for the known
+//   limits - the watchers do not see a change of a file that is tracked although an ignore pattern matches it, nor,
+//   on Windows, a write that leaves the file's modification time as it was (a file only read is reported there like
+//   one written, and that time tells them apart).
+//   A repository stays active for ACTIVE_GRACE_MS after its last session or terminal went, so closing a terminal and
+//   opening it again does not take the watcher down and put it up.
+// - Every other listed repository is asked about only when somebody wants to see it: a page names the folders it
+//   shows now (refresh({ shown })) and those of them whose status is older than TTL_MS are asked; after a git action
+//   on it (refreshRepo); and on the user's own Refresh, which asks about every listed one (refresh({ force })).
+//   Nothing sweeps them: no timer, no scan of the sessions, and no change in some other repository.
+// Nothing at all is asked in the background while nobody is at a window that shows the status (opts.focused): what
+// the watchers see meanwhile is remembered, and the first pass after the focus is back takes it - one pass, however
+// much changed.
+// At most PARALLEL gits run at a time, and a question already waiting or running is not asked twice.
+// stats() counts every start by its reason; with opts.log each is also a line of a log (AGENTDECK_GIT_LOG=1).
 const fs = require("node:fs");
 const path = require("node:path");
 const { createGitIgnores, getDefaultExcludesFile } = require("./git-ignore");
+const { runGit: startProcess } = require("./git-run");
 
 const TTL_MS = 20 * 1000;             // a status younger than this is not asked for again
-const BACKGROUND_MS = 2 * 60 * 1000;  // while a window that shows it is open
+const ACTIVE_FALLBACK_MS = 5 * 60 * 1000; // the active repositories are asked once more this often, while somebody is there
+const ACTIVE_GRACE_MS = 60 * 1000;    // a repository stays active this long after its last session or terminal went
 const ROOT_TTL_MS = 5 * 60 * 1000;    // where a folder's repository is, or that it has none
 const TIMEOUT_MS = 10 * 1000;
-const PARALLEL = 4;
+const PARALLEL = 2;                   // gits at a time
+const READ_PARALLEL = 4;              // folders read at a time while looking for repositories
 const MISSING_RETRY_MS = 5 * 60 * 1000;
 const ARGS = ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all", "--ignore-submodules=dirty"];
 
@@ -92,7 +109,7 @@ async function discoverRepositories(dirs, { shallow = false, maxDepth = shallow 
   let total = 0;
   for (let i = 0; i < queue.length;) {
     const batch = [];
-    for (; i < queue.length && batch.length < PARALLEL; i++) {
+    for (; i < queue.length && batch.length < READ_PARALLEL; i++) {
       const { dir, project } = queue[i], key = norm(dir);
       if (seen.has(key) || spent.has(project)) continue;
       seen.add(key);
@@ -124,15 +141,21 @@ async function discoverRepositories(dirs, { shallow = false, maxDepth = shallow 
 }
 
 // ---------- state ----------
-let opts = null, timer = null, running = null, again = null; // the options of one more pass after the running one
+let opts = null, timer = null, running = null, again = null; // the request of one more pass after the running one
 let missingAt = 0;                 // when git was last found missing
 const roots = new Map();           // norm(dir) -> { root: absolute path | null, at }
 const repos = new Map();           // norm(root) -> status (with root, at, error?)
 let discovery = { key: "", at: 0, repos: [], truncated: false, truncatedIn: [] };
-let snapshot = { at: 0, missing: false, dirs: {}, repos: {} };
+let snapshot = { at: 0, missing: false, dirs: {}, repos: {}, unchecked: {} };
 const watchers = new Map();
 let watchTimer = null;
-const changedRoots = new Set();    // norm(root) of the repositories a watcher saw change since the last pass
+const changedRoots = new Set();    // norm(root) of the active repositories a watcher saw change since a pass took them
+const actedRoots = new Set();      // norm(root) of the repositories a git action was run on since the last pass
+const activeAt = new Map();        // norm(root) -> { root, at }: when a session or a terminal was last seen in it
+let activeKeys = new Set();        // norm(root) of the active repositories, as of the last pass
+// The watched repositories whose status was asked for since their watcher is up: only from then on does "no change
+// reported" mean "no change".
+const covered = new Set();
 const MAX_WATCHERS = 32;
 // Even with the window focused, agents at work change tracked files all the time, and every `git status` stats each
 // tracked file - each of those opens inspected in the kernel by an EDR (CrowdStrike: about 3 of 14 cores with five
@@ -140,11 +163,53 @@ const MAX_WATCHERS = 32;
 const WATCH_DELAY_MS = 10 * 1000;
 const WATCH_DELAY_MAX_MS = 60 * 1000;
 const WATCH_COST_FACTOR = 10;      // a watchers' pass that took 3 s is followed by the next one 30 s later at the earliest
-const WATCH_UNFOCUSED_MS = 30 * 1000; // between two watchers' passes while nobody is at the window that shows the status
 const WATCH_SETTLE_MS = 2000;      // a change is looked at this long after it at the earliest: a burst of writes is one pass
+const WATCH_SINCE_SLACK_MS = 2000; // a file written this shortly before its watcher went up counts as written since (isWritten)
+const WATCH_TIMES_MAX = 20000;     // files a watcher remembers the modification time of (isWritten)
 let watchCostMs = 0;               // how long the last watchers' pass took
 let watchDue = 0;                  // when the pass that watchTimer waits for runs
 let watchedAt = 0;                 // when the last pass that asked git ended: the watchers' next one keeps its distance from it
+// Whether somebody is at a window that shows the status. A host that is not told (a test's) takes it that somebody is.
+const isFocused = () => (opts?.focused ? Boolean(opts.focused()) : true);
+
+// ---------- every start of git ----------
+// Counted by why it was started, since the host started: "initial" (an active repository's first status), "active"
+// (it became active, or its watcher is new), "watcher" (a watcher saw a change), "timer" (the active ones' fallback),
+// "focus" and "page" (a page asked about what it shows - as its window got the focus, or later), "action" (after a git
+// action on the repository), "forced" (the user's Refresh), "diff" (a file's changes were opened) and "config" (where
+// the user's excludes file is). opts.log(line), when the host was started with a log: one line a start - the time,
+// the reason, the repository - and one, "seen", for the watcher's report that made a repository one to ask about
+// (the repository, the kind of report, the file).
+const starts = { total: 0, reasons: {} };
+function countStart(reason, root) {
+  starts.total++;
+  starts.reasons[reason] = (starts.reasons[reason] || 0) + 1;
+  opts?.log?.(`${new Date().toISOString()} ${reason} ${root || "-"}`);
+}
+const stats = () => ({ total: starts.total, reasons: { ...starts.reasons } });
+// At most PARALLEL gits at a time, each question once: asked again while it waits or runs, it gets the answer of the
+// one already there. key: what is asked (a repository's status, one file's diff); run(): starts git, never rejects;
+// isDropped(): the answer is not needed any more by the time its turn comes (git turned out to be missing).
+const waiting = [], asked = new Map();
+let busy = 0;
+function ask(key, reason, root, run, isDropped = () => false) {
+  if (asked.has(key)) return asked.get(key);
+  const answer = new Promise(resolve => { waiting.push({ reason, root, run, isDropped, resolve }); });
+  asked.set(key, answer);
+  answer.then(() => asked.delete(key));
+  startWaiting();
+  return answer;
+}
+function startWaiting() {
+  while (busy < PARALLEL && waiting.length) {
+    const job = waiting.shift();
+    if (job.isDropped()) { job.resolve({ missing: true }); continue; }
+    busy++;
+    countStart(job.reason, job.root);
+    job.run().then(job.resolve, err => job.resolve({ error: err.message })).finally(() => { busy--; startWaiting(); });
+  }
+}
+
 // A linked worktree by where the main checkout keeps its index and HEAD: the main root -> <name> of
 // <main>/.git/worktrees/<name> -> norm(the worktree's root). The main root is keyed by its real path: git names it
 // that way, while a watcher goes by the folder as the project gives it - through a junction or a symlink, or with a
@@ -155,17 +220,16 @@ async function getRealKey(dir) {
 }
 // While files keep changing (an agent at work, a build), a repository whose `git status` is slow is not asked again
 // right away: git runs for at most 1/(WATCH_COST_FACTOR + 1) of the time.
-// While the status is only in view (opts.focused() is false: the window is open, the user is in another program), a
-// change waits longer still; a page that gets the focus asks for a refresh, which takes the waiting changes with it.
 function getWatchDelay() {
-  const delay = Math.min(WATCH_DELAY_MAX_MS, Math.max(opts?.watchDelayMs ?? WATCH_DELAY_MS, watchCostMs * WATCH_COST_FACTOR));
-  return opts?.focused && !opts.focused() ? Math.max(delay, opts.watchUnfocusedMs ?? WATCH_UNFOCUSED_MS) : delay;
+  return Math.min(WATCH_DELAY_MAX_MS, Math.max(opts?.watchDelayMs ?? WATCH_DELAY_MS, watchCostMs * WATCH_COST_FACTOR));
 }
 // At most one pass per getWatchDelay(), and only for the repositories that changed. The distance is kept from the last
 // pass, not from the change: a change after a quiet while shows WATCH_SETTLE_MS later, and only where files keep
 // changing do the passes come getWatchDelay() apart. A pass already waiting is brought forward when the delay has
-// become shorter since (the window got the focus), never put off.
+// become shorter since, never put off. With nobody at the window no pass is set up, and one that was waiting does
+// nothing when its time comes: the changes stay remembered for the pass that follows the focus.
 function scheduleWatchPass() {
+  if (!isFocused()) return;
   const now = Date.now(), gap = getWatchDelay();
   const due = Math.max(now + Math.min(opts?.watchSettleMs ?? WATCH_SETTLE_MS, gap), watchedAt + gap);
   if (watchTimer && due >= watchDue) return;
@@ -173,11 +237,12 @@ function scheduleWatchPass() {
   watchDue = due;
   watchTimer = setTimeout(() => {
     watchTimer = null;
-    // A pass asked for otherwise (a page, the background refresh) is running or has just ended: the changes since
-    // wait their distance from that one.
+    if (!isFocused()) return;
+    // A pass asked for otherwise (a page, the fallback) is running or has just ended: the changes since wait their
+    // distance from that one.
     if (running) return void running.catch(() => {}).then(() => { if (changedRoots.size) scheduleWatchPass(); });
     if (Date.now() < watchedAt + getWatchDelay()) return scheduleWatchPass();
-    refresh({ changedOnly: true }).catch(() => {});
+    refresh({ reason: "watcher" }).catch(() => {});
   }, Math.max(0, due - now));
   watchTimer.unref?.();
 }
@@ -198,47 +263,100 @@ const WATCH_NOISE = new RegExp(`(^|/)(${[...SKIP].filter(d => d !== ".git").map(
 // once, as its config can include other files: one process, not one per change.
 let excludesFile = null;
 const ignores = createGitIgnores({
-  excludesFile: () => excludesFile ||= getGitExe().then(exe => new Promise(resolve => {
-    execFile(exe, ["config", "--global", "--type=path", "--get", "core.excludesfile"], { windowsHide: true, timeout: TIMEOUT_MS }, (err, stdout) => {
+  excludesFile: () => excludesFile ||= ask("config", "config", "", async () => startProcess(await getGitExe(), ["config", "--global", "--type=path", "--get", "core.excludesfile"], { timeout: TIMEOUT_MS }))
+    .then(({ err, stdout }) => {
       const file = String(stdout || "").trim();
-      resolve(!err && path.isAbsolute(file) ? file : getDefaultExcludesFile());
-    });
-  }))
+      return !err && path.isAbsolute(file) ? file : getDefaultExcludesFile();
+    })
 });
 const IGNORE_RULES = /(^|\/)\.gitignore$/i;
 // A change a watcher reports under `root`: whether it can change the status, and then the pass that will ask.
 function onWatched(root, watcher, event, filename) {
   const name = String(filename || '').replaceAll('\\', '/');
   if (WATCH_NOISE.test(name) || /\.git\/(objects|logs)\//.test(name) || name.endsWith('.lock')) return;
+  const isRules = IGNORE_RULES.test(name), inGit = name === '.git' || name.startsWith('.git/');
+  // Windows reports a file or a folder as changed when no more than its times did - also the time it was last read.
+  // Git's own files and the rules are read here and by every `git status`, so each status and each loading of the
+  // rules would be followed by another status. Such a report counts only when the file was written since.
+  if ((isRules || inGit) && process.platform === 'win32' && event === 'change') {
+    return void isWritten(root, name).then(yes => { if (yes && watchers.get(root) === watcher) onChanged(root, watcher, event, name, isRules, inGit); });
+  }
+  onChanged(root, watcher, event, name, isRules, inGit);
+}
+// Whether the file a "change" was reported for was written, not merely read: its modification time moved since the
+// last report for it or, at the first one, is not older than the watcher - what it held before that, the first status
+// and the loading of the rules have seen. A folder is never "written": what changes in it has a report of its own. A
+// file that is gone by now counts.
+const watchTimes = new Map(); // watched root -> { since, files: Map(name -> mtimeMs) }
+async function isWritten(root, name) {
+  const times = watchTimes.get(root);
+  let st;
+  try { st = await fs.promises.stat(path.join(root, name)); } catch { return true; }
+  if (st.isDirectory()) return false;
+  if (!times) return true;
+  const known = times.files.get(name) ?? times.since;
+  if (times.files.size >= WATCH_TIMES_MAX) times.files.clear(); // forgotten, a file counts as written once more at most
+  times.files.set(name, st.mtimeMs);
+  return st.mtimeMs > known;
+}
+function onChanged(root, watcher, event, name, isRules, inGit) {
   // The rules themselves changed, or (no name: too many changes at once) may have. info/exclude is a main checkout's
   // and its worktrees' alike.
-  if (!name || IGNORE_RULES.test(name)) ignores.reload(root);
+  if (!name || isRules) ignores.reload(root);
   else if (name === '.git/info/exclude') ignores.clear();
-  if (!opts?.active?.()) return;
+  // Only an active repository's change is one to ask about: a main checkout watched for its worktrees' sake alone
+  // (their index is in its .git) is not asked about because a file of its own changed. Remembered whoever is at the
+  // window; scheduleWatchPass() sets a pass up only when somebody is.
   const changed = () => {
-    for (const r of getChangedRoots(root, name)) changedRoots.add(r);
-    scheduleWatchPass();
+    let any = false;
+    for (const r of getChangedRoots(root, name)) {
+      if (!activeKeys.has(r)) continue;
+      // In the log: the first report that makes a repository one to ask about, so a start can be traced to its file.
+      if (!changedRoots.has(r)) opts?.log?.(`${new Date().toISOString()} seen ${r} ${event} ${name || "(many changes)"}`);
+      changedRoots.add(r);
+      any = true;
+    }
+    if (any) scheduleWatchPass();
   };
   // Git's own folder (the index, HEAD, refs: staging and committing from outside) and the rules always count.
-  if (!name || name === '.git' || name.startsWith('.git/') || IGNORE_RULES.test(name)) return changed();
+  if (!name || isRules || inGit) return changed();
   // Rules not loaded yet: the answer comes later and the change with it, unless the watcher is gone by then.
   // Windows also reports the folder a file was added to as changed (its times did); that file has a report of its own,
   // and an ignored one would start a status through its folder otherwise.
   const ignored = ignores.isIgnored(root, name, { renamed: event === 'rename', skipFolders: process.platform === 'win32' && event === 'change' });
-  if (ignored === false) changed();
-  else if (ignored !== true) ignored.then(yes => { if (!yes && watchers.get(root) === watcher) changed(); }, () => {});
+  // On Windows a file that was only read is reported as changed too, when the time of its last reading moves: an
+  // editor's indexer, a search or an agent reading the sources would start a status each. Asked only of a file that
+  // is not ignored, so a build's output costs no stat.
+  const ifWritten = () => {
+    if (process.platform !== 'win32' || event !== 'change') return changed();
+    isWritten(root, name).then(yes => { if (yes && watchers.get(root) === watcher) changed(); });
+  };
+  if (ignored === false) ifWritten();
+  else if (ignored !== true) ignored.then(yes => { if (!yes && watchers.get(root) === watcher) ifWritten(); }, () => {});
 }
-async function syncWatchers() {
-  const wanted = new Set(Object.values(snapshot.repos).map(r => r.root));
-  for (const [root, watcher] of watchers) if (!wanted.has(root)) { watcher.close(); watchers.delete(root); realRoots.delete(root); ignores.reload(root); }
+function unwatch(root) {
+  watchers.get(root)?.close();
+  watchers.delete(root);
+  watchTimes.delete(root);
+  covered.delete(norm(root));
+  ignores.reload(root);
+}
+// A watcher for each active repository, and for the main checkout of an active linked worktree (staging in the
+// worktree changes files only there) - the active ones first when there are more than MAX_WATCHERS. One whose
+// repository is active no more is closed. active: [root].
+async function syncWatchers(active) {
+  const mains = (await Promise.all(active.map(getMainRoot))).filter(Boolean);
+  const wanted = new Set([...active, ...mains]);
+  for (const root of [...watchers.keys()]) if (!wanted.has(root)) { unwatch(root); realRoots.delete(root); }
   for (const root of wanted) {
     if (watchers.has(root) || watchers.size >= MAX_WATCHERS) continue;
     if (!realRoots.has(root)) realRoots.set(root, await getRealKey(root));
     try {
       const watcher = fs.watch(root, { recursive: true, persistent: false }, (event, filename) => onWatched(root, watcher, event, filename));
-      watcher.on('error', () => { watcher.close(); watchers.delete(root); ignores.reload(root); });
+      watcher.on('error', () => { if (watchers.get(root) === watcher) unwatch(root); else watcher.close(); });
       watchers.set(root, watcher);
-    } catch { /* Periodic refresh covers platforms without recursive watching. */ }
+      watchTimes.set(root, { since: Date.now() - WATCH_SINCE_SLACK_MS, files: new Map() });
+    } catch { /* The fallback pass covers platforms without recursive watching. */ }
   }
 }
 
@@ -307,112 +425,189 @@ async function resolveGitExe({ platform = process.platform, find = name => requi
 let gitExe = null;
 const getGitExe = () => gitExe ||= resolveGitExe().catch(() => "git");
 
-async function runGit(root) {
-  const exe = await getGitExe();
-  return new Promise(resolve => {
-    execFile(exe, ["-C", root, ...ARGS], {
-      windowsHide: true, timeout: TIMEOUT_MS, maxBuffer: 64 * 1024 * 1024,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }
-    }, (err, stdout, stderr) => {
-      if (err?.code === "ENOENT") return resolve({ missing: true });
-      if (err) return resolve({ error: (String(stderr).trim().split(/\r?\n/)[0] || err.message).slice(0, 300) });
-      resolve({ status: parseStatus(stdout) });
+// One repository's status: { status } | { error } | { missing: true } (no git on this computer).
+function askStatus(root, reason, isDropped) {
+  return ask(`status ${norm(root)}`, reason, root, async () => {
+    const { err, stdout, stderr } = await startProcess(await getGitExe(), ["-C", root, ...ARGS], {
+      timeout: TIMEOUT_MS, maxBuffer: 64 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }
     });
-  });
+    if (err?.code === "ENOENT") return { missing: true };
+    if (err) return { error: (String(stderr).trim().split(/\r?\n/)[0] || err.message).slice(0, 300) };
+    return { status: parseStatus(stdout) };
+  }, isDropped);
 }
 
 // ---------- refreshing ----------
-// Brings every folder that opts.dirs() lists up to date (repositories checked within TTL_MS are kept, unless forced),
-// then reports the result through opts.onChange. A refresh asked for while one runs is folded into one more after it.
-// changedOnly: only the repositories a watcher saw change, not every one past TTL_MS - except those no watcher looks
-// after (there are more repositories than watchers, or watching failed), which are checked past TTL_MS as before.
-function refresh({ force = false, changedOnly = false } = {}) {
+// Lists the repositories of the folders opts.dirs() names, asks about those there is a reason to ask about (the header
+// comment says which), and reports the result through opts.onChange. What a request may say:
+// - reason: who asks. "focus" and "page" - a page, of what it shows, as its window got the focus or later; they are
+//   answered whoever is at the window, as somebody is looking. "scan" (the default: the folders may have changed),
+//   "timer", "watcher" and "action" are the host's own.
+// - shown: the folders the page shows now (a repository's root, or a folder inside one). Those of them that are
+//   listed and whose status is older than TTL_MS are asked about.
+// - force: the user's Refresh - the folders are looked through anew and every listed repository is asked about.
+// - relist: the folders are looked through anew (an action added or removed a worktree, say); nobody is asked for it.
+// A refresh asked for while one runs is folded into one more after it.
+const REASONS = ["watcher", "action", "scan", "timer", "page", "focus", "forced"]; // of two folded requests, the later one names the pass
+function toRequest(r = {}) {
+  const force = r.force === true, shown = new Set((Array.isArray(r.shown) ? r.shown : []).filter(d => typeof d === "string" && d).map(norm));
+  const reason = force ? "forced" : REASONS.includes(r.reason) && r.reason !== "forced" ? r.reason : shown.size ? "page" : "scan";
+  return { force, reason, relist: force || r.relist === true, shown };
+}
+function refresh(request) {
   if (!opts) return Promise.resolve(snapshot);
+  const req = request?.shown instanceof Set ? request : toRequest(request);
   if (running) {
-    if (force) return running.then(() => refresh({ force: true }));
-    again = !again || again.changedOnly ? { changedOnly } : again;
+    if (req.force) return running.then(() => refresh(req), () => refresh(req));
+    again = !again ? req : {
+      force: false, relist: again.relist || req.relist, shown: new Set([...again.shown, ...req.shown]),
+      reason: REASONS.indexOf(req.reason) > REASONS.indexOf(again.reason) ? req.reason : again.reason
+    };
     return running;
   }
-  running = pass(force, changedOnly).finally(() => {
+  running = pass(req).finally(() => {
     running = null;
     if (again) {
       const next = again;
       again = null;
-      refresh(next);
+      refresh(next).catch(() => {});
     }
   });
   return running;
 }
-// After an action that changed one repository's index only (stage, unstage): just its status, once any pass running now
-// is over - no rescan of the projects, no other repository.
-async function refreshRepo(root) {
-  changedRoots.add(norm(root));
-  if (running) await running.catch(() => {});
-  return refresh({ changedOnly: true });
+// After a git action on one repository: its status, once any pass running now is over - no other repository is asked
+// about. relist: the action may have changed more than the index - the folders are looked through anew (a worktree
+// added or removed), and the checkouts that share its refs (its linked worktrees, or the main one) are asked about as
+// well, as a fetch or a commit moves what they are ahead of and behind.
+async function refreshRepo(root, { relist = false } = {}) {
+  const key = norm(root), main = norm(repos.get(key)?.mainRoot || root);
+  actedRoots.add(key);
+  if (relist) for (const [k, r] of repos) if (norm(r.mainRoot || r.root) === main) actedRoots.add(k);
+  while (running) await running.catch(() => {});
+  return refresh({ reason: "action", relist });
 }
-async function pass(force, changedOnly = false) {
-  const t0 = Date.now();
+// The active repositories as of now: those of opts.activeDirs(), and those that were among them less than
+// ACTIVE_GRACE_MS ago. One that is listed for no other reason stays listed through its grace. -> [root]
+let graceTimer = null;
+async function getActive(dirRoot, listed, t0) {
+  const grace = opts.activeGraceMs ?? ACTIVE_GRACE_MS;
+  const inUse = new Set();
+  for (const dir of new Set((await opts.activeDirs?.() || []).filter(Boolean))) {
+    const root = dirRoot[norm(dir)] ?? await rootOf(dir, t0);
+    if (!root) continue;
+    inUse.add(norm(root));
+    activeAt.set(norm(root), { root: listed.get(norm(root)) || root, at: t0 });
+  }
+  let left = Infinity;
+  for (const [key, a] of activeAt) {
+    if (inUse.has(key)) continue;
+    if (t0 - a.at >= grace) { activeAt.delete(key); continue; }
+    left = Math.min(left, grace - (t0 - a.at));
+    if (!listed.has(key)) { listed.set(key, a.root); dirRoot[key] = a.root; }
+  }
+  // Nothing else may come by when a grace ends: a pass of its own lets the watcher go then.
+  clearTimeout(graceTimer);
+  graceTimer = null;
+  if (left < Infinity) {
+    graceTimer = setTimeout(() => refresh({ reason: "scan" }).catch(() => {}), left + 50);
+    graceTimer.unref?.();
+  }
+  activeKeys = new Set(activeAt.keys());
+  return [...activeAt.values()].map(a => a.root);
+}
+async function pass(req) {
+  const t0 = Date.now(), { force, reason } = req;
   if (!force && missingAt && t0 - missingAt < MISSING_RETRY_MS) return snapshot;
+  // A page that asks is somebody looking; everything else waits for somebody to be at the window.
+  const allowed = force || reason === "focus" || reason === "page" || reason === "action" || isFocused();
+  const light = reason === "watcher" || reason === "action";
   const dirs = [...new Set((opts.dirs() || []).filter(Boolean))];
   // With the scope "open" the projects are not searched for the repositories nested in them: a project that holds a
-  // hundred reference clones would have each of them asked about, a process apiece, for a list that shows none of them.
+  // hundred reference clones would have each of them listed for a panel that shows none of them.
   const shallow = opts.scope?.() === "open";
   const projects = [...new Set([...(opts.projects?.() || dirs), ...(shallow ? (opts.open?.() || []).filter(Boolean) : [])])];
   const discoveryKey = JSON.stringify([shallow, [...projects].sort()]);
-  // Not in a watchers' pass (changedOnly): the walk would delay the status the user waits for after staging, and
-  // count as the cost that spaces the watchers' passes out. The background refresh does it.
-  if (force || discovery.key !== discoveryKey || (!changedOnly && t0 - discovery.at > ROOT_TTL_MS)) discovery = { ...await discoverRepositories(projects, { shallow }), key: discoveryKey, at: t0 };
+  // Not in a watchers' pass or after an action: the walk would delay the status the user waits for after staging, and
+  // count as the cost that spaces the watchers' passes out. Nor while nobody is there to see what it finds.
+  if (req.relist || discovery.key !== discoveryKey || (!light && allowed && t0 - discovery.at > ROOT_TTL_MS)) discovery = { ...await discoverRepositories(projects, { shallow }), key: discoveryKey, at: t0 };
   const dirRoot = {};
-  for (const d of [...dirs, ...discovery.repos]) { if (force) roots.delete(norm(d)); const r = await rootOf(d, t0); if (r) dirRoot[norm(d)] = r; }
-  const changed = new Set(changedRoots);
-  changedRoots.clear();
-  clearTimeout(watchTimer); // this pass takes the changes the watchers' one was waiting with
-  watchTimer = null;
-  const isStale = r => !(t0 - (repos.get(norm(r))?.at || 0) < TTL_MS);
+  for (const d of [...dirs, ...discovery.repos]) { if (req.relist) roots.delete(norm(d)); const r = await rootOf(d, t0); if (r) dirRoot[norm(d)] = r; }
+  const listed = new Map(Object.values(dirRoot).map(r => [norm(r), r])); // norm(root) -> root
+  // The watchers first, the questions after: what changes while git runs is then reported, not missed.
+  await syncWatchers(await getActive(dirRoot, listed, t0));
   const watched = new Set([...watchers.keys()].map(norm));
-  const todo = [...new Set(Object.values(dirRoot))].filter(r => force || changed.has(norm(r)) || (isStale(r) && (!changedOnly || !watched.has(norm(r)))));
-  let missing = false, next = 0;
-  const work = async () => {
-    while (next < todo.length && !missing) {
-      const root = todo[next++];
-      const r = await runGit(root);
-      if (r.missing) { missing = true; break; }
-      repos.set(norm(root), { root, mainRoot: await getMainRoot(root), at: Date.now(), ...(r.status || { error: r.error }) });
+  // What the watchers saw is taken by this pass - or, with nobody at the window, left for the one after the focus.
+  const changed = new Set(allowed ? changedRoots : []);
+  if (allowed) {
+    changedRoots.clear();
+    clearTimeout(watchTimer);
+    watchTimer = null;
+  }
+  const acted = new Set(actedRoots);
+  actedRoots.clear();
+  const shown = new Set([...req.shown].map(k => (dirRoot[k] ? norm(dirRoot[k]) : k)));
+  const looking = reason === "focus" || reason === "page" || reason === "timer";
+  // Why this pass asks about a repository; "": it does not.
+  const getReason = key => {
+    if (force) return "forced";
+    if (acted.has(key)) return "action";
+    if (changed.has(key)) return "watcher";
+    if (!allowed) return "";
+    const isStale = !(t0 - (repos.get(key)?.at || 0) < TTL_MS);
+    if (activeKeys.has(key)) {
+      if (!repos.has(key)) return "initial";
+      // Watched from now on: what changed before the watcher was up, nobody reported.
+      if (watched.has(key) && !covered.has(key)) return "active";
+      // No watcher looks after it (there are more active repositories than watchers, or watching failed): as often
+      // as somebody looks.
+      if (!watched.has(key) && isStale && looking) return reason;
+      if (reason === "timer" && isStale) return "timer";
     }
+    return shown.has(key) && isStale ? (reason === "focus" ? "focus" : "page") : "";
   };
-  await Promise.all(Array.from({ length: Math.min(PARALLEL, todo.length) }, work));
+  const todo = [...listed].map(([key, root]) => ({ key, root, reason: getReason(key) })).filter(x => x.reason)
+    .sort((a, b) => Number(activeKeys.has(b.key)) - Number(activeKeys.has(a.key)));
+  let missing = false;
+  await Promise.all(todo.map(async ({ key, root, reason: why }) => {
+    const r = await askStatus(root, why, () => missing);
+    if (r.missing) { missing = true; return; }
+    repos.set(key, { root, mainRoot: await getMainRoot(root), at: Date.now(), ...(r.status || { error: r.error }) });
+    if (watchers.has(root)) covered.add(key);
+  }));
   missingAt = missing ? Date.now() : 0;
   if (missing) gitExe = excludesFile = null;
-  if (changedOnly && todo.length) watchCostMs = Date.now() - t0;
+  if (light && todo.length) watchCostMs = Date.now() - t0;
   if (todo.length) watchedAt = Date.now();
-  const used = new Set(Object.values(dirRoot).map(norm));
-  for (const k of repos.keys()) if (!used.has(k)) repos.delete(k);
+  for (const k of repos.keys()) if (!listed.has(k)) repos.delete(k);
+  // Listed and never asked about: no status, and nothing that could pass for one.
+  const unchecked = {};
+  for (const [key, root] of listed) if (!repos.has(key)) unchecked[key] = { root, mainRoot: await getMainRoot(root) };
   const prev = snapshot;
   snapshot = {
-    at: Date.now(), missing, discoveryTruncated: discovery.truncated, discoveryTruncatedIn: discovery.truncatedIn, ms: Date.now() - t0, checked: todo.length,
+    at: Date.now(), missing, discoveryTruncated: discovery.truncated, discoveryTruncatedIn: discovery.truncatedIn, ms: Date.now() - t0, checked: todo.length, starts: stats(),
     dirs: Object.fromEntries(Object.entries(dirRoot).map(([d, r]) => [d, norm(r)])),
-    repos: Object.fromEntries(repos)
+    repos: Object.fromEntries(repos), unchecked
   };
-  await syncWatchers();
   if (signature(snapshot) !== signature(prev) || todo.length) opts.onChange?.(snapshot);
   return snapshot;
 }
 // What the pages show: an unchanged status is not sent again just because it was checked again, or because the
 // folders came in another order (the sessions are sorted by their last activity).
 const sorted = o => Object.entries(o || {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-const signature = s => JSON.stringify([s.missing, s.discoveryTruncatedIn, sorted(s.dirs), sorted(s.repos).map(([k, v]) => [k, { ...v, at: 0 }])]);
+const signature = s => JSON.stringify([s.missing, s.discoveryTruncatedIn, sorted(s.dirs), sorted(s.repos).map(([k, v]) => [k, { ...v, at: 0 }]), Object.keys(s.unchecked || {}).sort()]);
 
 // dirs(): the folders to report on; projects(): those searched for the repositories in them (without it: dirs());
 // scope(): "open" - none of the repositories nested in a repository, only a folder's own and those right in a folder
 // that is in none, for projects() and open() (the folders of the open terminals) - else every one in projects();
-// onChange(snapshot); active(): whether a window that shows the state is open
-// (the background refresh and the watchers' passes run only then); focused(): whether the user is at such a window
-// (without it: always) - else the watchers' passes are WATCH_UNFOCUSED_MS apart (watchUnfocusedMs: another gap, for
-// the tests; watchDelayMs likewise for the focused minimum WATCH_DELAY_MS, watchSettleMs for WATCH_SETTLE_MS).
+// activeDirs(): the folders a session is live in or a terminal is open in, now (may be a promise; without it no
+// repository is active); focused(): whether somebody is at a window that shows the state (without it: always);
+// onChange(snapshot); log(line): every start of git, a line each. For the tests, other times than the constants':
+// watchDelayMs (WATCH_DELAY_MS), watchSettleMs (WATCH_SETTLE_MS), fallbackMs (ACTIVE_FALLBACK_MS) and activeGraceMs
+// (ACTIVE_GRACE_MS).
 function start(o) {
   opts = o;
   clearInterval(timer);
-  timer = setInterval(() => { if (opts.active?.()) refresh(); }, BACKGROUND_MS);
+  timer = setInterval(() => { if (isFocused()) refresh({ reason: "timer" }).catch(() => {}); }, o.fallbackMs ?? ACTIVE_FALLBACK_MS);
   timer.unref?.();
 }
 
@@ -422,7 +617,7 @@ async function diff({ root, file } = {}) {
   root = snapshot.repos[norm(root)].root;
   const relative = path.relative(root, path.resolve(root, file));
   if (!relative || relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative)) return invalid();
-  const current = await runGit(root);
+  const current = await askStatus(root, "diff");
   if (current.error || current.missing) throw new Error(current.error || "Git is unavailable");
   const entry = current.status.files.find(f => f.path === file);
   if (!entry) return { staged: "", unstaged: "", untracked: "" };
@@ -446,23 +641,31 @@ async function diff({ root, file } = {}) {
     if (bytes.includes(0)) return { binary: true };
     return { staged: "", unstaged: "", untracked: text ? text.replace(/\n$/, "").split("\n").map(line => "+" + line).join("\n") : "", emptyFile: !bytes.length };
   }
-  const exe = await getGitExe();
-  const readDiff = cached => new Promise((resolve, reject) => {
-    execFile(exe, ["--no-pager", "--no-optional-locks", "--literal-pathspecs", "-C", root, "-c", "core.fsmonitor=false", "diff", ...(cached ? ["--cached"] : []), "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", "--", file, ...(entry.original ? [entry.original] : [])], {
-      windowsHide: true, timeout: TIMEOUT_MS, maxBuffer: limit,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_PAGER: "cat" }
-    }, (err, stdout, stderr) => {
-      if (err?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") return resolve(null);
-      if (err) return reject(new Error(String(stderr).trim().slice(0, 300) || err.message));
-      resolve(stdout);
-    });
-  });
+  // -> the diff, or null when it is longer than is shown.
+  const readDiff = async cached => {
+    const { err, stdout, stderr } = await ask(`diff ${cached ? "staged" : "unstaged"} ${norm(root)} ${file}`, "diff", root, async () => startProcess(await getGitExe(),
+      ["--no-pager", "--no-optional-locks", "--literal-pathspecs", "-C", root, "-c", "core.fsmonitor=false", "diff", ...(cached ? ["--cached"] : []), "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", "--", file, ...(entry.original ? [entry.original] : [])],
+      { timeout: TIMEOUT_MS, maxBuffer: limit, env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_PAGER: "cat" } }));
+    if (err?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") return null;
+    if (err) throw new Error(String(stderr).trim().slice(0, 300) || err.message);
+    return stdout;
+  };
   const [staged, unstaged] = await Promise.all([readDiff(true), readDiff(false)]);
   return { staged: staged || "", unstaged: unstaged || "", binary: /(?:^|\n)Binary files .* differ/.test((staged || "") + (unstaged || "")), tooLarge: staged === null || unstaged === null };
 }
 
 let actionContext = () => ({});
 const actions = require('./git-actions').createGitActions({ status: () => snapshot, refresh, refreshRepo, parseStatus, context: () => actionContext() });
-function stop() { clearInterval(timer); clearTimeout(watchTimer); watchTimer = null; changedRoots.clear(); watchCostMs = 0; watchedAt = 0; for (const w of watchers.values()) w.close(); watchers.clear(); realRoots.clear(); ignores.clear(); }
-module.exports = { start, stop, refresh, get: () => snapshot, parseStatus, norm, discoverRepositories, diff, WATCH_NOISE, getWatchDelay, resolveGitExe,
+function stop() {
+  clearInterval(timer);
+  clearTimeout(watchTimer);
+  clearTimeout(graceTimer);
+  watchTimer = graceTimer = null;
+  changedRoots.clear(); actedRoots.clear(); activeAt.clear(); covered.clear();
+  activeKeys = new Set();
+  watchCostMs = 0; watchedAt = 0;
+  for (const w of watchers.values()) w.close();
+  watchers.clear(); watchTimes.clear(); realRoots.clear(); ignores.clear();
+}
+module.exports = { start, stop, refresh, refreshRepo, get: () => snapshot, stats, parseStatus, norm, discoverRepositories, diff, WATCH_NOISE, getWatchDelay, resolveGitExe, TTL_MS,
   query: actions.query, execute: actions.execute, configure: context => { actionContext = context; } };

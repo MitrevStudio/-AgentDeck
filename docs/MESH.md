@@ -107,7 +107,7 @@ Layout-ът на панелите (`workspace.js`) **остава на desktop-�
 | `projects` | `list`, `add(path)`, `remove`, `rename`, `arrange`, групи, pin | `project:*`, `group:*` (без диалога – папката се избира с `fs.listDir`) |
 | `sessions` | `list` (кешът на сканирането), `preview(agent,id)`, `delete`, `search(q)` | `app:get-data`, `session:*`, `search:text` |
 | `live` | `list` | `live:get` |
-| `git` | `status`, `refresh`, `branches(dir)`, `remoteUrl(dir)` | `git:*` |
+| `git` | `status`, `refresh`, `shown(dirs)`, `branches(dir)`, `remoteUrl(dir)` | `git:*` |
 | `terminals` | `list`, `open({cwd, kind, agent, sessionId, prompt})`, `attach`, `close`, `move(agent,id)`; двоични кадри `input`, `resize`, `output` | `launch:*`, `terminal:*` |
 | `fs` | `listDir(path)`, `isDir(path)`, `home` | `fs:is-dir` |
 | `repo` | `clone({url, dir, branch, base})` → job; `jobs.list`, `jobs.cancel` | няма |

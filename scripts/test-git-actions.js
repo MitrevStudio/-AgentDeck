@@ -140,14 +140,15 @@ async function main() {
     await served.api('git.execute', { root, action: 'unstage', files: ['a.txt'] }, { id: 'peer' });
     assert.equal((await query({ kind: 'preview' })).patch, '');
     await assert.rejects(served.api('git.execute', { root: temp, action: 'fetch' }, { id: 'peer' }), /Unknown repository/);
-    // Staging and unstaging refresh that repository alone; anything else still refreshes everything.
+    // Every action refreshes its own repository, never every listed one; staging and unstaging without listing the
+    // repositories anew, anything else with it.
     const calls = [];
     const indexOnly = createGitActions({ status: () => ({ repos: { [norm(root)]: { root } } }), parseStatus,
-      refresh: async o => { calls.push(['all', o.force]); }, refreshRepo: async r => { calls.push(['repo', norm(r)]); } });
+      refresh: async o => { calls.push(['all', o.force]); }, refreshRepo: async (r, o) => { calls.push(['repo', norm(r), o.relist]); } });
     await indexOnly.execute({ root, action: 'stage', files: ['a.txt'] });
     await indexOnly.execute({ root, action: 'unstage', files: ['a.txt'] });
     await indexOnly.execute({ root, action: 'fetch' }).catch(() => {});
-    assert.equal(JSON.stringify(calls), JSON.stringify([['repo', norm(root)], ['repo', norm(root)], ['all', true]]));
+    assert.equal(JSON.stringify(calls), JSON.stringify([['repo', norm(root), false], ['repo', norm(root), false], ['repo', norm(root), true]]));
     assert.ok(refreshed > 15);
     console.log('Git actions: staging, initial commit, stale review, branches, history, comparison, worktrees, active/dirty guards, remotes and conflicts passed');
   } finally {

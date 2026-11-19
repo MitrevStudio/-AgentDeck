@@ -182,14 +182,18 @@ async function run() {
   // read or act on what it carries). Phones reach it on the same port with a plain WebSocket.
   // --with-api turns it into a resource too: projects, sessions, terminals and agents served to paired computers.
   const withApi = has("with-api");
-  let host = null, served = null;
+  let host = null, served = null, isViewed = () => false;
   if (withApi) {
     const { createHost } = require(path.join(ROOT, "src", "host"));
     const { createServed } = require(path.join(ROOT, "src", "mesh", "serve"));
     host = createHost({
       dataDir, home: os.homedir(), isExcluded: () => false,
       untitled: (agent, id) => `${agent} session ${id}`, noLauncher: exe => `${exe} is not installed on this host`,
-      log: (...parts) => log(parts.join(" ")), gitActive: () => true
+      log: (...parts) => log(parts.join(" ")),
+      // No window here, so nobody is ever "at" one: the git status is looked after in the background (and then only
+      // for the repositories a session or a terminal is in) while a paired computer is connected, which is who shows
+      // it. With none connected git is not started at all; what a computer asks about is answered whenever it asks.
+      gitFocused: () => isViewed()
     });
     // A program that ends takes its terminal with it, as on a desktop.
     host.on("terminal:exit", ({ id, lost }) => { if (!lost) host.terminals.close(id); });
@@ -210,6 +214,7 @@ async function run() {
     api: served ? served.api : () => {}, relayOnly: !withApi, listen: opt("listen"), log: meshLog, discover: !has("no-discovery")
   });
   served?.attach(links);
+  isViewed = () => links.nodes().some(n => n.status === "online" && n.kind === "desktop");
   // Before the first start: the settings given on the command line, into node.json as it is (a file that cannot be
   // read is not written over: identity.js readKept).
   const { readKept } = require(path.join(ROOT, "src", "mesh", "identity"));

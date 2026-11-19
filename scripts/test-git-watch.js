@@ -1,18 +1,19 @@
-// When git-status.js starts git: a real repository, the real watcher, and every start of git counted. Changes in
-// what git ignores start none; a real change, a change of the rules and staging from outside start one; while nobody
-// is at the window the watchers' checks are far apart, and getting the focus brings a waiting change at once.
+// When git-status.js starts git for a repository in use: a real repository, the real watcher, and every start of git
+// counted. Changes in what git ignores start none; a real change, a change of the rules and staging from outside
+// start one; while nobody is at the window nothing is started, and getting the focus brings what changed meanwhile
+// in one pass.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const childProcess = require('node:child_process');
 
-// Counted where git-status.js starts git, before it is loaded: { at, args } of every call.
+// Counted where git-status.js starts git (git-run.js), before it is loaded: { at, args } of every start.
 const started = [];
-const realExecFile = childProcess.execFile;
-childProcess.execFile = (file, args, ...rest) => {
+const realSpawn = childProcess.spawn;
+childProcess.spawn = function (file, args, ...rest) {
   started.push({ at: Date.now(), file, args });
-  return realExecFile(file, args, ...rest);
+  return realSpawn.call(this, file, args, ...rest);
 };
 const statusRuns = () => started.filter(s => s.args.includes('status'));
 
@@ -116,8 +117,9 @@ async function main() {
   };
   ignoredWrites(0);
 
-  // The focused minimum is shortened as the unfocused gap is below: the steps here wait for one watched pass each.
-  const options = { dirs: () => [root], projects: () => [root], active: () => true, focused: () => true, watchDelayMs: 2000, onChange: () => onChange() };
+  // The repository is in use (a terminal is open in it), so it is watched. The minimum between two watchers' passes
+  // is shortened: the steps here wait for one watched pass each.
+  const options = { dirs: () => [root], projects: () => [root], activeDirs: () => [root], focused: () => true, watchDelayMs: 2000, onChange: () => onChange() };
   git.start(options);
   await git.refresh({ force: true });
   assert.deepEqual(repo().files, [], 'nothing but ignored files');
@@ -142,6 +144,21 @@ async function main() {
   write('App/New.cs');
   await until(() => has('App/New.cs', '??'), 'a new file');
   assert.equal(count() - before, 1, 'one status for a new file');
+
+  // 2b. Files that are only read. Windows reports a file as changed when the time of its last reading moves, as it
+  // does for one that was written: a tracked source, the rules and git's own HEAD, read over and over, start nothing.
+  if (process.platform === 'win32') {
+    before = count();
+    for (let i = 0; i < 4; i++) {
+      for (const rel of ['App/App.csproj', '.gitignore', '.git/HEAD']) {
+        const file = path.join(root, rel);
+        fs.utimesSync(file, new Date(Date.now() + i * 1000), fs.statSync(file).mtime); // read "now", written when it was
+      }
+      await sleep(300);
+    }
+    await settle();
+    assert.equal(count() - before, 1, 'files that were only read start no status (the one start is the mark\'s)');
+  }
 
   // 3. The rules change: one status, and what is ignored follows - both ways.
   write('notes.draft');
@@ -180,52 +197,35 @@ async function main() {
   options.watchDelayMs = 2000;
   delete options.watchSettleMs;
 
-  // 5. Nobody at the window: the watchers' passes are a long gap apart, however much changes. (The gap is shortened
-  // here; the first pass after the switch may still be one that was waiting from before.)
-  const GAP = 5000;
-  options.watchUnfocusedMs = GAP;
+  // 5. Nobody at the window: no status is started, however much changes and for however long - several times the
+  // distance between two watchers' passes here.
+  await settle();
   options.focused = () => false;
-  // On a slow machine the gap is longer than GAP (a pass that took long is followed by a longer wait), so the writing
-  // goes on until enough passes were seen rather than for a fixed time.
-  assert.ok(git.getWatchDelay() >= GAP, `the gap while unfocused (${git.getWatchDelay()} ms)`);
   before = count();
-  const busyFrom = Date.now();
-  while (count() - before < 3 && Date.now() - busyFrom < 90000) { write('App/Busy.cs'); await sleep(150); }
-  const busyMs = Date.now() - busyFrom;
-  const runs = statusRuns().slice(before).map(s => s.at);
-  assert.ok(runs.length >= 2, `changes are still seen while unfocused (${runs.length} passes in ${busyMs} ms)`);
-  assert.ok(runs.length <= Math.floor(busyMs / GAP) + 2, `at most one pass per gap (${runs.length} passes in ${busyMs} ms)`);
-  for (let i = 2; i < runs.length; i++) assert.ok(runs[i] - runs[i - 1] >= GAP - 100, `passes ${runs[i] - runs[i - 1]} ms apart`);
-  assert.ok(runs.at(-1) - runs.at(-2) >= GAP - 100, `the last two passes ${runs.at(-1) - runs.at(-2)} ms apart`);
-  options.focused = () => true;
-  assert.ok(git.getWatchDelay() < GAP, 'the short delay again with the focus');
+  await keepWriting(5000, () => write('App/Busy.cs'));
+  await sleep(1000);
+  for (const reason of ['scan', 'timer', 'watcher']) await git.refresh({ reason });
+  assert.equal(count() - before, 0, 'nothing is started while nobody is at the window');
+  assert.ok(!has('App/Busy.cs'), 'the change waits');
 
-  // 6. The window gets the focus: the page asks for a refresh, which takes a waiting change at once although the
-  // status was checked a moment ago - and without it nothing would be asked.
-  options.focused = () => false;
-  options.watchUnfocusedMs = 10 * 60 * 1000;
-  await git.refresh();
-  await sleep(500);
-  await git.refresh(); // whatever was still on its way
-  before = count();
-  await git.refresh();
-  assert.equal(count() - before, 0, 'a status checked moments ago is not asked for again');
-  const t0 = Date.now();
-  write('App/Waiting.cs');
+  // 6. The window gets the focus: the page asks, and one pass takes what changed meanwhile - although the status is
+  // one that would be kept, had nothing changed.
   options.focused = () => true;
-  await until(() => { git.refresh().catch(() => {}); return has('App/Waiting.cs', '??'); }, 'the waiting change after the focus', 15000);
-  assert.ok(Date.now() - t0 < 15000, 'well within the time a status is kept for');
-  assert.equal(count() - before, 1, 'one status for it');
-  // The same without anybody asking: the next change after the focus brings the waiting pass forward.
+  await git.refresh({ reason: 'focus' });
+  assert.equal(count() - before, 1, 'one status for all that changed meanwhile');
+  assert.ok(has('App/Busy.cs', '??'), 'and it shows');
+  await git.refresh({ reason: 'focus' });
+  assert.equal(count() - before, 1, 'a status checked moments ago is not asked for again');
+  // The same without anybody asking: the next change after the focus takes the waiting one with it.
   options.focused = () => false;
   write('App/Waiting2.cs');
-  await sleep(500);
+  await sleep(3000);
   assert.ok(!has('App/Waiting2.cs'), 'waits while unfocused');
   options.focused = () => true;
   write('App/Waiting3.cs');
-  await until(() => has('App/Waiting2.cs', '??') && has('App/Waiting3.cs', '??'), 'a waiting pass brought forward', 20000);
+  await until(() => has('App/Waiting2.cs', '??') && has('App/Waiting3.cs', '??'), 'a waiting change taken by the next pass', 20000);
 
-  console.log(`Git watching passed: ignored changes start no status, real ones, rule changes and outside staging do, unfocused gap, focus flush; executable: ${executable}`);
+  console.log(`Git watching passed: ignored changes start no status, real ones, rule changes and outside staging do, nothing while unfocused, focus flush; executable: ${executable}`);
 }
 main().catch(e => { console.error(e); process.exitCode = 1; }).finally(() => {
   git.stop();

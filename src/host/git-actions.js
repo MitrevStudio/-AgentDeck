@@ -27,9 +27,12 @@ const value = (s, max = 4096) => {
   return s;
 };
 // Actions that change only the repository's own index: the status of that repository is all there is to refresh.
+// Any other may have moved refs its linked worktrees share, or added or removed a worktree: the repositories are
+// listed anew and those checkouts asked about too - never every listed repository, which can be hundreds.
 const INDEX_ONLY = new Set(['stage', 'unstage']);
 const ref = s => { value(s, 512); if (s.startsWith('-') || /[\s\x00-\x1f]/.test(s)) throw new Error('Invalid reference'); return s; };
-// refreshRepo(root): that repository's status only - after an action that changed nothing but its index.
+// refreshRepo(root, { relist }): that repository's status after an action on it; relist: the action was not one of
+// INDEX_ONLY (git-status.js refreshRepo).
 function createGitActions({ status, refresh, refreshRepo = () => refresh({ force: true }), parseStatus, context = () => ({}) }) {
   const queues = new Map();
   const rootOf = root => {
@@ -136,7 +139,7 @@ function createGitActions({ status, refresh, refreshRepo = () => refresh({ force
     const key = normPath(common), previous = queues.get(key) || Promise.resolve();
     const pending = previous.catch(() => {}).then(async () => {
       try { return await mutate(root, p); }
-      finally { await (INDEX_ONLY.has(p.action) ? refreshRepo(root) : refresh({ force: true })).catch(() => {}); }
+      finally { await refreshRepo(root, { relist: !INDEX_ONLY.has(p.action) }).catch(() => {}); }
     });
     queues.set(key, pending);
     try { return await pending; } finally { if (queues.get(key) === pending) queues.delete(key); }
