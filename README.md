@@ -384,11 +384,13 @@ A terminal belongs to the computer it runs on, whoever started it. Any of your p
 
 Sessions that run outside an AgentDeck terminal (for example in Windows Terminal) cannot be shared this way; **Move here** brings one in. See [docs/SHARED-SESSIONS.md](docs/SHARED-SESSIONS.md).
 
-### AgentDeck on your phone (Android)
+### AgentDeck on your phone (Android and iPhone)
 
-The Android app shows the sessions of all your computers in one list — the ones waiting for you on top — lets you reply, start and stop sessions, and opens any terminal. It connects to **your own relay** by address and port: no account, no cloud service, no push provider.
+The phone app shows the sessions of all your computers in one list — the ones waiting for you on top — lets you reply, start and stop sessions, and opens any terminal. It connects to **your own relay** by address and port: no account, no cloud service, no push provider.
 
-1. Install `AgentDeck-<version>.apk` from the [latest release](https://github.com/MitrevStudio/-AgentDeck/releases/latest) (Android asks to allow installing from your browser or file manager).
+1. Install the app:
+   - **Android** — `AgentDeck-<version>.apk` from the [latest release](https://github.com/MitrevStudio/-AgentDeck/releases/latest) (Android asks to allow installing from your browser or file manager).
+   - **iPhone** (iOS 16 or newer) — a beta named **AgentDeck Remote**, through Apple's TestFlight: install [TestFlight](https://apps.apple.com/app/testflight/id899247664) from the App Store, then open [testflight.apple.com/join/erWU4dAU](https://testflight.apple.com/join/erWU4dAU) on the phone. An iPhone takes apps only from Apple, so there is no file to download.
 2. On a desktop open **Settings → Computers → Phones → Add phone**, tick the computers the phone should reach and check the relay address as the phone will reach it.
 3. In the app choose **Scan** and point it at the code — or paste the text shown under it. One code pairs the phone with the relay and every ticked computer; it is valid for ten minutes and works once.
 
@@ -436,7 +438,7 @@ If `node-pty` cannot load, the installer reports missing build prerequisites. On
 
 ### Relay in Docker
 
-A relay only routes mesh traffic between your paired computers: the tunnels are end-to-end TLS, so it can neither read nor act on what it carries, and it runs no agents. It ships as an image for `amd64` and `arm64`, published with every release:
+A relay only routes mesh traffic between your paired computers: the tunnels are end-to-end TLS, so it can neither read nor act on what it carries, and it runs no agents. It ships as an image for `amd64` and `arm64`, published with every release that changes it:
 
 ```bash
 docker run -d --name agentdeck-relay --hostname agentdeck-relay --restart unless-stopped \
@@ -724,13 +726,28 @@ Pushes to `main` run validation and semantic-release. Conventional Commits deter
 | `feat!: ...` or a `BREAKING CHANGE:` footer | Major |
 | `docs: ...`, `chore: ...`, `refactor: ...` | No release by default |
 
-Automation creates a tag and draft release, builds the Windows installer, uploads the `.exe`, `.blockmap` and `latest.yml`, and then publishes the release. A failed build leaves a draft rather than a published release without its installer.
+A release builds only the parts that changed. There are four: the desktop app (Windows installer and Linux AppImage), the Android app, the iPhone app, and the relay's Docker image. Before anything is versioned, [`scripts/release-parts.js`](scripts/release-parts.js) compares each part with the commit it was last released from, not with the previous push, so changes pile up for a part until it is built. Each job that gets its part out leaves a tag on the commit it built (`desktop-v1.29.0`, `android-v…`, `ios-v…`, `relay-v…`); a part whose build failed gets none and is built again with the next release. The run's summary lists every part, what it was compared with and which files decided.
 
-Alongside it, a Linux job builds the AppImage from the same tag and attaches `AgentDeck-<version>.AppImage` and `latest-linux.yml`. It does not hold the release back: the app does not update itself on Linux, so a Linux build failure leaves the Windows release as it is.
+| A push to `main` that changes | Builds and publishes |
+| --- | --- |
+| The desktop app only (`src/`, `native/`, `build/`, `package.json`, `package-lock.json`) | Installer and AppImage. `src/host`, `src/mesh` and `src/shared` are also in the relay's image, so a change there builds that too |
+| The phone app only (`mobile/`) | Android and iPhone apps; `mobile/android` alone only Android, `mobile/ios` alone only the iPhone app |
+| Code both bundle (the files of `src/` the phone's page imports, such as `src/mesh/noise.js`) | Everything that bundles it |
+| The relay only (`host/bin`, `host/Dockerfile`, `host/package*.json`) | The Docker image |
+| Docs, tests, `scripts/`, the workflows | Nothing: no version, no tag, no release. The commits are part of the next release |
+| A path the script does not know | Everything |
 
-An Android job builds the phone app (`mobile/`) with the same version, signs it with the release key kept in the repository's secrets (`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`) and attaches `AgentDeck-<version>.apk`. It does not hold the release back either. Every release must be signed with the same key, or Android will not install it over the previous one.
+All parts share one line of versions; a part that is not built skips that version. The commit messages still decide whether there is a version at all: a push of only `docs:` or `chore:` commits releases nothing, whatever it touches, and its changes wait for the next `fix:` or `feat:`.
 
-Pull requests and non-main branches run checks and an unpacked packaging build on both Windows and Linux, and build a debug APK of the phone app (kept as a workflow artifact for a week). The Linux job skips the Electron UI test (`test:git-ui`), which needs a display. See the [CI workflow](.github/workflows/ci.yml) and [release workflow](.github/workflows/release.yml).
+With the desktop app in it, automation creates a tag and draft release, builds the Windows installer, uploads the `.exe`, `.blockmap` and `latest.yml`, and then publishes the release and marks it as the latest. A failed build leaves a draft rather than a published release without its installer. A Linux job builds the AppImage from the same tag and attaches `AgentDeck-<version>.AppImage` and `latest-linux.yml`. It does not hold the release back: the app does not update itself on Linux, so a Linux build failure leaves the Windows release as it is.
+
+A release without the desktop app is published too, but not marked as the latest. Installed copies update from the latest release, and the download links point to it, so it stays the newest release that has an installer. It also always carries the newest `AgentDeck-<version>.apk`: when the newest APK and the latest release are not the same release, the APK is copied onto the latest one and replaces the APK it had.
+
+The Android job builds the phone app (`mobile/`) with the release's version, signs it with the release key kept in the repository's secrets (`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`) and attaches `AgentDeck-<version>.apk`. Every release must be signed with the same key, or Android will not install it over the previous one. The same build goes to Google Play's internal testing track as a bundle, with the key of a service account in the `PLAY_SERVICE_ACCOUNT_JSON` secret. The iPhone job builds on a GitHub Mac and uploads to TestFlight. Neither phone job holds the release back or fails it: without its secrets an upload is skipped, and a failed one is a warning on the run. Setup for both stores is in [docs/MOBILE.md](docs/MOBILE.md).
+
+To build a part whatever changed, run the Release workflow by hand (**Actions → Release → Run workflow**) and tick it. If the commits since the last release ask for a new version, the ticked parts go out with it; if not, they are built again from the newest version's tag under the same number. Apple and Google Play accept a version number only once, so a phone app that already reached them needs a new version.
+
+Pull requests and non-main branches run checks and an unpacked packaging build on both Windows and Linux, and build a debug APK and an unsigned Play bundle of the phone app (the APK is kept as a workflow artifact for a week). The Linux job skips the Electron UI test (`test:git-ui`), which needs a display. See the [CI workflow](.github/workflows/ci.yml) and [release workflow](.github/workflows/release.yml).
 
 ## Architecture
 

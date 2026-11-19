@@ -52,6 +52,7 @@
     "test:taskbar": "node scripts/test-taskbar-monitor.js && node scripts/test-prefs-taskbar.js",
     "test:taskbar-ui": "node scripts/test-taskbar-ui-electron.cjs",
     "test:scratchpads": "node scripts/test-scratchpads.js",
+    "test:release": "node scripts/test-release-parts.js && node scripts/test-play-upload.js",
     "dist": "electron-builder --win --publish never",
     "dist:dir": "electron-builder --win --dir --publish never",
     "dist:linux": "electron-builder --linux --publish never"
