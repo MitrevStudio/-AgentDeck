@@ -78,6 +78,33 @@ async function main() {
     assert.deepEqual(cut.repos, [parent]);
     assert.deepEqual(cut.truncatedIn, [work]);
     fs.rmSync(scan, { recursive: true, force: true });
+    // The scope of Settings > Git. "open": a folder's own repository and those right in a folder that is in none -
+    // what the panel lists then; the repositories nested in a repository (reference clones, say) are neither looked
+    // for nor asked about. "all": every one in a project. A change of the scope is taken by the next refresh.
+    const scoped = fs.mkdtempSync(path.join(os.tmpdir(), 'agentdeck-scope-'));
+    const project = path.join(scoped, 'project'), reference = path.join(project, 'refs', 'a', 'b', 'reference');
+    const plain = path.join(scoped, 'plain'), direct = path.join(plain, 'direct'), inner = path.join(direct, 'inner'), far = path.join(plain, 'x', 'far');
+    for (const dir of [project, reference, direct, inner, far]) {
+      fs.mkdirSync(dir, { recursive: true });
+      execFileSync('git', ['init', '--quiet', dir], { windowsHide: true });
+    }
+    const shallow = await git.discoverRepositories([project, plain], { shallow: true });
+    assert.deepEqual(shallow.repos.sort(), [project, direct].sort(), 'a shallow walk stops at a repository and one level down');
+    assert.equal(shallow.truncated, false, 'a shallow walk is not a scan cut short');
+    let scope = 'open', open = [];
+    const keys = dirs => dirs.map(git.norm).sort();
+    git.start({ dirs: () => [project, plain, ...open], projects: () => [project, plain], open: () => open, scope: () => scope });
+    assert.deepEqual(Object.keys((await git.refresh({ force: true })).repos).sort(), keys([project, direct]), 'the open scope leaves nested repositories alone');
+    assert.equal(git.get().discoveryTruncated, false);
+    open = [path.join(plain, 'x')];
+    assert.deepEqual(Object.keys((await git.refresh()).repos).sort(), keys([project, direct, far]), 'a repository right in a folder with an open terminal');
+    scope = 'all';
+    assert.deepEqual(Object.keys((await git.refresh()).repos).sort(), keys([project, reference, direct, inner, far]), 'the scope "all" lists every repository in the projects');
+    scope = 'open';
+    open = [];
+    assert.deepEqual(Object.keys((await git.refresh()).repos).sort(), keys([project, direct]), 'back to the open scope');
+    git.stop();
+    fs.rmSync(scoped, { recursive: true, force: true });
     git.start({ dirs: () => [root], projects: () => [root] });
     const snapshot = await git.refresh({ force: true });
     assert.equal(Object.keys(snapshot.repos).length, 2);

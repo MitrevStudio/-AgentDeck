@@ -198,8 +198,9 @@ function equipTerminals(host, { terminals, launch, liveSessions, linkTabs = null
 // isExcluded(cwd): folders whose sessions are not the user's work; untitled(agent, shortId) and noLauncher(exe):
 // texts in the user's language; log(...parts): the launch log; gitActive(): whether anything shows the git status
 // now (it is refreshed in the background only then); gitFocused(): whether the user is at what shows it (else changes
-// in the folders are looked at less often).
-function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () => {}, gitActive = () => true, gitFocused = () => true, fetch: fetchLimits = globalThis.fetch }) {
+// in the folders are looked at less often); gitScope(): "open" or "all" (Settings > Git) - with "open" the
+// repositories nested in the projects are not looked for (git-status.js).
+function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () => {}, gitActive = () => true, gitFocused = () => true, gitScope = () => "all", fetch: fetchLimits = globalThis.fetch }) {
   const host = new EventEmitter();
   const limits = require("../limits").createAllLimits({ fetch: fetchLimits, findExecutable: require("./sessions").findOnPath, onChange: l => host.emit("limits", l) });
   const resources = require("./resources").createResources({ home, onChange: r => host.emit("resources", r) });
@@ -276,9 +277,10 @@ function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () 
       .catch(err => console.error("Usage scan failed:", err.message));
     gitStatus.start({
       projects: () => sessions.get()?.registry.projects.filter(p => !p.node).map(p => p.path) || [],
-      dirs: () => { const data = sessions.get(); return data ? [...data.registry.projects.filter(p => !p.node).map(p => p.path), ...data.sessions.flatMap(s => [s.cwd, s.workDir])] : []; },
+      dirs: () => { const data = sessions.get(); return data ? [...data.registry.projects.filter(p => !p.node).map(p => p.path), ...data.sessions.flatMap(s => [s.cwd, s.workDir]), ...terminals.getTabs().map(x => x.cwd)] : []; },
+      open: () => terminals.getTabs().map(x => x.cwd),
       onChange: g => host.emit("git", g),
-      active: gitActive, focused: gitFocused
+      active: gitActive, focused: gitFocused, scope: gitScope
     });
     sessions.scan().catch(err => console.error("Initial scan failed:", err.message));
   }
