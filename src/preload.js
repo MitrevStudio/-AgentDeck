@@ -94,6 +94,21 @@ contextBridge.exposeInMainWorld("terminals", {
   takeSize: id => ipcRenderer.invoke("terminal:take-size", id),
   // Stop: the terminal ends on its computer, for every device (main finds the computer).
   stop: id => ipcRenderer.invoke("terminal:stop", id),
+  // The "Ports" menu of a pane (docs/PORT-FORWARDING.md 3; main.js listPorts). The window names a terminal and a port
+  // number only: main finds the computer and builds every address.
+  // -> { node, name, ports: [{ port, process, own }], forwards: [{ node, port, localPort }], saved: [port], error?:
+  // "offline" | "update" | "failed", message? }: what listens on the terminal's computer (its own ports first), that
+  // computer's forwards here, the ports typed by hand for its project. Asked when the menu opens, never on a timer.
+  listPorts: id => ipcRenderer.invoke("ports:list", id),
+  // Opens the port in the browser - forwarded first for a terminal of another computer; opts: { https, remember }
+  // (remember: typed by hand, kept for the project). copyPort puts the same address on the clipboard. Both -> the address.
+  openPort: (id, port, opts) => ipcRenderer.invoke("ports:open", id, port, opts),
+  copyPort: (id, port) => ipcRenderer.invoke("ports:copy", id, port),
+  closePort: (id, port) => ipcRenderer.invoke("ports:close", id, port),
+  forgetPort: (id, port) => ipcRenderer.invoke("ports:forget", id, port),
+  // Every forward of this window's computer, [{ node, port, localPort }], and again when one starts or stops.
+  getForwards: () => ipcRenderer.invoke("ports:forwards"),
+  onForwards: cb => ipcRenderer.on("ports:changed", (_e, list) => cb(list)),
   // A clipboard picture saved as a PNG (its path, "" when the clipboard holds text or no picture), and a dropped
   // file's path.
   saveClipboardImage: id => ipcRenderer.invoke("clipboard:image-file", id),

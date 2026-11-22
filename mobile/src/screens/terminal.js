@@ -13,7 +13,9 @@
 // while held - and the tool row: a field for a message written with the phone's own keyboard and sent as one paste
 // (with Enter or without; the draft is the session's), a picture (taken or chosen, made smaller, put on the computer,
 // its path pasted), paste. In the header: the session's messages (the chat view) and "More" - Fit to phone, the text
-// size (kept across restarts), copying what is on the screen or the last lines, a terminal in the same folder, Stop.
+// size (kept across restarts), copying what is on the screen or the last lines, a terminal in the same folder, the
+// computer's ports (screens/ports.js: forwarded to the phone and opened in the app; an address in the terminal's text
+// is never a link), Stop.
 // Under the header, while the session waits for the user: what for.
 // "Fit to phone" is the one thing that resizes the host's terminal - it takes the size, to what fits here at the
 // readable size - and pressing it again gives the size back; so does leaving (the view detaches, and the host hands
@@ -32,6 +34,7 @@ import { isIos, copyText as toClipboard, pasteText as fromClipboard, plainKeys }
 import { icon, iconBtn } from "../icons.js";
 import { header, wireBack, closeAsk } from "./parts.js";
 import { keyStrip, wireStrip } from "./keys.js";
+import { openPorts } from "./ports.js";
 
 const READ_DEFAULT = 12, READ_MIN = 8, READ_MAX = 22; // the readable font: what "Fit to phone" sizes the host's terminal for
 const MIN_PX = 3, MAX_PX = 30;
@@ -203,7 +206,7 @@ export function render(el, ctx, p) {
       if (tab?.id) ctx.go("terminal", { node: p.node, term: tab.id, title: tab.title || baseName(cwd) });
     } catch (e) { ctx.fail(e); }
   }
-  // "More": what is used now and then - the size, the text's size, copying, the chat view, a shell here, Stop.
+  // "More": what is used now and then - the size, the text's size, copying, the chat view, a shell here, Ports, Stop.
   async function more() {
     const x = sessionOf(), mine = isMine(), cwd = x?.cwd || store.tab(p.node, p.term)?.cwd || "";
     const pick = await ctx.menu([
@@ -213,6 +216,8 @@ export function render(el, ctx, p) {
       { key: "copyLast", icon: "copy", label: t("term.copyLast", { n: COPY_LINES }) },
       x && !x.live?.unlinked ? { key: "chat", icon: "chat", label: t("term.chat") } : null,
       cwd && handle?.online ? { key: "shell", icon: "termPlus", label: t("session.shell") } : null,
+      // Only where the app can listen (its Forward plugin: not in a browser); lit while this computer has a forward.
+      ctx.forwards?.available ? { key: "ports", icon: "globe", label: t("ports.title"), on: ctx.forwards.list().some(f => f.node === p.node) } : null,
       { key: "stop", icon: x ? "stop" : "power", label: x ? t("term.stopSession") : t("term.close"), danger: true }
     ].filter(Boolean));
     if (closed) return;
@@ -221,6 +226,7 @@ export function render(el, ctx, p) {
     else if (pick === "copyLast") copyText(bufferText(COPY_LINES));
     else if (pick === "chat") openChat();
     else if (pick === "shell") shellHere(cwd);
+    else if (pick === "ports") openPorts(ctx, { node: p.node, term: p.term, cwd });
     else if (pick === "stop") stop();
   }
   // The terminal's text: the lines in view (count 0), or the last `count` lines of everything it holds; a line the

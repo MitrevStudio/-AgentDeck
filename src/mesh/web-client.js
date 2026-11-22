@@ -27,7 +27,8 @@
 // client.start() / client.stop(): dial the hubs and keep the links / close everything.
 // client.nodes() -> [{ id, name, kind, status: "online" | "offline", error, via, direct, version, relayOnly,
 //   address, port }] - every paired node. via: the hub a tunnelled link goes through ("" for a direct one); error: why
-//   the last try failed (a code below), "" when online; relayOnly: the node serves nothing (a relay).
+//   the last try failed (a code below), "" when online; relayOnly: the node serves nothing (a relay); outdated: it is linked and its
+//   AgentDeck is behind this app (protocol.js LEVEL): it works, but not with everything.
 // client.routes() -> [{ id, name, kind, via, web, paired }] - the nodes the connected hubs can reach, to pair with
 //   (paired: already a peer); web false: something on the way needs an update.
 // client.pairDirect(address, port, code, { key, id, invite }) -> Promise<peer>: pairs with the node at
@@ -46,6 +47,9 @@
 // client.call(id, method, params, { timeout }) -> Promise: a request to a node (protocol.js; rejects with .code, e.g.
 //   "offline", "timeout", "relayOnly", or whatever the node answers).
 // client.notify(id, name, data): an event to a node. client.sendBinary(id, bytes): a binary frame (frames.js).
+//   A forwarded port's stream frames (docs/PORT-FORWARDING.md) go and come as any binary frame; their credit window
+//   keeps what waits far below MAX_BACKLOG. client.buffered(id) -> the bytes of the link to that node still waiting
+//   here to go out: through a hub, the tunnel's backlog (the one MAX_BACKLOG closes the link on).
 // client.online(id) -> boolean. client.forget(id): tells the node (when online) and drops it.
 // client.retryNow({ drop }): every paired node that is not linked is dialled now rather than at its next backoff step
 //   (up to 30 s; the backoff starts again from 2 s); links that are up stay. drop: ids whose link is up but found dead
@@ -65,8 +69,8 @@ const noise = require("./noise");
 const webLink = require("./web-link");
 const pairProof = require("./pair-proof");
 const { inviteTag } = require("./pair-code");
-const { createLink, PROTOCOL } = require("./protocol");
-const { bytesToHex, randomBytes } = require("@noble/hashes/utils");
+const { createLink, PROTOCOL, LEVEL, outdated } = require("./protocol");
+const { bytesToHex, randomBytes, concatBytes } = require("@noble/hashes/utils");
 
 const ID = /^[0-9a-f]{64}$/;
 const RECONNECT_MIN_MS = 2000, RECONNECT_MAX_MS = 30000;
@@ -127,7 +131,7 @@ function createWebClient({ WebSocket, keypair, peers: initial = [], name = "Phon
     return [...peers.values()].map(p => {
       const c = conns.get(p.id);
       return { id: p.id, name: c?.info?.name || p.name, kind: p.kind, status: c ? "online" : "offline", error: c ? "" : errors.get(p.id) || "",
-        via: c?.via || "", direct: Boolean(c?.direct), version: c?.info?.version || "", relayOnly: Boolean(c?.info?.relayOnly), address: p.address, port: p.port };
+        via: c?.via || "", direct: Boolean(c?.direct), version: c?.info?.version || "", relayOnly: Boolean(c?.info?.relayOnly), outdated: Boolean(c) && outdated(c.info), address: p.address, port: p.port };
     });
   }
   function routes() {
@@ -170,28 +174,57 @@ function createWebClient({ WebSocket, keypair, peers: initial = [], name = "Phon
       ws.addEventListener("open", () => { clearTimeout(timer); pipe.onclose = null; resolve(pipe); });
     });
   }
-  // A tunnel through the hub at route.path[0]: a pipe of Noise messages, [length:4][message] as bytes, 32 KB per
-  // relay.data, one at a time (each waits for the hub's answer: that is the flow control).
+  // A tunnel through the hub at route.path[0]: a pipe of Noise messages, [length:4][message] as bytes, up to 32 KB
+  // per relay.data, one at a time (each waits for the hub's answer: that is the flow control).
   async function openTunnel(route) {
     const hubId = route.path[0], hubLink = conns.get(hubId)?.link;
     const path = [selfId, ...route.path];
     if (!hubLink || !conns.get(hubId).direct) throw failure("unreachable", "That relay is not connected.");
     if (path.length > MAX_HOPS || tunnels.size >= MAX_TUNNELS) throw failure("unreachable", "Too far, or too many tunnels.");
     const id = uuid();
-    let chain = Promise.resolve(), backlog = 0, gone = false, f = null;
+    const waiting = []; // what the pipe sent and the hub has not been handed yet, in order
+    let flushing = null, busy = false, backlog = 0, gone = false, f = null; // flushing: the last flush(), as a promise
     const finish = () => { gone = true; tunnels.delete(id); };
+    // The next relay.data: as much of what waits as a piece takes, across the messages' borders (the tunnel is a
+    // stream of bytes). So whatever gathered during one round trip goes in the next one - the acknowledgements of a
+    // forwarded port's stream, keystrokes, the few bytes by which a 32 KB frame with its headers is over a piece -
+    // rather than a round trip each.
+    function nextPiece() {
+      const parts = [];
+      for (let n = 0; waiting.length && n < PIECE;) {
+        const chunk = waiting[0], take = Math.min(chunk.length, PIECE - n);
+        parts.push(take === chunk.length ? chunk : chunk.subarray(0, take));
+        if (take === chunk.length) waiting.shift(); else waiting[0] = chunk.subarray(take);
+        n += take;
+      }
+      return parts.length === 1 ? parts[0] : concatBytes(...parts);
+    }
+    // One piece at a time until nothing waits. A piece the hub did not take: the tunnel is over, the rest is dropped.
+    async function flush() {
+      busy = true;
+      try {
+        while (waiting.length) {
+          const piece = nextPiece();
+          await hubLink.call("relay.data", { id, data: toBase64(piece) });
+          backlog -= piece.length;
+        }
+      } catch {
+        waiting.length = 0;
+        if (!gone) f.pipe.close();
+      } finally { busy = false; }
+    }
     f = webLink.framedPipe({
       send(bytes) {
         if (gone) return;
         backlog += bytes.length;
         if (backlog > MAX_BACKLOG) { f.pipe.close(); return; }
-        for (let i = 0; i < bytes.length; i += PIECE) {
-          const piece = bytes.subarray(i, i + PIECE);
-          chain = chain.then(() => hubLink.call("relay.data", { id, data: toBase64(piece) })).then(() => { backlog -= piece.length; }, () => { if (!gone) f.pipe.close(); });
-        }
+        waiting.push(bytes);
+        if (!busy) flushing = flush();
       },
       // Closed from this side: what is queued goes first, then the hub hears.
-      close() { finish(); chain.then(() => hubLink.call("relay.close", { id })).catch(() => {}); }
+      close() { finish(); Promise.resolve(flushing).then(() => hubLink.call("relay.close", { id })).catch(() => {}); },
+      // What waits here for the hub to take it (the link's buffered(): web-link.js bufferedAmount).
+      buffered: () => backlog
     });
     tunnels.set(id, { hub: hubId, input: f.input, end: () => { finish(); f.end(); } });
     try {
@@ -236,7 +269,7 @@ function createWebClient({ WebSocket, keypair, peers: initial = [], name = "Phon
           if (info) return renamed(peer, info, data);
           if (!isObj(data) || data.id !== peer.id) return settle("wrongNode");
           if (data.protocol !== PROTOCOL) return settle(Number(data.protocol) > PROTOCOL ? "appOutdated" : "nodeOutdated");
-          info = { name: typeof data.name === "string" ? data.name.slice(0, 60) : "", version: typeof data.version === "string" ? data.version.slice(0, 40) : "", relayOnly: data.relayOnly === true };
+          info = { name: typeof data.name === "string" ? data.name.slice(0, 60) : "", version: typeof data.version === "string" ? data.version.slice(0, 40) : "", relayOnly: data.relayOnly === true, level: Number(data.level) || 1 };
           return settle("");
         }
         if (!info) return;
@@ -273,7 +306,7 @@ function createWebClient({ WebSocket, keypair, peers: initial = [], name = "Phon
     out.emit("link", { node: peer.id, up: true });
     emitNodes();
   }
-  const hello = () => ({ id: selfId, name, kind: "mobile", version, protocol: PROTOCOL, relay: 0, port: 0 });
+  const hello = () => ({ id: selfId, name, kind: "mobile", version, protocol: PROTOCOL, level: LEVEL, relay: 0, port: 0 });
   // A node's new name, from a hello on its link that is up (only the name: nothing else changes on a live link).
   function renamed(peer, info, data) {
     const next = isObj(data) && data.id === peer.id && typeof data.name === "string" ? data.name.slice(0, 60) : "";
@@ -461,6 +494,8 @@ function createWebClient({ WebSocket, keypair, peers: initial = [], name = "Phon
   }
   const notify = (id, event, data) => conns.get(id)?.link.notify(event, data);
   const sendBinary = (id, bytes) => conns.get(id)?.link.sendBinary(bytes);
+  // Bytes of the link to `id` that wait on this side to go out (0 when it has none, or cannot say).
+  const buffered = id => conns.get(id)?.link.buffered() || 0;
 
   // A new name for the phone: the linked nodes hear it now (a hello again), the others with their next link's hello.
   function setName(next) {
@@ -489,7 +524,7 @@ function createWebClient({ WebSocket, keypair, peers: initial = [], name = "Phon
   function resume() { paused = false; }
 
   return Object.assign(out, {
-    id: selfId, key: selfKey, start, stop, pause, resume, nodes, routes, pairDirect, pairVia, call, notify, sendBinary, forget, retryNow, setName,
+    id: selfId, key: selfKey, start, stop, pause, resume, nodes, routes, pairDirect, pairVia, call, notify, sendBinary, buffered, forget, retryNow, setName,
     paused: () => paused,
     online: id => conns.has(id), peers: () => [...peers.values()].map(p => ({ ...p }))
   });

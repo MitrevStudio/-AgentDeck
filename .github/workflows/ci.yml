@@ -42,9 +42,14 @@ jobs:
       - run: npm run test:desktop-terminals
       - run: npm run test:mesh
       - run: npm run test:pairing
+      - run: npm run test:host-pair
+      - run: npm run test:port-forward
+      - run: npm run test:ports-list
+      - run: npm run test:ports-app
       - run: npm run test:web-link
       - run: npm run test:phone-invites
       - run: npm run test:mobile-provider
+      - run: npm run test:mobile-forward
       - run: npm run test:mobile-i18n
       - run: npm run test:mobile-text
       - name: Package (unpacked, no installer)
@@ -83,6 +88,8 @@ jobs:
       - run: npm run test:editors
       - run: npm run test:taskbar
       - run: npm run test:scratchpads
+      - run: npm run test:port-forward
+      - run: npm run test:ports-list
       - run: npm run test:release
       - run: npm run test:audit
       - name: Package (unpacked, no AppImage)
@@ -183,3 +190,16 @@ jobs:
           docker logs relay
           docker exec relay agentdeck-host pair
           [ "$(docker inspect -f '{{.State.Health.Status}}' relay)" = healthy ]
+      # The same image as a resource host (docker-compose.yml, the service "host"): everything `--with-api` loads is
+      # in the image, and it can open a terminal (node-pty built for it).
+      - name: Start it with --with-api and wait until it is healthy
+        run: |
+          docker run -d --name host agentdeck-relay:ci run --with-api --no-discovery
+          for i in $(seq 30); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' host)" = healthy ] && break
+            sleep 2
+          done
+          docker logs host
+          docker logs host 2>&1 | grep '^Resource host$'
+          docker exec host node -e 'require("/app/host/node_modules/node-pty").spawn("/bin/sh", ["-c", "exit 0"], {}).onExit(e => process.exit(e.exitCode))'
+          [ "$(docker inspect -f '{{.State.Health.Status}}' host)" = healthy ]

@@ -145,13 +145,13 @@ const VIEW = `JSON.stringify({ active: document.activeElement?.className || docu
     await until(`document.querySelector(".pair [data-act='scan']")`, "the first screen", 90000);
     const env = await json(`return JSON.stringify({ platform: window.Capacitor?.getPlatform?.(), origin: location.origin, secure: window.isSecureContext,
       camera: Boolean(navigator.mediaDevices?.getUserMedia), language: navigator.language, lang: document.documentElement.lang, classes: document.documentElement.className,
-      viewport: document.querySelector("meta[name='viewport']").content, store: Capacitor.isPluginAvailable("SecureStore"), phone: Capacitor.isPluginAvailable("Phone"),
+      viewport: document.querySelector("meta[name='viewport']").content, store: Capacitor.isPluginAvailable("SecureStore"), phone: Capacitor.isPluginAvailable("Phone"), forward: Capacitor.isPluginAvailable("Forward"),
       styled: getComputedStyle(document.body).backgroundColor, safeTop: getComputedStyle(document.querySelector("#app")).paddingTop,
       inner: [innerWidth, innerHeight], screen: [screen.width, screen.height], vibrate: typeof navigator.vibrate, ua: navigator.userAgent })`);
     note("page", env);
     check("the page is the iOS app's, from capacitor://localhost", () => { assert.equal(env.platform, "ios"); assert.equal(env.origin, "capacitor://localhost"); });
     check("the stylesheet and the script passed the CSP", () => assert.equal(env.styled, "rgb(13, 16, 21)"));
-    check("both local plugins are there", () => { assert.equal(env.store, true); assert.equal(env.phone, true); });
+    check("the local plugins are there", () => { assert.equal(env.store, true); assert.equal(env.phone, true); assert.equal(env.forward, true); });
     check("the page knows it is on an iPhone", () => { assert.match(env.classes, /\bios\b/); assert.match(env.viewport, /maximum-scale=1/); });
     check("the notch is left free", () => assert.ok(parseFloat(env.safeTop) >= 20, env.safeTop));
     await shot("first-run");
@@ -171,6 +171,62 @@ const VIEW = `JSON.stringify({ active: document.activeElement?.className || docu
     note("keychain", store);
     check("the Keychain store keeps, misses, removes and refuses as the Android one", () => assert.deepEqual([store.read, store.missing, store.removed, store.bad], ["kept ✓", null, null, "invalidData"]));
     check("the phone names itself and the pasteboard works", () => { assert.equal(store.device.model, "iPhone"); assert.equal(store.paste, "from the app"); });
+
+    // ---------- the Forward plugin (docs/PORT-FORWARDING.md 4.1) ----------
+    // A listener on 127.0.0.1 with the page behind it as a tiny web server, and two clients: a WebSocket of the page
+    // itself (its opening request is bytes like any other; the plain answer ends it) and the plugin's in-app view.
+    // That the page still answers while the view is up is part of what is checked: the view must not pause it.
+    try {
+      const fwd = await json(`const F = Capacitor.Plugins.Forward, out = { events: [], request: "", gets: 0 }, got = {}, done = {};
+        window.__fwd = out;
+        let closed;
+        const first = new Promise(resolve => { closed = resolve; });
+        const answer = async conn => {
+          out.gets++;
+          const body = "<body style='font:40px sans-serif;background:#fff'>forwarded " + out.gets;
+          await F.write({ conn, data: btoa("HTTP/1.1 200 OK\\r\\nContent-Type: text/html\\r\\nContent-Length: " + body.length + "\\r\\nConnection: close\\r\\n\\r\\n" + body) });
+          await F.end({ conn });
+        };
+        await F.addListener("connection", e => { out.events.push("connection"); out.listenerSeen = e.listener; got[e.conn] = ""; });
+        await F.addListener("data", e => {
+          out.events.push("data");
+          const bytes = atob(e.data);
+          got[e.conn] += bytes;
+          out.request ||= bytes;
+          F.credit({ conn: e.conn, bytes: bytes.length }).catch(() => {});
+          if (done[e.conn] || !got[e.conn].includes("\\r\\n\\r\\n")) return;
+          done[e.conn] = true;
+          answer(e.conn).catch(err => { out.failed = String(err); });
+        });
+        await F.addListener("end", () => out.events.push("end"));
+        await F.addListener("closed", e => { out.events.push("closed"); out.error ??= e.error; closed(); });
+        const l = await F.listen({ port: 0 });
+        out.listener = l.listener;
+        out.port = l.port;
+        const ws = new WebSocket("ws://127.0.0.1:" + l.port + "/");
+        ws.onerror = () => {};
+        await Promise.race([first, new Promise(r => setTimeout(r, 8000))]);
+        try { await F.write({ conn: "c-none", data: "" }); out.gone = "taken"; } catch (e) { out.gone = e.code; }
+        return JSON.stringify(out);`);
+      note("forward", fwd);
+      check("the Forward plugin listens on 127.0.0.1, hands a connection's bytes to the page and says closed once", () => {
+        assert.ok(fwd.port > 0, "a port");
+        assert.equal(fwd.listenerSeen, fwd.listener);
+        assert.match(fwd.request, /^GET \/ HTTP\/1\.1/);
+        assert.equal(fwd.events[0], "connection");
+        assert.equal(fwd.events.filter(e => e === "closed").length, 1);
+        assert.equal(fwd.events.at(-1), "closed");
+        assert.equal(fwd.gone, "unknownConnection");
+      });
+      await page(`await Capacitor.Plugins.Forward.show({ url: "http://127.0.0.1:${fwd.port}/", title: "CI" }); return "shown"`);
+      try {
+        await until(`window.__fwd.gets >= 2`, "the in-app view to ask the listener", 20000);
+        note("ok   the in-app view loads plain http from 127.0.0.1 through the listener, the page below still running", "");
+      } catch (e) { failures.push("in-app view"); note("FAIL the in-app view loads plain http from 127.0.0.1 through the listener", e.message); }
+      await shot("forward-view");
+      await page(`const F = Capacitor.Plugins.Forward; await F.hide(); await F.unlisten({ listener: window.__fwd.listener }); await F.removeAllListeners(); return "hidden"`);
+      await sleep(800);
+    } catch (e) { failures.push("forward"); note("FAIL the Forward plugin", e.message); }
 
     // ---------- pairing by hand: a field, the keyboard ----------
     await page(`document.querySelector("details.relay").open = true; return "open"`);

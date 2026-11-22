@@ -31,18 +31,18 @@ const FIXTURE = `(() => {
   const now = Date.now();
   // stopped / taken: the terminals Stop and "Use my size" were sent for; attached: the terminals the page attached.
   // resized: the wants the panes sent (terminals.resize).
-  const fx = { cbs: {}, wsCommands: [], live: [], copied: [], stopped: [], taken: [], attached: [], resized: [], load: null, loadAsked: 0, prefsCbs: [], views: [] };
+  const fx = { cbs: {}, wsCommands: [], live: [], copied: [], stopped: [], taken: [], attached: [], resized: [], load: null, loadAsked: 0, prefsCbs: [], views: [], ports: null, portsAsked: [], portsOpened: [], portsClosed: [] };
   const session = (id, cwd, title, agent = 'Claude') => ({ id, agent, cwd, title, prompt: title, updatedAt: now - 60000 });
   fx.data = {
     agents: ['Claude', 'Codex'],
-    registry: { order: 'activity', groups: [{ id: 'g1', name: 'BDD' }], projects: [
-      { name: 'agentdeck', path: 'C:/work/agentdeck' }, { name: 'bdd-web', path: 'C:/work/bdd-web', group: 'g1' },
-      { name: 'bdd-ws', path: 'C:/work/bdd-ws', group: 'g1' }, { name: '', path: 'E:/' }, { name: 'docs', path: 'C:/work/docs' }] },
-    sessions: [session('s1', 'C:/work/agentdeck', 'Polish the manager UI'), session('s2', 'C:/work/bdd-web', 'Orchestrate the B1 batch'),
+    registry: { order: 'activity', groups: [{ id: 'g1', name: 'DEMO' }], projects: [
+      { name: 'agentdeck', path: 'C:/work/agentdeck' }, { name: 'demo-web', path: 'C:/work/demo-web', group: 'g1' },
+      { name: 'demo-ws', path: 'C:/work/demo-ws', group: 'g1' }, { name: '', path: 'E:/' }, { name: 'docs', path: 'C:/work/docs' }] },
+    sessions: [session('s1', 'C:/work/agentdeck', 'Polish the manager UI'), session('s2', 'C:/work/demo-web', 'Orchestrate the B1 batch'),
       session('s3', 'C:/work/docs', 'Write the release notes', 'Codex'), session('s4', 'E:/', 'A session at the drive root')]
   };
   const liveOf = (id, status, extra = {}) => ({ agent: 'Claude', id, cwd: 'C:/work/agentdeck', status, pid: 100, startedAt: now - 500000, activityAt: now - 4000, statusAt: now - 4000, ...extra });
-  fx.live = [liveOf('s1', 'idle'), liveOf('s2', 'busy', { cwd: 'C:/work/bdd-web', subagents: [{ id: 'a1', type: 'builder', description: 'Builder B1 desktop', at: now, working: true }] })];
+  fx.live = [liveOf('s1', 'idle'), liveOf('s2', 'busy', { cwd: 'C:/work/demo-web', subagents: [{ id: 'a1', type: 'builder', description: 'Builder B1 desktop', at: now, working: true }] })];
   const limits = util => ({ providers: { claude: { installed: true, windows: [{ key: 'five_hour', util, elapsedPct: 40, resetsAt: now + 3600000 }, { key: 'seven_day', util: 23, elapsedPct: 50, resetsAt: now + 86400000 }] },
     codex: { installed: true } } });
   const stats = name => ({ name, at: now, cpu: 11, cores: 16, memory: { used: 8 * 2 ** 30, total: 32 * 2 ** 30 }, disk: { free: 2 ** 38, total: 2 ** 39, path: 'C:/' } });
@@ -77,6 +77,9 @@ const FIXTURE = `(() => {
   window.terminals = bridge({
     getWorkspace: async () => fx.ws, attach: async id => { fx.attached.push(id); return { scrollback: 'agentdeck $ ', end: 12, ...(fx.sizes[id] || {}) }; }, input() {}, resize(id, cols, rows) { fx.resized.push([id, cols, rows]); },
     stop: async id => { fx.stopped.push(id); return true; }, setView: async patch => { fx.views.push(patch); }, takeSize: async id => { fx.taken.push(id); return true; },
+    // The "Ports" menu: what main would answer for the pane's terminal, and what the page asked for.
+    listPorts: async id => { fx.portsAsked.push(id); return fx.ports; }, openPort: async (id, port, opts) => { fx.portsOpened.push([id, port, opts || null]); return 'http://localhost:' + port; },
+    copyPort: async (id, port) => 'http://localhost:' + port, closePort: async (id, port) => { fx.portsClosed.push([id, port]); return true; }, forgetPort: async () => true,
     command: async (cmd, args) => {
       fx.wsCommands.push({ cmd, ...args });
       if (cmd === 'split') {
@@ -249,10 +252,49 @@ app.whenReady().then(async () => {
   assert.equal(await evaluate("document.querySelector('.size-chip').textContent"), '120×32 · StudioPc');
   assert.equal(await evaluate("document.querySelector('.pane').classList.contains('sized')"), true);
   assert.deepEqual(await evaluate("(() => { const v = termViews.get('x1').term; return [v.cols, v.rows]; })()"), [120, 32], "the terminal is drawn in the size it has there");
-  assert.deepEqual(await evaluate("[...document.querySelectorAll('.pane-tools [data-ws]')].map(b => b.dataset.ws)"), ['split-right', 'split-down', 'take-size', 'stop', 'close-pane']);
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('.pane-tools [data-ws]')].map(b => b.dataset.ws)"), ['split-right', 'split-down', 'ports', 'take-size', 'stop', 'close-pane']);
   assert.equal(await evaluate("document.querySelector('[data-ws=stop]').classList.contains('danger')"), true);
   assert.equal(await evaluate("document.querySelector('[data-ws=close-pane]').title"), 'Hide the pane (Ctrl+Shift+W) · the terminal keeps running');
   assert.equal(await evaluate("document.querySelector('.wtab [data-ws=close-tab]').title"), 'Hide the tab');
+  // The "Ports" menu (docs/PORT-FORWARDING.md 3): asked for when it opens and not before; the terminal's own ports
+  // first, a forward in use ticked with its address here, the ports typed by hand, "Other port…".
+  const portRows = "[...document.querySelectorAll('.menu.ports-menu > button[data-i]')]";
+  assert.deepEqual(await evaluate('fx.portsAsked'), [], 'the ports are not read before the menu opens');
+  assert.equal(await evaluate("document.querySelector('[data-ws=ports]').title"), 'Ports');
+  await evaluate("fx.ports = { node: 'node-a', name: 'StudioPc', ports: [{ port: 3000, process: 'node', own: true }, { port: 5432, process: 'postgres', own: false }], forwards: [{ node: 'node-a', port: 5432, localPort: 54021 }], saved: [8080] }");
+  await evaluate("document.querySelector('[data-ws=ports]').click()");
+  assert.deepEqual(await evaluate(`${portRows}.map(b => [b.textContent.trim(), b.disabled])`), [['Loading…', true]], 'the menu opens at once, its rows come with the answer');
+  await settle();
+  assert.deepEqual(await evaluate('fx.portsAsked'), ['x1']);
+  assert.deepEqual(await evaluate(`${portRows}.map(b => b.textContent.trim())`), ['3000 · node', '8080', 'Other port…', '5432 → localhost:54021 · postgres'], '"Other port…" is above the rest of the ports of the computer');
+  assert.deepEqual(await evaluate(`${portRows}.map(b => b.getAttribute('aria-checked'))`), [null, null, null, 'true'], 'only the forward in use is ticked');
+  assert.equal(await evaluate("document.querySelectorAll('.menu.ports-menu .menu-sep').length"), 3, 'own ports, the remembered ones, "Other port…" and the rest are set apart');
+  await evaluate(`${portRows}[3].dispatchEvent(new MouseEvent('mouseenter'))`); await settle();
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('.menu-sub button')].map(b => b.textContent.trim())"), ['Open in browser', 'Open as https', 'Copy address', 'Stop forwarding']);
+  await evaluate(`${portRows}[1].dispatchEvent(new MouseEvent('mouseenter'))`); await settle();
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('.menu-sub button')].map(b => b.textContent.trim())"), ['Open in browser', 'Open as https', 'Copy address', 'Forget']);
+  await evaluate(`${portRows}[0].click()`); await settle();
+  assert.deepEqual(await evaluate('fx.portsOpened'), [['x1', 3000, null]], "a click on a port's row opens it, flyout or not");
+  assert.equal(await evaluate("document.querySelectorAll('.menu').length"), 0);
+  await click('[data-ws=ports]');
+  await evaluate(`${portRows}.find(b => b.textContent.trim() === 'Other port…').click()`); await settle();
+  assert.equal(await evaluate("document.querySelector('dialog.port-ask button[value=ok]').disabled"), true, 'nothing opens without a port');
+  await evaluate("(() => { const f = document.querySelector('dialog.port-ask input'); f.value = '70000'; f.dispatchEvent(new Event('input')); })()");
+  assert.equal(await evaluate("document.querySelector('dialog.port-ask button[value=ok]').disabled"), true, 'a number that is no port is not taken');
+  await evaluate("(() => { const f = document.querySelector('dialog.port-ask input'); f.value = '9000'; f.dispatchEvent(new Event('input')); })()");
+  await click('dialog.port-ask button[value=ok]');
+  assert.deepEqual(await evaluate('fx.portsOpened.at(-1)'), ['x1', 9000, { remember: true }], 'a port typed by hand opens and is remembered');
+  assert.equal(await evaluate("document.querySelector('dialog.port-ask')"), null);
+  await evaluate("fx.ports = { node: 'node-a', name: 'StudioPc', ports: [], forwards: [], saved: [8080], error: 'update' }");
+  await click('[data-ws=ports]');
+  assert.deepEqual(await evaluate(`${portRows}.map(b => [b.textContent.trim(), b.disabled])`), [['Update AgentDeck on StudioPc to forward ports', true]]);
+  await evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))"); await settle();
+  // The button counts the forwards of its terminal's computer; this pane's terminal runs here, so it shows none.
+  await evaluate("fx.cbs.onForwards([{ node: 'node-a', port: 5432, localPort: 54021 }])"); await settle();
+  assert.equal(await evaluate("document.querySelector('[data-ws=ports] .port-count')"), null);
+  assert.equal(await evaluate("getPortsButtonHtml({ node: 'node-a' }).includes('<span class=\"port-count\">1</span>')"), true);
+  await evaluate('fx.cbs.onForwards([])'); await settle();
+  assert.equal(await evaluate('keptPaneButton.isConnected'), true, "the pane's buttons are the same elements after all that");
   await capture('shared-header');
   await captureLight('shared-header-light');
   await click('[data-ws=take-size]'); await settle();
@@ -332,7 +374,7 @@ app.whenReady().then(async () => {
   await evaluate(`(() => {
     const term = (id, extra) => ({ id, node: '', title: 'pwsh', exited: false, paned: false, createdAt: Date.now(), viewers: [], driver: null, legacy: false, note: '', ...extra });
     fx.ws = structuredClone(fx.ws);
-    fx.ws.terminals.push(term('x3', { cwd: 'C:/work/docs', createdAt: Date.now() - 5000 }), term('x5', { cwd: 'C:/work/bdd-web', createdAt: Date.now() - 9000, paned: true }),
+    fx.ws.terminals.push(term('x3', { cwd: 'C:/work/docs', createdAt: Date.now() - 5000 }), term('x5', { cwd: 'C:/work/demo-web', createdAt: Date.now() - 9000, paned: true }),
       term('x4', { node: 'node-a', cwd: 'D:/src/clinicdesk', title: 'bash · StudioPc', viewers: [{ id: 'node-a', name: 'StudioPc', kind: 'desktop' }] }),
       term('x7', { node: 'node-c', cwd: '/srv/app', title: 'bash · agentdeck-relay', note: 'offline' }),
       term('x6', { cwd: 'C:/work/docs', agent: 'Codex', sessionId: 's3', title: 'Codex' }));
@@ -519,7 +561,7 @@ app.whenReady().then(async () => {
     // With terminals: two lines, each resizes only its own section.
     await evaluate(`(() => {
       const shell = (id, cwd, ago) => ({ id, node: '', cwd, title: 'pwsh', exited: false, paned: false, createdAt: Date.now() - ago, viewers: [], driver: null, legacy: false, note: '' });
-      fx.ws = structuredClone(fx.ws); fx.ws.terminals = [shell('y1', 'C:/work/docs', 1000), shell('y2', 'C:/work/bdd-web', 2000), shell('y3', 'C:/work/agentdeck', 3000)]; fx.cbs.onWorkspace(fx.ws);
+      fx.ws = structuredClone(fx.ws); fx.ws.terminals = [shell('y1', 'C:/work/docs', 1000), shell('y2', 'C:/work/demo-web', 2000), shell('y3', 'C:/work/agentdeck', 3000)]; fx.cbs.onWorkspace(fx.ws);
     })(); 0`); await poll(); await settle(150);
     assert.equal(await evaluate("$('sideTerms').hidden"), false);
     assert.equal(await shown('termsSplitter'), true, 'a line above the Terminals section');

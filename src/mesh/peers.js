@@ -1,5 +1,5 @@
 // The nodes this one trusts (<dir>/peers.json: id = certificate fingerprint, name, kind, the last address it was
-// reached at) and this node's pairing code (<dir>/pair-token.json), which another node must show to be added. A
+// reached at, and `reached`: the address and port this node last called it at itself) and this node's pairing code (<dir>/pair-token.json), which another node must show to be added. A
 // desktop's code is six digits for people to read off a screen and type. A host's (a relay or a resource host, often
 // reachable from the internet) is long: 128 random bits as 26 Crockford base32 characters in groups of four, which
 // cannot be guessed. A code is made anew after every pairing and after too many wrong tries; how fast codes may be
@@ -52,6 +52,11 @@ function createPeers(dir, { long: hostCodes = false } = {}) {
       id: p.id, name: typeof p.name === "string" ? p.name.slice(0, 60) : "", kind,
       ...(kind === "mobile" ? { key: p.key } : {}),
       address: typeof p.address === "string" ? p.address : "", port: Number.isInteger(p.port) ? p.port : 0,
+      // Where this node itself last called it and got it (links.js): kept apart from the address and port above,
+      // which a link the peer opened sets to where it came from and the port it announces - behind a port mapping
+      // (a router's forward, Docker's -p 17421:7421) that is not where it can be called.
+      ...(isObj(p.reached) && typeof p.reached.address === "string" && p.reached.address && Number.isInteger(p.reached.port) && p.reached.port > 0
+        ? { reached: { address: p.reached.address, port: p.reached.port } } : {}),
       // May this peer control this computer (open terminals, run git, write files - mesh/serve.js)? A desktop peer may,
       // and so may a phone; a host (a VPS/relay, or a resource host) may relay and be used as a resource but never
       // reach back into this computer, so a broken or hostile relay cannot control the machines it connects. Fixed

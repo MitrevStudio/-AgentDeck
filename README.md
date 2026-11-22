@@ -425,8 +425,12 @@ The paired computer's **Setup** panel checks Git, SSH keys, trusted hosts, Git i
 
 Install and authenticate agents on the host itself, using a remote terminal for interactive login. Its private SSH key stays on that machine.
 
+### Open a port of the other computer
+
+A dev server started in a remote terminal listens on that computer's `localhost`. The **Ports** button in the terminal's header lists what listens there — the terminal's own ports first — and **Other port…** takes a number by hand. Choosing a port forwards it through the same encrypted link, also through a relay, and opens `http://localhost:<port>` in your browser; the phone app has the same list under **More → Ports** and shows the page inside the app. Only `localhost` of that computer is reachable this way, the forward lives while the link does, and both computers need a version that has the menu.
+
 > [!IMPORTANT]
-> Pairing grants meaningful control: a paired computer or phone can launch terminals and sessions on the host and type into the ones running there. Pair only your own devices, and keep a desktop's mesh port off the public internet — the port meant to be reachable from outside is the relay's.
+> Pairing grants meaningful control: a paired computer or phone can launch terminals and sessions on the host, type into the ones running there and open the ports that listen on its `localhost`. Pair only your own devices, and keep a desktop's mesh port off the public internet — the port meant to be reachable from outside is the relay's.
 
 ## Linux headless host
 
@@ -465,7 +469,7 @@ Or with [`host/docker-compose.yml`](host/docker-compose.yml): `docker compose up
 - The container runs with `--no-discovery`, because mDNS does not leave a container network. Computers reach the relay by its address.
 - Build it yourself from the repository root: `docker build -f host/Dockerfile -t agentdeck-relay .`
 
-The image is relay-only. Running agents on a machine (`--with-api`) needs the agents, their sign-in and `node-pty`, so use the installer below for a resource host.
+The image is a relay by default. The compose file also has an opt-in `host` service (`docker compose --profile host …`) that runs the same image with `--with-api` on the server's own network, so the Ports menu of a terminal on it can forward the server's ports; read the comments there for what that exposes. No agents are installed in the image - use the installer below for a machine that runs agents.
 
 ### Manage the service
 

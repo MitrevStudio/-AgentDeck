@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The in-app view of a forwarded port (ForwardView.java), in Bulgarian: see values/forward.xml. -->
+    <string name="forward_back">Назад</string>
+    <string name="forward_reload">Презареди</string>
+    <string name="forward_close">Затвори</string>
+    <string name="forward_cancel">Отказ</string>
+    <string name="forward_continue">Продължи</string>
+    <string name="forward_ssl_title">Сертификатът не е доверен</string>
+    <string name="forward_ssl_message">%1$s ползва сертификат, на който този телефон няма доверие (например самоподписан). Страницата идва от твоя компютър през AgentDeck. Да се отвори ли въпреки това?</string>
+    <string name="forward_auth_title">Вход в %1$s</string>
+    <string name="forward_auth_user">Потребителско име</string>
+    <string name="forward_auth_password">Парола</string>
+    <string name="forward_auth_ok">Вход</string>
+</resources>

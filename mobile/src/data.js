@@ -9,7 +9,8 @@
 //   provider.start()                  -> Promise     connect; "nodes" follows
 //   provider.stop()                                  disconnect
 //   provider.nodes()                  -> Node[]
-//        { id, name, kind: "desktop" | "headless" | "relay", version, status: "online" | "offline",
+//        { id, name, kind: "desktop" | "headless" | "relay", version, outdated (linked, and its AgentDeck is behind
+//          this app: it works, but not with everything), status: "online" | "offline",
 //          via: [node ids the route goes through], lastSeen (ms), error: "" | why the last try failed (web-client.js
 //          codes: unreachable, nodeOutdated, appOutdated, unpaired, wrongNode, timeout, ...), hub: dialled directly }
 //        A "relay" serves nothing (no sessions): it is only shown in the Computers screen.
@@ -18,7 +19,8 @@
 //        "host.info"         -> { id, name, kind, version, platform, home, agents: ["Claude", "Codex", "OpenCode"],
 //                                 terminals: 2 } - terminals: 2 marks a host that shares its terminals
 //                                 (docs/SHARED-SESSIONS.md 4): viewers, a driver, terminals.resize. Without it the
-//                                 phone keeps the older way (a resize frame for "Fit to phone").
+//                                 phone keeps the older way (a resize frame for "Fit to phone"). ports: 1 marks one
+//                                 that forwards its loopback ports (without it: "update AgentDeck there").
 //        "sessions.list"     -> Snapshot (projects.js localSnapshot):
 //                               { registry: { projects: [{ name, path }] },
 //                                 sessions: [{ id, agent, cwd, title, prompt?, recap?, projectName?, updatedAt }],
@@ -62,6 +64,15 @@
 //                                                    rows, driver }), "terminal.resync" ({ id }: the phone missed output
 //                                                    there and attaches again)
 //        "frame"  { node, frame: { type: "output", id, data, end } }   terminal output
+//        "stream" { node, frame: { type: "stream-data", id, bytes } | { type: "stream-end", id } |
+//                 { type: "stream-ack", id, count } }          a forwarded port's stream (forward.js)
+//        "link"   { node, up }                       the link to a node came up or went down (forward.js: a forward
+//                                                    lives while its node's link does)
+//        Forwarded ports (docs/PORT-FORWARDING.md 2.1, 4) - the store only lists (ports below); forward.js does the
+//        rest on the provider itself: "ports.list" { term } -> [{ port, address, pid, process, own }];
+//        "ports.open" { stream, port } / "ports.close" { stream }; the host's push "port.closed" { stream } comes as
+//        a "notify"; provider.sendBinary(node, bytes) sends a stream frame already encoded; provider.online(node);
+//        provider.buffered(node) -> bytes of that link still waiting on the phone to go out.
 //   provider.id                       the phone's own node id (the owner of the terminals it opens)
 //   optional: provider.connection() -> { state: "none" | "nohub" | "connecting" | "down" | "ok", error },
 //        provider.wake(), provider.pause()
@@ -578,6 +589,9 @@ export function createStore(provider) {
     launch: (id, spec) => provider.request(id, "terminals.open", spec),
     attach,
     closeTerminal: (id, termId) => provider.request(id, "terminals.close", { id: termId }),
+    // What listens on that computer (ports.list): [{ port, address, pid, process, own }], own - of the terminal's
+    // process tree. Asked when the Ports sheet opens, never on a timer; reading the ports there may take a while.
+    ports: (id, termId) => provider.request(id, "ports.list", { term: termId }, { timeout: 15000 }),
     forget: id => provider.forget(id),
     refresh: id => load(id)
   };
