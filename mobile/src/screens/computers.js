@@ -41,8 +41,9 @@ export function render(el, ctx) {
       const terms = n.online ? store.terminals({ node: n.id, running: true }).length : 0;
       return [n.online && n.running ? tn("computers.sessions", n.running) : "", terms ? tn("computers.terminals", terms) : ""].filter(Boolean).join(" · ");
     };
-    // An AgentDeck there that lacks something the app asks for.
-    const outdated = n => n.online && n.kind !== "relay" && store.node(n.id)?.missing.size > 0;
+    // An AgentDeck there that lacks something the app asks for, or that says it is behind this app (a relay too:
+    // provider-relay.js `outdated`, protocol.js LEVEL) - it works, but not with everything.
+    const outdated = n => n.online && (n.outdated || (n.kind !== "relay" && store.node(n.id)?.missing.size > 0));
     // A computer's row opens its screen; a relay's is only text, with its tools at the end.
     const row = n => {
       const inner = `<span class="row-title"><span class="name">${esc(n.name)}</span>${mark(n)}${outdated(n) ? `<span class="tag">${esc(t("computers.outdated"))}</span>` : ""}</span>

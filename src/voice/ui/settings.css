@@ -120,6 +120,8 @@ body:not([data-tab="network"]) [data-for="network"], body:not([data-tab="nodes"]
 .vs-node .who { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 1px; }
 .vs-node .who b { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vs-node .who small { font-size: 11.5px; color: var(--faint); font-family: var(--mono); }
+/* "Update for everything": the link works, so this only whispers (the reason is in its tooltip). */
+.vs-node .older { flex: none; font-size: 11px; color: var(--faint); cursor: help; }
 .vs-node .tag { flex: none; }
 .vs-node .btn { flex: none; }
 .vs-node .input { width: 110px; height: 30px; font-family: var(--mono); letter-spacing: .08em; }

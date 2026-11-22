@@ -8,6 +8,8 @@ import { $, esc, buzz } from "./util.js";
 import { icon, iconBtn } from "./icons.js";
 import { createStore } from "./data.js";
 import { createRelayProvider } from "./provider-relay.js";
+import { createForwards } from "./forward.js";
+import { nativeForward } from "./forward-native.js";
 import { keystore, lock, deviceModel } from "./keystore.js";
 import { isIos, setupPhone } from "./phone.js";
 import { generateKeypair } from "../../src/mesh/noise.js";
@@ -32,6 +34,7 @@ const META_KEY = "agentdeck.nodes"; // provider-relay.js meta: which nodes are r
 const app = $("#app");
 let store = null;
 let link = null; // the relay provider, once there is an identity (paired, or pairing)
+let forwards = null; // the forwarded ports over that provider (forward.js)
 let stack = []; // [{ name, params, scroll }]
 let cleanup = null;
 let shown = null; // the stack entry on the screen now
@@ -263,6 +266,13 @@ async function useProvider(provider) {
   store?.disconnect();
   store = createStore(provider);
   ctx.store = store;
+  // Forwarded ports (docs/PORT-FORWARDING.md 4): on the provider itself, beside the store. Without the app's Forward
+  // plugin (a browser) `available` is false and no screen offers them. A forward goes with the link to its computer:
+  // the page's view was closed with it, and the user is told why.
+  forwards?.dispose();
+  forwards = createForwards({ provider, plugin: nativeForward() });
+  ctx.forwards = forwards;
+  forwards.on("lost", ({ node }) => toast(t("ports.lost", { name: store?.nodeName(node) || "" }), 5000));
   store.on("waiting", banner);
   // The tab bar's badge follows the waiting count.
   store.on("change", () => {
@@ -308,6 +318,9 @@ async function relay() {
 // Every computer that is online hears that it is forgotten; the identity and the list go.
 async function unpair() {
   if (link) for (const n of link.nodes()) { try { await link.forget(n.id); } catch {} }
+  forwards?.dispose();
+  forwards = null;
+  ctx.forwards = null;
   store?.disconnect();
   store = null;
   ctx.store = null;
@@ -324,7 +337,7 @@ async function phoneName() {
   return link?.name || (await keystore.getName()) || (await deviceModel()) || t("phone.name");
 }
 
-const ctx = { store: null, go, back, toast, fail, confirm: confirmSheet, prompt: promptSheet, menu: menuSheet, unpair, relay, rename, phoneName, secure: () => keystore.secure, version: pkg.version };
+const ctx = { store: null, forwards: null, go, back, toast, fail, confirm: confirmSheet, prompt: promptSheet, menu: menuSheet, unpair, relay, rename, phoneName, secure: () => keystore.secure, version: pkg.version };
 
 // ---------- the lifecycle ----------
 // The links do not survive the background reliably (and not at all on iOS): back in the foreground, or when the

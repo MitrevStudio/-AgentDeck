@@ -102,6 +102,7 @@
   }
   const kindOf = n => t(`settings.nodes.kind.${n.kind === "host" ? "host" : "desktop"}`);
   const since = ms => (ms ? I18N.formatDateTime(ms, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "");
+  // A computer whose AgentDeck is behind this one (links.js nodes() `outdated`) says so quietly: it works.
   function nodeRow(n, action) {
     const online = n.status === "online";
     const tag = online ? `<span class="tag ok">${esc(t("settings.nodes.online"))}</span>`
@@ -110,7 +111,7 @@
     const where = via.length ? t("settings.nodes.via", { route: via.join(" ? ") }) : n.address ? `${n.address}${n.port ? `:${n.port}` : ""}` : "";
     return `<div class="vs-node" data-id="${esc(n.id)}">${icon(n.kind === "host" ? "terminal" : "window")}
       <span class="who"><b title="${esc(n.id)}">${esc(n.name || n.id.slice(0, 8))}</b><small>${esc([kindOf(n), n.version ? `v${n.version}` : "", where].filter(Boolean).join(" · "))}</small></span>
-      ${n.error ? `<small role="status">${esc(n.error)}</small>` : ""}${tag}${action}</div>`;
+      ${n.error ? `<small role="status">${esc(n.error)}</small>` : ""}${n.outdated ? `<small class="older" title="${esc(t("settings.nodes.olderHint", { name: n.name || n.id.slice(0, 8) }))}">${esc(t("settings.nodes.older"))}</small>` : ""}${tag}${action}</div>`;
   }
   function render() {
     if (!state) return;

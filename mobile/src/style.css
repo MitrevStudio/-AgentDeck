@@ -640,6 +640,30 @@ button.menu-item:active { background: var(--panel-2); }
 .menu-label { flex: 1; min-width: 0; }
 .menu-step { padding-right: 0; }
 .menu-value { min-width: 44px; text-align: center; font-size: 13px; font-weight: 650; font-variant-numeric: tabular-nums; }
+/* The Ports sheet of a terminal (screens/ports.js): a menu sheet with a head, a list that scrolls when the computer
+   listens on many ports, and a line of fine print. A port's row is a menu item with the number over "process ·
+   forwarded" and a button at its end for the rest; a forward in use has the accent on its globe. */
+.sheet.ports { display: flex; flex-direction: column; max-height: min(78%, 620px); }
+.ports-head { flex: none; display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 2px 12px 6px; }
+.ports-head > .ic { width: 18px; height: 18px; color: var(--muted); }
+.ports-head b { font-size: 15px; font-weight: 650; }
+.ports-head small { flex: 1; min-width: 0; color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ports-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.ports-body .group { margin: 10px 12px 2px; }
+.ports-body .group:first-child { margin-top: 2px; }
+.port-row { display: flex; align-items: center; }
+.port-row .port-open { flex: 1; min-width: 0; min-height: 52px; }
+.port-row .row-title { font-variant-numeric: tabular-nums; }
+.port-row.on .port-open > .ic { color: var(--accent); }
+.port-row.on .row-meta { color: var(--accent); }
+.menu-item:disabled { opacity: .55; }
+.menu-item > .spinner { margin: 0 4px; }
+.port-note { color: var(--muted); font-size: 13.5px; }
+.ports-sub { display: flex; align-items: center; gap: 2px; min-height: var(--tap); }
+.ports-sub b { flex: 1; min-width: 0; font-size: 14.5px; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ports-ask { padding: 0 8px 6px; }
+.ports-ask .ports-sub { margin: 0 -8px 6px; }
+.sheet .ports-fine { flex: none; margin: 6px 12px 2px; font-size: 11.5px; line-height: 1.4; }
 @keyframes rise { from { transform: translateY(100%); } }
 
 /* ---------- less motion, where the phone asks for it ---------- */

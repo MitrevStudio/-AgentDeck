@@ -204,7 +204,7 @@ function equipTerminals(host, { terminals, launch, liveSessions, linkTabs = null
 // under dataDir: the time, why it was started, the repository.
 function createHost({ dataDir, home, isExcluded, untitled, noLauncher, log = () => {}, gitFocused = () => true, gitScope = () => "all", fetch: fetchLimits = globalThis.fetch }) {
   const host = new EventEmitter();
-  const limits = require("../limits").createAllLimits({ fetch: fetchLimits, findExecutable: require("./sessions").findOnPath, onChange: l => host.emit("limits", l) });
+  const limits = require("./limits").createAllLimits({ fetch: fetchLimits, findExecutable: require("./sessions").findOnPath, onChange: l => host.emit("limits", l) });
   const resources = require("./resources").createResources({ home, onChange: r => host.emit("resources", r) });
   const search = createSearch(path.join(dataDir, "search.db"));
   let lastKeysSig = "", lastIndexAt = 0;

@@ -20,11 +20,21 @@ const MAX_LEAF_TUNNELS = 32;
 // are not affected.
 const MAX_WEB_BUFFER = 32 * 1024 * 1024;
 const MAX_WEB_BUFFER_VIA = 48 * 1024 * 1024;
+// A tunnel's bytes go to the next hop as relay.data requests of PIECE each, at most AHEAD of them unanswered at once
+// (one at a time made every 32 KB wait a round trip: 0.5 MB/s through a relay 60 ms away). A hop answers a piece once
+// it took it: written on towards the tunnel's end, or - towards the node that opened it - once its reader has room
+// (HELD_MAX waiting to be read is a hop that never answered: the tunnel goes). So a slow leg slows the sender down
+// and nothing piles up in between. An older node sends one piece at a time and answers at once: both still work.
+const PIECE = 32768;
+const AHEAD = 8;
+const HELD_MAX = 1024 * 1024;
 // neighbors() / leaves(): Map peer id -> its link entry (links.js). acceptWeb(io, via, origin) -> { input(bytes),
 // end() }: io = { send(bytes), close() } is the tunnel's way back; via: the neighbour it came through; origin: the node
 // that opened it, as that neighbour says (relay.open `from`; the neighbour itself when it says nothing).
 function createRelay({ self, neighbors, leaves = () => new Map(), changed, acceptWeb }) {
-  const adverts = new Map(), channels = new Map(), inputs = new Set();
+  // inputs: the tunnels opened from here (their bytes come in on the readable side) -> room(): resolves once that
+  // side is read again.
+  const adverts = new Map(), channels = new Map(), inputs = new Map();
   const webEnds = new Set(); // { via, stream } of the web tunnels that end here
   // The local port of each tunnel's last hop into this node's own listener -> the neighbour it came through: those
   // connections all come from 127.0.0.1, and pairing tries are counted by where they came from (sourceOf).
@@ -72,21 +82,40 @@ function createRelay({ self, neighbors, leaves = () => new Map(), changed, accep
     });
     return stream;
   }
+  // -> feed(chunk): resolves once all of the chunk is on its way to `peer` as pieces of the tunnel `id` (at once
+  // while fewer than AHEAD are unanswered). Called for one chunk at a time. A piece that fails: fail().
+  function feeder(peer, id, fail) {
+    let flying = 0, room = null;
+    return async chunk => {
+      for (let i = 0; i < chunk.length; i += PIECE) {
+        if (flying >= AHEAD) await new Promise(resolve => { room = resolve; });
+        const link = linkOf(peer)?.link;
+        if (!link) throw new Error("Relay unavailable");
+        flying++;
+        link.call("relay.data", { id, data: chunk.subarray(i, i + PIECE).toString("base64") }).then(() => {
+          flying--;
+          const go = room;
+          room = null;
+          go?.();
+        }, fail);
+      }
+    };
+  }
   // from: with `web`, the node the tunnel is opened for (passed on as `from`, for the last hop's acceptWeb).
   async function open(path, { web = false, from = "" } = {}) {
     if (!Array.isArray(path) || path[0] !== self().id || path.length < 2 || path.length > MAX_HOPS || new Set(path).size !== path.length || !path.every(x => ID.test(x))) throw new Error("Invalid relay route");
     if (channels.size >= 128) throw new Error("Relay tunnel limit");
     const peer = path[1], n = neighbors().get(peer), id = randomUUID();
     if (!n) throw new Error("Relay unavailable");
+    const waiting = [];
+    const wake = () => { for (const go of waiting.splice(0)) go(); };
+    const feed = feeder(peer, id, e => stream.destroy(e));
     const stream = bind(peer, id, new Duplex({
-      read() {},
-      write(chunk, _encoding, callback) {
-        (async () => {
-          for (let i = 0; i < chunk.length; i += 32768) await n.link.call("relay.data", { id, data: chunk.subarray(i, i + 32768).toString("base64") });
-        })().then(() => callback(), callback);
-      }
+      read() { wake(); },
+      write(chunk, _encoding, callback) { feed(chunk).then(() => callback(), callback); }
     }));
-    inputs.add(key(peer, id));
+    stream.once("close", wake);
+    inputs.set(key(peer, id), () => new Promise(resolve => { waiting.push(resolve); }));
     // The flag only when set: what an older node is sent stays as it was.
     try { await n.link.call("relay.open", web ? { id, path, web: true, ...(from ? { from } : {}) } : { id, path }); return stream; }
     catch (e) { stream.destroy(); throw e; }
@@ -151,11 +180,10 @@ function createRelay({ self, neighbors, leaves = () => new Map(), changed, accep
         if (socket.destroyed) { downstream.destroy(); throw new Error("Tunnel closed"); }
         channels.set(k, downstream);
         bind(peer, p.id, downstream);
+        const feed = feeder(peer, p.id, () => downstream.destroy());
         downstream.on("data", chunk => {
           downstream.pause();
-          (async () => {
-            for (let i = 0; i < chunk.length; i += 32768) await linkOf(peer)?.link.call("relay.data", { id: p.id, data: chunk.subarray(i, i + 32768).toString("base64") });
-          })().then(() => downstream.resume(), () => downstream.destroy());
+          feed(chunk).then(() => downstream.resume(), () => downstream.destroy());
         });
         downstream.once("end", () => downstream.destroy());
         socket.destroy();
@@ -166,10 +194,11 @@ function createRelay({ self, neighbors, leaves = () => new Map(), changed, accep
     if (method === "relay.close") { channels.delete(k); inputs.delete(k); stream?.destroy(); return true; }
     if (method !== "relay.data" || !stream || typeof p.data !== "string" || p.data.length > 43692) throw new Error("Invalid tunnel data");
     const bytes = Buffer.from(p.data, "base64");
-    // Outgoing virtual sockets receive bytes through their readable side.
-    if (inputs.has(k)) {
-      if (stream.readableLength + bytes.length > 1024 * 1024) { stream.destroy(); throw new Error("Relay buffer limit"); }
-      stream.push(bytes);
+    // Outgoing virtual sockets receive bytes through their readable side; answered once that side has room.
+    const room = inputs.get(k);
+    if (room) {
+      if (stream.readableLength + bytes.length > HELD_MAX) { stream.destroy(); throw new Error("Relay buffer limit"); }
+      if (!stream.push(bytes) && !stream.destroyed) await room();
     } else await new Promise((resolve, reject) => stream.write(bytes, e => e ? reject(e) : resolve()));
     return true;
   }

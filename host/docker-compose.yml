@@ -11,5 +11,44 @@ services:
     volumes:
       - agentdeck-relay:/data
 
+  # Opt-in, not started by `docker compose up -d`: a HOST beside the relay, for forwarding this server's ports to your
+  # computers (the "Ports" menu of a terminal: http://localhost:<port> on your computer reaches localhost:<port> here).
+  # The relay above runs on a bridge network, where localhost is its own container; this one runs on the server's own
+  # network (network_mode: host - Linux; on Docker Desktop that is its VM, not your Windows or macOS), listens on
+  # 127.0.0.1:7422 only and is reached through the relay, as install.sh's AGENTDECK_INSTANCE=api host is:
+  #   docker compose exec relay agentdeck-host pair                             # the relay's code
+  #   docker compose --profile host run --rm host pair-to 127.0.0.1 7421 CODE   # once, BEFORE the host is started
+  #   docker compose --profile host up -d
+  #   docker compose exec host agentdeck-host pair                              # the host's own code
+  # then on a desktop paired with the relay: Settings → Computers → Found → this server's name → that code. A terminal
+  # opened on it is a shell in this container (no agents are installed in it); its "Ports" menu lists what listens on
+  # the server and forwards it.
+  # What it gives: every computer and phone paired with THIS host (its own code - not those paired only with the
+  # relay, which stays a pipe that serves nothing) can connect to any TCP port on the server's localhost, also the
+  # ones bound to 127.0.0.1 because they were not meant to be reached from outside (databases, admin pages), see the
+  # list of listening ports, and run commands in this container as the user `node`. Pair it only with computers you
+  # would give that to.
+  host:
+    profiles: ["host"]
+    image: ghcr.io/mitrevstudio/agentdeck-relay:latest
+    container_name: agentdeck-host
+    restart: unless-stopped
+    network_mode: host
+    # The name your computers see for it is the server's host name; add "--name", "NAME" for another.
+    command: ["run", "--with-api", "--no-discovery", "--listen", "127.0.0.1", "--port", "7422"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('net').connect(7422,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"]
+    volumes:
+      - agentdeck-host:/data
+    # The menu names the process behind a port ("5432 · postgres") only for processes this container can see. For
+    # the server's own, uncomment the three lines below - and know what they are: the container then sees every
+    # process of the server and, as root with SYS_PTRACE, can read their files and memory. That is root on the server
+    # for whoever is paired with this host. Without them the ports are listed and forwarded all the same, unnamed.
+    # Decide before the first start: what root has written in the volume, `node` cannot write afterwards.
+    # pid: host
+    # user: root
+    # cap_add: [SYS_PTRACE]
+
 volumes:
   agentdeck-relay:
+  agentdeck-host:

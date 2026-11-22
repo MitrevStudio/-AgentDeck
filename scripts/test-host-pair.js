@@ -71,6 +71,37 @@ const peersOf = dataDir => JSON.parse(fs.readFileSync(path.join(dataDir, "node",
   assert.ok(used.length >= 10, "the examples are found");
   for (const [file, cmd, rest] of used) for (const flag of rest.match(/--[a-z][a-z-]*/g) || []) assert.ok(allowed(cmd, flag), `${file}: ${cmd} ${flag} is an option it takes`);
 
+  // ---------- what the host loads ----------
+  // The image (host/Dockerfile) and the installer's checkout (install.sh) have host/ and src/host, src/mesh,
+  // src/shared, and the packages of host/package.json - nothing else of the repository. Every file the CLI can come
+  // to require, with the API on too (followed from its source: require("./x"), require(path.join(ROOT, ...)), and the
+  // workers and scripts named path.join(__dirname, "x.js")), is among those: `run --with-api` once stopped at a
+  // require of src/limits.js, which the image did not have.
+  {
+    const rel = f => path.relative(ROOT, f).split(path.sep).join("/");
+    const fileOf = base => [base, `${base}.js`, `${base}.json`, path.join(base, "index.js")].find(p => fs.existsSync(p) && fs.statSync(p).isFile());
+    const seen = new Set(), packages = new Set();
+    (function walk(file) {
+      if (seen.has(file)) return;
+      seen.add(file);
+      assert.match(rel(file), /^(host\/(bin\/|package\.json$)|src\/(host|mesh|shared)\/)/, `the headless host loads ${rel(file)}, which its image and its installer do not have`);
+      if (!file.endsWith(".js")) return;
+      const code = fs.readFileSync(file, "utf8");
+      for (const m of code.matchAll(/require\(\s*(["'])([^"']+)\1\s*\)|require\(path\.join\(ROOT,([^)]+)\)\)|path\.join\(__dirname,\s*"([^"]+\.js)"\)/g)) {
+        if (m[2] && !m[2].startsWith(".")) { if (!m[2].startsWith("node:")) packages.add(m[2].split("/").slice(0, m[2].startsWith("@") ? 2 : 1).join("/")); continue; }
+        const base = m[3] ? path.join(ROOT, ...m[3].split(",").map(s => s.trim().replace(/["']/g, ""))) : path.resolve(path.dirname(file), m[2] || m[4]);
+        const to = fileOf(base);
+        assert.ok(to, `${rel(file)}: ${m[0]} is a file`);
+        walk(to);
+      }
+    })(BIN);
+    assert.ok(seen.size > 40 && [...seen].some(f => rel(f) === "src/host/index.js") && [...seen].some(f => rel(f) === "src/mesh/serve.js"), "the walk reached the host and what it serves");
+    // Not the host's packages, and never loaded on it: Electron (shared/log-file.js, only when no folder is given)
+    // and koffi (host/ports.js: Windows, when the desktop app has it).
+    const has = Object.keys(JSON.parse(read("host/package.json")).dependencies);
+    for (const name of packages) assert.ok(has.includes(name) || ["electron", "koffi"].includes(name), `the headless host requires the package ${name}, which host/package.json does not have`);
+  }
+
   // The relay, with its data laid out as the headless host keeps it: <data>/node/{node.json, pair-token.json, ...}.
   const relayData = path.join(root, "relay"), relayNode = path.join(relayData, "node");
   fs.mkdirSync(relayNode, { recursive: true });

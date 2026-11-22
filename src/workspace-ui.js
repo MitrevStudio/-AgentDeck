@@ -561,10 +561,111 @@ function renderPaneHeads(tab) {
         <button class="icon-btn" data-ws="split-down" title="${esc(t("ws.splitDown"))}">${icon("splitDown")}</button>
         ${many ? `<button class="icon-btn" data-ws="reset-panes" title="${esc(t("ws.resetPanes"))}" aria-label="${esc(t("ws.resetPanes"))}">${icon("equal")}</button>` : ""}
         ${many ? `<button class="icon-btn ${tab.zoom ? "on" : ""}" data-ws="zoom" title="${esc(t(tab.zoom ? "ws.unzoom" : "ws.zoom"))}">${icon("maximize")}</button>` : ""}
+        ${getPortsButtonHtml(x)}
         ${foreign ? `<button class="icon-btn on" data-ws="take-size" title="${esc(t("term.useMySize"))}" aria-label="${esc(t("term.useMySize"))}">${icon("fit")}</button>` : ""}
         <button class="icon-btn danger" data-ws="stop" title="${esc(t("term.stopAll"))}" aria-label="${esc(t("term.stopAll"))}">${icon("stop")}</button>
         <button class="icon-btn" data-ws="close-pane" title="${esc(t("ws.closePane"))}" aria-label="${esc(t("ws.closePane"))}">${icon("x")}</button>`);
   });
+}
+// ---------- ports (docs/PORT-FORWARDING.md 3) ----------
+// A pane's "Ports" button: what listens on the terminal's computer, opened in the browser here - forwarded first when
+// that is another computer. The only way in: addresses in a terminal's text are not links. The list is asked for when
+// the menu opens and at no other time; main pushes only the forwards themselves ([{ node, port, localPort }]), which
+// the button counts for its terminal's computer.
+let portForwards = [];
+const getForwardsOf = node => (node ? portForwards.filter(f => f.node === node) : []);
+function setPortForwards(list) {
+  portForwards = Array.isArray(list) ? list : [];
+  const tab = getShownTab();
+  if (tab && !isPageLoading()) renderPaneHeads(tab);
+}
+// The same element until the count changes (setHtml), as the other buttons of the header.
+function getPortsButtonHtml(x) {
+  const n = getForwardsOf(x?.node).length;
+  const title = n ? t("term.ports.active", { n }) : t("term.ports.title");
+  return `<button class="icon-btn ${n ? "on counted" : ""}" data-ws="ports" title="${esc(title)}" aria-label="${esc(title)}" aria-haspopup="menu">${icon("globe")}${n ? `<span class="port-count">${n}</span>` : ""}</button>`;
+}
+const isPortNumber = v => Number.isInteger(v) && v >= 1 && v <= 65535;
+// "Other port…": a port number asked for in a dialog of AgentDeck's own (as common.js confirmDialog). Answers the
+// number, or 0 when given up. Enter opens only a valid one.
+function askPort(name) {
+  return new Promise(resolve => {
+    const d = document.createElement("dialog");
+    d.className = "dialog confirm port-ask";
+    d.innerHTML = `<form method="dialog" class="confirm-form"><h2>${esc(t("term.ports.askTitle"))}</h2><p>${esc(t("term.ports.askBody", { name }))}</p>
+      <input class="input" inputmode="numeric" maxlength="5" autocomplete="off" spellcheck="false" autofocus aria-label="${esc(t("term.ports.askTitle"))}">
+      <div class="confirm-actions"><button class="btn sm" type="button" data-cancel>${esc(t("common.cancel"))}</button>
+      <button class="btn sm primary" value="ok" disabled>${esc(t("term.ports.open"))}</button></div></form>`;
+    const field = d.querySelector("input"), ok = d.querySelector("button[value=ok]");
+    const read = () => (/^\d{1,5}$/.test(field.value.trim()) ? Number(field.value.trim()) : 0);
+    field.addEventListener("input", () => { ok.disabled = !isPortNumber(read()); });
+    d.querySelector("[data-cancel]").addEventListener("click", () => d.close("cancel"));
+    d.addEventListener("close", () => { d.remove(); resolve(d.returnValue === "ok" && isPortNumber(read()) ? read() : 0); });
+    document.body.append(d);
+    d.showModal();
+  });
+}
+// The menu's rows from main's answer (preload.js listPorts). A port's row opens it in the browser - forwarded first
+// for another computer - and carries the rest in its flyout; a forward in use is ticked and shows its address here
+// when the number differs. After the terminal's own ports: those typed by hand for this project and the forwards that
+// nothing listens behind any more (so they can still be stopped), then "Other port…", and only then the rest of the
+// computer's ports - dozens on a Windows machine, and what the user came for must not be below them.
+function getPortsItems(term, data) {
+  const name = data.name || t("term.thisComputer");
+  const note = label => ({ label, icon: "alert", disabled: true });
+  if (data.error === "offline") return [note(t("term.ports.offline", { name }))];
+  if (data.error === "update") return [note(t("term.ports.needsUpdate", { name }))];
+  const active = new Map((data.forwards || []).map(f => [f.port, f.localPort]));
+  const saved = new Set(data.saved || []);
+  const open = (port, opts) => () => window.terminals.openPort(term, port, opts);
+  const row = (port, process = "") => {
+    const local = active.get(port);
+    return {
+      label: [local && local !== port ? `${port} → localhost:${local}` : String(port), process].filter(Boolean).join(" · "),
+      icon: "globe", ...(data.node ? { checked: active.has(port) } : {}), run: open(port),
+      items: [
+        { label: t("term.ports.open"), icon: "open", run: open(port) },
+        { label: t("term.ports.openHttps"), icon: "key", run: open(port, { https: true }) },
+        { label: t("term.ports.copy"), icon: "copy", run: async () => toast(t("term.ports.copied", { address: await window.terminals.copyPort(term, port) })) },
+        ...(active.has(port) ? [{ label: t("term.ports.stop"), icon: "stop", danger: true, run: async () => { await window.terminals.closePort(term, port); toast(t("term.ports.stopped", { port })); } }] : []),
+        ...(saved.has(port) ? [{ label: t("term.ports.forget"), icon: "trash", run: () => window.terminals.forgetPort(term, port) }] : [])
+      ]
+    };
+  };
+  const ports = data.ports || [], listed = new Set(ports.map(p => p.port));
+  const own = ports.filter(p => p.own).map(p => row(p.port, p.process)), rest = ports.filter(p => !p.own).map(p => row(p.port, p.process));
+  const kept = [...new Set([...saved, ...active.keys()])].filter(p => !listed.has(p)).sort((a, b) => a - b).map(p => row(p));
+  const head = data.error ? [note(data.message || t("term.ports.failed"))] : ports.length ? [] : [note(t("term.ports.empty", { name }))];
+  const other = { label: t("term.ports.other"), icon: "plus", run: async () => {
+    const port = await askPort(name);
+    if (port) await window.terminals.openPort(term, port, { remember: true });
+  } };
+  const groups = [head, own, kept, [other], rest].filter(g => g.length);
+  return groups.flatMap((g, i) => (i ? [{ separator: true }, ...g] : g));
+}
+// renderer.js's menu opens a row's flyout on a click; a port's row has both a flyout and an action of its own, and
+// the click is the action (the flyout opens as the pointer reaches the row, and with the right arrow).
+function wirePortRows(menu) {
+  const click = menu.onclick;
+  menu.onclick = e => {
+    const x = menu.__items?.[Number(e.target.closest("[data-i]")?.dataset.i)];
+    if (!x?.items || !x.run || x.disabled) return click(e);
+    closeGroupMenu();
+    Promise.resolve().then(() => x.run()).catch(err => toast(err.message, true));
+  };
+}
+// The menu opens at once with "Loading…" (reading the ports there takes a moment) and gets its rows when the answer
+// comes - unless it was closed meanwhile.
+async function openPortsMenu(btn, term) {
+  openMenu(btn, "", [{ label: t("term.ports.loading"), icon: "globe", disabled: true }], "ports-menu");
+  const menu = groupMenu;
+  const data = await window.terminals.listPorts(term).catch(e => ({ error: "failed", message: getErrorText(e.message) }));
+  if (groupMenu !== menu || !menu.isConnected) return;
+  closeDescendants(menu);
+  renderMenuLayer(menu, getPortsItems(term, data || { error: "failed" }));
+  wirePortRows(menu);
+  if (btn.isConnected) placeGroupMenu(btn);
+  focusFirst(menu);
 }
 // The other devices that have a terminal open: an eye and how many, their names in the tooltip ("" when none).
 function getViewersHtml(x, cls) {
@@ -618,6 +719,9 @@ window.terminals.onWorkspace(next => {
   renderWorkspace();
   onWorkspaceChanged();
 });
+// The forwards of this computer, now and whenever one starts or stops (the "Ports" buttons count them).
+window.terminals.onForwards?.(setPortForwards);
+window.terminals.getForwards?.().then(setPortForwards, () => {});
 window.prefs.onChanged(p => { requestAnimationFrame(applyTermTheme); applyTermFont(p.terminalFontSize); });
 new ResizeObserver(() => fitShown()).observe($("panes"));
 
@@ -686,6 +790,8 @@ $("panes").addEventListener("click", e => {
   if (!pane) return;
   const term = pane.dataset.term, tab = getShownTab();
   if (!btn) { if (tab?.focus !== term) runWorkspace("focus", { term }); return; }
+  // The menu is of this pane whichever has the focus, and keeps the keyboard: nothing is focused for it.
+  if (btn.dataset.ws === "ports") return openPortsMenu(btn, term).catch(err => toast(err.message, true));
   focusAfterRender = true;
   const run = () => {
     if (btn.dataset.ws === "split-right") return runWorkspace("split", { dir: "right" });

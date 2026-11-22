@@ -65,7 +65,8 @@ Options for run:
   --interface ADDR            the network interface's address to announce on (default: all of them)
   --name NAME                 the name peers see (default: this machine's host name)
   --no-discovery              no discovery on the local network (mDNS)
-  --pair-token TOKEN          a fixed pairing code (at least 20 letters or digits; default: a long code of its own)
+  --pair-token TOKEN          the pairing code set at every start (at least 20 letters or digits; like any code it
+                              is replaced once a computer has paired with it; default: a long code of its own)
 Options for pair-to:
   --name NAME                 the name peers see
 Options for pair-relay:

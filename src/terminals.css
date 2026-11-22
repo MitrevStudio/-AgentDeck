@@ -95,11 +95,20 @@
 .pane.focused .pane-head { color: var(--text); }
 .pane-title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 550; cursor: grab; }
 .pane-note { flex: none; padding: 0 6px; border-radius: var(--r-pill); background: var(--accent-weak); color: var(--accent); font-size: 11px; }
-.pane-tools { flex: none; display: flex; gap: 1px; opacity: 0; transition: opacity var(--dur-fast); }
-.pane:hover .pane-tools, .pane.focused .pane-tools, .pane-tools:focus-within { opacity: 1; }
-.pane-tools .icon-btn { width: 24px; height: 24px; border-radius: 6px; }
+/* The tools show on the pane in use; "Ports" with forwards in use (.counted) shows on every pane. */
+.pane-tools { flex: none; display: flex; gap: 1px; }
+.pane-tools .icon-btn { width: 24px; height: 24px; border-radius: 6px; opacity: 0; transition: opacity var(--dur-fast); }
+.pane:hover .pane-tools .icon-btn, .pane.focused .pane-tools .icon-btn, .pane-tools:focus-within .icon-btn, .pane-tools .icon-btn.counted { opacity: 1; }
 .pane-tools .icon-btn .i { width: 14px; height: 14px; }
 .pane-tools .icon-btn.on { color: var(--accent); }
+/* "Ports" with forwards in use (workspace-ui.js): how many, beside the icon. */
+.pane-tools .icon-btn.counted { display: inline-flex; align-items: center; justify-content: center; gap: 3px; width: auto; padding: 0 5px; }
+.port-count { font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+/* The "Ports" menu: "3000 → localhost:53341 · node" in full, a note in full, and a long list (a Windows machine
+   listens on dozens of ports) stays below its button instead of covering it. */
+.menu.ports-menu { max-width: 420px; max-height: min(480px, calc(100vh - 120px)); }
+.menu.ports-menu button:disabled span { white-space: normal; }
+.port-ask .input { width: 100%; font-family: var(--mono); }
 .pane-head .ctx-chip { height: 20px; line-height: 18px; font-size: 11px; }
 /* The size another device set (workspace-ui.js): a quiet chip, what to do about it in its tooltip. */
 .size-chip {

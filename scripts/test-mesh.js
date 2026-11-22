@@ -50,6 +50,13 @@ const node = (name, api) => {
   await Promise.all([upA, upB]);
   assert.deepEqual(a2.nodes().map(n => [n.name, n.status]), [["B", "online"]]);
   assert.deepEqual(b.nodes().map(n => [n.name, n.status]), [["A", "online"]]);
+  // A linked computer whose AgentDeck is behind this one is listed as outdated (protocol.js LEVEL): one of this
+  // build is not, one that told no level (every release before levels) is.
+  assert.deepEqual([a2.nodes()[0].outdated, b.nodes()[0].outdated], [false, false]);
+  {
+    const { LEVEL, outdated } = require("../src/mesh/protocol");
+    assert.deepEqual([outdated({}), outdated(undefined), outdated({ level: LEVEL - 1 }), outdated({ level: LEVEL }), outdated({ level: LEVEL + 1 }), outdated({ level: "x" })], [true, true, true, false, false, true]);
+  }
   assert.notEqual(b.self().code, selfB.code, "a new code after pairing");
 
   // Requests both ways, and an event.

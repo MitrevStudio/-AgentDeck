@@ -1,8 +1,8 @@
 const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
 const { PassThrough } = require("node:stream");
-const { createCodexLimits, parseLimits } = require("../src/codex-limits");
-const { forecast } = require("../src/limits");
+const { createCodexLimits, parseLimits } = require("../src/host/codex-limits");
+const { forecast } = require("../src/host/limits");
 
 assert.deepEqual(parseLimits({ rateLimits: { primary: { usedPercent: 25, windowDurationMins: 300, resetsAt: 1800000000 } } }),
   [{ key: "codex:primary", label: "", util: 25, durationMins: 300, resetsAt: 1800000000000 }]);

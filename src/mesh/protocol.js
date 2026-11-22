@@ -5,6 +5,15 @@
 const { HostError } = require("../host/errors");
 
 const PROTOCOL = 1;
+// What this build of the mesh can do with a peer that can do it too, told in the hello as `level`. PROTOCOL is for
+// two nodes that cannot talk at all; this is for two that can, but not about everything: a peer with a lower level
+// works, and is listed as `outdated` (links.js, web-client.js nodes()) so that Settings can say "update it for the
+// rest". Raise it with a change of that kind, and say here what the level brought.
+//   1 (or no level told): everything before levels.
+//   2: relay tunnels with flow control and several pieces at once (relay.js); forwarded ports (PORT-FORWARDING.md).
+const LEVEL = 2;
+// Whether a peer that said `info` in its hello is behind this build.
+const outdated = info => (Number(info?.level) || 1) < LEVEL;
 const DEFAULT_TIMEOUT_MS = 30000;
 const MAX_TEXT = 16 * 1024 * 1024;
 
@@ -106,4 +115,4 @@ function createLink(ws, { onRequest = () => { throw new HostError("unknownMethod
   return { call, notify, sendBinary, close, isOpen, buffered, ws };
 }
 
-module.exports = { createLink, PROTOCOL };
+module.exports = { createLink, PROTOCOL, LEVEL, outdated };

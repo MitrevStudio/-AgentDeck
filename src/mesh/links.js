@@ -24,7 +24,7 @@ const { createServer } = require("./server");
 const { connect } = require("./client");
 const { connectViaProxy } = require("./proxy");
 const { createDiscovery } = require("./discovery");
-const { createLink, PROTOCOL } = require("./protocol");
+const { createLink, PROTOCOL, LEVEL, outdated } = require("./protocol");
 const webLink = require("./web-link");
 const { idOf } = require("./noise");
 const { HostError } = require("../host/errors");
@@ -73,18 +73,20 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
     discoverable: identity.settings.discoverable, proxy: identity.settings.proxy, code: peers.code(), pairFailures: guard.stats() });
   // relayOnly: this node serves no api (its installer set none); peers use it to skip resource fetches and to label it.
   // web: 1 - this node takes web links and passes relay.open's `web` on (relay.js marks its routes so).
-  const hello = () => ({ id: identity.id, name: identity.settings.name, kind, version, protocol: PROTOCOL, relay: 1, relayOnly, web: 1, port: server?.port() || 0 });
+  const hello = () => ({ id: identity.id, name: identity.settings.name, kind, version, protocol: PROTOCOL, level: LEVEL, relay: 1, relayOnly, web: 1, port: server?.port() || 0 });
   // The kind a peer is shown and served as: what it says, except that "mobile" is what was paired, never what is said.
   const kindOf = (p, info) => (p.kind === "mobile" || info?.kind === "mobile" ? p.kind : info?.kind || p.kind);
 
   // ---------- the nodes as listed ----------
-  // A phone is listed with relayOnly: it serves no api, so there is nothing of it to fetch.
+  // A phone is listed with relayOnly: it serves no api, so there is nothing of it to fetch. outdated: a linked
+  // computer whose AgentDeck is behind this one (protocol.js LEVEL) - it works, but not with everything; a phone is
+  // not told so here (its app says it itself).
   function nodes() {
     if (!peers) return []; // not started yet
     return peers.list().map(p => {
       const l = links.get(p.id);
       return { id: p.id, name: l?.info?.name || p.name, kind: kindOf(p, l?.info), version: l?.info?.version || "", address: l?.address || p.address, port: l?.port || p.port,
-        via: l?.route?.slice(1, -1) || [], status: l ? "online" : "offline", error: incompatible.get(p.id) || "", relayOnly: p.kind === "mobile" || Boolean(l?.info?.relayOnly), lastSeen: l ? Date.now() : p.lastSeen, pairedAt: p.pairedAt };
+        via: l?.route?.slice(1, -1) || [], status: l ? "online" : "offline", error: incompatible.get(p.id) || "", relayOnly: p.kind === "mobile" || Boolean(l?.info?.relayOnly), outdated: Boolean(l) && p.kind !== "mobile" && outdated(l.info), lastSeen: l ? Date.now() : p.lastSeen, pairedAt: p.pairedAt };
     });
   }
   const changed = () => out.emit("nodes", nodes());
@@ -218,12 +220,19 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
       unpaired();
       return null;
     }
+    // Where this node called the peer itself and got it (not through a relay): that address and port are what it is
+    // called at again, whatever port the peer announces - behind a port mapping (a router's forward, Docker's
+    // -p 17421:7421) the peer knows only its inside number. Kept in the peer's record as `reached`, apart from its
+    // address and port, which a link the peer opened sets to where it came from and what it announces, as before.
+    const dialled = initiatedHere && !route && !web && address && port ? { address, port } : null;
     // Two links to the same node: the one its smaller-id end opened stays. A phone always calls; its newest link is
     // the one that works (the older is a network it left).
     const other = links.get(id);
     if (other) {
       const keepThis = Boolean(web) || initiatedHere === (identity.id < id);
       if (!keepThis) {
+        // The call got through all the same: where to is remembered.
+        if (dialled) peers.update(id, { reached: dialled });
         link.close(1000, "duplicate");
         return other.link;
       }
@@ -233,11 +242,11 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
       other.link.close(1000, "duplicate");
     }
     if (!web && !route && info.routed && Array.isArray(info.route) && info.route[0] === id && info.route.at(-1) === identity.id) route = [...info.route].reverse();
-    const entry = { link, initiatedHere, info, address, route, web: Boolean(web), routed: Boolean(route || (!web && info.routed)), port: web ? 0 : Number(info.port) || port };
+    const entry = { link, initiatedHere, info, address, route, web: Boolean(web), routed: Boolean(route || (!web && info.routed)), port: web ? 0 : dialled ? port : Number(info.port) || port };
     links.set(id, entry);
     clearRetry(id);
     relay.refresh(); relay.broadcast();
-    peers.update(id, { name: info.name || peer.name, kind: info.kind || peer.kind, address: entry.routed ? peer.address : address, port: entry.routed ? peer.port : entry.port, lastSeen: Date.now() });
+    peers.update(id, { name: info.name || peer.name, kind: info.kind || peer.kind, address: entry.routed ? peer.address : address, port: entry.routed ? peer.port : entry.port, ...(dialled ? { reached: dialled } : {}), lastSeen: Date.now() });
     log(`link up: ${info.name || id.slice(0, 8)} at ${address}:${entry.port} (${initiatedHere ? "called" : "answered"})`);
     out.emit("link", { node: id, up: true });
     changed();
@@ -258,12 +267,16 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
     timer.unref?.();
     retries.set(id, { timer, delay });
   }
-  // Where a peer may be: where it was last reached, and where the network says it is now.
+  // Where a peer may be: where the network says it is now, where it was last linked from or to, and where this node
+  // last called it itself (`reached`, adopt) - the one that still holds when the peer is behind a port mapping and a
+  // link it opened has since put its own address and announced port in the record.
   function candidates(peer) {
     const list = [];
+    const add = (address, port) => { if (address && port && !list.some(c => c.address === address && c.port === port)) list.push({ address, port }); };
     const seen = discovery?.list().find(x => x.id === peer.id);
-    if (seen) list.push({ address: seen.address, port: seen.port });
-    if (peer.address && peer.port && !list.some(c => c.address === peer.address && c.port === peer.port)) list.push({ address: peer.address, port: peer.port });
+    if (seen) add(seen.address, seen.port);
+    add(peer.address, peer.port);
+    add(peer.reached?.address, peer.reached?.port);
     return list;
   }
   async function connectTo(id) {
@@ -507,7 +520,8 @@ function createLinks({ dir, defaultName, kind, version, api, log = () => {}, dis
       if (e.code === "unpaired" || e.code === "handshake") throw new HostError("pairOutdated", "That AgentDeck is older and pairs in a way this one no longer accepts. Update it and pair again.");
       throw e;
     }
-    peers.add({ id, name: String(r?.name || "").slice(0, 60), kind: r?.kind === "host" ? "host" : "desktop", address: route ? "" : address, port: route ? 0 : port });
+    // Called and got at address:port: that is where it is called again (adopt, `reached`).
+    peers.add({ id, name: String(r?.name || "").slice(0, 60), kind: r?.kind === "host" ? "host" : "desktop", address: route ? "" : address, port: route ? 0 : port, ...(route ? {} : { reached: { address, port } }) });
     // Through a relay `address` is the node's id: the relay it went through is what says where.
     const hop = route && (links.get(route[1])?.info?.name || peers.get(route[1])?.name || route[1].slice(0, 8));
     log(`paired with ${r?.name || id.slice(0, 8)} ${route ? `through ${hop}` : `at ${address}:${port}`}`);

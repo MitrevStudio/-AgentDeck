@@ -17,6 +17,12 @@
 // that falls under LAG_LOW (looked at with the next output, and every LAG_CHECK_MS while any is behind) it hears
 // "terminal.resync" { id } once and attaches again: what it missed comes from the scrollback.
 //
+// Forwarded ports (docs/PORT-FORWARDING.md 2): "ports.open" joins a stream the peer names to a TCP port on this
+// computer's loopback (host/port-streams.js), "ports.close" ends it, "ports.list" says what listens here. The stream's
+// bytes are frames too, through the same gate: a ports request counts for `ctl` as a terminals one does, and a
+// stream frame is taken only for a stream its sender opened. A stream that ends here by itself, not cleanly, is said
+// to the peer as "port.closed" { stream }; a link that drops takes the peer's streams with it.
+//
 // createServed({ host, env }) -> { api, attach(links) }: api(method, params, peer) answers a peer's request;
 // attach(links) hooks the host's events to the links once they exist.
 const { HostError } = require("../host/errors");
@@ -27,6 +33,7 @@ const { savePaste, MAX_BYTES } = require("../host/paste");
 const { localSnapshot } = require("./projects");
 const { SESSION_ID, isAgent } = require("../host/launch");
 const { TEXT_MAX } = require("../host/send-text");
+const { createPortStreams } = require("../host/port-streams");
 // The most of one message a peer may ask sessions.preview for. A preview is six messages: at this bound it is at
 // most about 100 000 characters (a few hundred kilobytes for text that is not Latin) - still quick over a mobile
 // link, which carries it through the relay in 32 KB pieces - and all but the longest answers fit whole.
@@ -54,8 +61,13 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
   const path = require("node:path");
   const fs = require("node:fs");
   let links = null, layout = null, lagTimer = null;
-  const ctl = new Set();      // peers that made a terminals request on their current link: their frames are taken
+  const ctl = new Set();      // peers that made a terminals or ports request on their current link: their frames are taken
   const behind = new Map();   // peer id -> Set of terminal ids whose output it is behind on
+  const ports = createPortStreams({
+    send: (peer, frame) => links?.sendBinary(peer, frame),
+    notify: (peer, name, data) => links?.notify(peer, name, data),
+    ownPort: () => links?.self()?.port || 0
+  });
 
   // ---------- tabs as a peer sees them ----------
   const selfId = () => links?.self()?.id || "";
@@ -106,7 +118,8 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
   const liveOut = () => (host.liveAgents || host.liveSessions)();
   const METHODS = {
     // terminals: 2 - this host shares its terminals as docs/SHARED-SESSIONS.md 4 says (viewers, driver, resize).
-    "host.info": () => ({ ...(links?.self() || {}), code: undefined, platform: process.platform, home: host.home, agents: sessions.get()?.agents || [], terminals: 2, ...info() }),
+    // ports: 1 - it forwards its loopback ports (ports.*, docs/PORT-FORWARDING.md).
+    "host.info": () => ({ ...(links?.self() || {}), code: undefined, platform: process.platform, home: host.home, agents: sessions.get()?.agents || [], terminals: 2, ports: 1, ...info() }),
     "sessions.list": async () => localSnapshot(await sessions.data()),
     // Each with `term`: the terminal here the session runs in, or "". With a stand-in for each agent terminal that
     // has no live session (host/index.js liveAgents), so a peer lists it under its agents too.
@@ -216,6 +229,22 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
       if (typeof p?.data === "string" && p.data.length > Math.ceil(MAX_BYTES * 4 / 3) + 4) throw new HostError("tooBig");
       return savePaste(str(p?.name, 200), Buffer.from(str(p?.data, Infinity), "base64"));
     },
+    // {term?} -> [{ port, address, pid, process, own }]: the TCP ports something listens on here; own: the process is
+    // in the tree of the terminal `term` (one that is gone marks none). Asked when a menu opens, never on a timer.
+    "ports.list": async p => {
+      const term = p?.term === undefined ? "" : str(p.term, 64);
+      const rootPid = term ? terminals.getTabs().find(x => x.id === term)?.pid : undefined;
+      // host/ports.js never rejects: a list it could not read is empty and marked `failed`, which JSON would lose.
+      const list = await require("../host/ports").listListening({ rootPid });
+      if (list.failed) throw new HostError("portsUnread", "The listening ports could not be read there.");
+      // The mesh's own port is never forwarded (port-streams.js: "notAllowed"), so it is not offered.
+      const own = links?.self()?.port || 0;
+      return list.filter(x => x.port !== own);
+    },
+    // {stream (a UUID the peer makes), port} -> true once connected to that port on this computer's loopback; the
+    // stream's bytes then pass as frames (port-streams.js: refused, notAllowed, tooManyStreams, invalidData).
+    "ports.open": (p, peer) => ports.open(peer.id, p?.stream, p?.port),
+    "ports.close": (p, peer) => { ports.close(peer.id, str(p?.stream, 36)); return true; },
     "git.branches": p => setup.branches(str(p?.dir, 4096)),
     "setup.status": () => setup.status(),
     "setup.sshKey.generate": () => setup.generateKey(),
@@ -225,7 +254,7 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
   function api(method, params, peer) {
     if (!Object.hasOwn(METHODS, method)) throw new HostError("unknownMethod");
     // Only a peer that may control this computer gets here (links.js); from now on its frames are taken too.
-    if (method.startsWith("terminals.") && typeof peer?.id === "string") ctl.add(peer.id);
+    if ((method.startsWith("terminals.") || method.startsWith("ports.")) && typeof peer?.id === "string") ctl.add(peer.id);
     return METHODS[method](params, peer);
   }
 
@@ -301,8 +330,9 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
         links.notifyAll("live", live);
       }
     }, liveMs).unref();
-    // A peer's keystrokes and sizes, taken only from a peer that asked for terminals on this link (ctl) and may see
-    // this computer. Keystrokes go to any running terminal; they count for the size only from a viewer. The terminal's
+    // A peer's keystrokes and sizes, taken only from a peer that asked for terminals or ports on this link (ctl) and
+    // may see this computer. A forwarded port's stream frame goes to the stream that peer opened (none: dropped), never
+    // on to the terminals. Keystrokes go to any running terminal; they count for the size only from a viewer. The terminal's
     // own answers (isReport: the device's xterm.js answering a program's question, also one replayed from the
     // scrollback it was just sent) are written, but are no one's typing - else merely opening a terminal would move its
     // size to the opener. A size is a viewer's want; from anyone else it is dropped.
@@ -310,6 +340,7 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
       if (!ctl.has(node) || !links.sees(node)) return;
       const f = frames.decode(data);
       if (!f || f.type === "output") return;
+      if (f.type.startsWith("stream-")) return void ports.frame(node, f);
       const tab = terminals.getTabs().find(x => x.id === f.id);
       if (!tab || tab.exited) return;
       if (f.type === "input") {
@@ -322,17 +353,18 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
         try { viewers.want(f.id, node, f.cols, f.rows); } catch {} // a size out of bounds is dropped
       }
     });
-    // A link that dropped: the peer views nothing any more (a size it drove is handed back), and its frames are not
-    // taken until it asks again.
+    // A link that dropped: the peer views nothing any more (a size it drove is handed back), the streams of its
+    // forwarded ports are closed, and its frames are not taken until it asks again.
     links.on("link", ({ node, up }) => {
       if (up) return;
       ctl.delete(node);
       behind.delete(node);
+      ports.drop(node);
       viewers.leave(node);
     });
   }
 
-  return { api, attach, get layout() { return layout; } };
+  return { api, attach, ports, get layout() { return layout; } };
 }
 
 module.exports = { createServed };

@@ -1,6 +1,8 @@
 # AgentDeck relay: routes mesh traffic between paired AgentDecks (end-to-end TLS tunnels it cannot read or act on)
 # and runs nothing of its own. Built from the repository root:
 #   docker build -f host/Dockerfile -t agentdeck-relay .
+# The same image is a resource host when its command has `--with-api` (docker-compose.yml, the service "host"): the
+# computers paired with it open terminals in the container and forward its ports. No agent is installed in it.
 # Its identity, pairing code and paired computers live in /data: keep that a volume, or every start is a new relay
 # that has to be paired again.
 FROM node:24-alpine
@@ -8,10 +10,19 @@ FROM node:24-alpine
 ENV NODE_ENV=production
 WORKDIR /app
 
-# The packages first, so a code change does not reinstall them. --ignore-scripts: node-pty is not built, as a relay
-# never opens a terminal, and is removed (only `--with-api` would need it, with a C toolchain and the agents installed).
+# The packages first, so a code change does not reinstall them. node-pty is built here, with a compiler that stays
+# for this one layer only: a relay never opens a terminal, but the same image run with `--with-api` does (a shell in
+# the container, whose "Ports" menu is the way to this machine's ports - docker-compose.yml, the service "host").
+# What node-pty brings for Windows and macOS (58 MB of prebuilt binaries, winpty, conpty) is not kept.
 COPY host/package.json host/package-lock.json host/
-RUN cd host && npm ci --omit=dev --ignore-scripts --no-audit --no-fund && rm -rf node_modules/node-pty && npm cache clean --force
+RUN apk add --no-cache --virtual .build python3 make g++ \
+ && cd host && npm ci --omit=dev --no-audit --no-fund \
+ && rm -rf node_modules/node-pty/prebuilds node_modules/node-pty/deps node_modules/node-pty/third_party \
+ && node -e 'require("node-pty")' \
+ && npm cache clean --force && rm -rf /root/.cache /root/.npm /tmp/* \
+ && apk del .build
+# The terminals' shell (src/host/terminals-pty.js asks $SHELL): Alpine has no bash.
+ENV SHELL=/bin/sh
 
 # What install.sh checks out: the host and the shared code it runs.
 COPY host/bin host/bin

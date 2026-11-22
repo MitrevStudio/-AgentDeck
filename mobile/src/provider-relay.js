@@ -11,7 +11,8 @@
 // Beyond data.js's interface it offers the pairing (pairAll, pairDirect, pairVia, routes), pause() (the app went to the
 // background: nothing is dialled until wake), wake() (the app came back to the foreground or the network changed:
 // what is not linked is dialled at once, dead links are found and made again, live ones stay), setName and
-// connection().
+// connection(); and what forwarded ports take (forward.js, docs/PORT-FORWARDING.md 4): sendBinary, online, buffered
+// and the events "stream" and "link" (data.js lists them with the interface).
 //
 // A phone forgotten elsewhere is told so by each node while the node can reach it ("forget": web-client.js drops it).
 // When that did not happen - the relay forgot the phone first, so the computers behind it could not tell it - the
@@ -64,6 +65,8 @@ export function createRelayProvider({ WebSocket = globalThis.WebSocket, keypair,
   client.on("binary", ({ node, data }) => {
     const frame = frames.decode(data);
     if (frame?.type === "output") ev.emit("frame", { node, frame });
+    // A forwarded port's stream (forward.js): data, end and ack, decoded; the bytes are a view into what arrived.
+    else if (frame?.type.startsWith("stream-")) ev.emit("stream", { node, frame });
   });
   let label = client.setName(name);
 
@@ -76,7 +79,7 @@ export function createRelayProvider({ WebSocket = globalThis.WebSocket, keypair,
       const relay = n.relayOnly || Boolean(m.relay);
       return {
         id: n.id, name: n.name || n.id.slice(0, 8), kind: relay ? "relay" : n.kind === "host" ? "headless" : "desktop",
-        version: n.version, status: n.status, error: n.status !== "online" && noHub ? "noHub" : n.error, via: n.via ? [n.via] : [], direct: n.direct,
+        version: n.version, outdated: n.outdated, status: n.status, error: n.status !== "online" && noHub ? "noHub" : n.error, via: n.via ? [n.via] : [], direct: n.direct,
         hub: Boolean(n.address), address: n.address, port: n.port,
         lastSeen: n.status === "online" ? Date.now() : m.lastSeen || 0
       };
@@ -158,6 +161,12 @@ export function createRelayProvider({ WebSocket = globalThis.WebSocket, keypair,
         : frame.type === "resize" ? frames.encodeResize(frame.id, frame.cols, frame.rows) : null;
       if (bytes) client.sendBinary(node, bytes);
     },
+    // A frame already encoded (src/mesh/frames.js), as it is: a forwarded port's stream frames, which the pipe that
+    // sends them encodes itself (src/mesh/stream-pipe.js). Dropped when the node is not linked.
+    sendBinary(node, bytes) { client.sendBinary(node, bytes); },
+    // Is the node linked now; and how many bytes of its link still wait here to go out (web-client.js buffered).
+    online: id => client.online(id),
+    buffered: id => client.buffered(id),
     async forget(id) { client.forget(id); },
     // The app is in the background: no dialling until wake().
     pause() { if (started) client.pause(); },

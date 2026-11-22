@@ -36,6 +36,8 @@ const { createNotifier } = require("./notify");
 const { createHost } = require("./host");
 const { savePaste } = require("./host/paste");
 const { createLinks } = require("./mesh/links");
+const { createPortForwards } = require("./port-forwards");
+const { listListening } = require("./host/ports");
 const { createServed } = require("./mesh/serve");
 const { DEFAULT_PORT } = require("./mesh/identity");
 const frames = require("./mesh/frames");
@@ -583,6 +585,121 @@ async function remoteLaunch(node, args) {
 const served = createServed({ host, env: async () => terminalEnv(process.env, await network.terminalProxy().catch(() => null)) });
 const links = createLinks({ dir: path.join(app.getPath("userData"), "node"), defaultName: os.hostname(), kind: "desktop", version: app.getVersion(), api: served.api, log: meshLog });
 served.attach(links);
+
+// ---------- the "Ports" menu of a terminal (docs/PORT-FORWARDING.md 3) ----------
+// What listens on the terminal's computer, opened in the browser here. A terminal of this computer needs no
+// forwarding: its port is opened as it is. For one of another computer the port is forwarded first (port-forwards.js:
+// a listener on 127.0.0.1 here, preferably of the same number, its connections carried over the mesh link to that
+// computer's localhost) and the local address is what opens. A forward lives until it is stopped, the app quits or -
+// as port-forwards.js sees to - the link is gone. The window names a terminal and a port number and nothing else: the
+// computer is found here and every address is built here.
+const forwards = createPortForwards({ links });
+const isPort = v => Number.isInteger(v) && v >= 1 && v <= 65535;
+function portOf(v) {
+  if (!isPort(v)) throw new HostError("invalidData");
+  return v;
+}
+// The forwards as the window gets them, [{ node, port, localPort }] ("ports:forwards", and "ports:changed" when one
+// starts or stops - not for every connection through one): the panes' "Ports" buttons count their computer's.
+const forwardsView = (node = null) => forwards.list().filter(f => node === null || f.node === node).map(f => ({ node: f.node, port: f.port, localPort: f.localPort }));
+let forwardsSent = "[]";
+forwards.on("change", () => {
+  const view = forwardsView(), sig = JSON.stringify(view);
+  if (sig === forwardsSent) return;
+  forwardsSent = sig;
+  sendToManager("ports:changed", view);
+});
+// The ports typed by hand ("Other port…"), remembered for the terminal's project: userData/ports.json,
+// { version: 1, spaces: { <space key>: [port] } } - the space key as the layout has it (a folder of this computer,
+// "node:<id>:<folder>" for another one's). The newest first, SAVED_PORTS_MAX a project.
+const PORTS_FILE = path.join(app.getPath("userData"), "ports.json");
+const SAVED_PORTS_MAX = 20;
+let savedPorts = null; // space key -> [port], read on the first use
+function getSavedPorts(space) {
+  if (!savedPorts) {
+    savedPorts = new Map();
+    try {
+      const saved = JSON.parse(fs.readFileSync(PORTS_FILE, "utf8"));
+      for (const [key, list] of Object.entries(saved?.version === 1 && isObj(saved.spaces) ? saved.spaces : {})) {
+        const ports = Array.isArray(list) ? [...new Set(list.filter(isPort))].slice(0, SAVED_PORTS_MAX) : [];
+        if (ports.length) savedPorts.set(key, ports);
+      }
+    } catch {}
+  }
+  return savedPorts.get(space) || [];
+}
+function setSavedPorts(space, ports) {
+  if (!space) return;
+  getSavedPorts(space);
+  if (ports.length) savedPorts.set(space, ports.slice(0, SAVED_PORTS_MAX)); else savedPorts.delete(space);
+  atomicFile.write(PORTS_FILE, JSON.stringify({ version: 1, spaces: Object.fromEntries(savedPorts) })).catch(e => console.error("Saving the ports failed:", e.message));
+}
+// The terminal's computer ("" this one), its name, and its project's space ("" when its folder is not known here).
+function portsTarget(id) {
+  const node = nodeOfTerm(id);
+  if (node === null) throw new HostError("invalidData");
+  const cwd = node === "" ? terminals.getTabs().find(x => x.id === id)?.cwd : (remoteTerms.get(id) || remoteLists.get(node)?.find(x => x.id === id))?.cwd;
+  const space = !cwd ? "" : node === "" ? getSpaceFor(cwd) : desk.remoteSpace(readRegistry().projects, node, cwd);
+  return { node, space, name: node === "" ? selfName() : nodeName(node) };
+}
+// A computer known not to forward ports: its host.info has no `ports: 1` (an older AgentDeck). One whose host.info
+// is not read yet is asked anyway, and answers "unknownMethod" if it is old.
+const isPortless = node => Boolean(remote.get(node)?.info) && remote.get(node).info.ports !== 1;
+// A list of listening ports as the menu gets it: one row a port (a server on both 0.0.0.0 and :: is one row; `own`
+// when any of them is of the terminal's process tree), own first, then by number. What another computer answers is
+// not trusted to be well formed.
+const PORTS_LISTED_MAX = 500;
+function cleanPorts(list) {
+  const rows = new Map();
+  for (const x of Array.isArray(list) ? list : []) {
+    if (!isObj(x) || !isPort(x.port)) continue;
+    const row = rows.get(x.port) || { port: x.port, process: "", own: false };
+    if (!row.process && typeof x.process === "string") row.process = x.process.slice(0, 80);
+    row.own = row.own || x.own === true;
+    rows.set(x.port, row);
+  }
+  return [...rows.values()].sort((a, b) => b.own - a.own || a.port - b.port).slice(0, PORTS_LISTED_MAX);
+}
+const PORTS_LIST_TIMEOUT_MS = 15000;
+// -> { node, name, ports: [{ port, process, own }], forwards: [{ node, port, localPort }] of that computer, saved:
+// [port], error?, message? }. error: "offline" (the computer is not connected), "update" (its AgentDeck is too old to
+// list or forward ports), "failed" (the list could not be read; `message` says why). Asked only when the menu opens.
+async function listPorts(id) {
+  const { node, space, name } = portsTarget(id);
+  const base = { node, name, ports: [], forwards: node ? forwardsView(node) : [], saved: getSavedPorts(space) };
+  // "portsUnread": the other computer could not read its ports - the menu's own words say that.
+  const failed = e => ({ ...base, error: "failed", message: e && e.code !== "portsUnread" ? translated(e).message : "" });
+  if (node === "") {
+    // host/ports.js never rejects: a list it could not read is empty and marked `failed`.
+    const rootPid = terminals.getTabs().find(x => x.id === id)?.pid;
+    return listListening({ rootPid }).then(list => (list?.failed ? failed() : { ...base, ports: cleanPorts(list) }), failed);
+  }
+  if (!links.online(node)) return { ...base, error: "offline" };
+  if (isPortless(node)) return { ...base, error: "update" };
+  try {
+    return { ...base, ports: cleanPorts(await links.call(node, "ports.list", { term: id }, { timeout: PORTS_LIST_TIMEOUT_MS })) };
+  } catch (e) {
+    if (e?.code === "offline") return { ...base, error: "offline" };
+    return e?.code === "unknownMethod" ? { ...base, error: "update" } : failed(e);
+  }
+}
+// The address here that reaches `port` of the terminal's computer: the port itself for a terminal of this computer,
+// else the local end of its forward, started when there is none yet - and only for a port that answers there now
+// (port-forwards.js `answers`): one nobody listens on is refused here ("refused", shown by the menu in the user's
+// language) before a browser opens on a connection that would only be reset, and leaves no forward behind. A forward
+// that is there already is used as it is.
+async function portAddress(id, port, https = false) {
+  const { node, name } = portsTarget(id);
+  let local = portOf(port);
+  if (node !== "") {
+    if (!links.online(node)) throw new HostError("offline");
+    const outdated = () => new Error(t("term.ports.needsUpdate", { name }));
+    if (isPortless(node)) throw outdated();
+    try { local = portOf((await forwards.open(node, port, { answers: true })).localPort); }
+    catch (e) { throw e?.code === "unknownMethod" ? outdated() : e; }
+  }
+  return `${https ? "https" : "http"}://localhost:${local}`;
+}
 // The mesh starts with the app. A file of the node that cannot be read (identity.js readKept: locked, or damaged)
 // keeps only the mesh off - the rest of AgentDeck runs - with the reason in Settings -> Computers and once in a
 // balloon; the start is tried again every half minute (a lock goes away; a damaged file waits for the user).
@@ -1372,6 +1489,40 @@ function registerIpc() {
   });
   // Stop: the terminal ends on its computer, for every device (asked first in the window).
   handle("terminal:stop", id => stopTerm(text(id, 64)));
+  // The "Ports" menu of a pane (listPorts, portAddress above). The list is read when the menu opens, never on a timer.
+  handle("ports:forwards", () => forwardsView());
+  handle("ports:list", id => listPorts(text(id, 64)));
+  // Opens the port in the browser, forwarded first when the terminal is on another computer. opts: { https, remember:
+  // the port was typed by hand and is kept for the terminal's project - once it could be forwarded: a port of another
+  // computer that nobody listens on is refused (portAddress) and not remembered }. -> the address opened.
+  handle("ports:open", async (id, port, opts) => {
+    const term = text(id, 64), url = await portAddress(term, port, opts?.https === true);
+    if (opts?.remember === true) {
+      const { space } = portsTarget(term);
+      setSavedPorts(space, [port, ...getSavedPorts(space).filter(p => p !== port)]);
+    }
+    await shell.openExternal(url);
+    return url;
+  });
+  // The same address on the clipboard (forwarded first as well). -> the address.
+  handle("ports:copy", async (id, port) => {
+    const url = await portAddress(text(id, 64), port);
+    await clipboard.writeText(url);
+    return url;
+  });
+  // "Stop forwarding": the listener here closes with its connections. Nothing to stop for a terminal of this computer.
+  handle("ports:close", async (id, port) => {
+    const { node } = portsTarget(text(id, 64));
+    if (node !== "") await forwards.close(node, portOf(port));
+    return true;
+  });
+  // "Forget": a port typed by hand leaves the project's list (a forward of it stays until it is stopped).
+  handle("ports:forget", (id, port) => {
+    const { space } = portsTarget(text(id, 64));
+    const gone = portOf(port);
+    setSavedPorts(space, getSavedPorts(space).filter(p => p !== gone));
+    return true;
+  });
   // Tokens and API-equivalent cost (usage.js): the last result at once, or a fresh pass over the transcripts.
   handle("usage:get", () => usage.get());
   // The shortcuts as set now: the menu's hotkey and the voice ones (labels such as "Ctrl + Shift + Space").
@@ -1629,6 +1780,7 @@ if (!app.requestSingleInstanceLock()) {
     taskbarMonitor?.dispose();
     orchestrator.stop();
     host.stop();
+    forwards.dispose();
     links.stop();
     globalShortcut.unregisterAll();
     // Quitting without before-quit (Windows ending the session) still saves the layout, at once.
