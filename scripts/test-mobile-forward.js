@@ -523,7 +523,7 @@ async function main() {
     await waitFor(() => { if (seen.down !== last) { last = seen.down; at = now(); } return seen.down > before.down && now() - at > 1000; }, "the sender stops", 60000);
     const got = seen.down - before.down, out = got - (seen.downAcked - before.downAcked);
     assert.ok(got < size, `stopped before the end: ${got} of ${size} bytes sent by H`);
-    assert.equal(out, STREAM_WINDOW, "exactly one window is out, unacknowledged: an ack goes only for what the plugin wrote");
+    assert.ok(out <= STREAM_WINDOW && out > STREAM_WINDOW - STREAM_PIECE, `one window is out (less at most a piece that did not fit), unacknowledged: an ack goes only for what the plugin wrote - ${out}`);
     console.log(`  a client that does not read: H stopped after ${got} bytes, ${out} unacknowledged; the plugin wrote ${plugin.written} bytes in all so far`);
     const hash = crypto.createHash("sha256");
     let length = 0;

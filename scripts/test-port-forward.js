@@ -23,7 +23,7 @@ const { createServed } = require("../src/mesh/serve");
 const { createPortStreams, MAX_STREAMS } = require("../src/host/port-streams");
 const { createPortForwards } = require("../src/port-forwards");
 const frames = require("../src/mesh/frames");
-const { STREAM_WINDOW } = frames;
+const { STREAM_WINDOW, STREAM_PIECE } = frames;
 
 const SOURCE_BYTES = 64 * 1024 * 1024, MB = 1024 * 1024;
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "agentdeck-port-forward-"));
@@ -221,7 +221,9 @@ async function main() {
     let last = 0, at = Date.now();
     await waitFor(() => { if (got !== last) { last = got; at = Date.now(); } return got > 0 && Date.now() - at > 1000; }, "the sender stops", 60000);
     assert.ok(got < SOURCE_BYTES && source.sent < SOURCE_BYTES, `stopped before the end: ${got} got, ${source.sent} written by the service`);
-    assert.equal(got - acked, STREAM_WINDOW, "exactly one window is out, unacknowledged");
+    // A piece goes out whole or waits (stream-pipe.js): what is out is a window, less at most the piece that did not
+    // fit any more - how the service's writes were cut into reads decides (64 KB ones on Windows, others on Linux).
+    assert.ok(got - acked <= STREAM_WINDOW && got - acked > STREAM_WINDOW - STREAM_PIECE, `one window is out, unacknowledged: ${got - acked}`);
     console.log(`  a client that does not read: the sender stopped after ${got} bytes (${got - acked} unacknowledged), the service after ${source.sent}`);
     const hash = crypto.createHash("sha256");
     let length = 0;
