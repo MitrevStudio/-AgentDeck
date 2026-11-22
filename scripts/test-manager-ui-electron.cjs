@@ -35,14 +35,14 @@ const FIXTURE = `(() => {
   const session = (id, cwd, title, agent = 'Claude') => ({ id, agent, cwd, title, prompt: title, updatedAt: now - 60000 });
   fx.data = {
     agents: ['Claude', 'Codex'],
-    registry: { order: 'activity', groups: [{ id: 'g1', name: 'BDD' }], projects: [
-      { name: 'agentdeck', path: 'C:/work/agentdeck' }, { name: 'bdd-web', path: 'C:/work/bdd-web', group: 'g1' },
-      { name: 'bdd-ws', path: 'C:/work/bdd-ws', group: 'g1' }, { name: '', path: 'E:/' }, { name: 'docs', path: 'C:/work/docs' }] },
-    sessions: [session('s1', 'C:/work/agentdeck', 'Polish the manager UI'), session('s2', 'C:/work/bdd-web', 'Orchestrate the B1 batch'),
+    registry: { order: 'activity', groups: [{ id: 'g1', name: 'DEMO' }], projects: [
+      { name: 'agentdeck', path: 'C:/work/agentdeck' }, { name: 'demo-web', path: 'C:/work/demo-web', group: 'g1' },
+      { name: 'demo-ws', path: 'C:/work/demo-ws', group: 'g1' }, { name: '', path: 'E:/' }, { name: 'docs', path: 'C:/work/docs' }] },
+    sessions: [session('s1', 'C:/work/agentdeck', 'Polish the manager UI'), session('s2', 'C:/work/demo-web', 'Orchestrate the B1 batch'),
       session('s3', 'C:/work/docs', 'Write the release notes', 'Codex'), session('s4', 'E:/', 'A session at the drive root')]
   };
   const liveOf = (id, status, extra = {}) => ({ agent: 'Claude', id, cwd: 'C:/work/agentdeck', status, pid: 100, startedAt: now - 500000, activityAt: now - 4000, statusAt: now - 4000, ...extra });
-  fx.live = [liveOf('s1', 'idle'), liveOf('s2', 'busy', { cwd: 'C:/work/bdd-web', subagents: [{ id: 'a1', type: 'builder', description: 'Builder B1 desktop', at: now, working: true }] })];
+  fx.live = [liveOf('s1', 'idle'), liveOf('s2', 'busy', { cwd: 'C:/work/demo-web', subagents: [{ id: 'a1', type: 'builder', description: 'Builder B1 desktop', at: now, working: true }] })];
   const limits = util => ({ providers: { claude: { installed: true, windows: [{ key: 'five_hour', util, elapsedPct: 40, resetsAt: now + 3600000 }, { key: 'seven_day', util: 23, elapsedPct: 50, resetsAt: now + 86400000 }] },
     codex: { installed: true } } });
   const stats = name => ({ name, at: now, cpu: 11, cores: 16, memory: { used: 8 * 2 ** 30, total: 32 * 2 ** 30 }, disk: { free: 2 ** 38, total: 2 ** 39, path: 'C:/' } });
@@ -374,7 +374,7 @@ app.whenReady().then(async () => {
   await evaluate(`(() => {
     const term = (id, extra) => ({ id, node: '', title: 'pwsh', exited: false, paned: false, createdAt: Date.now(), viewers: [], driver: null, legacy: false, note: '', ...extra });
     fx.ws = structuredClone(fx.ws);
-    fx.ws.terminals.push(term('x3', { cwd: 'C:/work/docs', createdAt: Date.now() - 5000 }), term('x5', { cwd: 'C:/work/bdd-web', createdAt: Date.now() - 9000, paned: true }),
+    fx.ws.terminals.push(term('x3', { cwd: 'C:/work/docs', createdAt: Date.now() - 5000 }), term('x5', { cwd: 'C:/work/demo-web', createdAt: Date.now() - 9000, paned: true }),
       term('x4', { node: 'node-a', cwd: 'D:/src/clinicdesk', title: 'bash · StudioPc', viewers: [{ id: 'node-a', name: 'StudioPc', kind: 'desktop' }] }),
       term('x7', { node: 'node-c', cwd: '/srv/app', title: 'bash · agentdeck-relay', note: 'offline' }),
       term('x6', { cwd: 'C:/work/docs', agent: 'Codex', sessionId: 's3', title: 'Codex' }));
@@ -561,7 +561,7 @@ app.whenReady().then(async () => {
     // With terminals: two lines, each resizes only its own section.
     await evaluate(`(() => {
       const shell = (id, cwd, ago) => ({ id, node: '', cwd, title: 'pwsh', exited: false, paned: false, createdAt: Date.now() - ago, viewers: [], driver: null, legacy: false, note: '' });
-      fx.ws = structuredClone(fx.ws); fx.ws.terminals = [shell('y1', 'C:/work/docs', 1000), shell('y2', 'C:/work/bdd-web', 2000), shell('y3', 'C:/work/agentdeck', 3000)]; fx.cbs.onWorkspace(fx.ws);
+      fx.ws = structuredClone(fx.ws); fx.ws.terminals = [shell('y1', 'C:/work/docs', 1000), shell('y2', 'C:/work/demo-web', 2000), shell('y3', 'C:/work/agentdeck', 3000)]; fx.cbs.onWorkspace(fx.ws);
     })(); 0`); await poll(); await settle(150);
     assert.equal(await evaluate("$('sideTerms').hidden"), false);
     assert.equal(await shown('termsSplitter'), true, 'a line above the Terminals section');

@@ -1,5 +1,5 @@
 // The command centre: a Claude Code session of AgentDeck's own that takes what the user says (a voice command,
-// voice/command-runner.js) or types (the edge menu's command field, or its own terminal) - "отвори BDD и ми кажи
+// voice/command-runner.js) or types (the edge menu's command field, or its own terminal) - "отвори DEMO и ми кажи
 // колко тикета са отворени" - and does it with the tools AgentDeck serves it over MCP: the projects and sessions,
 // starting a session on a prompt, typing into a running one, waiting for its answer and reading it, showing things
 // in the window. It runs in a terminal tab of its own in the "orchestrator" space (the card above the projects in the

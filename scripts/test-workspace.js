@@ -7,8 +7,8 @@ let changes = 0;
 const ws = createWorkspace({ onChange: () => changes++ });
 
 // A tab, then two splits: [t1 | t2] over t3 is t1 right of... built as t1 -> right t2 -> down (from t2) t3.
-const tab = ws.addTab("e:/bdd", "t1");
-assert.equal(ws.snapshot().activeSpace, "e:/bdd");
+const tab = ws.addTab("e:/demo", "t1");
+assert.equal(ws.snapshot().activeSpace, "e:/demo");
 ws.split(tab, "t2", "right");
 ws.split(tab, "t3", "down");
 assert.deepEqual(getPanes(ws.snapshot().tabs[tab].root), ["t1", "t2", "t3"]);
@@ -50,22 +50,22 @@ assert.equal(ws.snapshot().tabs[tab].focus, "t3");
 assert.equal(ws.snapshot().tabs[tab].root.dir, "right");
 
 // A second tab in the same space, another space, and switching.
-const tab2 = ws.addTab("e:/bdd", "t4", "logs");
-assert.deepEqual(ws.snapshot().spaces["e:/bdd"].tabs, [tab, tab2]);
-assert.equal(ws.snapshot().spaces["e:/bdd"].active, tab2);
+const tab2 = ws.addTab("e:/demo", "t4", "logs");
+assert.deepEqual(ws.snapshot().spaces["e:/demo"].tabs, [tab, tab2]);
+assert.equal(ws.snapshot().spaces["e:/demo"].active, tab2);
 const other = ws.addTab("e:/clinicdesk", "t5");
 assert.equal(ws.snapshot().activeSpace, "e:/clinicdesk");
 ws.focus("t1");
-assert.equal(ws.snapshot().activeSpace, "e:/bdd");
-assert.equal(ws.snapshot().spaces["e:/bdd"].active, tab);
-ws.reorderTabs("e:/bdd", [tab2, tab]);
-assert.deepEqual(ws.snapshot().spaces["e:/bdd"].tabs, [tab2, tab]);
+assert.equal(ws.snapshot().activeSpace, "e:/demo");
+assert.equal(ws.snapshot().spaces["e:/demo"].active, tab);
+ws.reorderTabs("e:/demo", [tab2, tab]);
+assert.deepEqual(ws.snapshot().spaces["e:/demo"].tabs, [tab2, tab]);
 
 // The last pane of a tab closes the tab; the space shows its next tab.
 ws.removeTerm("t4");
 assert.equal(ws.snapshot().tabs[tab2], undefined);
-assert.deepEqual(ws.snapshot().spaces["e:/bdd"].tabs, [tab]);
-assert.equal(ws.snapshot().spaces["e:/bdd"].active, tab);
+assert.deepEqual(ws.snapshot().spaces["e:/demo"].tabs, [tab]);
+assert.equal(ws.snapshot().spaces["e:/demo"].active, tab);
 ws.removeTerm("t5");
 assert.deepEqual(ws.snapshot().spaces["e:/clinicdesk"].tabs, []);
 assert.equal(ws.snapshot().spaces["e:/clinicdesk"].active, "");

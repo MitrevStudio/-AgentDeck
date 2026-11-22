@@ -429,7 +429,7 @@ s.listen(0, "127.0.0.1", () => { require("node:fs").writeFileSync(process.argv[2
   const host = makeHost();
   const served = createServed({ host });
   const r = node("R", { kind: "host", relayOnly: true });
-  const h = node("H-DEV-01", { api: (m, p, peer) => served.api(m, p, peer) });
+  const h = node("H-STUDIO", { api: (m, p, peer) => served.api(m, p, peer) });
   const old = node("OLD-BOX", { api: oldApi });
   const seed = node("PORTS-APP", { dir: path.join(profile, "node") });
   stops.push(() => [r, h, old].forEach(l => l.stop()));
@@ -485,7 +485,7 @@ s.listen(0, "127.0.0.1", () => { require("node:fs").writeFileSync(process.argv[2
   assert.equal(nR.relayOnly, true, "R is a relay only");
   assert.deepEqual(nH.via, [R], "the app reaches H through R, not directly");
   assert.deepEqual(seen.find(n => n.id === OLD).via, [R]);
-  assert.equal(nH.name, "H-DEV-01");
+  assert.equal(nH.name, "H-STUDIO");
   assert.equal(seen.find(n => n.id === OLD).info.ports, undefined, "OLD says nothing of ports");
 
   // ---------- 1. the panes and their button ----------
@@ -642,7 +642,7 @@ s.listen(0, "127.0.0.1", () => { require("node:fs").writeFileSync(process.argv[2
   };
   await askOpen();
   assert.deepEqual(await app.ev(`(() => { const d = ${dialog}; return [d.querySelector("h2").textContent, d.querySelector("p").textContent, ...[...d.querySelectorAll("button")].map(b => b.textContent)]; })()`),
-    [en.askTitle, await u.t("term.ports.askBody", { name: "H-DEV-01" }), await u.t("common.cancel"), en.open], "the dialog's texts");
+    [en.askTitle, await u.t("term.ports.askBody", { name: "H-STUDIO" }), await u.t("common.cancel"), en.open], "the dialog's texts");
   assert.deepEqual(await field(), { value: "", okDisabled: true, focused: true }, "empty: nothing to open; the field has the focus");
   for (const bad of ["0", "70000", "65536", "abc", "12a", "-5", " "]) {
     await type(bad);
@@ -840,8 +840,8 @@ s.listen(0, "127.0.0.1", () => { require("node:fs").writeFileSync(process.argv[2
   note(`A local terminal's pane: the same button; its menu lists this computer's ports (${portRows.length} rows, ${groups.length} groups, none marked as its own: ${groups.length === 2}), rows without ticks, the flyout without "Stop forwarding"; a click opens http://localhost:<the port itself>, nothing is forwarded and its button never shows a count.`);
 
   // ---------- 9. Bulgarian ----------
-  const KEYS = { title: {}, active: { n: count }, open: {}, openHttps: {}, copy: {}, stop: {}, other: {}, forget: {}, loading: {}, empty: { name: "H-DEV-01" }, offline: { name: "H-DEV-01" },
-    needsUpdate: { name: "OLD-BOX" }, failed: {}, copied: { address: `http://localhost:${LO}` }, stopped: { port: portOwn }, askTitle: {}, askBody: { name: "H-DEV-01" } };
+  const KEYS = { title: {}, active: { n: count }, open: {}, openHttps: {}, copy: {}, stop: {}, other: {}, forget: {}, loading: {}, empty: { name: "H-STUDIO" }, offline: { name: "H-STUDIO" },
+    needsUpdate: { name: "OLD-BOX" }, failed: {}, copied: { address: `http://localhost:${LO}` }, stopped: { port: portOwn }, askTitle: {}, askBody: { name: "H-STUDIO" } };
   const dict = () => app.ev(`Object.fromEntries(${J(Object.entries(KEYS))}.map(([k, v]) => [k, t("term.ports." + k, v)]))`);
   const enDict = await dict();
   const bg = {}; // key -> { text, cut, how }
@@ -898,7 +898,7 @@ s.listen(0, "127.0.0.1", () => { require("node:fs").writeFileSync(process.argv[2
     const list = await app.ev(`(() => { closeGroupMenu(); openMenu(__pt.portsBtn(${J(tH)}), "", getPortsItems(${J(tH)}, ${J(answer)}), "ports-menu"); return __pt.rows(); })()`);
     return list[0];
   };
-  const base = { node: H, name: "H-DEV-01", ports: [], forwards: [], saved: [] };
+  const base = { node: H, name: "H-STUDIO", ports: [], forwards: [], saved: [] };
   let x = await made(base);
   seenAs("empty", x.label, x.cut, "the menu, over a made-up empty answer");
   await u.shot("menu-bg-empty-made-up");

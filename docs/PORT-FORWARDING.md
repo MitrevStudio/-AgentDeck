@@ -66,7 +66,7 @@ Android plugin-ът са проверени (тестове без устрой�
 
 ## 1. Какво получава потребителят
 
-Терминал върви на компютър A (например DEV-01), а ти гледаш от компютър B или от телефона. В горната лента на
+Терминал върви на компютър A (например работният ти компютър), а ти гледаш от компютър B или от телефона. В горната лента на
 терминала има бутон **„Портове“**. Менюто му показва какво слуша на A; с един клик портът се препраща и
 `http://localhost:3000` се отваря при теб – на компютър в обикновения браузър, на телефон вътре в приложението.
 
@@ -143,7 +143,7 @@ Android plugin-ът са проверени (тестове без устрой�
 | 4 | Гледащ компютър: слушател на `127.0.0.1`, карта поток → сокет, рамките в `links.on("binary")`, чистене при паднала връзка, IPC `ports:*`, отваряне с `shell.openExternal` | нов `src/port-forwards.js`, `src/main.js`, `src/preload.js` |
 | 5 | Меню „Портове“ в лентата на терминала (`renderPaneHeads`, бутон `data-ws="ports"`, `openMenu` от `renderer.js`); брой активни препращания върху бутона | `src/workspace-ui.js`, `src/terminals.css`, `src/i18n.js` (en + bg) |
 | 6 | Тестове: два възела, хъб верига, натиск назад, откази, чистене | нов `scripts/test-port-forward.js`, `package.json`, `.github/workflows/ci.yml` |
-| 7 | Headless хост в Docker (devws) | `host/docker-compose.yml`, `host/Dockerfile`, `host/README` |
+| 7 | Headless хост в Docker | `host/docker-compose.yml`, `host/Dockerfile`, `host/README` |
 
 **Менюто (компютър):**
 
@@ -248,5 +248,5 @@ events (notifyListeners):
 | Част | Оценка |
 |---|---|
 | Издание 1 (компютри, без Docker) | 3–4 дни |
-| Docker/devws | 0,5–1 ден |
+| Docker хост | 0,5–1 ден |
 | Издание 2 (телефон, Android + iOS) | 5–7 дни |

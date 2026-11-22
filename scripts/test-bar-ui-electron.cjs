@@ -33,14 +33,14 @@ const FIXTURE = `(() => {
   const session = (id, cwd, title, agent = 'Claude', age = 60000) => ({ id, agent, cwd, title, prompt: title, updatedAt: now - age });
   fx.data = {
     agents: ['Claude', 'Codex'],
-    registry: { order: 'activity', groups: [{ id: 'g1', name: 'BDD' }], projects: [
+    registry: { order: 'activity', groups: [{ id: 'g1', name: 'DEMO' }], projects: [
       ...names.map((name, i) => ({ name, path: 'C:/work/' + name, ...(i === 2 || i === 4 ? { pin: i } : {}) })),
-      { name: 'bdd-web', path: 'C:/work/bdd-web', group: 'g1' }, { name: 'bdd-ws', path: 'C:/work/bdd-ws', group: 'g1' }] },
+      { name: 'demo-web', path: 'C:/work/demo-web', group: 'g1' }, { name: 'demo-ws', path: 'C:/work/demo-ws', group: 'g1' }] },
     sessions: [session('s1', 'C:/work/agentdeck', 'Polish the edge menu so that it reads as one piece with the manager window'),
       session('s2', 'C:/work/EonBiz', 'Service activation in the EON TV portal'),
       session('s3', 'C:/work/agentdeck', 'Write the release notes', 'Codex', 3600000),
       session('s4', 'C:/work/agentdeck', 'Pairing limits that cannot be turned against the user', 'Claude', 90000000),
-      session('s5', 'C:/work/bdd-web', 'Orchestrate the B1 batch', 'Claude', 7200000),
+      session('s5', 'C:/work/demo-web', 'Orchestrate the B1 batch', 'Claude', 7200000),
       ...names.slice(2).map((name, i) => session('p' + i, 'C:/work/' + name, 'Work in ' + name, i % 3 ? 'Claude' : 'Codex', 86400000 * (i + 1)))]
   };
   const liveOf = (id, status, extra = {}) => ({ agent: 'Claude', id, cwd: 'C:/work/agentdeck', status, pid: 100, startedAt: now - 500000, activityAt: now - 4000, statusAt: now - 4000, ...extra });

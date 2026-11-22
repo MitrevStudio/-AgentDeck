@@ -663,7 +663,7 @@ async function main() {
 
     // The rows from plain data: the terminal's own first, the kept ones, "Other port…", then the rest.
     const shape = rows => rows.map(x => (x.kind === "port" ? `${x.port}${x.own ? " own" : ""}${x.active ? " on" : ""}${x.saved ? " saved" : ""} [${x.meta}]` : x.kind === "other" ? "other" : `${x.kind}: ${x.text}`));
-    assert.deepEqual(shape(ports.portRows({ name: "DEV-01", ports: ports.cleanPorts([
+    assert.deepEqual(shape(ports.portRows({ name: "STUDIO-PC", ports: ports.cleanPorts([
       { port: 5432, process: "postgres", own: false }, { port: 3000, process: "node", own: true }, { port: 3000, address: "::", process: "node", own: false },
       { port: 0 }, { port: "80" }, null, { port: 8080, process: 5, own: "yes" }
     ]), forwards: [{ node: "n", port: 3000, localPort: 3000 }, { node: "n", port: 7000, localPort: 54021 }], saved: [9000, 5432] })), [
@@ -671,18 +671,18 @@ async function main() {
       "group: Typed by hand or forwarded", "7000 on [forwarded as 127.0.0.1:54021]", "9000 saved []", "other",
       "group: Others on the computer", "5432 saved [postgres]", "8080 []"
     ]);
-    assert.deepEqual(shape(ports.portRows({ name: "DEV-01", ports: [], forwards: [], saved: [] })), ["note: Nothing is listening on DEV-01", "other"]);
-    assert.deepEqual(shape(ports.portRows({ name: "DEV-01", error: "offline", saved: [9000] })), ["note: DEV-01 is not connected"]);
-    assert.deepEqual(shape(ports.portRows({ name: "DEV-01", error: "update" })), ["note: Update AgentDeck on DEV-01 to forward ports"]);
-    assert.deepEqual(shape(ports.portRows({ name: "DEV-01", error: "failed", message: "", saved: [9000] })), ["note: The ports could not be read", "group: Typed by hand or forwarded", "9000 saved []", "other"]);
-    assert.deepEqual(shape(ports.portRows({ name: "DEV-01", error: "failed", message: "No answer in time." })).slice(0, 1), ["note: No answer in time."]);
+    assert.deepEqual(shape(ports.portRows({ name: "STUDIO-PC", ports: [], forwards: [], saved: [] })), ["note: Nothing is listening on STUDIO-PC", "other"]);
+    assert.deepEqual(shape(ports.portRows({ name: "STUDIO-PC", error: "offline", saved: [9000] })), ["note: STUDIO-PC is not connected"]);
+    assert.deepEqual(shape(ports.portRows({ name: "STUDIO-PC", error: "update" })), ["note: Update AgentDeck on STUDIO-PC to forward ports"]);
+    assert.deepEqual(shape(ports.portRows({ name: "STUDIO-PC", error: "failed", message: "", saved: [9000] })), ["note: The ports could not be read", "group: Typed by hand or forwarded", "9000 saved []", "other"]);
+    assert.deepEqual(shape(ports.portRows({ name: "STUDIO-PC", error: "failed", message: "No answer in time." })).slice(0, 1), ["note: No answer in time."]);
     assert.deepEqual(["3000", " 65535 ", "0", "65536", "80a", "", "1e3"].map(ports.readPort), [3000, 65535, 0, 0, 0, 0, 0], "what the field holds, as a port");
     // A computer that is away, and one that could not read its ports.
     assert.equal((await ports.loadPorts({ store: { nodeName: () => "X", node: () => ({ node: { status: "offline" } }) }, forwards: fw, node: "x", term: "" })).error, "offline");
     const unread = { nodeName: () => "X", node: () => ({ node: { status: "online" }, info: { ports: 1 } }), ports: async () => { throw Object.assign(new Error("raw"), { code: "portsUnread" }); } };
     assert.deepEqual([(await ports.loadPorts({ store: unread, forwards: fw, node: "x", term: "" })).error, (await ports.loadPorts({ store: unread, forwards: fw, node: "x", term: "" })).message], ["failed", ""]);
     i18n.setLanguage("bg");
-    assert.deepEqual(shape(ports.portRows({ name: "DEV-01", error: "update" })), ["note: Обнови AgentDeck на DEV-01, за да се препращат портове"]);
+    assert.deepEqual(shape(ports.portRows({ name: "STUDIO-PC", error: "update" })), ["note: Обнови AgentDeck на STUDIO-PC, за да се препращат портове"]);
     i18n.setLanguage("en");
     pass("the sheet's list (the computer's ports, this phone's forwards, the ports typed by hand for the folder) and its rows: own first, the rest, the kept ones, Other port; the notes for offline, update, unread, nothing listening");
   }
