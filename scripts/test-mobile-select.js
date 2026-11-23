@@ -5,6 +5,8 @@
 //   * wordAt: a long press takes the run of cells with something in them - a path, an address, a word with a wide
 //     character in it (two cells, the second empty) - and stops at blanks and at the line's ends; a blank cell or a
 //     line that is not there is a selection of that one cell;
+//   * whole: a selection never begins or ends in the middle of a wide character - xterm copies a blank for one cut at
+//     its second half - so what is copied is every character the finger touched;
 //   * grow: the word first selected stays whole whichever way the finger goes on, also across lines;
 //   * between: a handle dragged past the other end changes places with it;
 //   * moved: a full history drops its oldest lines - the selection keeps to its text, cut where its beginning is
@@ -13,29 +15,32 @@
 //     counts a length over the lines;
 //   * handleAt: a handle hangs under its end of the selection, is hidden with its line, and never reaches out of the
 //     terminal's box - at the first column, the last one, the last row, a terminal smaller than a handle.
+//
+// The lines are xterm's own: a terminal that is written to and never opened (it needs no page for that), with the
+// character widths the app gives it (Unicode 11). A model of a line here would only hold what its author knows of
+// xterm - and what xterm copies from half a wide character is not what one would guess.
 const assert = require("node:assert/strict");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 
+globalThis.self = globalThis; // xterm's bundle asks for the page's global
+const { Terminal } = require("@xterm/xterm");
+const { Unicode11Addon } = require("@xterm/addon-unicode11");
+
 const src = p => pathToFileURL(path.join(__dirname, "../mobile/src", p)).href;
 
-// A line as xterm gives it (IBufferLine): a cell for every column, a wide character in two - the second with no
-// width and no characters.
-function lineOf(text, cols) {
-  const cells = [];
-  for (const ch of text) {
-    const wide = /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]|\p{Extended_Pictographic}/u.test(ch);
-    cells.push({ chars: ch === " " ? "" : ch, width: wide ? 2 : 1 });
-    if (wide) cells.push({ chars: "", width: 0 });
-  }
-  while (cells.length < cols) cells.push({ chars: "", width: 1 });
-  return {
-    cells,
-    getCell: col => (col >= 0 && col < cols ? { getWidth: () => cells[col].width, getChars: () => cells[col].chars } : undefined)
-  };
+// A terminal as the app makes it (screens/terminal.js), with this written to it.
+async function termOf(data, cols, rows = 4) {
+  const term = new Terminal({ cols, rows, scrollback: 50, allowProposedApi: true });
+  term.loadAddon(new Unicode11Addon());
+  term.unicode.activeVersion = "11";
+  await new Promise(done => term.write(data, done));
+  return term;
 }
-// The text of a selection's cells in one line.
-const textOf = (line, sel) => line.cells.slice(sel.a.col, sel.b.col + 1).map(c => c.chars || (c.width ? " " : "")).join("");
+const lineOf = async (text, cols) => (await termOf(text, cols)).buffer.active.getLine(0);
+// The text of a selection's cells in one line, as xterm copies it (its selection's text is this call, from the first
+// cell to the one after the last).
+const textOf = (line, sel) => line.translateToString(true, sel.a.col, sel.b.col + 1);
 // The cells xterm selects for select(col, row, length): from the cell on, row after row.
 function cellsOf(col, row, length, cols) {
   const out = [];
@@ -44,7 +49,7 @@ function cellsOf(col, row, length, cols) {
 }
 
 (async () => {
-  const { cellAt, notAfter, wordAt, grow, between, moved, wholeLines, cellCount, handleAt } = await import(src("select.js"));
+  const { cellAt, notAfter, wordAt, whole, grow, between, moved, wholeLines, cellCount, handleAt } = await import(src("select.js"));
   const at = (col, row) => ({ col, row });
 
   // ---------- cellAt ----------
@@ -73,7 +78,7 @@ function cellsOf(col, row, length, cols) {
 
   // ---------- wordAt ----------
   const COLS = 40;
-  const line = lineOf("  cd /srv/app  && npm run build", COLS);
+  const line = await lineOf("  cd /srv/app  && npm run build", COLS);
   const word = col => { const w = wordAt(line, at(col, 7), COLS); assert.equal(w.a.row, 7); assert.equal(w.b.row, 7); return textOf(line, w); };
   assert.equal(word(2), "cd");
   assert.equal(word(3), "cd");
@@ -85,18 +90,57 @@ function cellsOf(col, row, length, cols) {
   assert.deepEqual(wordAt(line, at(4, 7), COLS), { a: at(4, 7), b: at(4, 7) });
   assert.deepEqual(wordAt(line, at(39, 7), COLS), { a: at(39, 7), b: at(39, 7) });
   // A line full to both ends.
-  const full = lineOf("x".repeat(COLS), COLS);
+  const full = await lineOf("x".repeat(COLS), COLS);
   assert.deepEqual(wordAt(full, at(17, 0), COLS), { a: at(0, 0), b: at(COLS - 1, 0) });
   assert.deepEqual(wordAt(full, at(0, 0), COLS), { a: at(0, 0), b: at(COLS - 1, 0) });
   assert.deepEqual(wordAt(full, at(COLS - 1, 0), COLS), { a: at(0, 0), b: at(COLS - 1, 0) });
   // Wide characters: both halves are the word's, pressed on either.
-  const wide = lineOf("ok 日本語.txt ✅ done", COLS);
-  assert.equal(wide.cells[4].width, 0, "the fixture: the second half of a wide character");
+  const wide = await lineOf("ok 日本語.txt ✅ done", COLS);
+  const widthAt = (l, col) => l.getCell(col).getWidth();
+  assert.deepEqual([3, 4, 14, 15].map(col => widthAt(wide, col)), [2, 0, 2, 0], "the fixture: a wide character is two cells, the second with no width");
   for (const col of [3, 4, 5, 8, 9, 12]) assert.deepEqual(wordAt(wide, at(col, 0), COLS), { a: at(3, 0), b: at(12, 0) }, `pressed at column ${col}`);
   assert.equal(textOf(wide, wordAt(wide, at(4, 0), COLS)), "日本語.txt");
   assert.deepEqual(wordAt(wide, at(15, 0), COLS), { a: at(14, 0), b: at(15, 0) }, "an emoji alone: its two cells");
   // A line the buffer does not have.
   assert.deepEqual(wordAt(undefined, at(5, 3), COLS), { a: at(5, 3), b: at(5, 3) });
+
+  // ---------- whole ----------
+  // What xterm copies from the second half of a wide character on: a blank where the character was.
+  assert.equal(wide.translateToString(true, 4, 13), " 本語.txt");
+  const wideAt = row => (row === 0 ? wide : undefined);
+  const copied = s => textOf(wide, whole(s, wideAt, COLS));
+  // A handle put down on the second half of the first character: the character is the selection's.
+  assert.equal(copied(between(at(12, 0), at(4, 0))), "日本語.txt");
+  assert.deepEqual(whole(between(at(12, 0), at(4, 0)), wideAt, COLS), { a: at(3, 0), b: at(12, 0) });
+  assert.equal(copied(between(at(12, 0), at(6, 0))), "本語.txt");
+  // The finger went back from "done" onto the second half of the emoji, and on from "ok" onto the first half of 日.
+  const done = wordAt(wide, at(18, 0), COLS), ok = wordAt(wide, at(0, 0), COLS);
+  assert.equal(copied(grow(done, at(15, 0))), "✅ done");
+  assert.deepEqual(whole(grow(ok, at(3, 0)), wideAt, COLS), { a: at(0, 0), b: at(4, 0) }, "the last cell: on to the character's second half");
+  assert.equal(copied(grow(ok, at(3, 0))), "ok 日");
+  assert.deepEqual(whole({ a: at(4, 0), b: at(4, 0) }, wideAt, COLS), { a: at(3, 0), b: at(4, 0) }, "one cell of a wide character: both");
+  assert.deepEqual(whole({ a: at(9, 0), b: at(12, 0) }, wideAt, COLS), { a: at(9, 0), b: at(12, 0) }, "narrow characters: as it was");
+  assert.deepEqual(whole({ a: at(4, 7), b: at(3, 9) }, wideAt, COLS), { a: at(4, 7), b: at(3, 9) }, "lines the buffer does not have: as it was");
+  // Whatever the two ends: no character is cut, none is added that the ends did not touch, and what is copied is
+  // those characters - the line's text between them (it ends at column 20: xterm copies nothing for what is after).
+  const chars = [...Array(COLS).keys()].filter(col => widthAt(wide, col) > 0).map(col => ({ col, end: col + widthAt(wide, col) - 1, text: wide.getCell(col).getChars() || " " }));
+  for (let a = 0; a < 24; a++) {
+    for (let b = a; b < 24; b++) {
+      const w = whole({ a: at(a, 0), b: at(b, 0) }, wideAt, COLS), touched = chars.filter(c => c.end >= a && c.col <= b);
+      assert.deepEqual([w.a.col, w.b.col], [touched[0].col, touched.at(-1).end], `from ${a} to ${b}`);
+      assert.equal(textOf(wide, w), touched.filter(c => c.col <= 20).map(c => c.text).join(""), `from ${a} to ${b}`);
+    }
+  }
+  // A wide character in the line's last two cells, and one that did not fit there (xterm leaves the cell empty and
+  // puts it on the next row): the ends stay on the line.
+  const edge = await termOf("12345678日\r\n123456789日", 10);
+  const edgeAt = row => edge.buffer.active.getLine(row);
+  assert.deepEqual([8, 9].map(col => widthAt(edgeAt(0), col)), [2, 0]);
+  assert.deepEqual(whole({ a: at(9, 0), b: at(9, 0) }, edgeAt, 10), { a: at(8, 0), b: at(9, 0) });
+  assert.deepEqual(whole({ a: at(0, 0), b: at(8, 0) }, edgeAt, 10), { a: at(0, 0), b: at(9, 0) });
+  assert.deepEqual([widthAt(edgeAt(1), 9), widthAt(edgeAt(2), 0), widthAt(edgeAt(2), 1)], [1, 2, 0]);
+  assert.deepEqual(whole({ a: at(1, 2), b: at(1, 2) }, edgeAt, 10), { a: at(0, 2), b: at(1, 2) });
+  assert.deepEqual(whole({ a: at(9, 1), b: at(0, 2) }, edgeAt, 10), { a: at(9, 1), b: at(1, 2) });
 
   // ---------- grow ----------
   const w = { a: at(10, 5), b: at(14, 5) };
@@ -179,5 +223,5 @@ function cellsOf(col, row, length, cols) {
   assert.deepEqual(handleAt(at(0, 100), false, box), { left: 0, top: 16 }, "at the first column it stays in");
   assert.deepEqual(handleAt(at(79, 123), true, box), { left: 80 * 8 - 18, top: 24 * 16 - 18 }, "at the last cell of all too");
 
-  console.log("mobile select: the cell under a point, a long press's word, growing it, a handle past the other end, whole lines, the handles' places - passed");
+  console.log("mobile select: the cell under a point, a long press's word, growing it, whole wide characters, a handle past the other end, whole lines, the handles' places - passed");
 })().catch(e => { console.error(e); process.exit(1); });

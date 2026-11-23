@@ -492,8 +492,9 @@ export function render(el, ctx, p) {
       selMark = term.registerMarker(0) || null; // none on the alternate screen, which has no history to drop
       selMarkLine = selMark ? selMark.line : 0;
     }
-    sel = { a, b };
-    term.select(a.col, a.row, select.cellCount(sel, term.cols));
+    // Whole characters, whatever cells the finger gave: a wide one is two cells.
+    sel = select.whole({ a, b }, row => term.buffer.active.getLine(row), term.cols);
+    term.select(sel.a.col, sel.a.row, select.cellCount(sel, term.cols));
     drawSel();
   }
   // The selection is over, and so is the drag that was making it: a finger still down would bring it back, from
