@@ -43,6 +43,7 @@ const TAP_MS = 300, DOUBLE_MS = 320, MOVE_PX = 8;
 // Selecting text: a finger held still this long starts it; this near an edge of the view the terminal scrolls under
 // the finger, a line every EDGE_MS.
 const LONG_MS = 450, EDGE_PX = 28, EDGE_MS = 60;
+const HANDLE_PX = 18;         // a selection handle's size (style.css .sel-handle)
 // Scrolling: a wheel notch to a program for this many lines' height of a drag, at most so many notches or keys for one
 // move; a fling starts above FLING_FROM px/ms (measured over the drag's last TRAIL_MS), is capped at FLING_MAX, slows
 // down to 1/e in FLING_MS and ends below FLING_END.
@@ -517,8 +518,11 @@ export function render(el, ctx, p) {
       const row = pos ? pos.row - top : -1;
       h.hidden = row < 0 || row >= term.rows;
       if (h.hidden) continue;
-      h.style.left = `${(pos.col + end) * c.w}px`;
-      h.style.top = `${(row + 1) * c.h}px`;
+      // Kept inside the terminal's own box: one that reached out of it would be cut off at the left edge, and make
+      // the view scroll further than the terminal at the right and bottom ones.
+      const left = end ? (pos.col + 1) * c.w : pos.col * c.w - HANDLE_PX;
+      h.style.left = `${clamp(left, 0, Math.max(0, term.cols * c.w - HANDLE_PX))}px`;
+      h.style.top = `${clamp((row + 1) * c.h, 0, Math.max(0, term.rows * c.h - HANDLE_PX))}px`;
     }
   }
   // The finger moved while selecting: from the word first selected to the cell under the finger, or - a handle - from
