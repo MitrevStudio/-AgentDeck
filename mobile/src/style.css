@@ -493,6 +493,12 @@ textarea { resize: none; line-height: 1.35; }
   position: absolute; left: 50%; top: 8px; transform: translateX(-50%); z-index: 6; display: flex; align-items: center; gap: 6px; max-width: calc(100% - 16px); padding: 5px 6px;
   border: 1px solid var(--line-3); border-radius: var(--r-pill); background: var(--raised); box-shadow: var(--shadow-pop); white-space: nowrap;
 }
+/* Where an end of the selection is in the view's first rows the bar would lie on it and on its handle: it goes to the
+   bottom, or between the two when the other end is down there (terminal.js drawSel). */
+.term-sel[data-at="bottom"] { top: auto; bottom: 8px; }
+.term-sel[data-at="middle"] { top: 50%; transform: translate(-50%, -50%); }
+/* The chips are over the same rows: away while there is a selection. */
+.term-area.selecting .term-chip { display: none; }
 .term-sel .btn { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 12px; border-radius: var(--r-pill); font-size: 13px; }
 .term-sel .btn .ic { width: 15px; height: 15px; }
 /* Narrower than the session's keys, so about nine show at 360px. */

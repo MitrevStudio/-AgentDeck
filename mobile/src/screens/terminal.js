@@ -45,6 +45,7 @@ const TAP_MS = 300, DOUBLE_MS = 320, MOVE_PX = 8;
 // the finger, a line every EDGE_MS - once the finger came EDGE_TOWARDS px towards that edge (select.edgeScroll).
 const LONG_MS = 450, EDGE_PX = 28, EDGE_TOWARDS = 8, EDGE_MS = 60;
 const HANDLE_PX = 18;         // a selection handle's size (style.css .sel-handle)
+const BAR_GAP = 8;            // the selection bar's distance from the view's edge (style.css .term-sel)
 // Scrolling: a wheel notch to a program for this many lines' height of a drag, at most so many notches or keys for one
 // move; a fling starts above FLING_FROM px/ms (measured over the drag's last TRAIL_MS), is capped at FLING_MAX, slows
 // down to 1/e in FLING_MS and ends below FLING_END.
@@ -150,7 +151,7 @@ export function render(el, ctx, p) {
   let overState = "";                             // what the overlay says: "" | "exited" | "reconnecting" | "gone"
   // The text selected with a finger ("selecting text" below): its first and last cell, { col, row } in the buffer.
   let sel = null;
-  const selBar = el.querySelector(".term-sel"), selA = el.querySelector(".sel-handle.a"), selB = el.querySelector(".sel-handle.b");
+  const area = el.querySelector(".term-area"), selBar = el.querySelector(".term-sel"), selA = el.querySelector(".sel-handle.a"), selB = el.querySelector(".sel-handle.b");
 
   // The terminal has this phone's size: on a host that shares its terminals, the host says so (the driver);
   // on an older one, while the phone's own "Fit to phone" is on.
@@ -533,8 +534,14 @@ export function render(el, ctx, p) {
   }
   // The handles under the selection's two ends (out of sight with their line), the bar while there is a selection.
   function drawSel() {
-    selBar.hidden = !sel;
+    // The bar is away while a finger makes the selection or moves an end of it: it would jump about under the drag.
+    // So are the chips for as long as there is a selection - they lie over the first and the last rows' text, where
+    // an end and its handle may be, and the bar would lie over them.
+    selBar.hidden = !sel || g?.kind === "sel";
+    area.classList.toggle("selecting", Boolean(sel));
     const view = sel ? { cell: cell(), cols: term.cols, rows: term.rows, top: term.buffer.active.viewportY, size: HANDLE_PX } : null;
+    // Never over an end of the selection (select.barAt); it takes its height and BAR_GAP on either side.
+    if (!selBar.hidden) selBar.dataset.at = select.barAt(sel, { ...view, pad: PAD, scrollTop: wrap.scrollTop, height: wrap.clientHeight, band: selBar.offsetHeight + 2 * BAR_GAP, handle: HANDLE_PX });
     for (const [h, pos, last] of [[selA, sel?.a, false], [selB, sel?.b, true]]) {
       // Kept inside the terminal's own box: one that reached out of it would be cut off at the left edge, and make
       // the view scroll further than the terminal at the right and bottom ones.
@@ -612,6 +619,7 @@ export function render(el, ctx, p) {
         const pos = end === selB ? sel.b : sel.a, c = cell();
         const cx = PAD + (pos.col + 0.5) * c.w - wrap.scrollLeft, cy = PAD + (pos.row - term.buffer.active.viewportY + 0.5) * c.h - wrap.scrollTop;
         g = { kind: "sel", fixed: end === selB ? sel.a : sel.b, dx: cx - a.x, dy: cy - a.y, x: a.x, y: a.y, reach: select.reachOf(a, null) };
+        drawSel();
         return;
       }
       g = { kind: "pan", axis: "", x0: a.x, y0: a.y, x: a.x, y: a.y, moved: false, t0: Date.now(), trail: [{ t: performance.now(), x: a.x, y: a.y }] };
@@ -622,6 +630,7 @@ export function render(el, ctx, p) {
       const a = pt(e.touches[0], r), b = pt(e.touches[1], r);
       const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
       g = { kind: "pinch", d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, px0: term.options.fontSize, cx, cy, scale: 1 };
+      drawSel(); // a second finger ended the selection's drag: the bar is back
       pan.style.transformOrigin = `${wrap.scrollLeft + cx}px ${wrap.scrollTop + cy}px`;
     }
   }, { passive: true, capture: true });
@@ -665,6 +674,7 @@ export function render(el, ctx, p) {
       e.preventDefault(); // no emulated click
       stopEdge();
       g = null;
+      drawSel();
       return;
     }
     if (g.kind === "pinch") {
@@ -703,7 +713,9 @@ export function render(el, ctx, p) {
     clearTimeout(tapTimer);
     tapTimer = setTimeout(() => { if (!keyboardUp()) { kbRaisedAt = Date.now(); showKeyboard(); } }, TAP_MS);
   }, { passive: false, capture: true });
-  wrap.addEventListener("touchcancel", () => { clearTimeout(longTimer); stopEdge(); pan.style.transform = ""; g = null; }, { capture: true });
+  wrap.addEventListener("touchcancel", () => { clearTimeout(longTimer); stopEdge(); pan.style.transform = ""; g = null; drawSel(); }, { capture: true });
+  // The view scrolled (a terminal taller than it): the selection's ends are elsewhere in it, and so may the bar be.
+  wrap.addEventListener("scroll", () => { if (sel) drawSel(); }, { passive: true });
   // A mouse / trackpad (the browser preview, a tablet): the wheel scrolls as a drag does, Ctrl+wheel zooms.
   wrap.addEventListener("wheel", e => {
     e.preventDefault();

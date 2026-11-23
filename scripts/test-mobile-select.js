@@ -19,7 +19,9 @@
 //   * handleAt: a handle hangs under its end of the selection, is hidden with its line, and never reaches out of the
 //     terminal's box - at the first column, the last one, the last row, a terminal smaller than a handle;
 //   * reachOf and edgeScroll: near an edge of the view the terminal scrolls under a finger that came towards that
-//     edge - never under one that rests where it pressed, goes along the edge or trembles.
+//     edge - never under one that rests where it pressed, goes along the edge or trembles;
+//   * barAt: the bar with Copy is never over an end of the selection that is in view - it leaves the top of the view
+//     for the bottom, or for the middle when there is an end at each.
 //
 // The lines are xterm's own: a terminal that is written to and never opened (it needs no page for that), with the
 // character widths the app gives it (Unicode 11). A model of a line here would only hold what its author knows of
@@ -54,7 +56,7 @@ function cellsOf(col, row, length, cols) {
 }
 
 (async () => {
-  const { cellAt, notAfter, wordAt, whole, grow, between, moved, fromRange, onDropped, settle, wholeLines, cellCount, handleAt, reachOf, edgeScroll } = await import(src("select.js"));
+  const { cellAt, notAfter, wordAt, whole, grow, between, moved, fromRange, onDropped, settle, wholeLines, cellCount, handleAt, reachOf, edgeScroll, barAt } = await import(src("select.js"));
   const at = (col, row) => ({ col, row });
 
   // ---------- cellAt ----------
@@ -377,5 +379,36 @@ function cellsOf(col, row, length, cols) {
   assert.deepEqual(scrollAfter([180, 278], [5, 5]), { dx: -1, dy: -1 });
   assert.deepEqual(scrollAfter([50, 11], [350, 11]), { dx: 1, dy: 0 }, "along the top edge to the right one");
 
-  console.log("mobile select: the cell under a point, a long press's word, growing it, whole wide characters, a handle past the other end, the selection where xterm has it, whole lines, the handles' places, scrolling at an edge - passed");
+  // ---------- barAt ----------
+  // A view 556 px high showing a terminal of 32 rows of 14 px from line 100 on; the bar takes 72 px at the edge it is
+  // put at, a handle 18 px under its cell.
+  const room = { cell: { w: 7, h: 14 }, pad: 4, rows: 32, top: 100, scrollTop: 0, height: 556, band: 72, handle: 18 };
+  const one = (col, row) => ({ a: at(col, row), b: at(col + 4, row) });
+  assert.equal(barAt(one(20, 115), room), "top", "a word in the middle: over the terminal's top");
+  // The first rows are where the bar is: there it would lie on the word and on both handles.
+  for (const row of [100, 101, 102, 103, 104]) assert.equal(barAt(one(20, row), room), "bottom", `a word of row ${row - 100}`);
+  assert.equal(barAt(one(20, 105), room), "top", "the first row clear of it: 74 px down");
+  assert.equal(barAt({ a: at(3, 102), b: at(9, 120) }, room), "bottom", "only its first end is up there");
+  assert.equal(barAt({ a: at(3, 90), b: at(9, 101) }, room), "bottom", "its beginning is above the view, its last end in the first rows");
+  // An end out of sight has no handle to cover.
+  assert.equal(barAt({ a: at(3, 90), b: at(9, 115) }, room), "top");
+  assert.equal(barAt({ a: at(3, 90), b: at(9, 99) }, room), "top", "all of it above the view");
+  assert.equal(barAt({ a: at(3, 80), b: at(9, 300) }, room), "top", "the whole view selected, both ends out of sight");
+  // Rows 0-31 end at 452 px, well above the view's last 72: nothing is ever down there in this view.
+  assert.equal(barAt(one(20, 131), room), "top");
+  // A view that the terminal fills or overflows (the keyboard up: 236 px, scrolled to the terminal's end).
+  const low = { ...room, height: 236, scrollTop: 32 * 14 + 8 - 236 };
+  assert.equal(barAt(one(20, 131), low), "top", "a word of the last row: the bar is out of its way already");
+  assert.equal(barAt(one(20, 116), low), "bottom", "the first row in view now");
+  assert.equal(barAt(one(20, 113), low), "top", "a row scrolled out above, handle and all");
+  assert.equal(barAt(one(20, 124), low), "top", "the middle of it");
+  // An end at each edge: between them, where there is selected text and no handle.
+  assert.equal(barAt({ a: at(3, 117), b: at(9, 131) }, low), "middle");
+  assert.equal(barAt({ a: at(3, 117), b: at(9, 124) }, low), "bottom", "the last end and its handle clear of the last 72 px");
+  assert.equal(barAt({ a: at(3, 117), b: at(9, 125) }, low), "middle", "its handle reaches into them");
+  // The history scrolled into view: the rows are the buffer's lines.
+  assert.equal(barAt(one(20, 100), { ...room, top: 95 }), "top", "row 5 of the view now");
+  assert.equal(barAt(one(20, 96), { ...room, top: 95 }), "bottom");
+
+  console.log("mobile select: the cell under a point, a long press's word, growing it, whole wide characters, a handle past the other end, the selection where xterm has it, whole lines, the handles' places, scrolling at an edge, the bar's place - passed");
 })().catch(e => { console.error(e); process.exit(1); });

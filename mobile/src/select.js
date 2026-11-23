@@ -140,3 +140,19 @@ export function edgeScroll(at, reach, view, { near, towards }) {
   const way = (v, least, most, size) => (v < near && most - v >= towards ? -1 : v > size - near && v - least >= towards ? 1 : 0);
   return { dx: way(at.x, reach.left, reach.right, view.w), dy: way(at.y, reach.top, reach.bottom, view.h) };
 }
+
+// Where the bar (Copy, whole lines, cancel) goes over the view: "top", where it is out of the way of the thumb that
+// selects - unless an end of the selection is there in view: the bar would lie on the selected text and on the handle
+// that moves it. Then "bottom", or "middle" when the other end is in view down there. band: the px the bar takes at
+// the edge it is put at; handle: the px a handle hangs under its cell; height: the view's; rows, top and scrollTop:
+// the terminal's rows, the buffer line its first row shows, and how far the view is scrolled down the terminal.
+export function barAt(sel, { cell, pad, rows, top, scrollTop, height, band, handle }) {
+  let up = false, down = false;
+  for (const pos of [sel.a, sel.b]) {
+    const from = pad + (pos.row - top) * cell.h - scrollTop, to = from + cell.h + handle;
+    if (pos.row < top || pos.row >= top + rows || to <= 0 || from >= height) continue; // out of sight: nothing of it to cover
+    if (from < band) up = true;
+    if (to > height - band) down = true;
+  }
+  return up ? (down ? "middle" : "bottom") : "top";
+}
