@@ -56,6 +56,7 @@ jobs:
       - run: npm run test:mobile-forward
       - run: npm run test:mobile-i18n
       - run: npm run test:mobile-text
+      - run: npm run test:mobile-select
       - name: Package (unpacked, no installer)
         run: npx electron-builder --win --dir --publish never
         env:

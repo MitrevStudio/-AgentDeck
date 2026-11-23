@@ -35,11 +35,16 @@ import { icon, iconBtn } from "../icons.js";
 import { header, wireBack, closeAsk } from "./parts.js";
 import { keyStrip, wireStrip } from "./keys.js";
 import { openPorts } from "./ports.js";
+import * as select from "../select.js";
 
 const READ_DEFAULT = 12, READ_MIN = 8, READ_MAX = 22; // the readable font: what "Fit to phone" sizes the host's terminal for
 const MIN_PX = 3, MAX_PX = 30;
 const PAD = 4;                // the wrap's padding around the terminal
 const TAP_MS = 300, DOUBLE_MS = 320, MOVE_PX = 8;
+// Selecting text: a finger held still this long starts it; this near an edge of the view the terminal scrolls under
+// the finger, a line every EDGE_MS.
+const LONG_MS = 450, EDGE_PX = 28, EDGE_MS = 60;
+const HANDLE_PX = 18;         // a selection handle's size (style.css .sel-handle)
 // Scrolling: a wheel notch to a program for this many lines' height of a drag, at most so many notches or keys for one
 // move; a fling starts above FLING_FROM px/ms (measured over the drag's last TRAIL_MS), is capped at FLING_MAX, slows
 // down to 1/e in FLING_MS and ends below FLING_END.
@@ -100,7 +105,8 @@ export function render(el, ctx, p) {
   const store = ctx.store;
   const nodeName = store.nodeName(p.node);
   el.innerHTML = `<div class="term-head"></div>
-    <div class="term-area"><main class="term-wrap"><div class="term-pan"><div class="term-host"></div></div></main>
+    <div class="term-area"><main class="term-wrap"><div class="term-pan"><div class="term-host"></div><i class="sel-handle a" hidden></i><i class="sel-handle b" hidden></i></div></main>
+      <div class="term-sel" role="toolbar" hidden><button class="btn primary" type="button" data-act="sel-copy">${icon("copy")}<span>${esc(t("term.selCopy"))}</span></button><button class="btn" type="button" data-act="sel-lines">${esc(t("term.selLines"))}</button>${iconBtn("x", t("common.cancel"), 'type="button" data-act="sel-cancel"')}</div>
       <button class="term-chip fit" type="button" hidden>${icon("fit")}<span></span></button>
       <button class="term-chip end" type="button" hidden aria-label="${esc(t("term.toEnd"))}" title="${esc(t("term.toEnd"))}">${icon("down")}</button>
       <div class="term-busy" role="status" hidden><i class="spinner accent"></i><span></span></div></div>
@@ -142,6 +148,9 @@ export function render(el, ctx, p) {
   const rememberZoom = () => { view.zoom = zoom; saveView(); };
   let beforeFit = null;                           // the zoom "Fit to phone" replaced; back once the size is not the phone's
   let overState = "";                             // what the overlay says: "" | "exited" | "reconnecting" | "gone"
+  // The text selected with a finger ("selecting text" below): its first and last cell, { col, row } in the buffer.
+  let sel = null;
+  const selBar = el.querySelector(".term-sel"), selA = el.querySelector(".sel-handle.a"), selB = el.querySelector(".sel-handle.b");
 
   // The terminal has this phone's size: on a host that shares its terminals, the host says so (the driver);
   // on an older one, while the phone's own "Fit to phone" is on.
@@ -312,6 +321,7 @@ export function render(el, ctx, p) {
       wrap.scrollLeft = (sl + anchor.x) * (after.w / before.w) - anchor.x;
       wrap.scrollTop = (st + anchor.y) * (after.h / before.h) - anchor.y;
     }
+    drawSel();
   }
   const applyZoom = anchor => setFont(targetPx(), anchor);
 
@@ -339,7 +349,7 @@ export function render(el, ctx, p) {
     // The size is not the phone's any more (given back, taken by someone else, the link made anew): the whole width
     // of the host's size would be too small to read, so the zoom from before "Fit to phone" is back.
     if (beforeFit != null && !isMine()) { zoom = beforeFit; beforeFit = null; }
-    if (term.cols !== cols || term.rows !== rows) term.resize(cols, rows);
+    if (term.cols !== cols || term.rows !== rows) { clearSel(); term.resize(cols, rows); }
     applyZoom();
     drawHead();
     drawChips();
@@ -463,13 +473,149 @@ export function render(el, ctx, p) {
     if (zoom === "fit") wrap.scrollLeft = 0;
     ctx.toast(t(zoom === "fit" ? "term.zoomFit" : "term.zoomRead"));
   }
+  // ---------- selecting text ----------
+  // A finger held still for LONG_MS selects the word under it; dragged on without lifting, the selection grows from
+  // that word. Lifted, the selection stays, with a handle at each end to move and a bar over the terminal: Copy,
+  // whole lines, cancel. While it stays a drag scrolls as before, a tap anywhere else puts the selection away. Near an
+  // edge of the view the terminal scrolls under the finger. The selection is xterm's own (term.select), set from
+  // here: xterm itself selects with a mouse only.
+  let longTimer = 0, edgeTimer = 0, touchedAt = 0;
+  // The arithmetic is select.js's; here it is given the view and the terminal as they are now.
+  const cellAt = at => select.cellAt(at, { scroll: { left: wrap.scrollLeft, top: wrap.scrollTop }, cell: cell(), pad: PAD, cols: term.cols, rows: term.rows, top: term.buffer.active.viewportY });
+  const wordAt = pos => select.wordAt(term.buffer.active.getLine(pos.row), pos, term.cols);
+  // A full history drops its oldest lines as new ones come, and every line's number with them. xterm moves its
+  // selection then; ours follows by a marker put on a line when the selection begins (xterm keeps a marker on its
+  // line), so the handles, "Whole lines" and a handle's drag stay on the text that was selected.
+  let selMark = null, selMarkLine = 0;
+  function setSel({ a, b }) {
+    if (!sel) {
+      selMark = term.registerMarker(0) || null; // none on the alternate screen, which has no history to drop
+      selMarkLine = selMark ? selMark.line : 0;
+    }
+    sel = { a, b };
+    term.select(a.col, a.row, select.cellCount(sel, term.cols));
+    drawSel();
+  }
+  // The selection is over, and so is the drag that was making it: a finger still down would bring it back, from
+  // cells of a buffer or a size that is no more.
+  function dropSel() {
+    sel = null;
+    selMark?.dispose();
+    selMark = null;
+    if (g?.kind === "sel") g = null;
+    stopEdge();
+    drawSel();
+  }
+  function clearSel() {
+    if (!sel) return;
+    dropSel();
+    term.clearSelection();
+  }
+  // Before the selection's cells are used: moved with the lines, if those moved.
+  function settleSel() {
+    if (!sel || !selMark) return;
+    if (selMark.isDisposed) return clearSel(); // its line is gone, with what was selected above it
+    const by = selMark.line - selMarkLine;
+    if (!by) return;
+    selMarkLine = selMark.line;
+    const next = select.moved(sel, by);
+    if (!next) return clearSel();
+    sel = next;
+    if (g?.kind === "sel") {
+      const anchor = select.moved(g.word || { a: g.fixed, b: g.fixed }, by);
+      if (!anchor) { g = null; stopEdge(); } // what the drag began from is gone: the selection stays as it is
+      else if (g.word) g.word = anchor;
+      else g.fixed = anchor.a;
+    }
+    drawSel();
+  }
+  // The handles under the selection's two ends (out of sight with their line), the bar while there is a selection.
+  function drawSel() {
+    selBar.hidden = !sel;
+    const view = sel ? { cell: cell(), cols: term.cols, rows: term.rows, top: term.buffer.active.viewportY, size: HANDLE_PX } : null;
+    for (const [h, pos, last] of [[selA, sel?.a, false], [selB, sel?.b, true]]) {
+      // Kept inside the terminal's own box: one that reached out of it would be cut off at the left edge, and make
+      // the view scroll further than the terminal at the right and bottom ones.
+      const at = pos ? select.handleAt(pos, last, view) : null;
+      h.hidden = !at;
+      if (!at) continue;
+      h.style.left = `${at.left}px`;
+      h.style.top = `${at.top}px`;
+    }
+  }
+  // The finger moved while selecting: from the word first selected to the cell under the finger, or - a handle - from
+  // the selection's other end to it.
+  function moveSel() {
+    settleSel();
+    if (g?.kind !== "sel") return;
+    const pos = cellAt({ x: g.x + g.dx, y: g.y + g.dy });
+    setSel(g.word ? select.grow(g.word, pos) : select.between(g.fixed, pos));
+  }
+  const stopEdge = () => { clearInterval(edgeTimer); edgeTimer = 0; };
+  // The finger rests near an edge: the view moves a line at a time, then xterm's history.
+  function edgeStep() {
+    if (g?.kind !== "sel") return stopEdge();
+    const dy = g.y < EDGE_PX ? -1 : g.y > wrap.clientHeight - EDGE_PX ? 1 : 0, dx = g.x < EDGE_PX ? -1 : g.x > wrap.clientWidth - EDGE_PX ? 1 : 0;
+    if (!dx && !dy) return stopEdge();
+    const c = cell();
+    if (dy) {
+      const was = wrap.scrollTop;
+      wrap.scrollTop += dy * c.h;
+      if (wrap.scrollTop === was && wheelMode() === "history") term.scrollLines(dy);
+    }
+    if (dx) wrap.scrollLeft += dx * 2 * c.w;
+    moveSel();
+  }
+  function startSel() {
+    clearTimeout(tapTimer);
+    const word = wordAt(cellAt({ x: g.x0, y: g.y0 }));
+    g = { kind: "sel", word, dx: 0, dy: 0, x: g.x, y: g.y };
+    buzz(12);
+    setSel(word);
+  }
+  term.onSelectionChange(() => { if (sel && !term.hasSelection()) dropSel(); }); // xterm dropped it (another screen)
+  term.onWriteParsed(settleSel);
+  selBar.onpointerdown = e => e.preventDefault(); // the keyboard stays as it was
+  selBar.onclick = e => {
+    settleSel();
+    const act = e.target.closest("[data-act]")?.dataset.act;
+    if (act === "sel-copy") {
+      const text = term.getSelection();
+      clearSel();
+      copyText(text);
+    } else if (act === "sel-lines" && sel) setSel(select.wholeLines(sel, term.cols));
+    else if (act === "sel-cancel") clearSel();
+  };
+  // What a browser makes of a touch for a mouse (a long press: mousedown, the context menu) is not xterm's to act on -
+  // it would start a selection of its own or put its textarea under the finger.
+  for (const type of ["mousedown", "contextmenu"]) {
+    wrap.addEventListener(type, e => {
+      if (Date.now() - touchedAt > 1000) return;
+      e.stopPropagation();
+      if (type === "contextmenu") e.preventDefault();
+    }, { capture: true });
+  }
+
   wrap.addEventListener("touchstart", e => {
     stopFling();
+    clearTimeout(longTimer);
+    touchedAt = Date.now();
+    settleSel();
     const r = wrap.getBoundingClientRect();
     if (e.touches.length === 1) {
       const a = pt(e.touches[0], r);
+      const end = sel && e.target.closest?.(".sel-handle");
+      if (end) {
+        // A handle hangs under its cell: the selection's end stays where it is until the finger moves.
+        const pos = end === selB ? sel.b : sel.a, c = cell();
+        const cx = PAD + (pos.col + 0.5) * c.w - wrap.scrollLeft, cy = PAD + (pos.row - term.buffer.active.viewportY + 0.5) * c.h - wrap.scrollTop;
+        g = { kind: "sel", fixed: end === selB ? sel.a : sel.b, dx: cx - a.x, dy: cy - a.y, x: a.x, y: a.y };
+        return;
+      }
       g = { kind: "pan", axis: "", x0: a.x, y0: a.y, x: a.x, y: a.y, moved: false, t0: Date.now(), trail: [{ t: performance.now(), x: a.x, y: a.y }] };
+      longTimer = setTimeout(() => { if (g?.kind === "pan" && !g.moved && !closed) startSel(); }, LONG_MS);
     } else if (e.touches.length === 2) {
+      stopEdge();
       clearTimeout(tapTimer);
       const a = pt(e.touches[0], r), b = pt(e.touches[1], r);
       const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
@@ -481,11 +627,17 @@ export function render(el, ctx, p) {
     if (!g) return;
     e.preventDefault();
     const r = wrap.getBoundingClientRect();
-    if (g.kind === "pan" && e.touches.length === 1) {
+    if (g.kind === "sel" && e.touches.length === 1) {
+      const a = pt(e.touches[0], r);
+      g.x = a.x; g.y = a.y;
+      moveSel();
+      if (!edgeTimer) edgeTimer = setInterval(edgeStep, EDGE_MS);
+    } else if (g.kind === "pan" && e.touches.length === 1) {
       const a = pt(e.touches[0], r);
       if (!g.moved) {
         if (Math.hypot(a.x - g.x0, a.y - g.y0) < MOVE_PX) return;
         g.moved = true;
+        clearTimeout(longTimer);
         // Sideways only where there is something to pan to.
         g.axis = Math.abs(a.x - g.x0) > Math.abs(a.y - g.y0) && wrap.scrollWidth > wrap.clientWidth + 1 ? "x" : "y";
       }
@@ -502,7 +654,16 @@ export function render(el, ctx, p) {
     }
   }, { passive: false, capture: true });
   wrap.addEventListener("touchend", e => {
+    clearTimeout(longTimer);
+    touchedAt = Date.now();
     if (!g) return;
+    if (g.kind === "sel") {
+      if (e.touches.length) return;
+      e.preventDefault(); // no emulated click
+      stopEdge();
+      g = null;
+      return;
+    }
     if (g.kind === "pinch") {
       if (e.touches.length) return; // the pinch ends with the last finger
       pan.style.transform = "";
@@ -526,6 +687,7 @@ export function render(el, ctx, p) {
     }
     if (!tap) return;
     e.preventDefault(); // no emulated click: the taps are handled here
+    if (sel) { clearSel(); lastTap = null; return; } // a tap beside the selection puts it away
     if (lastTap && Date.now() - lastTap.t < DOUBLE_MS && Math.hypot(at.x - lastTap.x, at.y - lastTap.y) < 40) {
       clearTimeout(tapTimer);
       // A slow double tap: the first one brought the keyboard up already - it goes again.
@@ -538,7 +700,7 @@ export function render(el, ctx, p) {
     clearTimeout(tapTimer);
     tapTimer = setTimeout(() => { if (!keyboardUp()) { kbRaisedAt = Date.now(); showKeyboard(); } }, TAP_MS);
   }, { passive: false, capture: true });
-  wrap.addEventListener("touchcancel", () => { pan.style.transform = ""; g = null; }, { capture: true });
+  wrap.addEventListener("touchcancel", () => { clearTimeout(longTimer); stopEdge(); pan.style.transform = ""; g = null; }, { capture: true });
   // A mouse / trackpad (the browser preview, a tablet): the wheel scrolls as a drag does, Ctrl+wheel zooms.
   wrap.addEventListener("wheel", e => {
     e.preventDefault();
@@ -785,7 +947,7 @@ export function render(el, ctx, p) {
 
   fitChip.onclick = toggleFit;
   endChip.onclick = () => { term.scrollToBottom(); home(); drawChips(); };
-  term.onScroll(drawChips);
+  term.onScroll(() => { drawChips(); drawSel(); });
 
   // ---------- attach ----------
   // The keyboard coming up, a turn to landscape: the whole width is measured again, the cursor stays in view.
@@ -819,6 +981,7 @@ export function render(el, ctx, p) {
     offs.push(handle.onState(({ online }) => { if (!online) say("reconnecting"); else if (overState === "reconnecting") say(""); }));
     offs.push(handle.onReset(({ scrollback, cols, rows }) => {
       fitted = null; // a size the phone set on an older host went back to its pane with the link
+      clearSel();
       term.reset();
       mouseEnc.clear();
       cursorHidden = false;
@@ -841,6 +1004,8 @@ export function render(el, ctx, p) {
     closed = true;
     endHold();
     clearTimeout(tapTimer);
+    clearTimeout(longTimer);
+    stopEdge();
     cancelAnimationFrame(raf);
     stopFling();
     ro.disconnect();
