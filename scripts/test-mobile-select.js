@@ -17,7 +17,9 @@
 //   * wholeLines and cellCount: what xterm's select(col, row, length) is given - checked against a model of how xterm
 //     counts a length over the lines;
 //   * handleAt: a handle hangs under its end of the selection, is hidden with its line, and never reaches out of the
-//     terminal's box - at the first column, the last one, the last row, a terminal smaller than a handle.
+//     terminal's box - at the first column, the last one, the last row, a terminal smaller than a handle;
+//   * reachOf and edgeScroll: near an edge of the view the terminal scrolls under a finger that came towards that
+//     edge - never under one that rests where it pressed, goes along the edge or trembles.
 //
 // The lines are xterm's own: a terminal that is written to and never opened (it needs no page for that), with the
 // character widths the app gives it (Unicode 11). A model of a line here would only hold what its author knows of
@@ -52,7 +54,7 @@ function cellsOf(col, row, length, cols) {
 }
 
 (async () => {
-  const { cellAt, notAfter, wordAt, whole, grow, between, moved, fromRange, onDropped, settle, wholeLines, cellCount, handleAt }= await import(src("select.js"));
+  const { cellAt, notAfter, wordAt, whole, grow, between, moved, fromRange, onDropped, settle, wholeLines, cellCount, handleAt, reachOf, edgeScroll } = await import(src("select.js"));
   const at = (col, row) => ({ col, row });
 
   // ---------- cellAt ----------
@@ -320,5 +322,60 @@ function cellsOf(col, row, length, cols) {
   assert.deepEqual(handleAt(at(0, 100), false, box), { left: 0, top: 16 }, "at the first column it stays in");
   assert.deepEqual(handleAt(at(79, 123), true, box), { left: 80 * 8 - 18, top: 24 * 16 - 18 }, "at the last cell of all too");
 
-  console.log("mobile select: the cell under a point, a long press's word, growing it, whole wide characters, a handle past the other end, the selection where xterm has it, whole lines, the handles' places - passed");
+  // ---------- reachOf, edgeScroll ----------
+  // A view of 360 by 556 px, as a phone's; the terminal scrolls within 28 px of an edge, for a finger that came at
+  // least 8 px towards it.
+  const port = { w: 360, h: 556 }, edges = { near: 28, towards: 8 };
+  // The finger's way as points; which way the terminal scrolls at its last one.
+  const scrollAfter = (...way) => {
+    let reach = null;
+    for (const [x, y] of way) reach = reachOf({ x, y }, reach);
+    const [x, y] = way.at(-1);
+    return edgeScroll({ x, y }, reach, port, edges);
+  };
+  const still = { dx: 0, dy: 0 };
+  assert.deepEqual(reachOf({ x: 50, y: 11 }, null), { left: 50, right: 50, top: 11, bottom: 11 });
+  assert.deepEqual(reachOf({ x: 70, y: 5 }, reachOf({ x: 50, y: 11 }, null)), { left: 50, right: 70, top: 5, bottom: 11 });
+  assert.deepEqual(reachOf({ x: 60, y: 8 }, { left: 50, right: 70, top: 5, bottom: 11 }), { left: 50, right: 70, top: 5, bottom: 11 }, "where it has been stays");
+  // A long press on a word of the first rows, of the last ones, at a side: the finger rests where it pressed.
+  for (const [x, y] of [[50, 11], [50, 25], [50, 0], [180, 550], [5, 300], [350, 300], [3, 3], [357, 553], [180, 278]]) {
+    assert.deepEqual(scrollAfter([x, y]), still, `resting at ${x}, ${y}`);
+  }
+  // It goes on along the edge, to take more of the line - and trembles as a finger does.
+  assert.deepEqual(scrollAfter([50, 11], [66, 11], [120, 12], [200, 10]), still, "along the top edge");
+  assert.deepEqual(scrollAfter([50, 11], [62, 23]), still, "away from the edge, still near it");
+  assert.deepEqual(scrollAfter([50, 11], [65, 11], [65, 9], [65, 12], [66, 9], [65, 13], [65, 6]), still, "trembling: never 8 px towards the edge");
+  assert.deepEqual(scrollAfter([345, 151], [345, 171], [346, 181], [344, 181]), still, "down along the right edge");
+  // Towards the edge by less than counts, then by as much.
+  assert.deepEqual(scrollAfter([50, 11], [50, 4]), still, "7 px up");
+  assert.deepEqual(scrollAfter([50, 11], [50, 3]), { dx: 0, dy: -1 }, "8 px up: the history comes");
+  assert.deepEqual(scrollAfter([50, 11], [50, -7]), { dx: 0, dy: -1 }, "over what is above the view");
+  // From elsewhere into the edge.
+  assert.deepEqual(scrollAfter([50, 179], [50, 100], [50, 28]), still, "not yet near");
+  assert.deepEqual(scrollAfter([50, 179], [50, 100], [50, 27]), { dx: 0, dy: -1 });
+  assert.deepEqual(scrollAfter([50, 30], [50, 27]), still, "3 px into the edge from just outside it: a tremble");
+  assert.deepEqual(scrollAfter([50, 30], [50, 22]), { dx: 0, dy: -1 });
+  // Away from the edge and back to where it pressed.
+  assert.deepEqual(scrollAfter([50, 11], [50, 18], [50, 11]), still, "7 px away and back");
+  assert.deepEqual(scrollAfter([50, 11], [50, 81], [50, 11]), { dx: 0, dy: -1 }, "five rows down and back up");
+  // Once it scrolls it goes on while the finger stays near the edge, whatever it does there; away from it, it stops.
+  assert.deepEqual(scrollAfter([50, 179], [50, 10], [50, 20], [60, 26]), { dx: 0, dy: -1 });
+  assert.deepEqual(scrollAfter([50, 179], [50, 10], [50, 40]), still);
+  // The other edges the same way.
+  assert.deepEqual(scrollAfter([180, 300], [180, 529]), { dx: 0, dy: 1 }, "the bottom");
+  assert.deepEqual(scrollAfter([180, 300], [180, 528]), still);
+  assert.deepEqual(scrollAfter([180, 545], [260, 545]), still, "along the bottom edge");
+  assert.deepEqual(scrollAfter([180, 545], [180, 553]), { dx: 0, dy: 1 });
+  assert.deepEqual(scrollAfter([148, 179], [333, 179]), { dx: 1, dy: 0 }, "the right");
+  assert.deepEqual(scrollAfter([148, 179], [332, 179]), still);
+  assert.deepEqual(scrollAfter([345, 151], [265, 151], [345, 151]), { dx: 1, dy: 0 }, "left and back to the right edge");
+  assert.deepEqual(scrollAfter([148, 179], [27, 179]), { dx: -1, dy: 0 }, "the left");
+  assert.deepEqual(scrollAfter([10, 179], [10, 300]), still, "down along the left edge");
+  assert.deepEqual(scrollAfter([10, 179], [2, 300]), { dx: -1, dy: 0 });
+  // Into a corner: both ways; towards one edge along the other: only that one.
+  assert.deepEqual(scrollAfter([180, 278], [350, 550]), { dx: 1, dy: 1 });
+  assert.deepEqual(scrollAfter([180, 278], [5, 5]), { dx: -1, dy: -1 });
+  assert.deepEqual(scrollAfter([50, 11], [350, 11]), { dx: 1, dy: 0 }, "along the top edge to the right one");
+
+  console.log("mobile select: the cell under a point, a long press's word, growing it, whole wide characters, a handle past the other end, the selection where xterm has it, whole lines, the handles' places, scrolling at an edge - passed");
 })().catch(e => { console.error(e); process.exit(1); });

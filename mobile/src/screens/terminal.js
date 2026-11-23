@@ -42,8 +42,8 @@ const MIN_PX = 3, MAX_PX = 30;
 const PAD = 4;                // the wrap's padding around the terminal
 const TAP_MS = 300, DOUBLE_MS = 320, MOVE_PX = 8;
 // Selecting text: a finger held still this long starts it; this near an edge of the view the terminal scrolls under
-// the finger, a line every EDGE_MS.
-const LONG_MS = 450, EDGE_PX = 28, EDGE_MS = 60;
+// the finger, a line every EDGE_MS - once the finger came EDGE_TOWARDS px towards that edge (select.edgeScroll).
+const LONG_MS = 450, EDGE_PX = 28, EDGE_TOWARDS = 8, EDGE_MS = 60;
 const HANDLE_PX = 18;         // a selection handle's size (style.css .sel-handle)
 // Scrolling: a wheel notch to a program for this many lines' height of a drag, at most so many notches or keys for one
 // move; a fling starts above FLING_FROM px/ms (measured over the drag's last TRAIL_MS), is capped at FLING_MAX, slows
@@ -554,10 +554,10 @@ export function render(el, ctx, p) {
     setSel(g.word ? select.grow(g.word, pos) : select.between(g.fixed, pos));
   }
   const stopEdge = () => { clearInterval(edgeTimer); edgeTimer = 0; };
-  // The finger rests near an edge: the view moves a line at a time, then xterm's history.
+  // The finger came to an edge and stays near it: the view moves a line at a time, then xterm's history.
   function edgeStep() {
     if (g?.kind !== "sel") return stopEdge();
-    const dy = g.y < EDGE_PX ? -1 : g.y > wrap.clientHeight - EDGE_PX ? 1 : 0, dx = g.x < EDGE_PX ? -1 : g.x > wrap.clientWidth - EDGE_PX ? 1 : 0;
+    const { dx, dy } = select.edgeScroll({ x: g.x, y: g.y }, g.reach, { w: wrap.clientWidth, h: wrap.clientHeight }, { near: EDGE_PX, towards: EDGE_TOWARDS });
     if (!dx && !dy) return stopEdge();
     const c = cell();
     if (dy) {
@@ -571,7 +571,7 @@ export function render(el, ctx, p) {
   function startSel() {
     clearTimeout(tapTimer);
     const word = wordAt(cellAt({ x: g.x0, y: g.y0 }));
-    g = { kind: "sel", word, dx: 0, dy: 0, x: g.x, y: g.y };
+    g = { kind: "sel", word, dx: 0, dy: 0, x: g.x, y: g.y, reach: select.reachOf(g, null) };
     buzz(12);
     setSel(word);
   }
@@ -611,7 +611,7 @@ export function render(el, ctx, p) {
         // A handle hangs under its cell: the selection's end stays where it is until the finger moves.
         const pos = end === selB ? sel.b : sel.a, c = cell();
         const cx = PAD + (pos.col + 0.5) * c.w - wrap.scrollLeft, cy = PAD + (pos.row - term.buffer.active.viewportY + 0.5) * c.h - wrap.scrollTop;
-        g = { kind: "sel", fixed: end === selB ? sel.a : sel.b, dx: cx - a.x, dy: cy - a.y, x: a.x, y: a.y };
+        g = { kind: "sel", fixed: end === selB ? sel.a : sel.b, dx: cx - a.x, dy: cy - a.y, x: a.x, y: a.y, reach: select.reachOf(a, null) };
         return;
       }
       g = { kind: "pan", axis: "", x0: a.x, y0: a.y, x: a.x, y: a.y, moved: false, t0: Date.now(), trail: [{ t: performance.now(), x: a.x, y: a.y }] };
@@ -632,8 +632,9 @@ export function render(el, ctx, p) {
     if (g.kind === "sel" && e.touches.length === 1) {
       const a = pt(e.touches[0], r);
       g.x = a.x; g.y = a.y;
+      g.reach = select.reachOf(a, g.reach);
       moveSel();
-      if (!edgeTimer) edgeTimer = setInterval(edgeStep, EDGE_MS);
+      if (g && !edgeTimer) edgeTimer = setInterval(edgeStep, EDGE_MS);
     } else if (g.kind === "pan" && e.touches.length === 1) {
       const a = pt(e.touches[0], r);
       if (!g.moved) {

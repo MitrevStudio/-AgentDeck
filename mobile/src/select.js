@@ -123,3 +123,20 @@ export function handleAt(pos, last, { cell, cols, rows, top, size }) {
     top: clamp((row + 1) * cell.h, rows * cell.h - size)
   };
 }
+
+// How far the finger has been each way since it began a selection or took a handle, in px of the view: was, widened
+// to the point it is at now (was null: it has just begun).
+export function reachOf(at, was) {
+  if (!was) return { left: at.x, right: at.x, top: at.y, bottom: at.y };
+  return { left: Math.min(was.left, at.x), right: Math.max(was.right, at.x), top: Math.min(was.top, at.y), bottom: Math.max(was.bottom, at.y) };
+}
+
+// Which way the terminal scrolls under a finger near an edge of the view: { dx, dy }, each -1 (left, up), 0 or 1.
+// Being within `near` px of an edge is not enough: a word of the first rows is pressed there, and the finger that
+// rests on it, trembles, or goes on along the edge to take more of the line would send the terminal off into its
+// history. The finger has to have come towards that edge, by `towards` px at least, from the furthest it has been
+// from it (reach: reachOf) - from elsewhere in the view, on from where it pressed, or away and back.
+export function edgeScroll(at, reach, view, { near, towards }) {
+  const way = (v, least, most, size) => (v < near && most - v >= towards ? -1 : v > size - near && v - least >= towards ? 1 : 0);
+  return { dx: way(at.x, reach.left, reach.right, view.w), dy: way(at.y, reach.top, reach.bottom, view.h) };
+}
