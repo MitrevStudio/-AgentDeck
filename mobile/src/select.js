@@ -52,6 +52,23 @@ export function wordAt(lineAt, pos, cols) {
   return { a: { col: a.col, row: a.row }, b: { col: b.col, row: b.row } };
 }
 
+// The word a long press takes: the one at the cell, or - the cell is blank - the nearest one in its row within
+// `reach` cells, the one before at the same distance. A fingertip covers several cells of a terminal shown small,
+// and its middle is as often on the blank beside a word as on the word: one blank cell selected is next to nothing
+// to see, and nothing to copy. Further from any text it is that one cell still: a place to drag a selection on from.
+export function wordNear(lineAt, pos, cols, reach) {
+  const line = lineAt(pos.row);
+  const full = col => {
+    const c = col >= 0 && col < cols ? line?.getCell(col) : undefined;
+    return Boolean(c) && (c.getWidth() === 0 || c.getChars().trim() !== "");
+  };
+  if (full(pos.col)) return wordAt(lineAt, pos, cols);
+  for (let d = 1; d <= reach; d++) {
+    for (const col of [pos.col - d, pos.col + d]) if (full(col)) return wordAt(lineAt, { col, row: pos.row }, cols);
+  }
+  return wordAt(lineAt, pos, cols);
+}
+
 // A selection with no wide character cut in two: a first cell on a character's second half goes back to its first, a
 // last cell on its first half on to its second. xterm selects cells and knows nothing of the characters in them: from
 // a second half on it copies a blank for the character, and it would highlight half of one. lineAt: the buffer's

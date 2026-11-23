@@ -44,6 +44,7 @@ const TAP_MS = 300, DOUBLE_MS = 320, MOVE_PX = 8;
 // Selecting text: a finger held still this long starts it; this near an edge of the view the terminal scrolls under
 // the finger, a line every EDGE_MS - once the finger came EDGE_TOWARDS px towards that edge (select.edgeScroll).
 const LONG_MS = 450, EDGE_PX = 28, EDGE_TOWARDS = 8, EDGE_MS = 60;
+const NEAR_CELLS = 2;         // a long press on a blank takes a word this near in its row (select.wordNear)
 const HANDLE_PX = 18;         // a selection handle's size (style.css .sel-handle)
 const BAR_GAP = 8;            // the selection bar's distance from the view's edge (style.css .term-sel)
 // Scrolling: a wheel notch to a program for this many lines' height of a drag, at most so many notches or keys for one
@@ -484,7 +485,7 @@ export function render(el, ctx, p) {
   // The arithmetic is select.js's; here it is given the view and the terminal as they are now.
   const cellAt = at => select.cellAt(at, { scroll: { left: wrap.scrollLeft, top: wrap.scrollTop }, cell: cell(), pad: PAD, cols: term.cols, rows: term.rows, top: term.buffer.active.viewportY });
   const lineAt = row => term.buffer.active.getLine(row);
-  const wordAt = pos => select.wordAt(lineAt, pos, term.cols);
+  const wordAt = pos => select.wordNear(lineAt, pos, term.cols, NEAR_CELLS);
   // The selection is xterm's to keep: sel is what xterm was last given, and before its cells are used - for the
   // handles, "Whole lines", a handle's drag - it is read back from xterm (settleSel), which moves it when a full
   // history drops its oldest lines and leaves it be when a program moves lines about. A second account of where the

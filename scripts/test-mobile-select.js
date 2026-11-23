@@ -6,6 +6,8 @@
 //     character in it (two cells, the second empty) - and stops at blanks and at the line's ends; a blank cell or a
 //     line that is not there is a selection of that one cell; a word that the terminal's width broke over two rows
 //     or more is taken whole, from any of them;
+//   * wordNear: a long press on a blank within two cells of a word in its row takes that word - a fingertip is
+//     wider than a cell; further from any text it is the one blank cell;
 //   * whole: a selection never begins or ends in the middle of a wide character - xterm copies a blank for one cut at
 //     its second half - so what is copied is every character the finger touched;
 //   * grow: the word first selected stays whole whichever way the finger goes on, also across lines;
@@ -59,7 +61,7 @@ function cellsOf(col, row, length, cols) {
 }
 
 (async () => {
-  const { cellAt, notAfter, wordAt, whole, grow, between, moved, fromRange, onDropped, settle, wholeLines, cellCount, handleAt, reachOf, edgeScroll, barAt, ofTouch } = await import(src("select.js"));
+  const { cellAt, notAfter, wordAt, wordNear, whole, grow, between, moved, fromRange, onDropped, settle, wholeLines, cellCount, handleAt, reachOf, edgeScroll, barAt, ofTouch } = await import(src("select.js"));
   const at = (col, row) => ({ col, row });
 
   // ---------- cellAt ----------
@@ -103,6 +105,30 @@ function cellsOf(col, row, length, cols) {
   assert.deepEqual(wordAt(on(line, 7), at(0, 7), COLS), { a: at(0, 7), b: at(0, 7) }, "a blank cell: itself");
   assert.deepEqual(wordAt(on(line, 7), at(4, 7), COLS), { a: at(4, 7), b: at(4, 7) });
   assert.deepEqual(wordAt(on(line, 7), at(39, 7), COLS), { a: at(39, 7), b: at(39, 7) });
+  // ---------- wordNear ----------
+  // What a long press takes. A fingertip covers several cells and its middle is easily on the blank beside the
+  // word it is put on: within two cells of a word in the row, that word - the nearer one, the one before at the
+  // same distance.
+  const near = col => { const w = wordNear(on(line, 7), at(col, 7), COLS, 2); return w.a.col === w.b.col && textOf(line, w) === "" ? col : textOf(line, w); };
+  assert.equal(near(3), "cd", "on a word: that word");
+  assert.equal(near(0), "cd", "two cells before the line's first word");
+  assert.equal(near(4), "cd", "between two words, one cell from each: the one before");
+  assert.equal(near(13), "/srv/app", "one cell after a word, two before the next");
+  assert.equal(near(14), "&&");
+  assert.equal(near(31), "build", "just past the line's end");
+  assert.equal(near(32), "build");
+  // Further from any text the press is on that one blank cell: a place to drag a selection on from.
+  assert.deepEqual(wordNear(on(line, 7), at(33, 7), COLS, 2), { a: at(33, 7), b: at(33, 7) }, "three cells past the end");
+  assert.deepEqual(wordNear(on(line, 7), at(39, 7), COLS, 2), { a: at(39, 7), b: at(39, 7) });
+  assert.deepEqual(wordNear(on(await lineOf("", COLS)), at(5, 0), COLS, 2), { a: at(5, 0), b: at(5, 0) }, "a blank line");
+  assert.deepEqual(wordNear(none, at(5, 3), COLS, 2), { a: at(5, 3), b: at(5, 3) }, "a line the buffer does not have");
+  assert.deepEqual(wordNear(on(line, 7), at(4, 7), COLS, 0), { a: at(4, 7), b: at(4, 7) }, "no reach: the cell itself");
+  // The first and the last column: nothing is looked for off the row.
+  const ends = await lineOf("a" + " ".repeat(COLS - 2) + "z", COLS);
+  assert.deepEqual(wordNear(on(ends), at(1, 0), COLS, 2), { a: at(0, 0), b: at(0, 0) });
+  assert.deepEqual(wordNear(on(ends), at(COLS - 2, 0), COLS, 2), { a: at(COLS - 1, 0), b: at(COLS - 1, 0) });
+  assert.deepEqual(wordNear(on(ends), at(3, 0), COLS, 2), { a: at(3, 0), b: at(3, 0) });
+
   // A line full to both ends.
   const full = await lineOf("x".repeat(COLS), COLS);
   assert.deepEqual(wordAt(on(full), at(17, 0), COLS), { a: at(0, 0), b: at(COLS - 1, 0) });
@@ -488,5 +514,5 @@ function cellsOf(col, row, length, cols) {
   assert.equal(ofTouch({ fingers: 0, since: 5000, source: null }), false);
   assert.equal(ofTouch({ fingers: 1, since: 5000, source: { firesTouchEvents: false } }), true, "a finger is down all the same");
 
-  console.log("mobile select: the cell under a point, a long press's word, growing it, whole wide characters, a handle past the other end, the selection where xterm has it, whole lines, the handles' places, scrolling at an edge, the bar's place, a touch's mouse events - passed");
+  console.log("mobile select: the cell under a point, a long press's word and the word beside a blank, growing it, whole wide characters, a handle past the other end, the selection where xterm has it, whole lines, the handles' places, scrolling at an edge, the bar's place, a touch's mouse events - passed");
 })().catch(e => { console.error(e); process.exit(1); });
