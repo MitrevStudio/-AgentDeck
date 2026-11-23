@@ -480,7 +480,7 @@ export function render(el, ctx, p) {
   // whole lines, cancel. While it stays a drag scrolls as before, a tap anywhere else puts the selection away. Near an
   // edge of the view the terminal scrolls under the finger. The selection is xterm's own (term.select), set from
   // here: xterm itself selects with a mouse only.
-  let longTimer = 0, edgeTimer = 0, touchedAt = 0;
+  let longTimer = 0, edgeTimer = 0, touchedAt = 0, fingers = 0; // fingers: how many are on the terminal now
   // The arithmetic is select.js's; here it is given the view and the terminal as they are now.
   const cellAt = at => select.cellAt(at, { scroll: { left: wrap.scrollLeft, top: wrap.scrollTop }, cell: cell(), pad: PAD, cols: term.cols, rows: term.rows, top: term.buffer.active.viewportY });
   const lineAt = row => term.buffer.active.getLine(row);
@@ -596,11 +596,14 @@ export function render(el, ctx, p) {
     } else if (act === "sel-lines" && sel) setSel(select.wholeLines(sel, term.cols, lineAt));
     else if (act === "sel-cancel") clearSel();
   };
-  // What a browser makes of a touch for a mouse (a long press: mousedown, the context menu) is not xterm's to act on -
-  // it would start a selection of its own or put its textarea under the finger.
-  for (const type of ["mousedown", "contextmenu"]) {
+  // What a browser makes of a touch for a mouse (a long press: a mouse move, mousedown, the context menu) is not
+  // xterm's to act on - it would start a selection of its own or put its textarea under the finger. And for a
+  // program that asked for the mouse xterm reports each of them as the user's input, which ends its selection: on a
+  // phone whose own long press comes just after LONG_MS the word was selected and gone again under the resting
+  // finger, and the program was told of a mouse that is not there.
+  for (const type of ["mousemove", "mousedown", "mouseup", "contextmenu"]) {
     wrap.addEventListener(type, e => {
-      if (Date.now() - touchedAt > 1000) return;
+      if (!select.ofTouch({ fingers, since: Date.now() - touchedAt, source: e.sourceCapabilities })) return;
       e.stopPropagation();
       if (type === "contextmenu") e.preventDefault();
     }, { capture: true });
@@ -610,6 +613,7 @@ export function render(el, ctx, p) {
     stopFling();
     clearTimeout(longTimer);
     touchedAt = Date.now();
+    fingers = e.touches.length;
     settleSel();
     const r = wrap.getBoundingClientRect();
     if (e.touches.length === 1) {
@@ -669,6 +673,7 @@ export function render(el, ctx, p) {
   wrap.addEventListener("touchend", e => {
     clearTimeout(longTimer);
     touchedAt = Date.now();
+    fingers = e.touches.length;
     if (!g) return;
     if (g.kind === "sel") {
       if (e.touches.length) return;
@@ -714,7 +719,7 @@ export function render(el, ctx, p) {
     clearTimeout(tapTimer);
     tapTimer = setTimeout(() => { if (!keyboardUp()) { kbRaisedAt = Date.now(); showKeyboard(); } }, TAP_MS);
   }, { passive: false, capture: true });
-  wrap.addEventListener("touchcancel", () => { clearTimeout(longTimer); stopEdge(); pan.style.transform = ""; g = null; drawSel(); }, { capture: true });
+  wrap.addEventListener("touchcancel", e => { clearTimeout(longTimer); touchedAt = Date.now(); fingers = e.touches.length; stopEdge(); pan.style.transform = ""; g = null; drawSel(); }, { capture: true });
   // The view scrolled (a terminal taller than it): the selection's ends are elsewhere in it, and so may the bar be.
   wrap.addEventListener("scroll", () => { if (sel) drawSel(); }, { passive: true });
   // A mouse / trackpad (the browser preview, a tablet): the wheel scrolls as a drag does, Ctrl+wheel zooms.

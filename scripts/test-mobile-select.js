@@ -22,7 +22,9 @@
 //   * reachOf and edgeScroll: near an edge of the view the terminal scrolls under a finger that came towards that
 //     edge - never under one that rests where it pressed, goes along the edge or trembles;
 //   * barAt: the bar with Copy is never over an end of the selection that is in view - it leaves the top of the view
-//     for the bottom, or for the middle when there is an end at each.
+//     for the bottom, or for the middle when there is an end at each;
+//   * ofTouch: the mouse events a browser makes of a finger - while one is down however long it has been, just
+//     after it, or marked as a touch's by the browser - are told from a real mouse's, which stay xterm's.
 //
 // The lines are xterm's own: a terminal that is written to and never opened (it needs no page for that), with the
 // character widths the app gives it (Unicode 11). A model of a line here would only hold what its author knows of
@@ -57,7 +59,7 @@ function cellsOf(col, row, length, cols) {
 }
 
 (async () => {
-  const { cellAt, notAfter, wordAt, whole, grow, between, moved, fromRange, onDropped, settle, wholeLines, cellCount, handleAt, reachOf, edgeScroll, barAt } = await import(src("select.js"));
+  const { cellAt, notAfter, wordAt, whole, grow, between, moved, fromRange, onDropped, settle, wholeLines, cellCount, handleAt, reachOf, edgeScroll, barAt, ofTouch } = await import(src("select.js"));
   const at = (col, row) => ({ col, row });
 
   // ---------- cellAt ----------
@@ -469,5 +471,22 @@ function cellsOf(col, row, length, cols) {
   assert.equal(barAt(one(20, 100), { ...room, top: 95 }), "top", "row 5 of the view now");
   assert.equal(barAt(one(20, 96), { ...room, top: 95 }), "bottom");
 
-  console.log("mobile select: the cell under a point, a long press's word, growing it, whole wide characters, a handle past the other end, the selection where xterm has it, whole lines, the handles' places, scrolling at an edge, the bar's place - passed");
+  // ---- a mouse event made of a touch ----
+  // A finger that rests: Android's own long press comes when the phone is set to (half a second, a second and a
+  // half), with a mouse move and a button's press at the finger's place - however long the finger has been down.
+  assert.equal(ofTouch({ fingers: 1, since: 500 }), true);
+  assert.equal(ofTouch({ fingers: 1, since: 1500 }), true, "a finger down for longer than the time after a touch");
+  assert.equal(ofTouch({ fingers: 2, since: 4000 }), true);
+  // After the lift: the mouse events of a tap follow it at once.
+  assert.equal(ofTouch({ fingers: 0, since: 0 }), true);
+  assert.equal(ofTouch({ fingers: 0, since: 1000 }), true);
+  assert.equal(ofTouch({ fingers: 0, since: 1001 }), false, "a mouse, a while after the screen was last touched");
+  assert.equal(ofTouch({ fingers: 0, since: Infinity }), false, "a mouse, the screen never touched");
+  // Where the browser says what the event was made of, that is taken.
+  assert.equal(ofTouch({ fingers: 0, since: 5000, source: { firesTouchEvents: true } }), true);
+  assert.equal(ofTouch({ fingers: 0, since: 5000, source: { firesTouchEvents: false } }), false);
+  assert.equal(ofTouch({ fingers: 0, since: 5000, source: null }), false);
+  assert.equal(ofTouch({ fingers: 1, since: 5000, source: { firesTouchEvents: false } }), true, "a finger is down all the same");
+
+  console.log("mobile select: the cell under a point, a long press's word, growing it, whole wide characters, a handle past the other end, the selection where xterm has it, whole lines, the handles' places, scrolling at an edge, the bar's place, a touch's mouse events - passed");
 })().catch(e => { console.error(e); process.exit(1); });

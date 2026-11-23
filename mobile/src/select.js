@@ -151,6 +151,13 @@ export function handleAt(pos, last, { cell, cols, rows, top, size }) {
   };
 }
 
+// A mouse event is one the browser made of a touch, not a mouse's own. fingers: how many are on the terminal now;
+// since: ms since one last came down or lifted; source: the event's sourceCapabilities, where the browser has them.
+// A tap's mouse events follow its lift at once. A long press's do not: Android makes a mouse move, a button's press
+// and the context menu of a finger that rests, when the phone's own "touch and hold" time is up - half a second on
+// some phones, a second and a half where the user set it so - so a finger that is down counts for as long as it is.
+export const ofTouch = ({ fingers, since, source = null }) => fingers > 0 || since <= 1000 || Boolean(source?.firesTouchEvents);
+
 // How far the finger has been each way since it began a selection or took a handle, in px of the view: was, widened
 // to the point it is at now (was null: it has just begun).
 export function reachOf(at, was) {
