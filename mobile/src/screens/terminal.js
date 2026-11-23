@@ -35,6 +35,7 @@ import { icon, iconBtn } from "../icons.js";
 import { header, wireBack, closeAsk } from "./parts.js";
 import { keyStrip, wireStrip } from "./keys.js";
 import { openPorts } from "./ports.js";
+import * as select from "../select.js";
 
 const READ_DEFAULT = 12, READ_MIN = 8, READ_MAX = 22; // the readable font: what "Fit to phone" sizes the host's terminal for
 const MIN_PX = 3, MAX_PX = 30;
@@ -479,29 +480,12 @@ export function render(el, ctx, p) {
   // edge of the view the terminal scrolls under the finger. The selection is xterm's own (term.select), set from
   // here: xterm itself selects with a mouse only.
   let longTimer = 0, edgeTimer = 0, touchedAt = 0;
-  const cellAt = at => {
-    const c = cell();
-    return {
-      col: clamp(Math.floor((at.x + wrap.scrollLeft - PAD) / c.w), 0, term.cols - 1),
-      row: term.buffer.active.viewportY + clamp(Math.floor((at.y + wrap.scrollTop - PAD) / c.h), 0, term.rows - 1)
-    };
-  };
-  const notAfter = (a, b) => a.row < b.row || (a.row === b.row && a.col <= b.col);
-  // The run of cells with something in them around a cell (the second half of a wide character counts); an empty
-  // cell is a selection of its own.
-  function wordAt(pos) {
-    const line = term.buffer.active.getLine(pos.row);
-    const full = col => { const c = line?.getCell(col); return Boolean(c) && (c.getWidth() === 0 || c.getChars().trim() !== ""); };
-    let s = pos.col, e = pos.col;
-    if (full(s)) {
-      while (s > 0 && full(s - 1)) s--;
-      while (e < term.cols - 1 && full(e + 1)) e++;
-    }
-    return { a: { col: s, row: pos.row }, b: { col: e, row: pos.row } };
-  }
-  function setSel(a, b) {
+  // The arithmetic is select.js's; here it is given the view and the terminal as they are now.
+  const cellAt = at => select.cellAt(at, { scroll: { left: wrap.scrollLeft, top: wrap.scrollTop }, cell: cell(), pad: PAD, cols: term.cols, rows: term.rows, top: term.buffer.active.viewportY });
+  const wordAt = pos => select.wordAt(term.buffer.active.getLine(pos.row), pos, term.cols);
+  function setSel({ a, b }) {
     sel = { a, b };
-    term.select(a.col, a.row, (b.row - a.row) * term.cols + b.col - a.col + 1);
+    term.select(a.col, a.row, select.cellCount(sel, term.cols));
     drawSel();
   }
   function clearSel() {
@@ -513,28 +497,22 @@ export function render(el, ctx, p) {
   // The handles under the selection's two ends (out of sight with their line), the bar while there is a selection.
   function drawSel() {
     selBar.hidden = !sel;
-    const c = sel ? cell() : null, top = term.buffer.active.viewportY;
-    for (const [h, pos, end] of [[selA, sel?.a, 0], [selB, sel?.b, 1]]) {
-      const row = pos ? pos.row - top : -1;
-      h.hidden = row < 0 || row >= term.rows;
-      if (h.hidden) continue;
+    const view = sel ? { cell: cell(), cols: term.cols, rows: term.rows, top: term.buffer.active.viewportY, size: HANDLE_PX } : null;
+    for (const [h, pos, last] of [[selA, sel?.a, false], [selB, sel?.b, true]]) {
       // Kept inside the terminal's own box: one that reached out of it would be cut off at the left edge, and make
       // the view scroll further than the terminal at the right and bottom ones.
-      const left = end ? (pos.col + 1) * c.w : pos.col * c.w - HANDLE_PX;
-      h.style.left = `${clamp(left, 0, Math.max(0, term.cols * c.w - HANDLE_PX))}px`;
-      h.style.top = `${clamp((row + 1) * c.h, 0, Math.max(0, term.rows * c.h - HANDLE_PX))}px`;
+      const at = pos ? select.handleAt(pos, last, view) : null;
+      h.hidden = !at;
+      if (!at) continue;
+      h.style.left = `${at.left}px`;
+      h.style.top = `${at.top}px`;
     }
   }
   // The finger moved while selecting: from the word first selected to the cell under the finger, or - a handle - from
   // the selection's other end to it.
   function moveSel() {
     const pos = cellAt({ x: g.x + g.dx, y: g.y + g.dy });
-    if (g.word) {
-      if (notAfter(pos, g.word.a)) setSel(pos, g.word.b);
-      else if (notAfter(g.word.b, pos)) setSel(g.word.a, pos);
-      else setSel(g.word.a, g.word.b);
-    } else if (notAfter(pos, g.fixed)) setSel(pos, g.fixed);
-    else setSel(g.fixed, pos);
+    setSel(g.word ? select.grow(g.word, pos) : select.between(g.fixed, pos));
   }
   const stopEdge = () => { clearInterval(edgeTimer); edgeTimer = 0; };
   // The finger rests near an edge: the view moves a line at a time, then xterm's history.
@@ -556,7 +534,7 @@ export function render(el, ctx, p) {
     const word = wordAt(cellAt({ x: g.x0, y: g.y0 }));
     g = { kind: "sel", word, dx: 0, dy: 0, x: g.x, y: g.y };
     buzz(12);
-    setSel(word.a, word.b);
+    setSel(word);
   }
   term.onSelectionChange(() => { if (sel && !term.hasSelection()) { sel = null; drawSel(); } }); // xterm dropped it (another screen)
   selBar.onpointerdown = e => e.preventDefault(); // the keyboard stays as it was
@@ -566,7 +544,7 @@ export function render(el, ctx, p) {
       const text = term.getSelection();
       clearSel();
       copyText(text);
-    } else if (act === "sel-lines" && sel) setSel({ col: 0, row: sel.a.row }, { col: term.cols - 1, row: sel.b.row });
+    } else if (act === "sel-lines" && sel) setSel(select.wholeLines(sel, term.cols));
     else if (act === "sel-cancel") clearSel();
   };
   // What a browser makes of a touch for a mouse (a long press: mousedown, the context menu) is not xterm's to act on -

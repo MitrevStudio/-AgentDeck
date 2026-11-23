@@ -35,6 +35,7 @@
     "test:mobile-forward": "node scripts/test-mobile-forward.js",
     "test:mobile-i18n": "node scripts/test-mobile-i18n.js",
     "test:mobile-text": "node scripts/test-mobile-text.js",
+    "test:mobile-select": "node scripts/test-mobile-select.js",
     "test:shared-terminals": "node scripts/test-shared-terminals.js",
     "test:terminal-viewers": "node scripts/test-terminal-viewers.js",
     "test:host-restore": "node scripts/test-host-restore.js",
