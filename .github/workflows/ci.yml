@@ -32,11 +32,15 @@ jobs:
       - run: npm run test:statusline
       - run: npm run test:themes
       - run: npm run test:prefs
+      - run: npm run test:voice-models
+      - run: npm run test:meetings
       - run: npm run test:editors
       - run: npm run test:taskbar
       - run: npm run test:scratchpads
       - run: npm run test:release
       - run: npm run test:taskbar-ui
+      - run: npm run test:meetings-recorder
+      - run: npm run test:meetings-ui
       - run: npm run test:noise
       - run: npm run test:terminal-viewers
       - run: npm run test:desktop-terminals
@@ -85,6 +89,8 @@ jobs:
       - run: npm run test:statusline
       - run: npm run test:themes
       - run: npm run test:prefs
+      - run: npm run test:voice-models
+      - run: npm run test:meetings
       - run: npm run test:editors
       - run: npm run test:taskbar
       - run: npm run test:scratchpads

@@ -1,23 +1,28 @@
-// OpenAI speech-to-text (whisper-1, gpt-4o-transcribe, ...). Port of VoiceTray's OpenAITranscriptionProvider.
-// Throws VoiceError only. Requests go through ../../network.js (Chromium's network stack and the proxy settings).
+// OpenAI speech-to-text and text; what each model takes is the catalog's to say (../catalog.js). Port of VoiceTray's
+// OpenAITranscriptionProvider. Throws VoiceError only. Requests go through ../../network.js (Chromium's network stack and the proxy settings).
 const fs = require("node:fs");
 const path = require("node:path");
 const network = require("../../network");
 const { VoiceError, classify, fromResponse, tooLarge } = require("../errors");
 const { t, formatNumber } = require("../../i18n");
+const { modelInfo } = require("../catalog");
 
 const PROVIDER = "OpenAI";
-const URL = "https://api.openai.com/v1/audio/transcriptions";
+const TRANSCRIPTIONS_URL = "https://api.openai.com/v1/audio/transcriptions";
 const CHAT_URL = "https://api.openai.com/v1/chat/completions";
 
 // "Files can be up to 25 MB." Decimal, not MiB: read as MiB we would send 26.2 MB and take a 413 at the boundary.
 const MAX_UPLOAD_BYTES = 25_000_000;
 
-// The terms go in as `prompt`, which the transcription models read as preceding text: a list of correctly spelled
-// words is what steers them. Whisper reads only its last 224 tokens; the diarizing model takes no prompt at all.
+// gpt-transcribe takes the terms as `keywords`, one field each, and refuses the whole request over one with < > or a
+// line break: such a term is left out, the dictionary must never cost a dictation.
+const keywordTerms = vocabulary => vocabulary.filter(term => !/[<>\r\n]/.test(term));
+
+// The older models read them as `prompt`, their preceding text: a list of correctly spelled words is what steers
+// them. Whisper reads only its last 224 tokens.
 const PROMPT_CHARS = 800;
-function vocabularyPrompt(model, vocabulary) {
-  if (!vocabulary.length || /diarize/i.test(model)) return "";
+function vocabularyPrompt(vocabulary) {
+  if (!vocabulary.length) return "";
   let out = "";
   for (const term of vocabulary) {
     const next = out ? `${out}, ${term}` : term;
@@ -39,11 +44,17 @@ async function transcribe({ wavPath, model, language, vocabulary = [], apiKey, s
     const form = new FormData();
     form.append("file", new Blob([audio], { type: "audio/wav" }), path.basename(wavPath));
     form.append("model", model);
-    if (language && language !== "auto") form.append("language", language);
-    const prompt = vocabularyPrompt(model, vocabulary);
-    if (prompt) form.append("prompt", prompt);
+    const info = modelInfo(PROVIDER, model);
+    // `languages` replaces `language`: never both.
+    if (language && language !== "auto") form.append(info.language === "languages" ? "languages[]" : "language", language);
+    if (info.vocabulary === "keywords") {
+      for (const term of keywordTerms(vocabulary)) form.append("keywords[]", term);
+    } else if (info.vocabulary === "prompt") {
+      const prompt = vocabularyPrompt(vocabulary);
+      if (prompt) form.append("prompt", prompt);
+    }
 
-    const res = await network.fetch(URL, { method: "POST", headers: { Authorization: `Bearer ${apiKey}` }, body: form, signal });
+    const res = await network.fetch(TRANSCRIPTIONS_URL, { method: "POST", headers: { Authorization: `Bearer ${apiKey}` }, body: form, signal });
     const body = await res.text();
     if (!res.ok) throw fromResponse(res, body, PROVIDER);
 
@@ -59,11 +70,17 @@ async function transcribe({ wavPath, model, language, vocabulary = [], apiKey, s
 
 // One answer from a chat model: `system` holds the instructions, `text` the material; with a `schema` (JSON Schema,
 // strict: every property required, no others) the answer is JSON that follows it. Empty when the model gave no text;
-// the caller decides what that means.
-async function generateText({ model, system, text, temperature = 0.2, schema, apiKey, signal }) {
+// the caller decides what that means. It gets the least effort the model takes, as with Gemini, unless `effort` names
+// another that it takes; GPT-6 takes a temperature only without reasoning, and GPT-6.2, which always reasons, none.
+async function generateText({ model, system, text, temperature = 0.2, effort, schema, apiKey, signal }) {
   try {
+    const info = modelInfo(PROVIDER, model);
+    const levels = info.thinking?.levels;
+    const reasoning = levels?.includes(effort) ? effort : levels?.[0];
     const body = JSON.stringify({
-      model, temperature, messages: [{ role: "system", content: system }, { role: "user", content: text }],
+      model, messages: [{ role: "system", content: system }, { role: "user", content: text }],
+      ...(info.temperature && (!reasoning || reasoning === "none") && { temperature }),
+      ...(reasoning && { reasoning_effort: reasoning }),
       ...(schema && { response_format: { type: "json_schema", json_schema: { name: "answer", strict: true, schema } } })
     });
     const res = await network.fetch(CHAT_URL, {
@@ -78,4 +95,4 @@ async function generateText({ model, system, text, temperature = 0.2, schema, ap
   }
 }
 
-module.exports = { transcribe, generateText, vocabularyPrompt, MAX_UPLOAD_BYTES };
+module.exports = { transcribe, generateText, MAX_UPLOAD_BYTES, TRANSCRIPTIONS_URL };

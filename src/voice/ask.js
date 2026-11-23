@@ -1,5 +1,5 @@
-// Voice question: a short spoken question answered at once by the fast text model the dictation rewrite uses
-// (rewrite.js generate(), the user's own provider and key). The queue copies the answer to the clipboard and main
+// Voice question: a short spoken question answered at once by its task's text model (catalog.js; through
+// rewrite.js generate(), on the user's own key). The queue copies the answer to the clipboard and main
 // shows it in a small window (answer-popup.js).
 const { generate } = require("./rewrite");
 const { VoiceError } = require("./errors");
@@ -23,7 +23,7 @@ async function askText(question, { dictionary = [], language = "auto", provider,
   try { languageName = require("./providers/gemini").LANGUAGE_NAMES[language] || ""; } catch {}
   if (languageName) lines.push(`The user usually speaks ${languageName}, often with English technical terms mixed in.`);
   if (dictionary.length) lines.push(`Names and terms that may occur, spelled correctly (the transcript may have misheard them): ${dictionary.join(", ")}.`);
-  const answer = await generate({ system: lines.join("\n"), text: tag(question), provider, model, temperature: 0.3, signal, getApiKey, timeoutMs: 45_000 });
+  const answer = await generate({ system: lines.join("\n"), text: tag(question), task: "ask", provider, model, temperature: 0.3, signal, getApiKey, timeoutMs: 45_000 });
   const out = String(answer || "").replace(/^\s*<\/?answer>\s*|\s*<\/?answer>\s*$/gi, "").trim();
   if (!out) throw new VoiceError("MalformedResponse", t("voice.errors.rewrite.empty.short"), t("voice.errors.rewrite.empty.long", { provider: provider || "" }));
   return out;

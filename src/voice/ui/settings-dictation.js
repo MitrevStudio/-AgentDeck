@@ -2,7 +2,7 @@
 // and the dictionary (terms, replacements, project names). Loaded before settings.js, which calls dictationUi.fill()
 // once the settings are in and spreads dictationUi.payload() into what it saves; edits inside those tabs already
 // count as unsaved there.
-// Uses $, esc, icon, t and tn from common.js.
+// Uses $, esc, icon, t and tn from common.js and modelsUi from settings-models.js.
 const dictationUi = (() => {
   // As dictation-options.js has them (the modes: VOICE_MODES in common.js).
   const MODES = VOICE_MODES;
@@ -50,8 +50,7 @@ const dictationUi = (() => {
   }
 
   function modeHint() {
-    const d = st.data, provider = d?.settings.provider;
-    const extra = st.mode === "verbatim" ? "" : ` ${t("voice.settings.modeRewrite", { provider, model: d?.rewriteModels?.[provider] || "" })}`;
+    const extra = st.mode === "verbatim" || !st.data ? "" : ` ${t("voice.settings.modeRewrite", modelsUi.target("rewrite"))}`;
     $("dictModeHint").textContent = `${t(`voice.settings.modeHint.${st.mode}`)}${extra} ${t("voice.settings.modeChip")}`;
   }
   const talkHint = () => { $("talkModeHint").textContent = t(`voice.settings.talkHint.${st.talk}`); };
@@ -183,13 +182,6 @@ const dictationUi = (() => {
     };
   }
 
-  // A provider switched on the page changes what the hint names (settings.js re-renders the control first).
-  for (const type of ["click", "keydown"]) $("provider").addEventListener(type, () => setTimeout(() => {
-    const on = $("provider").querySelector(".on")?.dataset.provider;
-    if (!st.data || !on || on === st.data.settings.provider) return;
-    st.data = { ...st.data, settings: { ...st.data.settings, provider: on } };
-    modeHint();
-  }));
-
-  return { fill, payload };
+  // modelsChanged: the Models tab changed what the hint names.
+  return { fill, payload, modelsChanged: modeHint };
 })();

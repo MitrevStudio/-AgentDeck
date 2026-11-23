@@ -50,6 +50,10 @@
     "test:audit": "node scripts/test-audit-regressions.js",
     "test:themes": "node scripts/test-themes.js",
     "test:prefs": "node scripts/test-prefs-compact.js",
+    "test:voice-models": "node scripts/test-voice-models.js",
+    "test:meetings": "node scripts/test-meetings-store.js && node scripts/test-meetings-pipeline.js && node scripts/test-meetings-recorder.js",
+    "test:meetings-recorder": "node scripts/test-meetings-recorder-electron.cjs",
+    "test:meetings-ui": "node scripts/test-meetings-ui-electron.cjs",
     "test:editors": "node scripts/test-editors.js",
     "test:load": "node scripts/test-proc-stats.js && node scripts/test-live-push.js",
     "test:taskbar": "node scripts/test-taskbar-monitor.js && node scripts/test-prefs-taskbar.js",
@@ -74,7 +78,8 @@
       "native/**",
       "package.json",
       "THIRD_PARTY_NOTICES.md",
-      "!node_modules/soundtouchjs/{public,scripts}/**"
+      "!node_modules/soundtouchjs/{public,scripts}/**",
+      "!node_modules/mediabunny/{src,dist/modules}/**"
     ],
     "asarUnpack": [
       "node_modules/koffi/**",
@@ -144,6 +149,7 @@
     "electron-updater": "^6.8.10",
     "ignore": "^7.0.14",
     "koffi": "^3.3.3",
+    "mediabunny": "1.66.2",
     "qrcode-generator": "^2.0.4",
     "selfsigned": "^5.5.0",
     "soundtouchjs": "^0.3.0",

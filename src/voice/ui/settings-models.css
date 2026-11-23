@@ -1,0 +1,18 @@
+/* Settings -> Models: the keys, then one line per task - its provider and its model. An id typed by hand and what is
+   to be known about the model come under the line. Tokens and fields: ../../theme.css and settings.css. */
+.vm-tasks { grid-template-columns: 148px minmax(0, 1fr); }
+.vm-tasks > .vs-field { margin-bottom: 7px; }
+.vm-tasks > .vs-label { margin-bottom: 7px; line-height: 1.25; }
+.vm-row { display: grid; grid-template-columns: 172px minmax(0, 1fr); gap: 6px; }
+.vm-row .select { width: 100%; min-width: 0; }
+.vm-other { width: 100%; margin-top: 6px; user-select: text; }
+/* The warning's colour is the icon's: as text it is too faint in several themes. */
+.vm-warn { display: flex; gap: 6px; color: var(--muted); }
+.vm-warn .i { flex: none; width: 13px; height: 13px; margin-top: 2px; color: var(--warn); }
+
+/* A narrow page (a large interface scale): the model under its provider, both under the task. */
+@media (max-width: 720px) {
+  .vm-keys, .vm-tasks { grid-template-columns: minmax(0, 1fr); }
+  .vm-keys > .vs-label, .vm-tasks > .vs-label { margin-bottom: 4px; }
+  .vm-row { grid-template-columns: minmax(0, 1fr); }
+}

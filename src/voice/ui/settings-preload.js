@@ -28,6 +28,8 @@ function getPageHeight() {
 
 contextBridge.exposeInMainWorld("voiceSettings", {
   get: () => ipcRenderer.invoke("voice:settings:get"),
+  // A tab asked for while the window is open.
+  onShow: cb => ipcRenderer.on("voice:settings:show", (_e, pane) => cb(pane)),
   devices: () => ipcRenderer.invoke("voice:settings:devices"),
   save: payload => ipcRenderer.invoke("voice:settings:save", payload),
   // true while a hotkey field has the focus: main lets go of the voice hotkeys so they reach the field.

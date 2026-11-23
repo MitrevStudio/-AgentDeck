@@ -17,6 +17,8 @@ else if (fs.existsSync(formerProfile)) app.setPath("userData", formerProfile);
 const wayland = process.platform === "linux" && Boolean(process.env.WAYLAND_DISPLAY)
   && !/x11/i.test(app.commandLine.getSwitchValue("ozone-platform") || process.env.ELECTRON_OZONE_PLATFORM_HINT || "");
 if (wayland && !app.commandLine.hasSwitch("force-device-scale-factor")) app.commandLine.appendSwitch("force-device-scale-factor", "1");
+// Windows, before ready: our own playback stays out of a recorded meeting's system sound (meetings/capture/own-audio.js).
+require("./meetings/capture/own-audio").excludeOwnPlayback(app);
 const { terminalEnv } = require("./host/terminal-env");
 const { focusSession, allowForeground, terminalWindows, raiseNewTerminal } = require("./terminal-focus");
 const { createLog } = require("./shared/log-file");
@@ -223,6 +225,8 @@ async function stopAllAndQuit() {
     const owner = managerWin && !managerWin.isDestroyed() && managerWin.isVisible() ? managerWin : null;
     if ((owner ? dialog.showMessageBoxSync(owner, options) : dialog.showMessageBoxSync(options)) !== 0) return;
   }
+  // Asked before anything stops: the answer can be no.
+  if (!(await meetings.confirmQuit())) return;
   // The layout stays as it is: the next start opens its panes anew (agents resume their sessions).
   await saveWorkspaceFinal();
   stoppingAll = true;
@@ -973,6 +977,7 @@ async function focusSessionAnywhere(opts) {
 async function launchTerminal(cwd, command = null, meta = {}, inTab = false, place = "tab", argv = null) {
   if (!cwd || !fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) throw new Error(t("errors.folderMissing"));
   if (!PLACES.includes(place)) place = "tab";
+  meetings.sessionLaunched(cwd); // not waited for: the skill of the meetings there, where it is missing
   // Windows Terminal is Windows only: elsewhere every session opens in AgentDeck's own terminals.
   if (inTab || place !== "tab" || prefs.get().sessionsIn === "tabs" || process.platform !== "win32") {
     const proxy = await network.terminalProxy().catch(() => null);
@@ -1135,6 +1140,12 @@ const HOTKEYS = ["Alt+`", "Control+Alt+Space", "Control+Alt+Shift+Space"];
 let hotkey = "";
 const hotkeyLabel = () => keyLabel(hotkey, " + ");
 let managerWin = null, bar = null, taskbarMonitor = null, tray = null, trayHintShown = false, voice = null, voiceStarting = null;
+// Meetings (meetings/app.js), for the manager window alone. Made here: its scheme is declared before ready.
+const meetings = require("./meetings/app").createMeetingsApp({
+  getWindow: () => managerWin,
+  getProjects: () => readRegistry().projects,
+  openSettings: pane => { voice?.openSettings(pane); return Boolean(voice); }
+});
 // Quitting waits this long at most for voice to put an attempt in flight back to Pending and release its hotkeys.
 const QUIT_GRACE_MS = 3000;
 function showManager() {
@@ -1153,6 +1164,7 @@ function showManager() {
   });
   managerWin.webContents.on("did-finish-load", () => managerWin?.webContents.setZoomFactor(prefs.get().uiScale));
   managerWin.loadFile(path.join(__dirname, "index.html"));
+  meetings.watchSessionEnd(managerWin); // Windows logging off or shutting down: no before-quit
   managerWin.on("closed", () => {
     managerWin = null;
     // The app keeps running for the edge menu; say so the first time the window goes away.
@@ -1695,6 +1707,7 @@ if (!app.requestSingleInstanceLock()) {
     // Before the window: it shows the layout as soon as it is back (and updates as it comes).
     restoring = restoreWorkspace();
     registerIpc();
+    meetings.register();
     autopilot.start();
 
     bar = createEdgeBar({
@@ -1715,7 +1728,7 @@ if (!app.requestSingleInstanceLock()) {
     // Not reset on "balloon-closed": replacing a balloon can report the old one closed after the new one is up.
     tray.on("balloon-click", () => { const click = balloonClick; balloonClick = null; click?.(); });
     updater.on("changed", onUpdateChanged);
-    updater.start({ auto: prefs.get().autoUpdate });
+    updater.start({ auto: prefs.get().autoUpdate, beforeInstall: meetings.confirmQuit });
     notifier = createNotifier({
       liveSessions, focus: focusSessionAnywhere, balloon, t, tn, onChange: buildTrayMenu,
       quiet: () => Boolean(bar?.isVisible()),
@@ -1736,6 +1749,7 @@ if (!app.requestSingleInstanceLock()) {
     autostart.applyDefault().catch(err => console.error("Could not set up starting with Windows:", err.message));
     launch.sweepPrompts(); // prompts of voice commands whose terminal never started
     host.start(); // the scans, the usage figures, the git status, the tabs' links to their sessions
+    meetings.start();
     // The mesh once the terminals are back: a peer connecting earlier would get a list without those still being
     // opened anew, and its panes of them would go (docs/SHARED-SESSIONS.md 4.6, as the headless host does).
     restoring.finally(startMesh);
@@ -1766,15 +1780,21 @@ if (!app.requestSingleInstanceLock()) {
   });
   // Gives an in-flight transcription a moment to settle back to Pending and frees the voice hotkeys first - briefly:
   // quitting must never hang on it.
-  let quitting = false;
+  let quitting = false, quitReady = false;
   app.on("before-quit", e => {
-    if (quitting) return;
-    quitting = true;
+    if (quitReady) return;
     e.preventDefault();
+    if (quitting) return; // asked again while it shuts down: saving a recording is not cut short
+    if (meetings.holdsQuit()) {
+      meetings.confirmQuit().then(ok => { if (ok) app.quit(); }, err => console.error("Asking before quitting failed:", err));
+      return;
+    }
+    quitting = true;
     const shutdown = Promise.all([(async () => { await voiceStarting; await voice?.dispose(); })(), host.flush(), saveWorkspaceFinal()]);
-    Promise.race([shutdown, new Promise(r => setTimeout(r, QUIT_GRACE_MS))])
-      .catch(err => console.error("Voice shutdown failed:", err))
-      .finally(() => app.quit());
+    const graced = Promise.race([shutdown, new Promise(r => setTimeout(r, QUIT_GRACE_MS))])
+      .catch(err => console.error("Voice shutdown failed:", err));
+    // A recording being saved has a limit of its own.
+    Promise.all([graced, meetings.shutdown()]).finally(() => { quitReady = true; app.quit(); });
   });
   app.on("will-quit", () => {
     taskbarMonitor?.dispose();

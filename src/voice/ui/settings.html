@@ -8,12 +8,13 @@
 <link rel="stylesheet" href="../../themes.css">
 <link rel="stylesheet" href="settings.css">
 <link rel="stylesheet" href="settings-dictation.css">
+<link rel="stylesheet" href="settings-models.css">
 <link rel="stylesheet" href="settings-commands.css">
 <script src="../../i18n.js"></script>
 </head>
 <body>
 <form id="form" class="vs" autocomplete="off" novalidate>
-  <!-- The tabs down the left: the app's own, then the voice group. Dictation, Dictionary and Read aloud are one
+  <!-- The tabs down the left: the app's own, then the voice group. Models, Dictation, Dictionary and Read aloud are one
        settings record with one Save (data-group="voice" on their panes); each marks its own unsaved edits. -->
   <nav class="vs-side">
     <div class="vs-brand">
@@ -27,9 +28,11 @@
       <button type="button" role="tab" id="tabNetwork" data-value="network" aria-controls="network"><span data-icon="globe"></span><span data-i18n="settings.network"></span></button>
       <button type="button" role="tab" id="tabNodes" data-value="nodes" aria-controls="nodes"><span data-icon="nodes"></span><span data-i18n="settings.nodes"></span></button>
       <div class="vs-group" aria-hidden="true" data-i18n="settings.voice"></div>
+      <button type="button" role="tab" id="tabModels" data-value="models" aria-controls="models"><span data-icon="layers"></span><span data-i18n="settings.models"></span></button>
       <button type="button" role="tab" id="tabDictation" data-value="dictation" aria-controls="dictation"><span data-icon="mic"></span><span data-i18n="voice.settings.dictation"></span></button>
       <button type="button" role="tab" id="tabDictionary" data-value="dictionary" aria-controls="dictionary"><span data-icon="book"></span><span data-i18n="settings.dictionary"></span></button>
       <button type="button" role="tab" id="tabReadAloud" data-value="readaloud" aria-controls="readaloud"><span data-icon="speaker"></span><span data-i18n="voice.settings.readAloud"></span></button>
+      <button type="button" role="tab" id="tabMeetings" data-value="meetings" aria-controls="meetings"><span data-icon="meeting"></span><span data-i18n="settings.meetings"></span></button>
       <button type="button" role="tab" id="tabCommands" data-value="commands" aria-controls="commands"><span data-icon="bolt"></span><span data-i18n="settings.commands"></span></button>
     </div>
   </nav>
@@ -247,26 +250,23 @@
       </section>
     </div>
 
+    <!-- The keys, and who does each task: built by settings-models.js. -->
+    <div class="vs-pane" id="models" data-group="voice" role="tabpanel" aria-labelledby="tabModels">
+      <section class="vs-sec">
+        <h2><span data-icon="key"></span><span data-i18n="voice.settings.models.keys"></span></h2>
+        <div class="vs-grid vm-keys" id="modelKeys"></div>
+      </section>
+
+      <section class="vs-sec">
+        <h2><span data-icon="layers"></span><span data-i18n="voice.settings.models.tasks"></span></h2>
+        <div class="vs-grid vm-tasks" id="modelTasks"></div>
+      </section>
+    </div>
+
     <div class="vs-pane" id="dictation" data-group="voice" role="tabpanel" aria-labelledby="tabDictation">
       <section class="vs-sec">
         <h2><span data-icon="mic"></span><span data-i18n="voice.settings.recognition"></span></h2>
         <div class="vs-grid">
-          <span class="vs-label" id="providerLabel" data-i18n="voice.settings.provider"></span>
-          <div class="seg" id="provider" role="radiogroup" aria-labelledby="providerLabel"></div>
-
-          <label class="vs-label" for="apiKey" data-i18n="voice.settings.apiKey"></label>
-          <div class="vs-field">
-            <div class="vs-key">
-              <input id="apiKey" class="input" type="password" spellcheck="false" autocomplete="new-password">
-              <span class="tag" id="keyTag"></span>
-            </div>
-            <div class="vs-keystate" id="keyState"></div>
-            <div class="vs-err" data-err="apiKey"></div>
-          </div>
-
-          <label class="vs-label" for="model" data-i18n="voice.settings.model"></label>
-          <div class="vs-field"><select id="model" class="select"></select><div class="vs-err" data-err="model"></div></div>
-
           <label class="vs-label" for="language" data-i18n="voice.settings.language"></label>
           <select id="language" class="select"></select>
 
@@ -368,9 +368,6 @@
       <section class="vs-sec">
         <h2><span data-icon="speaker"></span><span data-i18n="voice.settings.readAloud"></span></h2>
         <div class="vs-grid">
-          <label class="vs-label" for="raModel" data-i18n="voice.settings.raModel"></label>
-          <select id="raModel" class="select"></select>
-
           <label class="vs-label" for="raVoice" data-i18n="voice.settings.raVoice"></label>
           <div class="vs-field"><select id="raVoice" class="select"></select><div class="vs-hint" id="raHint"></div></div>
 
@@ -389,6 +386,30 @@
 
           <span></span>
           <div class="vs-hint" data-i18n="voice.settings.hotkey.hint"></div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Meetings (../../meetings): the screenshot key, saved with the voice tabs. Windows only, as the recording. -->
+    <div class="vs-pane" id="meetings" data-group="voice" role="tabpanel" aria-labelledby="tabMeetings">
+      <section class="vs-sec">
+        <h2><span data-icon="keyboard"></span><span data-i18n="voice.settings.hotkeys"></span></h2>
+        <div class="vs-grid">
+          <label class="vs-label" for="hkMeetingShot" data-i18n="settings.meetings.shot"></label>
+          <div class="vs-field">
+            <div class="vs-hk">
+              <label class="hk" for="hkMeetingShot">
+                <input id="hkMeetingShot" type="text" spellcheck="false" autocomplete="off">
+                <span class="hk-caps" aria-hidden="true"></span>
+                <span class="hk-rec" data-i18n="voice.settings.hotkey.recording"></span>
+              </label>
+              <button type="button" class="icon-btn" data-reset="meetingScreenshot" data-i18n-title="voice.settings.hotkey.reset"></button>
+            </div>
+            <div class="vs-err" data-err="hotkeys.meetingScreenshot"></div>
+          </div>
+
+          <span></span>
+          <div class="vs-hint" data-i18n="settings.meetings.shotHint"></div>
         </div>
       </section>
     </div>
@@ -490,6 +511,7 @@
   </div>
 </form>
 <script src="../../common.js"></script>
+<script src="settings-models.js"></script>
 <script src="settings-dictation.js"></script>
 <script src="settings-commands.js"></script>
 <!-- The QR code of "Add phone" (settings-nodes.js): a small encoder without dependencies, drawn here, nothing fetched. -->

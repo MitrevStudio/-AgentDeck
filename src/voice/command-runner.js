@@ -8,7 +8,7 @@
 // Electron.
 const { t } = require("../i18n");
 const { applyReplacements } = require("./dictionary");
-const { defaultModelFor } = require("./catalog");
+const { resolveTask } = require("./catalog");
 const { BYTES_PER_SECOND, HEADER_BYTES } = require("./wav");
 const { maxRecordingBytes } = require("./transcription");
 
@@ -21,7 +21,7 @@ const LIMIT_SECONDS = 60; // a command is a sentence or two
 function createCommandRunner(deps) {
   const { recorder, store, settings, panel, app } = deps;
   const now = deps.now || Date.now;
-  let cur = null; // {id, phase, source, ac, s, createdAt, transcript, audio, stopping}
+  let cur = null; // {id, phase, source, ac, s, heard, createdAt, transcript, audio, stopping}
   let disposed = false;
 
   const enabled = () => settings.load().commands.enabled;
@@ -56,7 +56,8 @@ function createCommandRunner(deps) {
     if (deps.busy()) return { ok: false, error: t("voice.command.busy") };
     deps.stopReading();
     const s = settings.load();
-    const c = cur = { id: store.newId(), phase: "recording", source, ac: new AbortController(), s, createdAt: new Date(now()) };
+    const heard = resolveTask(s, "commands"); // the provider and model that recognise it
+    const c = cur = { id: store.newId(), phase: "recording", source, ac: new AbortController(), s, heard, createdAt: new Date(now()) };
     deps.escape.register(cancel);
     report("recording");
     // Started from the menu, it is finished by the microphone, the dictation key or a click on the panel: the menu
@@ -65,7 +66,7 @@ function createCommandRunner(deps) {
     panel.fresh("listening", { command: true, hint, cancelKey: "Esc", limitSeconds: LIMIT_SECONDS });
     recorder.start({
       deviceId: s.microphoneDeviceId, deviceName: s.microphoneName, wavPath: store.wavPath(c.id),
-      maxBytes: Math.min(maxRecordingBytes(s), LIMIT_SECONDS * BYTES_PER_SECOND),
+      maxBytes: Math.min(maxRecordingBytes(s, heard.provider), LIMIT_SECONDS * BYTES_PER_SECOND),
       onLevel: (level, elapsed) => { if (cur === c && c.phase === "recording") panel.update({ level, elapsed }); },
       onLimit: result => stopped(c, result),
       onEnded: result => stopped(c, result)
@@ -89,7 +90,7 @@ function createCommandRunner(deps) {
   function thinking(c) {
     c.phase = "thinking";
     report("working");
-    panel.show("transcribing", { provider: c.s.provider, mode: "verbatim", command: true });
+    panel.show("transcribing", { provider: c.heard.provider, mode: "verbatim", command: true });
   }
 
   function stopped(c, result) {
@@ -108,7 +109,7 @@ function createCommandRunner(deps) {
   // ---------- recognising, then off to the command centre ----------
   async function understand(c) {
     const s = c.s;
-    const raw = await deps.transcribe({ wavPath: store.wavPath(c.id), provider: s.provider, model: s.models?.[s.provider] || defaultModelFor(s.provider),
+    const raw = await deps.transcribe({ wavPath: store.wavPath(c.id), ...c.heard,
       language: s.language, vocabulary: deps.vocabulary(), getApiKey: settings.getApiKey, signal: c.ac.signal });
     if (cur !== c) return;
     const transcript = applyReplacements(String(raw ?? ""), s.dictionary?.replacements).trim();
@@ -155,7 +156,7 @@ function createCommandRunner(deps) {
     try {
       store.create("Command", {
         Id: c.id, CreatedAt: store.stamp(c.createdAt), CompletedAt: store.stamp(new Date(now())),
-        DurationSeconds: c.audio?.seconds || 0, Provider: s.provider, Model: s.models?.[s.provider] || defaultModelFor(s.provider),
+        DurationSeconds: c.audio?.seconds || 0, Provider: c.heard.provider, Model: c.heard.model,
         Language: s.language || "auto", Status: status, AttemptCount: 1, ResultText: c.transcript, Mode: "verbatim",
         LastErrorShort: status === "Failed" ? short || t("voice.command.error.title") : null, LastError: status === "Failed" ? note : null,
         Command: { action: "orchestrate", kind: "sent", summary: t("voice.command.sent"), outcome, note: note || null }

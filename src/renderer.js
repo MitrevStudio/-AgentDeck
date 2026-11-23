@@ -63,6 +63,7 @@ function render() {
   renderTitle(v);
   if (!getShownTab()) renderSpaceEmpty($("spaceEmpty"), ws.activeSpace);
   renderFocusInfo();
+  window.meetingsUi?.sync();
   window.searchPalette?.render();
   const input = document.querySelector(".rename");
   if (input && document.activeElement !== input) { input.focus(); input.select(); }
@@ -593,6 +594,7 @@ function renderFocusInfo() {
 // workspace-ui.js: the layout changed - the shown space is the selected project.
 function onWorkspaceChanged() {
   ui.selected = ws.activeSpace;
+  window.meetingsUi?.sync();
   renderSoon();
 }
 
@@ -1096,7 +1098,7 @@ function renderMenuLayer(menu, items) {
   menu.innerHTML = (searchable ? renderMenuSearch(menu) : "") + items.map((x, i) => x.separator
     ? '<div class="menu-sep" role="separator"></div>'
     : `<button role="${x.checked !== undefined ? "menuitemcheckbox" : "menuitem"}" data-i="${i}" ${x.danger ? 'class="danger"' : ""} ${x.items ? 'aria-haspopup="menu"' : ""} ${x.checked ? 'aria-checked="true"' : ""} ${x.disabled ? "disabled" : ""}>
-    ${icon(x.icon)}<span>${esc(x.label)}</span>${x.checked ? `<span class="menu-check">${icon("check")}</span>` : ""}${x.items ? icon("right") : ""}</button>`).join("");
+    ${icon(x.icon)}<span>${esc(x.label)}${x.detail ? `<small class="menu-detail">${esc(x.detail)}</small>` : ""}</span>${x.checked ? `<span class="menu-check">${icon("check")}</span>` : ""}${x.items ? icon("right") : ""}</button>`).join("");
   if (searchable) wireMenuSearch(menu);
   menu.onclick = e => {
     const button = e.target.closest("[data-i]");

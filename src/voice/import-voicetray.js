@@ -25,18 +25,20 @@ async function copyAtomic(from, to) {
 }
 
 function mapSettings(vt) {
-  const patch = {};
-  if (typeof vt.Provider === "string" && settings.PROVIDERS.includes(vt.Provider)) patch.provider = vt.Provider;
+  // VoiceTray had a provider and models for dictation and one read-aloud model. modelsVersion 0: they predate the
+  // catalog, so those that stop move to their successors (settings.js).
+  const dictation = { models: {} }, readAloud = { models: {} };
+  const patch = { tasks: { dictation, readAloud }, modelsVersion: 0 };
+  if (typeof vt.Provider === "string" && settings.PROVIDERS.includes(vt.Provider)) dictation.provider = vt.Provider;
   if (vt.Models && typeof vt.Models === "object") {
-    patch.models = {};
-    for (const p of settings.PROVIDERS) if (typeof vt.Models[p] === "string" && vt.Models[p].trim()) patch.models[p] = vt.Models[p].trim();
+    for (const p of settings.PROVIDERS) if (typeof vt.Models[p] === "string" && vt.Models[p].trim()) dictation.models[p] = vt.Models[p].trim();
   }
   if (typeof vt.Language === "string") patch.language = vt.Language;
   // MicrophoneDeviceId is a WinMM index and means nothing to the browser; the name is what gets matched.
   if (typeof vt.MicrophoneName === "string") patch.microphoneName = vt.MicrophoneName;
   if (typeof vt.UseClipboardFallback === "boolean") patch.useClipboardPaste = vt.UseClipboardFallback;
   if (Number.isFinite(vt.MaxRecordingMinutes)) patch.maxRecordingMinutes = vt.MaxRecordingMinutes;
-  if (typeof vt.ReadAloudModel === "string") patch.readAloudModel = vt.ReadAloudModel;
+  if (typeof vt.ReadAloudModel === "string") readAloud.models.Gemini = vt.ReadAloudModel;
   if (typeof vt.ReadAloudVoice === "string") patch.readAloudVoice = vt.ReadAloudVoice;
   if (Number.isFinite(vt.ReadAloudSpeed)) patch.readAloudSpeed = vt.ReadAloudSpeed;
   return patch;

@@ -6,7 +6,7 @@
 const fs = require("node:fs");
 const { classify, configuration } = require("./errors");
 const { wavDurationMs, BYTES_PER_SECOND, HEADER_BYTES } = require("./wav");
-const { defaultModelFor } = require("./catalog");
+const { providerName, resolveTask } = require("./catalog");
 const { t } = require("../i18n");
 
 const PROVIDERS = { OpenAI: require("./providers/openai"), Gemini: require("./providers/gemini") };
@@ -14,7 +14,6 @@ const PROVIDERS = { OpenAI: require("./providers/openai"), Gemini: require("./pr
 const BASE_TIMEOUT_MS = 60_000;
 const MAX_TIMEOUT_MS = 10 * 60_000;
 
-const providerName = p => Object.keys(PROVIDERS).find(k => k.toLowerCase() === String(p || "").toLowerCase());
 const isGemini = p => providerName(p) === "Gemini";
 
 const providerByteCap = provider =>
@@ -27,9 +26,9 @@ const maxRecordingMinutesFor = provider =>
 
 // PCM bytes (header excluded) the recorder may write: the lower of the user's limit and what the provider accepts,
 // so a recording can never grow past what will be accepted.
-function maxRecordingBytes(settings = {}) {
+function maxRecordingBytes(settings = {}, provider = resolveTask(settings, "dictation").provider) {
   const user = Math.min(60, Math.max(1, Math.floor(Number(settings.maxRecordingMinutes) || 10)));
-  return Math.min(user, maxRecordingMinutesFor(settings.provider)) * 60 * BYTES_PER_SECOND;
+  return Math.min(user, maxRecordingMinutesFor(provider)) * 60 * BYTES_PER_SECOND;
 }
 
 // A fixed budget drops long recordings on ordinary uplinks: a 10 minute WAV is 19 MB, and a third more once
@@ -47,7 +46,8 @@ async function transcribeFile({ wavPath, provider, model, language, vocabulary =
   if (!name) throw configuration(t("voice.errors.unknownProvider", { provider }));
   const apiKey = String((await getApiKey(name)) || "").trim();
   if (!apiKey) throw configuration(t("voice.errors.noApiKey", { provider: name }));
-  if (!model || !String(model).trim()) model = defaultModelFor(name);
+  // The provider's default when none was recorded, the successor when the recorded one has stopped meanwhile.
+  model = resolveTask({}, "dictation", { provider: name, model }).model;
 
   const timeout = AbortSignal.timeout(attemptTimeoutMs(wavPath));
   const attempt = signal ? AbortSignal.any([signal, timeout]) : timeout;

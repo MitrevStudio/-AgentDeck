@@ -31,6 +31,7 @@ const INSTALL_RECHECK_MS = 5 * 60 * 1000; // install() looks for a newer version
 const updater = new EventEmitter();
 let au = null; // electron-updater's autoUpdater; loaded only where updates are supported
 let timer = null, checking = null, installing = false;
+let beforeInstall = null; // start()'s: may the app quit for an update now (a meeting is being recorded)?
 let installWhenDownloaded = false; // install() found a newer version: it goes in as soon as it is downloaded
 const s = {
   supported: false, auto: true,
@@ -83,7 +84,8 @@ function schedule(ms) {
   timer = setTimeout(check, ms);
 }
 
-function start({ auto = true } = {}) {
+function start({ auto = true, beforeInstall: ask = null } = {}) {
+  beforeInstall = ask;
   s.auto = auto !== false;
   const installed = app.isPackaged && fs.existsSync(path.join(path.dirname(process.execPath), `Uninstall ${app.getName()}.exe`));
   if (!installed || au) return;
@@ -188,6 +190,17 @@ function install() {
 function installNow() {
   if (!s.downloaded || installing) return false;
   installing = true;
+  if (!beforeInstall) return quitToInstall();
+  beforeInstall().then(ok => {
+    if (ok) quitToInstall();
+    else installing = false;
+  }, e => {
+    installing = false;
+    console.error(`The update was not installed: ${firstLine(e)}`);
+  });
+  return true;
+}
+function quitToInstall() {
   au.autoInstallOnAppQuit = false;
   app.once("quit", () => { if (!au.install(true, true)) app.relaunch(); });
   app.quit();

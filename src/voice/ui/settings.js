@@ -1,14 +1,13 @@
 // The app's Settings page. General (language, theme, edge menu, updates) applies at once through window.prefs; the
-// voice settings - a port of VoiceTray's SettingsWindow plus the two hotkeys, the modes and the dictionary - are one
-// record over three tabs (Dictation, Dictionary, Read aloud) saved by one Save; Commands applies at once
+// voice settings - a port of VoiceTray's SettingsWindow plus the two hotkeys, the modes, the dictionary and the models
+// - are one record over five tabs (Models, Dictation, Dictionary, Read aloud, Meetings) saved by one Save; Commands applies at once
 // (settings-commands.js); Network (the proxy) has a Save of its own. Secrets never come here: the page knows only
 // whether an API key or the proxy password is saved, and an empty field keeps it - removing one takes the explicit
 // button.
 // Uses $, esc, icon, t and tn from common.js.
 
 const PSEUDO_DEVICES = ["default", "communications"];
-// Working copies, so switching provider keeps each provider's typed key and model (as VoiceTray did).
-const st = { data: null, provider: "", models: {}, keys: {}, devices: [] };
+const st = { data: null, devices: [] };
 
 // Non-breaking around "+", so a combination never wraps in the middle of a hint.
 const NB_PLUS = "\u00a0+\u00a0";
@@ -45,7 +44,7 @@ const fit = () => window.voiceSettings.fit();
 // The last one shown comes back next time, and after the reload a language switch causes. body[data-pane] is the
 // tab shown, body[data-tab] its group (general, voice, commands or network): the footer and Save go by the group.
 const TAB_KEY = "settingsTab";
-const VOICE_PANES = ["dictation", "dictionary", "readaloud"];
+const VOICE_PANES = ["models", "dictation", "dictionary", "readaloud", "meetings"];
 function showTab(name, focus = false) {
   const tabs = [...document.querySelectorAll('[role="tab"]')];
   const want = name === "voice" ? "dictation" : name; // remembered from before Voice was split
@@ -202,7 +201,7 @@ $("autostart").addEventListener("change", async e => renderAutostart(await windo
 window.voiceSettings.autostart().then(renderAutostart).catch(() => {});
 // The tray changes the same settings; a language change reloads this page anyway.
 window.prefs.onChanged(p => { general = p; renderGeneral(); });
-// Each voice tab marks its own edits; Save stores all three.
+// Each voice tab marks its own edits; Save stores all four.
 for (const id of VOICE_PANES) {
   for (const type of ["input", "change"]) $(id).addEventListener(type, () => setDirty(id, true));
   $(id).addEventListener("click", e => { if (e.target.closest("button")) setDirty(id, true); });
@@ -214,7 +213,12 @@ document.addEventListener("keydown", e => {
   if (e.ctrlKey && e.key === "Tab") { e.preventDefault(); showTab(nextTab(e.shiftKey ? -1 : 1), true); }
 });
 $("logo").innerHTML = icon("sliders");
-showTab((() => { try { return localStorage.getItem(TAB_KEY); } catch { return null; } })());
+// Meetings are recorded on Windows only.
+if (window.prefs.windows === false) $("tabMeetings").hidden = true;
+// The tab asked for (windows.js openSettings), else the one shown last.
+showTab(location.hash.slice(1) || (() => { try { return localStorage.getItem(TAB_KEY); } catch { return null; } })());
+if (location.hash) location.hash = ""; // a reload (a language switch) comes back to the one shown then
+window.voiceSettings.onShow?.(pane => showTab(pane, true));
 renderGeneral();
 showEdgeHotkey().catch(() => {});
 
@@ -343,51 +347,16 @@ async function clearScratchpads() {
 $("scratchRefresh").addEventListener("click", () => { scratch.note = ""; measureScratchpads(true); });
 $("scratchClear").addEventListener("click", clearScratchpads);
 
-// ---------- provider: segmented control ----------
-function renderProviders() {
-  $("provider").innerHTML = st.data.providers.map(p =>
-    `<button type="button" role="radio" data-provider="${esc(p)}" aria-checked="${p === st.provider}" tabindex="${p === st.provider ? 0 : -1}" class="${p === st.provider ? "on" : ""}">${esc(p)}</button>`).join("");
+// ---------- what follows the Models tab ----------
+// The provider's own ceiling, which is where the surprise used to be: 30 minutes means nothing if Gemini stops
+// accepting audio after 7.
+function renderLengthHint() {
+  const { provider } = modelsUi.target("dictation");
+  $("lengthHint").textContent = t("voice.settings.lengthHint", { provider, n: I18N.formatNumber(st.data.providerMinutes[provider]) });
 }
-function selectProvider(p, focus = false) {
-  if (!p || p === st.provider) return;
-  stash(); // edits for the provider we are leaving
-  st.provider = p;
-  renderProviders();
-  showProvider();
-  if (focus) $("provider").querySelector(".on")?.focus();
-}
-
-// ---------- provider-dependent part ----------
-function showProvider() {
-  const p = st.provider, d = st.data, models = d.models[p] || [];
-  // Like VoiceTray: a model that is not in the list falls back to the provider's first (default) one.
-  fillSelect($("model"), models.map(m => [m, m]), models.includes(st.models[p]) ? st.models[p] : models[0]);
-  $("apiKey").value = st.keys[p].typed;
-  renderKeyState();
-  // The provider's own ceiling, which is where the surprise used to be: 30 minutes means nothing if Gemini stops
-  // accepting audio after 7.
-  $("lengthHint").textContent = t("voice.settings.lengthHint", { provider: p, n: I18N.formatNumber(d.providerMinutes[p]) });
-}
-
-function stash() {
-  st.keys[st.provider].typed = $("apiKey").value;
-  st.models[st.provider] = $("model").value;
-}
-
-function renderKeyState() {
-  const p = st.provider, k = st.keys[p], saved = Boolean(st.data.hasKey[p]);
-  const typed = $("apiKey").value.trim();
-  const text = key => `<span>${esc(t(key))}</span>`;
-  const link = (key, action, cls = "") => `<button type="button" class="vs-link${cls}" data-key="${action}">${esc(t(key))}</button>`;
-  let html, tag;
-  if (typed) { tag = ["accent", "key", "voice.settings.key.tag.new"]; html = text(saved ? "voice.settings.key.replaces" : "voice.settings.key.willEncrypt"); }
-  else if (saved && k.clear) { tag = ["warn", "trash", "voice.settings.key.tag.removing"]; html = text("voice.settings.key.removeOnSave") + link("voice.settings.key.undo", "undo"); }
-  else if (saved) { tag = ["ok", "check", "voice.settings.key.tag.saved"]; html = text("voice.settings.key.savedInfo") + link("voice.settings.key.remove", "clear", " danger"); }
-  else { tag = ["warn", "alert", "voice.settings.key.tag.none"]; html = text("voice.settings.key.noneInfo"); }
-  $("keyTag").className = `tag ${tag[0]}`;
-  $("keyTag").innerHTML = `${icon(tag[1])}${esc(t(tag[2]))}`;
-  $("keyState").innerHTML = html;
-  $("apiKey").placeholder = saved && !k.clear ? "••••••••••••" : t("voice.settings.key.placeholder", { provider: p });
+function modelsChanged() {
+  renderLengthHint();
+  dictationUi.modelsChanged();
 }
 
 function renderReadAloudHint() {
@@ -401,7 +370,7 @@ function clearErrors() {
   for (const el of document.querySelectorAll(".invalid, .warned")) el.classList.remove("invalid", "warned");
 }
 
-const FIELD_OF = { apiKey: "apiKey", model: "model", "hotkeys.dictate": "hkDictate", "hotkeys.readAloud": "hkRead",
+const FIELD_OF = { "hotkeys.dictate": "hkDictate", "hotkeys.readAloud": "hkRead", "hotkeys.meetingScreenshot": "hkMeetingShot",
   "net.pacUrl": "netPac", "net.proxy": "netProxy", "net.bypass": "netBypass", "net.username": "netUser", "net.password": "netPass" };
 // `form`: the footer slot for what belongs to no field - the voice tab's or the network tab's.
 function showErrors(errors, warn = false, form = "form") {
@@ -411,14 +380,14 @@ function showErrors(errors, warn = false, form = "form") {
     if (!slot || k === form) { loose.push(msg); continue; }
     slot.textContent = msg;
     slot.classList.toggle("warn", warn);
-    if (FIELD_OF[k]) $(FIELD_OF[k]).classList.add(warn ? "warned" : "invalid");
+    $(FIELD_OF[k] || k)?.classList.add(warn ? "warned" : "invalid"); // the Models fields go by their error's name
   }
   if (loose.length) {
     const slot = document.querySelector(`[data-err="${form}"]`);
     slot.textContent = loose.join(" ");
     slot.classList.toggle("warn", warn);
   }
-  // Save covers three tabs: the first message on another one brings that tab up.
+  // Save covers five tabs: the first message on another one brings that tab up.
   const first = [...document.querySelectorAll(".vs-pane [data-err]")].find(el => el.textContent)?.closest(".vs-pane");
   if (first && !first.classList.contains("on")) showTab(first.id);
   fit(); // messages add lines; the window grows with them
@@ -463,7 +432,7 @@ function renderCaps(input) {
     : `<span class="none">${esc(t("voice.settings.hotkey.none"))}</span>`;
 }
 
-for (const id of ["hkDictate", "hkRead"]) {
+for (const id of ["hkDictate", "hkRead", "hkMeetingShot"]) {
   $(id).addEventListener("keydown", captureHotkey);
   // Pressing the current combination here must record it, not start a dictation or a reading.
   $(id).addEventListener("focus", () => window.voiceSettings.capture(true));
@@ -486,26 +455,6 @@ for (const btn of document.querySelectorAll("[data-reset]")) {
 }
 
 // ---------- events ----------
-$("provider").addEventListener("click", e => selectProvider(e.target.closest("[data-provider]")?.dataset.provider));
-$("provider").addEventListener("keydown", e => {
-  const list = st.data.providers, i = list.indexOf(st.provider);
-  const to = { ArrowRight: i + 1, ArrowDown: i + 1, ArrowLeft: i - 1, ArrowUp: i - 1, Home: 0, End: list.length - 1 }[e.key];
-  if (to === undefined) return;
-  e.preventDefault();
-  selectProvider(list[(to + list.length) % list.length], true);
-});
-$("apiKey").addEventListener("input", () => {
-  if ($("apiKey").value.trim()) st.keys[st.provider].clear = false; // typing a new key supersedes "remove"
-  $("apiKey").classList.remove("invalid", "warned");
-  document.querySelector('[data-err="apiKey"]').textContent = "";
-  renderKeyState();
-});
-$("keyState").addEventListener("click", e => {
-  const btn = e.target.closest("[data-key]");
-  if (!btn) return;
-  st.keys[st.provider].clear = btn.dataset.key === "clear";
-  renderKeyState();
-});
 for (const id of ["cancel", "close"]) $(id).addEventListener("click", () => window.close());
 // Escape in a question (confirmDialog) answers the question only.
 document.addEventListener("keydown", e => { if (e.key === "Escape" && !e.defaultPrevented && !document.querySelector("dialog[open]")) window.close(); });
@@ -519,28 +468,21 @@ $("form").addEventListener("submit", async e => {
   if (!$(document.body.dataset.pane)?.contains(document.activeElement) && e.submitter?.dataset.for !== tab) return;
   if (tab === "network") return saveNetwork();
   if (tab !== "voice") return;
-  stash();
   clearErrors();
   const dev = st.devices[Number($("mic").value)] || st.devices[0];
-  const apiKeys = {};
-  for (const p of st.data.providers) {
-    const k = st.keys[p];
-    if (k.typed.trim()) apiKeys[p] = { set: k.typed.trim() };
-    else if (k.clear) apiKeys[p] = { clear: true };
-  }
   const payload = {
-    provider: st.provider,
-    models: { ...st.models },
+    ...modelsUi.payload(), // each task's provider and model, the API keys (settings-models.js)
     language: $("language").value,
     useClipboardPaste: $("clipboard").checked,
     microphoneDeviceId: dev.deviceId,
     microphoneName: dev.fallback ? "" : dev.label,
     maxRecordingMinutes: Number($("maxLen").value),
-    readAloudModel: $("raModel").value,
     readAloudVoice: $("raVoice").value,
-    hotkeys: { dictate: $("hkDictate").value.trim(), readAloud: $("hkRead").value.trim() },
-    ...dictationUi.payload(), // mode, prompt language, key behaviour, dictionary (settings-dictation.js)
-    apiKeys
+    hotkeys: {
+      dictate: $("hkDictate").value.trim(), readAloud: $("hkRead").value.trim(),
+      ...(!$("tabMeetings").hidden && { meetingScreenshot: $("hkMeetingShot").value.trim() })
+    },
+    ...dictationUi.payload() // mode, prompt language, key behaviour, dictionary (settings-dictation.js)
   };
   $("save").disabled = true;
   try {
@@ -548,14 +490,13 @@ $("form").addEventListener("submit", async e => {
     if (!r?.ok) return showErrors(r?.errors || { form: t("voice.settings.notSaved") });
     // Saved. The typed keys are gone from the page; only whether one exists remains.
     for (const id of VOICE_PANES) setDirty(id, false);
-    st.data.hasKey = r.hasKey;
     st.data.settings = r.settings;
-    for (const p of st.data.providers) st.keys[p] = { typed: "", clear: false };
-    $("apiKey").value = "";
+    modelsUi.saved(r.hasKey);
     $("hkDictate").value = r.settings.hotkeys.dictate;
     $("hkRead").value = r.settings.hotkeys.readAloud;
     renderCaps($("hkDictate")); renderCaps($("hkRead"));
-    renderKeyState();
+    $("hkMeetingShot").value = r.settings.hotkeys.meetingScreenshot || "";
+    renderCaps($("hkMeetingShot"));
     if (!Object.keys(r.warnings || {}).length) return window.close();
     showErrors({ ...r.warnings, form: r.warnings.form || t("voice.settings.savedWithWarnings") }, true);
   } catch (err) {
@@ -720,13 +661,8 @@ async function init() {
   const d = st.data = await window.voiceSettings.get();
   const s = d.settings;
 
-  for (const p of d.providers) {
-    st.models[p] = s.models?.[p] || d.models[p][0];
-    st.keys[p] = { typed: "", clear: false };
-  }
-  st.provider = d.providers.includes(s.provider) ? s.provider : d.providers[0];
-  renderProviders();
-  showProvider();
+  modelsUi.fill(d, modelsChanged);
+  renderLengthHint();
 
   fillSelect($("language"), d.languages, s.language); // an unknown code falls back to auto-detect, as in VoiceTray
   $("clipboard").checked = s.useClipboardPaste;
@@ -739,8 +675,6 @@ async function init() {
   const lengths = [...new Set([...d.lengths, s.maxRecordingMinutes])].sort((a, b) => a - b);
   fillSelect($("maxLen"), lengths.map(m => [String(m), tn("voice.settings.minutes", m)]), s.maxRecordingMinutes);
 
-  const raModel = s.readAloudModel || d.readAloudModels[0];
-  fillSelect($("raModel"), withCustom(d.readAloudModels.map(m => [m, m]), raModel, v => v), raModel);
   // Shown with the character of each voice; only the name is stored.
   const voice = s.readAloudVoice || d.defaultVoice;
   const voiceLabel = (name, style) => (style ? `${name}  —  ${style}` : name);
@@ -750,12 +684,14 @@ async function init() {
   $("hkDictate").value = s.hotkeys.dictate;
   $("hkRead").value = s.hotkeys.readAloud;
   renderCaps($("hkDictate")); renderCaps($("hkRead"));
+  $("hkMeetingShot").value = s.hotkeys.meetingScreenshot || "";
+  renderCaps($("hkMeetingShot"));
   renderReadAloudHint();
   dictationUi.fill(s, d);
 
   await fit();
   // The tab's first control where it has an obvious one, otherwise the tab itself.
-  const first = { general: "#uiLanguage .on", dictation: "#provider .on", readaloud: "#raModel", network: "#netMode .on" }[document.body.dataset.pane];
+  const first = { general: "#uiLanguage .on", models: "#models input", dictation: "#language", readaloud: "#raVoice", meetings: "#hkMeetingShot", network: "#netMode .on" }[document.body.dataset.pane];
   ((first && document.querySelector(first)) || document.querySelector('[role="tab"].on'))?.focus();
 }
 
