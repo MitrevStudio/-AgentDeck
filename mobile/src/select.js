@@ -1,5 +1,5 @@
 // Selecting a terminal's text with a finger (screens/terminal.js): the arithmetic, apart from the touches and from
-// xterm, so it can be tested (scripts/test-mobile-select.js). A cell is { col, row }: col from 0, row a line of the
+// the page, so it can be tested (scripts/test-mobile-select.js). A cell is { col, row }: col from 0, row a line of the
 // buffer (the history's lines included). A selection is { a, b }, its first and last cell, a not after b.
 // The order here is the order of use: a touch's cell, the word there, the selection grown or moved, then - whatever
 // made it - whole characters (whole), and what xterm and the handles are given.
@@ -60,13 +60,52 @@ export const between = (fixed, pos) => (notAfter(pos, fixed) ? { a: pos, b: fixe
 export const wholeLines = (sel, cols) => ({ a: { col: 0, row: sel.a.row }, b: { col: cols - 1, row: sel.b.row } });
 
 // The buffer's lines moved by so many (negative: a full history dropped its oldest lines as new ones came): the
-// selection as xterm keeps its own then - on the same text, cut at the buffer's first cell where its beginning is
-// gone, null once all of it is.
+// selection on the same text - cut at the buffer's first cell where its beginning is gone, null once all of it is.
 export function moved(sel, by) {
   const b = { col: sel.b.col, row: sel.b.row + by };
   if (b.row < 0) return null;
   const row = sel.a.row + by;
   return { a: row < 0 ? { col: 0, row: 0 } : { col: sel.a.col, row }, b };
+}
+
+// xterm's own selection (getSelectionPosition) as a selection here. Its range is { start, end }, each { x, y }: x a
+// column and y a line of the buffer, both from 0 (its typings say from 1; xterm 6 does not), the end one cell past
+// the last - x is the number of columns for a selection that ends with its line.
+export function fromRange({ start, end }, cols) {
+  return { a: { col: start.x, row: start.y }, b: end.x > 0 ? { col: end.x - 1, row: end.y } : { col: cols - 1, row: end.y - 1 } };
+}
+
+// Tells fn how many lines the buffer on screen dropped from its top, each time it does; returns what ends the
+// telling. xterm moves its selection by that many and says the number to no one, and from the selection itself it
+// cannot be read once the first line is among those dropped (settle) - but the buffer's list of lines announces it:
+// a private field of xterm 6. Where it is not there, null: nothing is counted.
+export function onDropped(term, fn) {
+  try {
+    const listening = term._core.buffer.lines.onTrim(fn);
+    return () => listening.dispose();
+  } catch {
+    return null;
+  }
+}
+
+// Where a selection is now. It is xterm's to keep - the highlight and what is copied are xterm's - and only xterm
+// knows what became of it, so it is read back from there before its cells are used. sel: as it was last given to
+// xterm; range: xterm's own now (none: xterm dropped it - another screen, another size); dropped: the lines the
+// buffer dropped from its top since (onDropped). Gives { sel, by, cut }: by - how many lines it moved (what began
+// with it moves along); or null: it is over.
+// A program that moves lines about (scrolls them up, inserts or deletes one) moves no selection of xterm's, and so
+// none here: the selection is of cells, and the two stay one. Lines dropped from a full history move it up - right
+// until its first line is among them: xterm then keeps it whole and puts it on the buffer's first line, over text
+// that was never selected. That is the one thing not taken from xterm: such a selection is cut at the buffer's
+// first cell (cut: xterm is to be given it again), and over once its last line is gone too.
+export function settle(sel, range, dropped, cols) {
+  if (!range) return null;
+  if (dropped > sel.a.row) {
+    const left = moved(sel, -dropped);
+    return left && { sel: left, by: -dropped, cut: true };
+  }
+  const now = fromRange(range, cols);
+  return { sel: now, by: now.a.row - sel.a.row, cut: false };
 }
 
 // How many cells a selection holds, as xterm's select(col, row, length) counts them: row after row, each cols wide.

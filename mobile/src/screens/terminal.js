@@ -483,15 +483,15 @@ export function render(el, ctx, p) {
   // The arithmetic is select.js's; here it is given the view and the terminal as they are now.
   const cellAt = at => select.cellAt(at, { scroll: { left: wrap.scrollLeft, top: wrap.scrollTop }, cell: cell(), pad: PAD, cols: term.cols, rows: term.rows, top: term.buffer.active.viewportY });
   const wordAt = pos => select.wordAt(term.buffer.active.getLine(pos.row), pos, term.cols);
-  // A full history drops its oldest lines as new ones come, and every line's number with them. xterm moves its
-  // selection then; ours follows by a marker put on a line when the selection begins (xterm keeps a marker on its
-  // line), so the handles, "Whole lines" and a handle's drag stay on the text that was selected.
-  let selMark = null, selMarkLine = 0;
+  // The selection is xterm's to keep: sel is what xterm was last given, and before its cells are used - for the
+  // handles, "Whole lines", a handle's drag - it is read back from xterm (settleSel), which moves it when a full
+  // history drops its oldest lines and leaves it be when a program moves lines about. A second account of where the
+  // text went, kept here, would sooner or later differ from what xterm highlights and copies.
+  // selDropped: the lines the buffer dropped since sel was given - the one thing xterm's selection does not say.
+  let selDropped = 0, selWatch = null;
   function setSel({ a, b }) {
-    if (!sel) {
-      selMark = term.registerMarker(0) || null; // none on the alternate screen, which has no history to drop
-      selMarkLine = selMark ? selMark.line : 0;
-    }
+    if (!sel) selWatch = select.onDropped(term, n => { selDropped += n; });
+    selDropped = 0; // these cells are of the buffer as it is now
     // Whole characters, whatever cells the finger gave: a wide one is two cells.
     sel = select.whole({ a, b }, row => term.buffer.active.getLine(row), term.cols);
     term.select(sel.a.col, sel.a.row, select.cellCount(sel, term.cols));
@@ -501,8 +501,8 @@ export function render(el, ctx, p) {
   // cells of a buffer or a size that is no more.
   function dropSel() {
     sel = null;
-    selMark?.dispose();
-    selMark = null;
+    selWatch?.();
+    selWatch = null;
     if (g?.kind === "sel") g = null;
     stopEdge();
     drawSel();
@@ -512,18 +512,19 @@ export function render(el, ctx, p) {
     dropSel();
     term.clearSelection();
   }
-  // Before the selection's cells are used: moved with the lines, if those moved.
+  // Before the selection's cells are used: as xterm has it now (select.settle).
   function settleSel() {
-    if (!sel || !selMark) return;
-    if (selMark.isDisposed) return clearSel(); // its line is gone, with what was selected above it
-    const by = selMark.line - selMarkLine;
-    if (!by) return;
-    selMarkLine = selMark.line;
-    const next = select.moved(sel, by);
-    if (!next) return clearSel();
-    sel = next;
+    if (!sel) return;
+    const now = select.settle(sel, term.getSelectionPosition(), selDropped, term.cols);
+    selDropped = 0;
+    if (!now) return clearSel(); // xterm has none, or the history dropped all of it
+    sel = now.sel;
+    // Cut at the buffer's first cell: xterm, which kept it whole on other text, is given what is left of it.
+    if (now.cut) term.select(sel.a.col, sel.a.row, select.cellCount(sel, term.cols));
+    if (!now.by) return;
+    // A drag in progress goes on from the same text: what it began from moved by as much.
     if (g?.kind === "sel") {
-      const anchor = select.moved(g.word || { a: g.fixed, b: g.fixed }, by);
+      const anchor = select.moved(g.word || { a: g.fixed, b: g.fixed }, now.by);
       if (!anchor) { g = null; stopEdge(); } // what the drag began from is gone: the selection stays as it is
       else if (g.word) g.word = anchor;
       else g.fixed = anchor.a;

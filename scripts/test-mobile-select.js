@@ -11,6 +11,9 @@
 //   * between: a handle dragged past the other end changes places with it;
 //   * moved: a full history drops its oldest lines - the selection keeps to its text, cut where its beginning is
 //     gone, over once all of it is;
+//   * fromRange, onDropped, settle: the selection is where xterm has its own - moved up with the lines a full history
+//     drops, left alone when a program scrolls, inserts or deletes lines - except that one whose first line was
+//     dropped is cut there, where xterm would keep it whole over other text; what xterm drops is counted by xterm;
 //   * wholeLines and cellCount: what xterm's select(col, row, length) is given - checked against a model of how xterm
 //     counts a length over the lines;
 //   * handleAt: a handle hangs under its end of the selection, is hidden with its line, and never reaches out of the
@@ -49,7 +52,7 @@ function cellsOf(col, row, length, cols) {
 }
 
 (async () => {
-  const { cellAt, notAfter, wordAt, whole, grow, between, moved, wholeLines, cellCount, handleAt } = await import(src("select.js"));
+  const { cellAt, notAfter, wordAt, whole, grow, between, moved, fromRange, onDropped, settle, wholeLines, cellCount, handleAt }= await import(src("select.js"));
   const at = (col, row) => ({ col, row });
 
   // ---------- cellAt ----------
@@ -179,7 +182,7 @@ function cellsOf(col, row, length, cols) {
   }
 
   // ---------- moved ----------
-  // A full history drops lines from its top: the selection keeps to its text, as xterm's own does.
+  // A full history drops lines from its top: the selection keeps to its text.
   const s = { a: at(10, 5), b: at(2, 8) };
   assert.deepEqual(moved(s, 0), s);
   assert.deepEqual(moved(s, -3), { a: at(10, 2), b: at(2, 5) });
@@ -190,12 +193,106 @@ function cellsOf(col, row, length, cols) {
   assert.equal(moved(s, -5000), null);
   assert.deepEqual(moved({ a: at(4, 0), b: at(4, 0) }, -1), null, "one cell on the line that went");
   assert.notEqual(moved(s, 0).a, s.a, "new cells, not the selection's own");
-  // Whatever is left has its ends in order and is as long as xterm would have it.
+  // Whatever is left has its ends in order and holds the cells that are still there, no more.
   for (let by = 0; by >= -12; by--) {
     const m = moved(s, by);
     if (!m) continue;
     assert.ok(notAfter(m.a, m.b) && m.a.row >= 0, `by ${by}: ${JSON.stringify(m)}`);
     assert.equal(cellCount(m, 80), Math.min(cellCount(s, 80), m.b.row * 80 + m.b.col + 1), `by ${by}: cut at the buffer's first cell`);
+  }
+
+  // ---------- fromRange ----------
+  // xterm's range for a selection, as the app saw it in a page: a word at columns 13-17 of line 21, and that whole
+  // line of a terminal 120 wide. Columns and lines from 0, the end one past the last cell.
+  assert.deepEqual(fromRange({ start: { x: 13, y: 21 }, end: { x: 18, y: 21 } }, 120), { a: at(13, 21), b: at(17, 21) });
+  assert.deepEqual(fromRange({ start: { x: 0, y: 21 }, end: { x: 120, y: 21 } }, 120), { a: at(0, 21), b: at(119, 21) }, "to its line's end: the number of columns");
+  assert.deepEqual(fromRange({ start: { x: 0, y: 2 }, end: { x: 4, y: 4 } }, 120), { a: at(0, 2), b: at(3, 4) });
+  assert.deepEqual(fromRange({ start: { x: 5, y: 2 }, end: { x: 0, y: 4 } }, 120), { a: at(5, 2), b: at(119, 3) }, "an end before a line's first cell: the last of the line above");
+  // A terminal that was never opened has no selection to ask, so here is how xterm 6 keeps one made with
+  // select(col, row, length) (its SelectionModel): the first cell and the length - the end is counted from them -
+  // and for lines dropped the first cell goes up, no further than the buffer's first line.
+  const xtermRange = (sel, cols, dropped = 0) => {
+    const start = { x: sel.a.col, y: Math.max(0, sel.a.row - dropped) }, upTo = start.x + cellCount(sel, cols);
+    if (upTo <= cols) return { start, end: { x: upTo, y: start.y } };
+    return { start, end: upTo % cols ? { x: upTo % cols, y: start.y + Math.floor(upTo / cols) } : { x: cols, y: start.y + upTo / cols - 1 } };
+  };
+  assert.deepEqual(xtermRange({ a: at(13, 21), b: at(17, 21) }, 120), { start: { x: 13, y: 21 }, end: { x: 18, y: 21 } }, "the model gives what the page showed");
+  assert.deepEqual(xtermRange({ a: at(0, 21), b: at(119, 21) }, 120), { start: { x: 0, y: 21 }, end: { x: 120, y: 21 } });
+  assert.deepEqual(xtermRange({ a: at(0, 2), b: at(3, 4) }, 120), { start: { x: 0, y: 2 }, end: { x: 4, y: 4 } });
+  // What is given to xterm comes back the same, whatever the two ends.
+  for (const cols of [1, 2, 7, 80, 213]) {
+    for (let n = 0; n < 300; n++) {
+      const sel = between(at((n * 31) % cols, 100 + (n % 5)), at((n * 17 + 3) % cols, 100 + (n % 5) + (n % 4)));
+      assert.deepEqual(fromRange(xtermRange(sel, cols), cols), sel, `${cols} columns, ${JSON.stringify(sel)}`);
+    }
+  }
+
+  // ---------- onDropped ----------
+  // xterm's own buffer says how many lines it dropped: 4 rows and a history of 50, so 54 lines before the first goes.
+  const hist = await termOf(Array.from({ length: 30 }, (_, i) => `note ${i}`).join("\r\n"), 20);
+  const put = data => new Promise(done => hist.write(data, done));
+  const rowOf = text => { for (let r = 0; r < hist.buffer.active.length; r++) if (hist.buffer.active.getLine(r).translateToString(true) === text) return r; return -1; };
+  let dropped = 0;
+  const stop = onDropped(hist, n => { dropped += n; });
+  assert.equal(typeof stop, "function", "the installed xterm has the field this reads");
+  // A program moving lines about drops none: scrolling up, inserting a line, deleting one.
+  await put("\x1b[S\x1b[2;1H\x1b[L\x1b[M\x1b[4;1H");
+  assert.equal(dropped, 0);
+  await put("\r\nnote 30\r\nnote 31");
+  assert.equal(dropped, 0, "a history not yet full grows");
+  const was = rowOf("note 28");
+  assert.ok(was > 0);
+  await put(Array.from({ length: 40 }, (_, i) => `\r\nmore ${i}`).join(""));
+  assert.equal(hist.buffer.active.length, 54);
+  assert.ok(dropped > 0 && dropped < was, `some of it dropped: ${dropped}`);
+  assert.equal(rowOf("note 28"), was - dropped, "a line is as many rows up as were dropped");
+  await put("\r\nlast 0\r\nlast 1\r\nlast 2");
+  assert.equal(rowOf("note 28"), was - dropped);
+  // The other screen is a buffer of its own; what it drops is not this one's.
+  const before = dropped;
+  await put("\x1b[?1049h");
+  let other = 0;
+  const stopOther = onDropped(hist, n => { other += n; });
+  await put("\x1b[4;1Hone\r\ntwo\r\nthree");
+  assert.deepEqual([dropped, other], [before, 2]);
+  stopOther();
+  await put("\r\nfour\x1b[?1049l");
+  assert.equal(other, 2, "told no more once stopped");
+  stop();
+  await put("\r\nlast 3");
+  assert.equal(dropped, before);
+  assert.equal(onDropped({}, () => {}), null, "an xterm without the field: nothing to stop, nothing counted");
+
+  // ---------- settle ----------
+  const S = { a: at(10, 5), b: at(2, 8) };
+  assert.equal(settle(S, undefined, 0, 80), null, "xterm has no selection: it is over");
+  assert.equal(settle(S, undefined, 3, 80), null);
+  assert.deepEqual(settle(S, xtermRange(S, 80), 0, 80), { sel: S, by: 0, cut: false }, "nothing happened: as it was");
+  // Lines moved about by a program are no lines dropped: xterm's selection stays on its cells, and so does this.
+  assert.deepEqual(settle(S, xtermRange(S, 80), 0, 80).sel, S);
+  // Lines dropped: xterm moved it, and it is where xterm has it.
+  assert.deepEqual(settle(S, xtermRange(S, 80, 3), 3, 80), { sel: { a: at(10, 2), b: at(2, 5) }, by: -3, cut: false });
+  assert.deepEqual(settle(S, xtermRange(S, 80, 5), 5, 80), { sel: { a: at(10, 0), b: at(2, 3) }, by: -5, cut: false }, "its first line is the buffer's first now");
+  // An xterm that does not say what it dropped: the selection is still where xterm has it.
+  assert.deepEqual(settle(S, xtermRange(S, 80, 3), 0, 80), { sel: { a: at(10, 2), b: at(2, 5) }, by: -3, cut: false });
+  // Its first line is among the dropped: xterm keeps all of its length, from the buffer's first line - over text
+  // that was not selected. Here it is cut, and xterm is to be given what is left.
+  assert.deepEqual(fromRange(xtermRange(S, 80, 6), 80), { a: at(10, 0), b: at(2, 3) }, "xterm's own: as long as ever");
+  assert.deepEqual(settle(S, xtermRange(S, 80, 6), 6, 80), { sel: { a: at(0, 0), b: at(2, 2) }, by: -6, cut: true });
+  assert.deepEqual(settle(S, xtermRange(S, 80, 8), 8, 80), { sel: { a: at(0, 0), b: at(2, 0) }, by: -8, cut: true }, "only its last line is left");
+  assert.equal(settle(S, xtermRange(S, 80, 9), 9, 80), null, "all of it dropped, though xterm still has one");
+  assert.equal(settle(S, xtermRange(S, 80, 5000), 5000, 80), null);
+  // Step by step, a few lines at a time, it ends where it would have in one go.
+  for (const step of [1, 2, 3, 7]) {
+    let cur = S, total = 0;
+    while (cur) {
+      assert.deepEqual(cur, moved(S, -total), `${total} dropped, ${step} at a time`);
+      const next = settle(cur, xtermRange(cur, 80, step), step, 80);
+      total += step;
+      assert.deepEqual(next?.sel ?? null, moved(S, -total), `${total} dropped, ${step} at a time`);
+      cur = next?.sel;
+    }
+    assert.ok(total > 8);
   }
 
   // ---------- handleAt ----------
@@ -223,5 +320,5 @@ function cellsOf(col, row, length, cols) {
   assert.deepEqual(handleAt(at(0, 100), false, box), { left: 0, top: 16 }, "at the first column it stays in");
   assert.deepEqual(handleAt(at(79, 123), true, box), { left: 80 * 8 - 18, top: 24 * 16 - 18 }, "at the last cell of all too");
 
-  console.log("mobile select: the cell under a point, a long press's word, growing it, whole wide characters, a handle past the other end, whole lines, the handles' places - passed");
+  console.log("mobile select: the cell under a point, a long press's word, growing it, whole wide characters, a handle past the other end, the selection where xterm has it, whole lines, the handles' places - passed");
 })().catch(e => { console.error(e); process.exit(1); });
