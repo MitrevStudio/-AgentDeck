@@ -4,7 +4,8 @@
 //     outside the terminal is the nearest cell, never one off it;
 //   * wordAt: a long press takes the run of cells with something in them - a path, an address, a word with a wide
 //     character in it (two cells, the second empty) - and stops at blanks and at the line's ends; a blank cell or a
-//     line that is not there is a selection of that one cell;
+//     line that is not there is a selection of that one cell; a word that the terminal's width broke over two rows
+//     or more is taken whole, from any of them;
 //   * whole: a selection never begins or ends in the middle of a wide character - xterm copies a blank for one cut at
 //     its second half - so what is copied is every character the finger touched;
 //   * grow: the word first selected stays whole whichever way the finger goes on, also across lines;
@@ -15,7 +16,7 @@
 //     drops, left alone when a program scrolls, inserts or deletes lines - except that one whose first line was
 //     dropped is cut there, where xterm would keep it whole over other text; what xterm drops is counted by xterm;
 //   * wholeLines and cellCount: what xterm's select(col, row, length) is given - checked against a model of how xterm
-//     counts a length over the lines;
+//     counts a length over the lines; a line on several rows is taken with all of them;
 //   * handleAt: a handle hangs under its end of the selection, is hidden with its line, and never reaches out of the
 //     terminal's box - at the first column, the last one, the last row, a terminal smaller than a handle;
 //   * reachOf and edgeScroll: near an edge of the view the terminal scrolls under a finger that came towards that
@@ -84,32 +85,78 @@ function cellsOf(col, row, length, cols) {
   assert.ok(!notAfter(at(0, 2), at(70, 1)));
 
   // ---------- wordAt ----------
+  // A buffer of one line at a row, of none, and a terminal's own.
+  const on = (l, row = 0) => r => (r === row ? l : undefined);
+  const none = () => undefined;
+  const linesOf = term => row => term.buffer.active.getLine(row);
   const COLS = 40;
   const line = await lineOf("  cd /srv/app  && npm run build", COLS);
-  const word = col => { const w = wordAt(line, at(col, 7), COLS); assert.equal(w.a.row, 7); assert.equal(w.b.row, 7); return textOf(line, w); };
+  const word = col => { const w = wordAt(on(line, 7), at(col, 7), COLS); assert.equal(w.a.row, 7); assert.equal(w.b.row, 7); return textOf(line, w); };
   assert.equal(word(2), "cd");
   assert.equal(word(3), "cd");
   assert.equal(word(5), "/srv/app", "a path is one run: only blanks end it");
   assert.equal(word(12), "/srv/app");
   assert.equal(word(15), "&&");
   assert.equal(word(30), "build", "the run ends with the text");
-  assert.deepEqual(wordAt(line, at(0, 7), COLS), { a: at(0, 7), b: at(0, 7) }, "a blank cell: itself");
-  assert.deepEqual(wordAt(line, at(4, 7), COLS), { a: at(4, 7), b: at(4, 7) });
-  assert.deepEqual(wordAt(line, at(39, 7), COLS), { a: at(39, 7), b: at(39, 7) });
+  assert.deepEqual(wordAt(on(line, 7), at(0, 7), COLS), { a: at(0, 7), b: at(0, 7) }, "a blank cell: itself");
+  assert.deepEqual(wordAt(on(line, 7), at(4, 7), COLS), { a: at(4, 7), b: at(4, 7) });
+  assert.deepEqual(wordAt(on(line, 7), at(39, 7), COLS), { a: at(39, 7), b: at(39, 7) });
   // A line full to both ends.
   const full = await lineOf("x".repeat(COLS), COLS);
-  assert.deepEqual(wordAt(full, at(17, 0), COLS), { a: at(0, 0), b: at(COLS - 1, 0) });
-  assert.deepEqual(wordAt(full, at(0, 0), COLS), { a: at(0, 0), b: at(COLS - 1, 0) });
-  assert.deepEqual(wordAt(full, at(COLS - 1, 0), COLS), { a: at(0, 0), b: at(COLS - 1, 0) });
+  assert.deepEqual(wordAt(on(full), at(17, 0), COLS), { a: at(0, 0), b: at(COLS - 1, 0) });
+  assert.deepEqual(wordAt(on(full), at(0, 0), COLS), { a: at(0, 0), b: at(COLS - 1, 0) });
+  assert.deepEqual(wordAt(on(full), at(COLS - 1, 0), COLS), { a: at(0, 0), b: at(COLS - 1, 0) });
   // Wide characters: both halves are the word's, pressed on either.
   const wide = await lineOf("ok 日本語.txt ✅ done", COLS);
   const widthAt = (l, col) => l.getCell(col).getWidth();
   assert.deepEqual([3, 4, 14, 15].map(col => widthAt(wide, col)), [2, 0, 2, 0], "the fixture: a wide character is two cells, the second with no width");
-  for (const col of [3, 4, 5, 8, 9, 12]) assert.deepEqual(wordAt(wide, at(col, 0), COLS), { a: at(3, 0), b: at(12, 0) }, `pressed at column ${col}`);
-  assert.equal(textOf(wide, wordAt(wide, at(4, 0), COLS)), "日本語.txt");
-  assert.deepEqual(wordAt(wide, at(15, 0), COLS), { a: at(14, 0), b: at(15, 0) }, "an emoji alone: its two cells");
+  for (const col of [3, 4, 5, 8, 9, 12]) assert.deepEqual(wordAt(on(wide), at(col, 0), COLS), { a: at(3, 0), b: at(12, 0) }, `pressed at column ${col}`);
+  assert.equal(textOf(wide, wordAt(on(wide), at(4, 0), COLS)), "日本語.txt");
+  assert.deepEqual(wordAt(on(wide), at(15, 0), COLS), { a: at(14, 0), b: at(15, 0) }, "an emoji alone: its two cells");
   // A line the buffer does not have.
-  assert.deepEqual(wordAt(undefined, at(5, 3), COLS), { a: at(5, 3), b: at(5, 3) });
+  assert.deepEqual(wordAt(none, at(5, 3), COLS), { a: at(5, 3), b: at(5, 3) });
+  // A terminal 20 wide puts a long line on as many rows as it takes: a path that runs over three of them is one
+  // word, pressed on any of the rows. What a new line began is another.
+  const wrapped = await termOf("see /srv/app/releases/2024-11/build/output.log now\r\nabcdefghijklmnopqrst\r\nuvw\r\nabcdefghijklmnopqrst xyz", 20, 8);
+  const rowsOf = linesOf(wrapped);
+  assert.deepEqual([0, 1, 2, 3, 4, 5, 6].map(r => rowsOf(r).isWrapped), [false, true, true, false, false, false, true], "the fixture: rows 1, 2 and 6 go on from the row above");
+  // What xterm copies of a selection: its rows' text, a row that goes on from the one above joined to it.
+  const copiedOf = (lineAt, s, cols) => {
+    let out = "";
+    for (let r = s.a.row; r <= s.b.row; r++) out += (r > s.a.row && !lineAt(r).isWrapped ? "\n" : "") + lineAt(r).translateToString(true, r === s.a.row ? s.a.col : 0, r === s.b.row ? s.b.col + 1 : cols);
+    return out;
+  };
+  const longPath = { a: at(4, 0), b: at(5, 2) };
+  for (const [col, row] of [[4, 0], [12, 0], [19, 0], [0, 1], [10, 1], [19, 1], [0, 2], [5, 2]]) assert.deepEqual(wordAt(rowsOf, at(col, row), 20), longPath, `pressed at ${col}, ${row}`);
+  assert.equal(copiedOf(rowsOf, longPath, 20), "/srv/app/releases/2024-11/build/output.log");
+  assert.deepEqual(wordAt(rowsOf, at(1, 0), 20), { a: at(0, 0), b: at(2, 0) }, "the word before it");
+  assert.deepEqual(wordAt(rowsOf, at(8, 2), 20), { a: at(7, 2), b: at(9, 2) }, "and the one after");
+  assert.deepEqual(wordAt(rowsOf, at(6, 2), 20), { a: at(6, 2), b: at(6, 2) }, "the blank between");
+  // A row full to its end, the next one a line of its own: the word ends with the row.
+  assert.deepEqual(wordAt(rowsOf, at(7, 3), 20), { a: at(0, 3), b: at(19, 3) });
+  assert.deepEqual(wordAt(rowsOf, at(1, 4), 20), { a: at(0, 4), b: at(2, 4) });
+  // A row full to its end and the line going on with a blank: the word ends there too.
+  assert.deepEqual(wordAt(rowsOf, at(7, 5), 20), { a: at(0, 5), b: at(19, 5) });
+  assert.deepEqual(wordAt(rowsOf, at(2, 6), 20), { a: at(1, 6), b: at(3, 6) });
+  // A wide character that did not fit at a row's end is put on the next row, and the last cell left empty: the word
+  // goes on over it, both ways.
+  const split = await termOf("abcdefghi日本x y", 10);
+  const splitAt = linesOf(split);
+  assert.deepEqual([splitAt(0).getCell(9).getChars(), splitAt(1).isWrapped, splitAt(1).getCell(0).getWidth()], ["", true, 2], "the fixture");
+  for (const [col, row] of [[0, 0], [8, 0], [0, 1], [1, 1], [3, 1], [4, 1]]) assert.deepEqual(wordAt(splitAt, at(col, row), 10), { a: at(0, 0), b: at(4, 1) }, `pressed at ${col}, ${row}`);
+  assert.equal(copiedOf(splitAt, wordAt(splitAt, at(3, 0), 10), 10), "abcdefghi日本x");
+  assert.deepEqual(wordAt(splitAt, at(9, 0), 10), { a: at(9, 0), b: at(9, 0) }, "the empty cell itself: a blank");
+  assert.deepEqual(wordAt(splitAt, at(6, 1), 10), { a: at(6, 1), b: at(6, 1) });
+  // A row left with an empty last cell by something else - the line does not go on with a wide character: no word
+  // crosses it.
+  const erased = await termOf("abcdefghijklm\x1b[1;10H\x1b[X", 10);
+  const erasedAt = linesOf(erased);
+  assert.deepEqual([erasedAt(0).getCell(9).getChars(), erasedAt(1).isWrapped, erasedAt(1).getCell(0).getWidth()], ["", true, 1], "the fixture");
+  assert.deepEqual(wordAt(erasedAt, at(3, 0), 10), { a: at(0, 0), b: at(8, 0) });
+  assert.deepEqual(wordAt(erasedAt, at(1, 1), 10), { a: at(0, 1), b: at(2, 1) });
+  // A line whose beginning the history dropped: its first row left goes on from a row that is no more.
+  const cutLine = { isWrapped: true, getCell: col => rowsOf(1).getCell(col) };
+  assert.deepEqual(wordAt(on(cutLine), at(3, 0), 20), { a: at(0, 0), b: at(19, 0) });
 
   // ---------- whole ----------
   // What xterm copies from the second half of a wide character on: a blank where the character was.
@@ -121,7 +168,7 @@ function cellsOf(col, row, length, cols) {
   assert.deepEqual(whole(between(at(12, 0), at(4, 0)), wideAt, COLS), { a: at(3, 0), b: at(12, 0) });
   assert.equal(copied(between(at(12, 0), at(6, 0))), "本語.txt");
   // The finger went back from "done" onto the second half of the emoji, and on from "ok" onto the first half of 日.
-  const done = wordAt(wide, at(18, 0), COLS), ok = wordAt(wide, at(0, 0), COLS);
+  const done = wordAt(on(wide), at(18, 0), COLS), ok = wordAt(on(wide), at(0, 0), COLS);
   assert.equal(copied(grow(done, at(15, 0))), "✅ done");
   assert.deepEqual(whole(grow(ok, at(3, 0)), wideAt, COLS), { a: at(0, 0), b: at(4, 0) }, "the last cell: on to the character's second half");
   assert.equal(copied(grow(ok, at(3, 0))), "ok 日");
@@ -168,12 +215,24 @@ function cellsOf(col, row, length, cols) {
   assert.deepEqual(between(at(10, 5), at(0, 6)), { a: at(10, 5), b: at(0, 6) });
 
   // ---------- wholeLines, cellCount ----------
-  assert.deepEqual(wholeLines({ a: at(10, 5), b: at(2, 8) }, 80), { a: at(0, 5), b: at(79, 8) });
-  assert.deepEqual(wholeLines({ a: at(10, 5), b: at(14, 5) }, 80), { a: at(0, 5), b: at(79, 5) });
+  assert.deepEqual(wholeLines({ a: at(10, 5), b: at(2, 8) }, 80, none), { a: at(0, 5), b: at(79, 8) });
+  assert.deepEqual(wholeLines({ a: at(10, 5), b: at(14, 5) }, 80, none), { a: at(0, 5), b: at(79, 5) });
   assert.equal(cellCount({ a: at(10, 5), b: at(10, 5) }, 80), 1);
   assert.equal(cellCount({ a: at(10, 5), b: at(14, 5) }, 80), 5);
   assert.equal(cellCount({ a: at(0, 5), b: at(79, 5) }, 80), 80);
-  assert.equal(cellCount(wholeLines({ a: at(10, 5), b: at(2, 8) }, 80), 80), 320);
+  assert.equal(cellCount(wholeLines({ a: at(10, 5), b: at(2, 8) }, 80, none), 80), 320);
+  // A line the terminal put on several rows is one line: all its rows, from whichever of them the selection is on.
+  const pathRows = { a: at(0, 0), b: at(19, 2) };
+  for (const s of [{ a: at(4, 0), b: at(6, 0) }, { a: at(3, 1), b: at(9, 1) }, { a: at(7, 2), b: at(9, 2) }, longPath, { a: at(19, 0), b: at(0, 1) }]) {
+    assert.deepEqual(wholeLines(s, 20, rowsOf), pathRows, JSON.stringify(s));
+  }
+  assert.equal(copiedOf(rowsOf, pathRows, 20), "see /srv/app/releases/2024-11/build/output.log now");
+  assert.deepEqual(wholeLines({ a: at(5, 3), b: at(9, 3) }, 20, rowsOf), { a: at(0, 3), b: at(19, 3) }, "a full row that is a line of its own");
+  assert.deepEqual(wholeLines({ a: at(1, 4), b: at(1, 4) }, 20, rowsOf), { a: at(0, 4), b: at(19, 4) });
+  assert.deepEqual(wholeLines({ a: at(3, 1), b: at(2, 6) }, 20, rowsOf), { a: at(0, 0), b: at(19, 6) }, "from inside one line to inside another");
+  assert.deepEqual(wholeLines({ a: at(3, 4), b: at(2, 5) }, 20, rowsOf), { a: at(0, 4), b: at(19, 6) });
+  assert.equal(copiedOf(rowsOf, wholeLines({ a: at(3, 4), b: at(2, 5) }, 20, rowsOf), 20), "uvw\nabcdefghijklmnopqrst xyz");
+  assert.deepEqual(wholeLines({ a: at(3, 0), b: at(5, 0) }, 20, on(cutLine)), { a: at(0, 0), b: at(19, 0) }, "a line with its beginning dropped: from the buffer's first row");
   // The length reaches the selection's last cell and not one more, whatever the two ends.
   for (const cols of [1, 2, 7, 80, 213]) {
     for (let n = 0; n < 300; n++) {

@@ -483,7 +483,8 @@ export function render(el, ctx, p) {
   let longTimer = 0, edgeTimer = 0, touchedAt = 0;
   // The arithmetic is select.js's; here it is given the view and the terminal as they are now.
   const cellAt = at => select.cellAt(at, { scroll: { left: wrap.scrollLeft, top: wrap.scrollTop }, cell: cell(), pad: PAD, cols: term.cols, rows: term.rows, top: term.buffer.active.viewportY });
-  const wordAt = pos => select.wordAt(term.buffer.active.getLine(pos.row), pos, term.cols);
+  const lineAt = row => term.buffer.active.getLine(row);
+  const wordAt = pos => select.wordAt(lineAt, pos, term.cols);
   // The selection is xterm's to keep: sel is what xterm was last given, and before its cells are used - for the
   // handles, "Whole lines", a handle's drag - it is read back from xterm (settleSel), which moves it when a full
   // history drops its oldest lines and leaves it be when a program moves lines about. A second account of where the
@@ -494,7 +495,7 @@ export function render(el, ctx, p) {
     if (!sel) selWatch = select.onDropped(term, n => { selDropped += n; });
     selDropped = 0; // these cells are of the buffer as it is now
     // Whole characters, whatever cells the finger gave: a wide one is two cells.
-    sel = select.whole({ a, b }, row => term.buffer.active.getLine(row), term.cols);
+    sel = select.whole({ a, b }, lineAt, term.cols);
     term.select(sel.a.col, sel.a.row, select.cellCount(sel, term.cols));
     drawSel();
   }
@@ -592,7 +593,7 @@ export function render(el, ctx, p) {
       const text = term.getSelection();
       clearSel();
       copyText(text);
-    } else if (act === "sel-lines" && sel) setSel(select.wholeLines(sel, term.cols));
+    } else if (act === "sel-lines" && sel) setSel(select.wholeLines(sel, term.cols, lineAt));
     else if (act === "sel-cancel") clearSel();
   };
   // What a browser makes of a touch for a mouse (a long press: mousedown, the context menu) is not xterm's to act on -

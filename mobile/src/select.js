@@ -17,19 +17,39 @@ export function cellAt(at, { scroll, cell, pad, cols, rows, top }) {
 // a is b or comes before it, reading the lines left to right, top to bottom.
 export const notAfter = (a, b) => a.row < b.row || (a.row === b.row && a.col <= b.col);
 
-// The run of cells with something in them around a cell of a line (xterm's IBufferLine): the second half of a wide
-// character counts as its first. An empty cell, or one off the line, is a selection of its own.
-export function wordAt(line, pos, cols) {
-  const full = col => {
-    const c = line?.getCell(col);
+// The run of cells with something in them around a cell: the second half of a wide character counts as its first.
+// An empty cell, or one off the buffer, is a selection of its own. lineAt: the buffer's line of a row (xterm's
+// IBufferLine), if it has one.
+// A line too long for the terminal is on several rows (the ones after the first say so: isWrapped), and a path or
+// an address that runs over a row's end is still one word - so the run goes on from a row's last cell to the first
+// of the row its line continues on, and back the same way. Where a wide character did not fit in a row's last cell
+// xterm left that cell empty and put the character on the next row: no blank of the text, and stepped over.
+export function wordAt(lineAt, pos, cols) {
+  const cellOf = p => lineAt(p.row)?.getCell(p.col);
+  const full = p => {
+    const c = cellOf(p);
     return Boolean(c) && (c.getWidth() === 0 || c.getChars().trim() !== "");
   };
-  let s = pos.col, e = pos.col;
-  if (full(s)) {
-    while (s > 0 && full(s - 1)) s--;
-    while (e < cols - 1 && full(e + 1)) e++;
+  const goesOn = row => Boolean(lineAt(row + 1)?.isWrapped); // the row's line continues on the next one
+  // The row's last cell is the one left empty before a wide character that begins the next row.
+  const padded = row => cols > 1 && goesOn(row) && cellOf({ col: cols - 1, row })?.getChars() === "" && cellOf({ col: 0, row: row + 1 })?.getWidth() === 2;
+  // The cell before and the cell after in the line, or null at the line's ends.
+  const before = p => {
+    if (p.col > 0) return { col: p.col - 1, row: p.row };
+    if (p.row < 1 || !goesOn(p.row - 1)) return null;
+    return { col: padded(p.row - 1) ? cols - 2 : cols - 1, row: p.row - 1 };
+  };
+  const after = p => {
+    const last = padded(p.row) ? cols - 2 : cols - 1;
+    if (p.col < last) return { col: p.col + 1, row: p.row };
+    return p.col === last && goesOn(p.row) ? { col: 0, row: p.row + 1 } : null;
+  };
+  let a = pos, b = pos;
+  if (full(pos)) {
+    for (let p = before(a); p && full(p); p = before(a)) a = p;
+    for (let p = after(b); p && full(p); p = after(b)) b = p;
   }
-  return { a: { col: s, row: pos.row }, b: { col: e, row: pos.row } };
+  return { a: { col: a.col, row: a.row }, b: { col: b.col, row: b.row } };
 }
 
 // A selection with no wide character cut in two: a first cell on a character's second half goes back to its first, a
@@ -56,8 +76,15 @@ export function grow(word, pos) {
 // change places.
 export const between = (fixed, pos) => (notAfter(pos, fixed) ? { a: pos, b: fixed } : { a: fixed, b: pos });
 
-// The lines of a selection from their first cell to their last.
-export const wholeLines = (sel, cols) => ({ a: { col: 0, row: sel.a.row }, b: { col: cols - 1, row: sel.b.row } });
+// The lines of a selection from their first cell to their last - the lines as they were written, not the rows: one
+// that the terminal put on several rows is taken with all of them (a row after a line's first says so: isWrapped),
+// and copied as the one line it is.
+export function wholeLines(sel, cols, lineAt) {
+  let first = sel.a.row, last = sel.b.row;
+  while (first > 0 && lineAt(first)?.isWrapped) first--;
+  while (lineAt(last + 1)?.isWrapped) last++;
+  return { a: { col: 0, row: first }, b: { col: cols - 1, row: last } };
+}
 
 // The buffer's lines moved by so many (negative: a full history dropped its oldest lines as new ones came): the
 // selection on the same text - cut at the buffer's first cell where its beginning is gone, null once all of it is.
