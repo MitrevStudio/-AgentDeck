@@ -45,6 +45,16 @@ export const between = (fixed, pos) => (notAfter(pos, fixed) ? { a: pos, b: fixe
 // The lines of a selection from their first cell to their last.
 export const wholeLines = (sel, cols) => ({ a: { col: 0, row: sel.a.row }, b: { col: cols - 1, row: sel.b.row } });
 
+// The buffer's lines moved by so many (negative: a full history dropped its oldest lines as new ones came): the
+// selection as xterm keeps its own then - on the same text, cut at the buffer's first cell where its beginning is
+// gone, null once all of it is.
+export function moved(sel, by) {
+  const b = { col: sel.b.col, row: sel.b.row + by };
+  if (b.row < 0) return null;
+  const row = sel.a.row + by;
+  return { a: row < 0 ? { col: 0, row: 0 } : { col: sel.a.col, row }, b };
+}
+
 // How many cells a selection holds, as xterm's select(col, row, length) counts them: row after row, each cols wide.
 export const cellCount = (sel, cols) => (sel.b.row - sel.a.row) * cols + sel.b.col - sel.a.col + 1;
 

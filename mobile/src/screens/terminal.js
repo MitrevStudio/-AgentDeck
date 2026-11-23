@@ -483,15 +483,50 @@ export function render(el, ctx, p) {
   // The arithmetic is select.js's; here it is given the view and the terminal as they are now.
   const cellAt = at => select.cellAt(at, { scroll: { left: wrap.scrollLeft, top: wrap.scrollTop }, cell: cell(), pad: PAD, cols: term.cols, rows: term.rows, top: term.buffer.active.viewportY });
   const wordAt = pos => select.wordAt(term.buffer.active.getLine(pos.row), pos, term.cols);
+  // A full history drops its oldest lines as new ones come, and every line's number with them. xterm moves its
+  // selection then; ours follows by a marker put on a line when the selection begins (xterm keeps a marker on its
+  // line), so the handles, "Whole lines" and a handle's drag stay on the text that was selected.
+  let selMark = null, selMarkLine = 0;
   function setSel({ a, b }) {
+    if (!sel) {
+      selMark = term.registerMarker(0) || null; // none on the alternate screen, which has no history to drop
+      selMarkLine = selMark ? selMark.line : 0;
+    }
     sel = { a, b };
     term.select(a.col, a.row, select.cellCount(sel, term.cols));
     drawSel();
   }
+  // The selection is over, and so is the drag that was making it: a finger still down would bring it back, from
+  // cells of a buffer or a size that is no more.
+  function dropSel() {
+    sel = null;
+    selMark?.dispose();
+    selMark = null;
+    if (g?.kind === "sel") g = null;
+    stopEdge();
+    drawSel();
+  }
   function clearSel() {
     if (!sel) return;
-    sel = null;
+    dropSel();
     term.clearSelection();
+  }
+  // Before the selection's cells are used: moved with the lines, if those moved.
+  function settleSel() {
+    if (!sel || !selMark) return;
+    if (selMark.isDisposed) return clearSel(); // its line is gone, with what was selected above it
+    const by = selMark.line - selMarkLine;
+    if (!by) return;
+    selMarkLine = selMark.line;
+    const next = select.moved(sel, by);
+    if (!next) return clearSel();
+    sel = next;
+    if (g?.kind === "sel") {
+      const anchor = select.moved(g.word || { a: g.fixed, b: g.fixed }, by);
+      if (!anchor) { g = null; stopEdge(); } // what the drag began from is gone: the selection stays as it is
+      else if (g.word) g.word = anchor;
+      else g.fixed = anchor.a;
+    }
     drawSel();
   }
   // The handles under the selection's two ends (out of sight with their line), the bar while there is a selection.
@@ -511,6 +546,8 @@ export function render(el, ctx, p) {
   // The finger moved while selecting: from the word first selected to the cell under the finger, or - a handle - from
   // the selection's other end to it.
   function moveSel() {
+    settleSel();
+    if (g?.kind !== "sel") return;
     const pos = cellAt({ x: g.x + g.dx, y: g.y + g.dy });
     setSel(g.word ? select.grow(g.word, pos) : select.between(g.fixed, pos));
   }
@@ -536,9 +573,11 @@ export function render(el, ctx, p) {
     buzz(12);
     setSel(word);
   }
-  term.onSelectionChange(() => { if (sel && !term.hasSelection()) { sel = null; drawSel(); } }); // xterm dropped it (another screen)
+  term.onSelectionChange(() => { if (sel && !term.hasSelection()) dropSel(); }); // xterm dropped it (another screen)
+  term.onWriteParsed(settleSel);
   selBar.onpointerdown = e => e.preventDefault(); // the keyboard stays as it was
   selBar.onclick = e => {
+    settleSel();
     const act = e.target.closest("[data-act]")?.dataset.act;
     if (act === "sel-copy") {
       const text = term.getSelection();
@@ -561,6 +600,7 @@ export function render(el, ctx, p) {
     stopFling();
     clearTimeout(longTimer);
     touchedAt = Date.now();
+    settleSel();
     const r = wrap.getBoundingClientRect();
     if (e.touches.length === 1) {
       const a = pt(e.touches[0], r);

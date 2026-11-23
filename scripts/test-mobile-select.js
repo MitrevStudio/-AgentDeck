@@ -7,6 +7,8 @@
 //     line that is not there is a selection of that one cell;
 //   * grow: the word first selected stays whole whichever way the finger goes on, also across lines;
 //   * between: a handle dragged past the other end changes places with it;
+//   * moved: a full history drops its oldest lines - the selection keeps to its text, cut where its beginning is
+//     gone, over once all of it is;
 //   * wholeLines and cellCount: what xterm's select(col, row, length) is given - checked against a model of how xterm
 //     counts a length over the lines;
 //   * handleAt: a handle hangs under its end of the selection, is hidden with its line, and never reaches out of the
@@ -42,7 +44,7 @@ function cellsOf(col, row, length, cols) {
 }
 
 (async () => {
-  const { cellAt, notAfter, wordAt, grow, between, wholeLines, cellCount, handleAt } = await import(src("select.js"));
+  const { cellAt, notAfter, wordAt, grow, between, moved, wholeLines, cellCount, handleAt } = await import(src("select.js"));
   const at = (col, row) => ({ col, row });
 
   // ---------- cellAt ----------
@@ -130,6 +132,26 @@ function cellsOf(col, row, length, cols) {
       assert.equal(cells[0], `${sel.a.row}:${sel.a.col}`);
       assert.equal(cells.at(-1), `${sel.b.row}:${sel.b.col}`, `${cols} columns, ${JSON.stringify(sel)}`);
     }
+  }
+
+  // ---------- moved ----------
+  // A full history drops lines from its top: the selection keeps to its text, as xterm's own does.
+  const s = { a: at(10, 5), b: at(2, 8) };
+  assert.deepEqual(moved(s, 0), s);
+  assert.deepEqual(moved(s, -3), { a: at(10, 2), b: at(2, 5) });
+  assert.deepEqual(moved(s, -5), { a: at(10, 0), b: at(2, 3) }, "its first line is the buffer's first now");
+  assert.deepEqual(moved(s, -6), { a: at(0, 0), b: at(2, 2) }, "its beginning is gone: from the buffer's first cell");
+  assert.deepEqual(moved(s, -8), { a: at(0, 0), b: at(2, 0) }, "only its last line is left");
+  assert.equal(moved(s, -9), null, "all of it is gone");
+  assert.equal(moved(s, -5000), null);
+  assert.deepEqual(moved({ a: at(4, 0), b: at(4, 0) }, -1), null, "one cell on the line that went");
+  assert.notEqual(moved(s, 0).a, s.a, "new cells, not the selection's own");
+  // Whatever is left has its ends in order and is as long as xterm would have it.
+  for (let by = 0; by >= -12; by--) {
+    const m = moved(s, by);
+    if (!m) continue;
+    assert.ok(notAfter(m.a, m.b) && m.a.row >= 0, `by ${by}: ${JSON.stringify(m)}`);
+    assert.equal(cellCount(m, 80), Math.min(cellCount(s, 80), m.b.row * 80 + m.b.col + 1), `by ${by}: cut at the buffer's first cell`);
   }
 
   // ---------- handleAt ----------
