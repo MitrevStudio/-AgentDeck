@@ -222,10 +222,11 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
     capturing = null;
     if (tts.isActive()) tts.stop();
     const s = settings.load();
-    const providerCap = maxRecordingMinutesFor(s.provider);
+    // Transcribed with what is set now: the length cap below is this provider's, whatever is chosen meanwhile.
+    const recordedWith = jobSettings(s, { Ask: extra.ask, EditSource: extra.editSource });
+    const providerCap = maxRecordingMinutesFor(recordedWith.Provider);
     const r = rec = {
-      // Transcribed with what is set now: the length cap below is this provider's, whatever is chosen meanwhile.
-      id: store.newId(), target, recordedWith: jobSettings(s), mode: s.dictationMode, stopping: false, editSource: extra.editSource, ask: extra.ask === true,
+      id: store.newId(), target, recordedWith, mode: s.dictationMode, stopping: false, editSource: extra.editSource, ask: extra.ask === true,
       capMinutes: Math.min(s.maxRecordingMinutes, providerCap), capIsProvider: providerCap < s.maxRecordingMinutes
     };
     // Nothing may be typed into the window the user is about to dictate into.
@@ -621,6 +622,17 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
     await store.flush(); // the attempt put back to Pending reaches the disk before the process ends
   }
 
+  // ---------- models ----------
+  // Models that are being retired were replaced in the settings (settings.js migrate): said once. The last of the
+  // startup balloons, as only one shows: it waits for a start without the others.
+  function tellModelChanges() {
+    const changes = settings.load().modelChanges;
+    if (!changes.length) return;
+    const list = changes.map(c => `${c.from} → ${c.to}`).join(", ");
+    balloon(t("voice.balloon.modelsReplaced", { list }), { onClick: () => windows.openSettings() });
+    saveSettings({ modelChanges: [] });
+  }
+
   // ---------- preferences ----------
   // Main reloads its own windows and broadcasts the theme; these are voice's.
   function onPrefsChanged(_p, keys) {
@@ -634,6 +646,7 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
   const taken = Object.keys(registerHotkeys());
   if (taken.length) balloon(hotkeyWarning(taken), { iconType: "warning" });
   else if (waiting) balloon(tn("voice.balloon.waiting", waiting), { iconType: "warning" });
+  else tellModelChanges();
   // The first press then pays neither for loading the capture page nor for starting the selection thread.
   recorder.warmUp();
   selection.warmUp();
@@ -643,7 +656,7 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
     trayMenu, dispose, edgeKey,
     retry: id => q.retry(id),
     openHistory: () => windows.openHistory(),
-    openSettings: () => windows.openSettings(),
+    openSettings: pane => windows.openSettings(pane),
     // The edge menu's microphone: start / finish / stop a command, and what its button shows.
     command: { toggle: () => commands.toggle(), state: () => commands.state() }
   };

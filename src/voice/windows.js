@@ -5,7 +5,7 @@ const { BrowserWindow, ipcMain, screen } = require("electron");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { maxRecordingMinutesFor } = require("./transcription");
-const { TRANSCRIPTION_MODELS, SPEECH_MODELS, VOICES, VOICE_STYLES, DEFAULT_SPEECH_MODEL, DEFAULT_VOICE, REWRITE_MODELS, defaultModelFor } = require("./catalog");
+const { MODELS, TASKS, VOICES, VOICE_STYLES, DEFAULT_VOICE, choices } = require("./catalog");
 const { SAFE_ID, isObj, sleep } = require("../shared/util");
 const { classify } = require("./errors");
 const dictation = require("./dictation-options");
@@ -20,6 +20,11 @@ const LANGUAGES = [["auto", null], ["bg", "Български"], ["en", "English
   ["fr", "Français"], ["de", "Deutsch"], ["it", "Italiano"], ["pt", "Português"], ["ru", "Русский"], ["ja", "日本語"],
   ["zh", "中文"], ["tr", "Türkçe"]];
 const languageChoices = () => LANGUAGES.map(([code, name]) => [code, name ?? t("voice.catalog.language.auto")]);
+// Each task with the providers that can do it and what to offer on each, the default first.
+const taskChoices = () => Object.entries(TASKS).map(([id, spec]) => ({
+  id, provider: spec.provider, sameModel: spec.sameModel === true,
+  models: Object.fromEntries(Object.keys(spec.models).map(p => [p, choices(id, p)]))
+}));
 const LENGTH_PRESETS = [1, 2, 3, 5, 10, 15, 20, 30, 45, 60];
 const voiceStyle = name => (VOICE_STYLES[name] ? t(`voice.catalog.style.${VOICE_STYLES[name]}`) : "");
 
@@ -83,7 +88,7 @@ function createVoiceWindows({ settings, store, queue, listDevices, onReread, onS
   let historyWin = null, settingsWin = null, changedTimer = null;
   const alive = w => Boolean(w && !w.isDestroyed());
 
-  function makeWindow({ page, preload, ...opts }) {
+  function makeWindow({ page, hash = "", preload, ...opts }) {
     const win = new BrowserWindow({
       ...opts, show: false, backgroundColor: background(), icon: icon || undefined,
       webPreferences: { preload: path.join(UI, preload), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false }
@@ -91,7 +96,7 @@ function createVoiceWindows({ settings, store, queue, listDevices, onReread, onS
     win.removeMenu(); // Alt would otherwise pop up the default menu - in the middle of capturing a hotkey, too
     win.webContents.on("will-navigate", e => e.preventDefault()); // e.g. a file dropped onto the window
     win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-    win.loadFile(path.join(UI, page));
+    win.loadFile(path.join(UI, page), hash ? { hash } : undefined);
     return win;
   }
 
@@ -173,10 +178,14 @@ function createVoiceWindows({ settings, store, queue, listDevices, onReread, onS
   handle("voice:history:clear", historyOwner, () => queue.clearHistory());
 
   // ---------- Settings ----------
-  function openSettings() {
-    if (alive(settingsWin)) return focus(settingsWin);
+  // pane: the tab to show ("models", "meetings"), else the one shown last.
+  function openSettings(pane = "") {
+    if (alive(settingsWin)) {
+      if (pane) settingsWin.webContents.send("voice:settings:show", pane);
+      return focus(settingsWin);
+    }
     settingsWin = makeWindow({
-      page: "settings.html", preload: "settings-preload.js", title: t("settings.title"),
+      page: "settings.html", hash: pane, preload: "settings-preload.js", title: t("settings.title"),
       width: 840, height: 760, useContentSize: true, resizable: false, maximizable: false, minimizable: false,
       fullscreenable: false, center: true
     });
@@ -204,16 +213,15 @@ function createVoiceWindows({ settings, store, queue, listDevices, onReread, onS
     settings: settings.load(),
     hasKey: keyState(),
     providers: [...settings.PROVIDERS],
-    models: TRANSCRIPTION_MODELS,
+    catalog: MODELS,
+    tasks: taskChoices(),
     providerMinutes: Object.fromEntries(settings.PROVIDERS.map(p => [p, maxRecordingMinutesFor(p)])),
     languages: languageChoices(),
     lengths: LENGTH_PRESETS,
-    readAloudModels: SPEECH_MODELS,
     voices: VOICES.map(name => [name, voiceStyle(name)]),
     defaultVoice: DEFAULT_VOICE,
     hotkeyDefaults: { ...settings.defaults.hotkeys },
-    projectNames: (() => { try { return projectNames() || []; } catch { return []; } })(),
-    rewriteModels: { ...REWRITE_MODELS }
+    projectNames: (() => { try { return projectNames() || []; } catch { return []; } })()
   }));
   // Apart from the rest: the first listing starts the recorder and can take seconds, and the window waits for the
   // page's first fit before it shows - with the microphones in it, it was shown unfitted (the timer above) and resized.
@@ -299,13 +307,14 @@ function createVoiceWindows({ settings, store, queue, listDevices, onReread, onS
   handle("voice:commands:set", settingsOwner, patch => commandSettings?.set(patch) ?? { ok: false });
 
   handle("voice:settings:save", settingsOwner, async payload => {
-    const { patch, keys, errors } = validateSettings(payload, settings.PROVIDERS);
+    const inUse = { hotkeys: settings.load().hotkeys, edge: general?.hotkey?.()?.current };
+    const { patch, keys, errors } = validateSettings(payload, settings.PROVIDERS, inUse);
     if (Object.keys(errors).length) return { ok: false, errors };
     // Keys first: if encryption is unavailable nothing is saved and the user is told why.
-    try {
-      for (const [provider, k] of Object.entries(keys)) await settings.setApiKey(provider, k.clear ? "" : k.value);
-    } catch (e) {
-      return { ok: false, errors: { apiKey: t("voice.settings.err.keyNotSaved", { error: e.message }) } };
+    for (const [provider, k] of Object.entries(keys)) {
+      try { await settings.setApiKey(provider, k.clear ? "" : k.value); } catch (e) {
+        return { ok: false, errors: { [`apiKey.${provider}`]: t("voice.settings.err.keyNotSaved", { error: e.message }) } };
+      }
     }
     // In effect at once; a file that could not be written is reported, not rolled back.
     let unsaved = null;
@@ -337,19 +346,26 @@ function createVoiceWindows({ settings, store, queue, listDevices, onReread, onS
 }
 
 // Everything the Settings page sends is checked here; the page is not trusted to have offered only valid choices.
-function validateSettings(p, providers) {
+// inUse: { hotkeys: the saved ones, edge: the edge menu's as shown } - the screenshot key may be none of them.
+function validateSettings(p, providers, inUse = {}) {
   const errors = {}, patch = {}, keys = {};
   if (!isObj(p)) return { patch, keys, errors: { form: t("errors.invalidData") } };
   const str = (v, max) => (typeof v === "string" && v.length <= max ? v.trim() : null);
 
-  if (!providers.includes(p.provider)) errors.provider = t("voice.settings.err.provider");
-  else patch.provider = p.provider;
-
-  patch.models = {};
-  for (const provider of providers) {
-    const m = str(p.models?.[provider] ?? "", 100);
-    if (m === null || (m && !MODEL_RE.test(m))) errors.model = t("voice.settings.err.model");
-    else patch.models[provider] = m || defaultModelFor(provider);
+  patch.tasks = {};
+  for (const [task, spec] of Object.entries(TASKS)) {
+    const own = isObj(p.tasks) ? p.tasks[task] : null, field = `tasks.${task}`;
+    if (!isObj(own) || (own.provider !== spec.provider && !Object.keys(spec.models).includes(own.provider))) {
+      errors[field] = t("voice.settings.err.provider");
+      continue;
+    }
+    const models = {};
+    for (const provider of Object.keys(spec.models)) {
+      const m = str(own.models?.[provider] ?? "", 100); // empty = the default
+      if (m === null || (m && !MODEL_RE.test(m))) errors[field] = t("voice.settings.err.model");
+      else models[provider] = m;
+    }
+    patch.tasks[task] = { provider: own.provider, models };
   }
 
   const lang = str(p.language, 16);
@@ -367,10 +383,6 @@ function validateSettings(p, providers) {
   if (!Number.isInteger(minutes) || minutes < 1 || minutes > 60) errors.maxRecordingMinutes = t("voice.settings.err.minutes", { min: 1, max: 60 });
   else patch.maxRecordingMinutes = minutes;
 
-  const ram = str(p.readAloudModel ?? "", 100);
-  if (ram === null || (ram && !MODEL_RE.test(ram))) errors.readAloudModel = t("voice.settings.err.model");
-  else patch.readAloudModel = ram || DEFAULT_SPEECH_MODEL;
-
   const voice = str(p.readAloudVoice ?? "", 40);
   if (voice === null || (voice && !/^[A-Za-z]+$/.test(voice))) errors.readAloudVoice = t("voice.settings.err.voice");
   else patch.readAloudVoice = voice || DEFAULT_VOICE;
@@ -383,6 +395,23 @@ function validateSettings(p, providers) {
     else patch.hotkeys = { dictate: dictate.value, readAloud: readAloud.value };
   }
 
+  // A meeting's screenshot key, which the recorder holds while it records (meetings/capture/shortcut.js).
+  if (p.hotkeys?.meetingScreenshot !== undefined) {
+    const shot = normalizeAccelerator(p.hotkeys.meetingScreenshot);
+    if (shot.error) errors["hotkeys.meetingScreenshot"] = shot.error;
+    else {
+      const taken = [
+        ["voice.settings.hotkey.dictate", dictate.value],
+        ["voice.settings.hotkey.readAloud", readAloud.value],
+        ["voice.task.edit", normalizeAccelerator(inUse.hotkeys?.editSelection).value],
+        ["voice.task.ask", normalizeAccelerator(inUse.hotkeys?.ask).value],
+        ["settings.general.hotkey", normalizeAccelerator(inUse.edge).value]
+      ].find(([, value]) => value === shot.value);
+      if (taken) errors["hotkeys.meetingScreenshot"] = t("voice.settings.err.hotkeyUsed", { name: t(taken[0]) });
+      else patch.hotkeys = { ...patch.hotkeys, meetingScreenshot: shot.value };
+    }
+  }
+
   // Dictation mode, prompt language, key behaviour and dictionary (dictation-options.js).
   const dict = dictation.validate(p);
   Object.assign(patch, dict.patch);
@@ -390,11 +419,11 @@ function validateSettings(p, providers) {
 
   // {set: "key"} replaces, {clear: true} removes; a provider that is absent keeps whatever is saved.
   for (const [provider, k] of Object.entries(isObj(p.apiKeys) ? p.apiKeys : {})) {
-    if (!providers.includes(provider) || !isObj(k)) { errors.apiKey = t("voice.settings.err.keyData"); continue; }
+    if (!providers.includes(provider) || !isObj(k)) { errors.form = t("voice.settings.err.keyData"); continue; }
     if (k.clear === true) { keys[provider] = { clear: true }; continue; }
     const value = str(k.set, 512);
     if (!value) continue;
-    if (!/^[\x21-\x7e]+$/.test(value)) errors.apiKey = t("voice.settings.err.keyChars");
+    if (!/^[\x21-\x7e]+$/.test(value)) errors[`apiKey.${provider}`] = t("voice.settings.err.keyChars");
     else keys[provider] = { value };
   }
   return { patch, keys, errors };

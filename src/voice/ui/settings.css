@@ -78,7 +78,7 @@ body:not([data-tab="network"]) [data-for="network"], body:not([data-tab="nodes"]
 .vs .vs-netmode > button { padding: 0 8px; white-space: nowrap; }
 .vs-netmode + .vs-hint { margin-top: 6px; }
 
-/* Provider: a segmented control. */
+/* Segmented controls in the page. */
 .vs .seg { padding: 2px; }
 .vs .seg > button { height: 28px; }
 .vs .seg > button:focus-visible { outline-offset: -2px; }

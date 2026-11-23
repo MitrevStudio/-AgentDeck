@@ -12,15 +12,21 @@
 // in RewriteError.
 const { EventEmitter } = require("node:events");
 const { classify } = require("./errors");
-const { defaultModelFor } = require("./catalog");
+const { resolveTask } = require("./catalog");
 const { applyReplacements } = require("./dictionary");
 const { sleep, hhmm } = require("../shared/util");
 const { t } = require("../i18n");
 
 const IN_FLIGHT = new Set(["Transcribing", "Delivering"]);
 
-// What a recording is transcribed with: the settings in force when it was made.
-const jobSettings = s => ({ Provider: s.provider, Model: s.models?.[s.provider] || defaultModelFor(s.provider), Language: s.language || "auto" });
+const textTask = job => (job?.Ask ? "ask" : job?.EditSource ? "edit" : "rewrite");
+
+// What a recording is transcribed with, and what then writes its text: the settings in force when it was made.
+// job: {Ask} or {EditSource} when it is a question or an edit.
+function jobSettings(s, job) {
+  const heard = resolveTask(s, "dictation"), written = resolveTask(s, textTask(job));
+  return { Provider: heard.provider, Model: heard.model, Language: s.language || "auto", TextProvider: written.provider, TextModel: written.model };
+}
 
 function createQueue(deps = {}) {
   const store = deps.store || require("./job-store");
@@ -90,13 +96,22 @@ function createQueue(deps = {}) {
     await deliverStep(id);
   }
 
+  // What an attempt runs on, written to the record so that History names it: the record's provider, with its model or
+  // that model's successor. A record without a provider (imported, edited by hand) takes the settings of now, all but
+  // its language: a model alone does not say whose it is.
+  function runsOn(job, s) {
+    if (!job.Provider) return { ...jobSettings(s, job), Language: job.Language };
+    return { Model: resolveTask(s, "dictation", { provider: job.Provider, model: job.Model }).model };
+  }
+
   async function transcribeStep(id) {
     const before = store.get(id);
-    const job = store.update(id, { Status: "Transcribing", AttemptCount: (before.AttemptCount || 0) + 1 });
-    emit("started", id);
+    let job = store.update(id, { Status: "Transcribing", AttemptCount: (before.AttemptCount || 0) + 1 });
     const ac = attempt = new AbortController();
     try {
       const s = getSettings();
+      job = store.update(id, runsOn(job, s));
+      emit("started", id);
       const terms = vocabulary();
       const raw = String((await transcribe(job, s, { signal: ac.signal, vocabulary: terms })) ?? "").trim();
       const { text, rewriteError } = await finish(id, job, raw, s, terms, ac.signal);
@@ -121,22 +136,24 @@ function createQueue(deps = {}) {
     }
   }
 
-  // The transcript as the record's mode wants it, written by the provider it was recorded with (a retry included);
-  // only when that one has no key any more, by the one chosen now. Only a cancel (shutdown) escapes; any other rewrite
-  // failure falls back to the transcript, so the dictation is never lost to it.
+  // The transcript as the record's mode wants it, written by what was fixed when it was recorded, a retry included
+  // (a record from before that: by its own provider); a rewrite whose provider has no key any more, by the one chosen
+  // now. Only a cancel (shutdown) escapes; any other rewrite failure falls back to the transcript, so the dictation is
+  // never lost to it.
   async function finish(id, job, raw, s, terms, signal) {
     const fixed = applyReplacements(raw, s.dictionary?.replacements);
+    const use = resolveTask(s, textTask(job), { provider: job.TextProvider || job.Provider, model: job.TextModel });
     if (job.Ask) {
       if (!fixed) return { text: "", rewriteError: null };
       const { askText } = require("./ask");
-      return { text: await askText(fixed, { dictionary: terms, language: job.Language, provider: job.Provider || s.provider, signal }), rewriteError: null };
+      return { text: await askText(fixed, { dictionary: terms, language: job.Language, ...use, signal }), rewriteError: null };
     }
     if (job.EditSource) {
       if (!fixed) return { text: job.EditSource, rewriteError: null };
       emit("rewriting", id);
       try {
         const { editText } = require("./edit");
-        return { text: await editText(job.EditSource, fixed, { dictionary: terms, language: job.Language, provider: job.Provider || s.provider, signal }), rewriteError: null };
+        return { text: await editText(job.EditSource, fixed, { dictionary: terms, language: job.Language, ...use, signal }), rewriteError: null };
       } catch (error) {
         if (signal.aborted) throw error;
         console.error("Voice edit failed, pasting the selection back:", error?.longMessage || error?.message || error);
@@ -146,17 +163,17 @@ function createQueue(deps = {}) {
     const mode = job.Mode || "verbatim";
     if (!fixed || mode === "verbatim") return { text: fixed, rewriteError: null };
     emit("rewriting", id);
-    const attempt = provider => rewrite(fixed, { mode, dictionary: terms, language: job.Language, provider, signal });
-    const provider = job.Provider || s.provider;
+    const attempt = to => rewrite(fixed, { mode, dictionary: terms, language: job.Language, ...to, signal });
     try {
-      try { return { text: await attempt(provider), rewriteError: null }; } catch (error) {
-        if (error?.kind !== "Configuration" || !s.provider || s.provider === provider) throw error;
-        return { text: await attempt(s.provider), rewriteError: null };
+      try { return { text: await attempt(use), rewriteError: null }; } catch (error) {
+        const now = resolveTask(s, "rewrite");
+        if (error?.kind !== "Configuration" || now.provider === use.provider) throw error;
+        return { text: await attempt(now), rewriteError: null };
       }
     } catch (error) {
       if (signal.aborted) throw error;
       let e = error;
-      if (!e?.shortMessage) { try { e = classify({ error, provider, signal }); } catch {} }
+      if (!e?.shortMessage) { try { e = classify({ error, provider: use.provider, signal }); } catch {} }
       console.error(`Rewrite (${mode}) failed, delivering the transcript:`, e?.longMessage || e?.message || e);
       // "No API key is set for Gemini" says more than "Not set up".
       return { text: fixed, rewriteError: (e?.kind === "Configuration" ? e.longMessage : e?.shortMessage) || String(e?.message || e) };
@@ -264,7 +281,7 @@ function createQueue(deps = {}) {
     const job = store.get(id);
     if (!job || job.Kind !== "Dictation" || IN_FLIGHT.has(job.Status) || !store.hasAudio(job)) return false;
     targets.delete(id);
-    store.update(id, { ...jobSettings(getSettings()), ResultText: null, RawText: null, RewriteError: null, CompletedAt: null, Status: "Pending" });
+    store.update(id, { ...jobSettings(getSettings(), job), ResultText: null, RawText: null, RewriteError: null, CompletedAt: null, Status: "Pending" });
     push(id);
     emit("retry", id);
     return true;

@@ -64,3 +64,16 @@ qrcode-generator, loaded from `node_modules/qrcode-generator/dist/qrcode.js` and
 It is distributed under the MIT License, whose text is the one above (with the copyright holder listed here).
 
 The word "QR Code" is a registered trademark of DENSO WAVE INCORPORATED.
+
+## Meeting audio: Mediabunny
+
+A recorded meeting's audio is put into WebM (Opus, encoded by Chromium) and read from it by Mediabunny, loaded from
+`node_modules/mediabunny/dist/bundles/mediabunny.min.cjs` (`src/meetings/capture/codec.html`) and run unchanged, on the
+computer itself. Nothing of it is copied into AgentDeck's own files.
+
+| Used for | Upstream | Copyright | Licence | Source |
+| --- | --- | --- | --- | --- |
+| Meetings' WebM files | Mediabunny 1.66.2 | Copyright (c) 2026-present, Vanilagy and contributors | MPL-2.0 | https://github.com/Vanilagy/mediabunny, https://registry.npmjs.org/mediabunny/-/mediabunny-1.66.2.tgz |
+
+It is subject to the terms of the Mozilla Public License, v. 2.0: the text is in the package's `LICENSE` and at
+https://mozilla.org/MPL/2.0/. The source code of this version is in the package linked above (`src/`).

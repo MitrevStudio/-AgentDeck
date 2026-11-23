@@ -1,36 +1,41 @@
 // Turns a raw transcript into the text the user asked for - cleaned up, or rewritten as a prompt for a coding agent -
-// with a fast text model on the user's own provider and key. Failures are VoiceErrors like a transcription's (the
+// with the task's text model (catalog.js) on the user's own key. Failures are VoiceErrors like a transcription's (the
 // queue then delivers the transcript as it was, so a dictation is never lost to a rewrite).
 //
 // generate() is the general part: one instruction + one piece of text in, the model's text out (or JSON that follows
 // a schema), with the timeout and the error classification every voice request gets. Voice commands build on it.
 const { classify, configuration, VoiceError } = require("./errors");
-const { REWRITE_MODELS } = require("./catalog");
+const { providerName, resolveTask } = require("./catalog");
 const { MODES } = require("./dictation-options");
 const { t } = require("../i18n");
 
 const PROVIDERS = { OpenAI: require("./providers/openai"), Gemini: require("./providers/gemini") };
 const LANGUAGE_NAMES = PROVIDERS.Gemini.LANGUAGE_NAMES;
-const providerName = p => Object.keys(PROVIDERS).find(k => k.toLowerCase() === String(p || "").toLowerCase());
 
 // A flash model answers a paragraph in about a second; a ten-minute dictation is a few thousand characters.
 const timeoutFor = text => Math.min(15_000 + String(text).length * 20, 120_000);
 
 const settings = () => require("./settings");
 
-// One answer from the provider's text model. provider (default: the dictation provider), model (default: its rewrite
-// model), temperature, schema (a JSON Schema the answer must follow: structured output), signal (abort = a "Cancelled"
-// VoiceError), timeoutMs (default: by length), getApiKey (default: the saved keys). Resolves with the trimmed text, ""
-// when the model gave none.
-async function generate({ system, text, provider, model, temperature = 0.2, schema, signal, timeoutMs, getApiKey } = {}) {
-  const name = providerName(provider || settings().load().provider);
+// Where a request goes: what the caller names, the rest as the task's settings have it.
+const target = (task, provider, model) => resolveTask(provider && model ? {} : settings().load(), task, { provider, model });
+
+// One answer from a text model. task (default: rewrite) says whose provider and model are used where the caller names
+// none; provider, model, temperature (for the models that take one), effort (how hard it thinks, where the model has
+// that level; default: the least), schema (a JSON Schema the answer must follow: structured output), signal (abort =
+// a "Cancelled" VoiceError), timeoutMs (default: by length), getApiKey (default: the saved keys), exact (provider and
+// model as given, never a successor: the caller resolved them). Resolves with the trimmed text, "" when the model gave
+// none.
+async function generate({ system, text, task = "rewrite", provider, model, exact = false, temperature = 0.2, effort, schema, signal, timeoutMs, getApiKey } = {}) {
+  if (!exact) ({ provider, model } = target(task, provider, model));
+  const name = providerName(provider);
   if (!name) throw configuration(t("voice.errors.unknownProvider", { provider }));
   const apiKey = String((await (getApiKey || settings().getApiKey)(name)) || "").trim();
   if (!apiKey) throw configuration(t("voice.errors.noApiKey", { provider: name }));
   const timeout = AbortSignal.timeout(timeoutMs ?? timeoutFor(text));
   const attempt = signal ? AbortSignal.any([signal, timeout]) : timeout;
   try {
-    const out = await PROVIDERS[name].generateText({ model: model || REWRITE_MODELS[name], system, text: String(text ?? ""), temperature, schema, apiKey, signal: attempt });
+    const out = await PROVIDERS[name].generateText({ model, system, text: String(text ?? ""), temperature, effort, schema, apiKey, signal: attempt });
     return String(out ?? "").trim();
   } catch (error) {
     throw classify({ error, provider: name, signal });
@@ -101,11 +106,11 @@ async function rewrite(text, { mode = "verbatim", dictionary = [], language = "a
   const source = String(text ?? "").trim();
   if (!MODES.includes(mode)) throw new Error(`unknown dictation mode "${mode}"`);
   if (!source || mode === "verbatim") return source;
-  const name = providerName(provider || settings().load().provider) || provider;
+  const use = target("rewrite", provider, model);
   const system = instructions(mode, { vocabulary: dictionary, language, promptLanguage: promptLanguage ?? settings().load().promptLanguage });
-  const answer = await generate({ system, text: wrap(source), provider: name, model, temperature: mode === "prompt" ? 0.3 : 0.1, signal, getApiKey });
+  const answer = await generate({ system, text: wrap(source), ...use, temperature: mode === "prompt" ? 0.3 : 0.1, signal, getApiKey });
   const out = unwrap(answer, source);
-  if (!out) throw new VoiceError("MalformedResponse", t("voice.errors.rewrite.empty.short"), t("voice.errors.rewrite.empty.long", { provider: name }));
+  if (!out) throw new VoiceError("MalformedResponse", t("voice.errors.rewrite.empty.short"), t("voice.errors.rewrite.empty.long", { provider: use.provider }));
   return out;
 }
 

@@ -125,6 +125,38 @@ contextBridge.exposeInMainWorld("terminals", {
   onEnded: cb => ipcRenderer.on("terminal:ended", (_e, e) => cb(e)),
   onWorkspace: cb => ipcRenderer.on("workspace:changed", (_e, w) => cb(w))
 });
+// Meetings (meetings/ipc.js): the manager window's, refused to every other. A project by its folder, a meeting by its
+// id. Each answers { ok: true, value } or { ok: false, code, message }.
+contextBridge.exposeInMainWorld("meetings", {
+  state: () => ipcRenderer.invoke("meetings:state"),
+  count: project => ipcRenderer.invoke("meetings:count", project),
+  list: project => ipcRenderer.invoke("meetings:list", project),
+  sizes: project => ipcRenderer.invoke("meetings:sizes", project),
+  devices: opts => ipcRenderer.invoke("meetings:devices", opts),
+  start: (project, opts) => ipcRenderer.invoke("meetings:start", project, opts),
+  stop: () => ipcRenderer.invoke("meetings:stop"),
+  discard: () => ipcRenderer.invoke("meetings:discard"),
+  screenshot: () => ipcRenderer.invoke("meetings:screenshot"),
+  recover: () => ipcRenderer.invoke("meetings:recover"),
+  discardRecoverable: key => ipcRenderer.invoke("meetings:discard-recoverable", key),
+  // -> { place, meeting, size, summary, transcript, raw, media: the address of its sound and screenshots }
+  open: (project, id) => ipcRenderer.invoke("meetings:open", project, id),
+  options: () => ipcRenderer.invoke("meetings:options"),
+  estimate: (project, id, choices) => ipcRenderer.invoke("meetings:estimate", project, id, choices),
+  transcribe: (project, id, choices) => ipcRenderer.invoke("meetings:transcribe", project, id, choices),
+  retry: (project, id) => ipcRenderer.invoke("meetings:retry", project, id),
+  summarize: (project, id, choices) => ipcRenderer.invoke("meetings:summarize", project, id, choices),
+  cancel: (project, id) => ipcRenderer.invoke("meetings:cancel", project, id),
+  compress: (project, id) => ipcRenderer.invoke("meetings:compress", project, id),
+  rename: (project, id, title) => ipcRenderer.invoke("meetings:rename", project, id, title),
+  remove: (project, id) => ipcRenderer.invoke("meetings:remove", project, id),
+  removeAudio: (project, id) => ipcRenderer.invoke("meetings:remove-audio", project, id),
+  removeScreen: (project, id, file) => ipcRenderer.invoke("meetings:remove-screen", project, id, file),
+  copyPath: (project, id) => ipcRenderer.invoke("meetings:copy-path", project, id),
+  settings: pane => ipcRenderer.invoke("meetings:settings", pane),
+  // status, levels, warning, screenshot, ended, job, compression, changed
+  onEvent: cb => ipcRenderer.on("meetings:event", (_e, name, data) => cb(name, data))
+});
 // UI language and theme, read before the page renders; i18n.js applies them.
 contextBridge.exposeInMainWorld("prefs", {
   ...ipcRenderer.sendSync("prefs:get"),

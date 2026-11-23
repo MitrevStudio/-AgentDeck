@@ -28,10 +28,11 @@ const LIMITS = Object.freeze({
 // Property order as VoiceTray serializes TranscriptionJob, then AgentDeck's own: the dictation mode, the transcript
 // as recognised when the delivered text differs from it, why a rewrite fell back to that transcript, and for a voice
 // command what it was taken to mean and how it ended ({action, summary, agent, project, path, session, prompt,
-// rewriteError, outcome, note}).
+// rewriteError, outcome, note}). TextProvider and TextModel, fixed with Provider and Model: what rewrites, edits or
+// answers the transcript.
 const FIELDS = ["Id", "Kind", "AudioPath", "CreatedAt", "CompletedAt", "DurationSeconds", "Provider", "Model", "Language",
   "Voice", "Status", "AttemptCount", "LastError", "LastErrorShort", "LastStatusCode", "LastErrorTransient", "ResultText",
-  "Mode", "RawText", "RewriteError", "Command", "Ask", "EditSource"];
+  "Mode", "RawText", "RewriteError", "Command", "Ask", "EditSource", "TextProvider", "TextModel"];
 
 let root = null;
 let jobs = null; // Map id -> record, loaded by recoverOnStartup()

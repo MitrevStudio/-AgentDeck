@@ -7,6 +7,7 @@ const fs = require("node:fs");
 const network = require("../../network");
 const { classify, fromResponse, tooLarge } = require("../errors");
 const { t, formatNumber } = require("../../i18n");
+const { modelInfo } = require("../catalog");
 
 const PROVIDER = "Gemini";
 const GENERATE_URL = model => `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
@@ -17,9 +18,6 @@ const API_REVISION = "2026-05-20";
 // Gemini caps a whole request at 20 MB and base64 inflates audio by 4/3: 14 MB of audio encodes to ~18.7 MB,
 // which leaves room for the JSON envelope. Our ceiling, not the model's (the Files API takes far longer audio).
 const MAX_INLINE_BYTES = 14_000_000;
-
-// The dedicated speech-to-text model lives behind the Interactions API, not generateContent.
-const TRANSCRIBE_MODEL_PREFIX = "gemini-3.5-transcribe";
 
 // Streamed speech is headerless 16-bit little-endian PCM, 24 kHz mono.
 const SPEECH_SAMPLE_RATE = 24000;
@@ -33,10 +31,8 @@ const LANGUAGE_NAMES = {
 // BCP-47, which is what the transcription model's language_codes wants.
 const LANGUAGE_TAGS = {
   bg: "bg-BG", en: "en-US", es: "es-ES", fr: "fr-FR", de: "de-DE", it: "it-IT",
-  pt: "pt-PT", ru: "ru-RU", ja: "ja-JP", zh: "zh-CN", tr: "tr-TR"
+  pt: "pt-PT", ru: "ru-RU", ja: "ja-JP", zh: "cmn-Hans-CN", tr: "tr-TR"
 };
-
-const isTranscribeModel = model => String(model || "").toLowerCase().startsWith(TRANSCRIBE_MODEL_PREFIX);
 
 const jsonHeaders = apiKey => ({ "content-type": "application/json; charset=utf-8", "x-goog-api-key": apiKey });
 const interactionHeaders = apiKey => ({ ...jsonHeaders(apiKey), "Api-Revision": API_REVISION });
@@ -62,17 +58,20 @@ function readText(root) {
   return out.trim();
 }
 
-// No prompt: this model only transcribes. "smart" removes filler words and adds punctuation and capitalisation,
-// which is what dictation wants; no language_codes means auto-detect. custom_vocabulary steers it towards the
+// No prompt: this model only transcribes. "verbatim" writes down what was said, word for word: "smart" would also
+// carry out spoken editing instructions ("delete the last sentence") and tidy words on its own, and a dictation or a
+// voice command must come out as spoken; cleaning up is the record's mode (clean, prompt) and the user's choice.
+// No language_codes means auto-detect. custom_vocabulary steers it towards the
 // user's names and technical words - and should a revision of the API refuse it (a 400 that names it), the recording
 // is transcribed without it: the dictionary must never cost a dictation.
 async function viaInteractions(data, apiKey, model, language, vocabulary, signal) {
   const tag = language !== "auto" ? LANGUAGE_TAGS[language] : undefined;
-  const config = { mode: "smart" };
+  const config = { mode: { type: "verbatim" } };
   if (tag) config.language_codes = [tag];
   if (vocabulary.length) config.custom_vocabulary = vocabulary;
   const body = {
     model,
+    store: false, // the dictation is not kept at Google for later retrieval
     input: [{ type: "audio", data, mime_type: "audio/wav" }],
     generation_config: { transcription_config: config }
   };
@@ -86,6 +85,17 @@ async function viaInteractions(data, apiKey, model, language, vocabulary, signal
   }
 }
 
+// A quick answer wants no thinking - every second of it is a second before anything is pasted - so it gets the least
+// the model takes: a level, or for 2.5 a budget (0 = off). 3.5 Flash-Lite, 3.6 and newer take no temperature.
+// effort: a level the caller wants instead, where the model has it.
+function generationConfig({ thinking, temperature: takesTemperature }, temperature, effort) {
+  const config = {};
+  if (takesTemperature) config.temperature = temperature;
+  if (thinking?.levels) config.thinkingConfig = { thinkingLevel: thinking.levels.includes(effort) ? effort : thinking.levels[0] };
+  else if (thinking) config.thinkingConfig = { thinkingBudget: thinking.budget };
+  return config;
+}
+
 // The general-purpose models are chat models asked to transcribe, so the instruction is spelled out.
 async function viaGenerateContent(data, apiKey, model, language, vocabulary, signal) {
   let prompt = "Transcribe this audio recording accurately. " +
@@ -95,7 +105,7 @@ async function viaGenerateContent(data, apiKey, model, language, vocabulary, sig
 
   const body = {
     contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: "audio/wav", data } }] }],
-    generationConfig: { temperature: 0.0 }
+    generationConfig: generationConfig(modelInfo(PROVIDER, model), 0.0)
   };
   const root = await postJson(GENERATE_URL(model), jsonHeaders(apiKey), body, signal);
   // No candidates (blocked) or a safety-blocked candidate without content: nothing to type, not an error.
@@ -112,7 +122,8 @@ async function transcribe({ wavPath, model, language, vocabulary = [], apiKey, s
       throw tooLarge(t("voice.errors.tooLarge.gemini", { mb: formatNumber(Math.floor(audio.length / 1_000_000)) }));
     }
     const data = audio.toString("base64");
-    return isTranscribeModel(model)
+    // The dedicated speech-to-text model lives behind the Interactions API, not generateContent.
+    return modelInfo(PROVIDER, model).api === "interactions"
       ? await viaInteractions(data, apiKey, model, language, vocabulary, signal)
       : await viaGenerateContent(data, apiKey, model, language, vocabulary, signal);
   } catch (error) {
@@ -120,20 +131,16 @@ async function transcribe({ wavPath, model, language, vocabulary = [], apiKey, s
   }
 }
 
-// Flash models think unless told not to: Gemini 3 takes a level, 2.5 a budget (0 = off). A rewrite needs no thinking,
-// and every second of it is a second before anything is pasted. Pro models cannot turn it off and are left alone.
-const thinkingOff = model => (!/flash/i.test(model) ? undefined : /^gemini-2\./.test(model) ? { thinkingBudget: 0 } : { thinkingLevel: "minimal" });
-
 // One answer from a text model: `system` holds the instructions, `text` the material; with a `schema` (JSON Schema)
 // the answer is JSON that follows it. Empty when the model gave no text (blocked, or cut off before any); the caller
 // decides what that means.
-async function generateText({ model, system, text, temperature = 0.2, schema, apiKey, signal }) {
-  const generationConfig = { temperature, thinkingConfig: thinkingOff(model) };
-  if (schema) Object.assign(generationConfig, { responseMimeType: "application/json", responseJsonSchema: schema });
+async function generateText({ model, system, text, temperature = 0.2, effort, schema, apiKey, signal }) {
+  const config = generationConfig(modelInfo(PROVIDER, model), temperature, effort);
+  if (schema) Object.assign(config, { responseMimeType: "application/json", responseJsonSchema: schema });
   const body = {
     systemInstruction: { parts: [{ text: system }] },
     contents: [{ role: "user", parts: [{ text }] }],
-    generationConfig
+    generationConfig: config
   };
   try {
     const root = await postJson(GENERATE_URL(model), jsonHeaders(apiKey), body, signal);
@@ -217,4 +224,8 @@ async function* speak({ text, model, voice, apiKey, signal, timeoutMs }) {
   }
 }
 
-module.exports = { transcribe, generateText, speak, isTranscribeModel, LANGUAGE_NAMES, MAX_INLINE_BYTES, SPEECH_SAMPLE_RATE };
+module.exports = {
+  transcribe, generateText, speak, LANGUAGE_NAMES, MAX_INLINE_BYTES, SPEECH_SAMPLE_RATE,
+  // For the meetings' requests (../../meetings/providers/gemini.js).
+  LANGUAGE_TAGS, GENERATE_URL, INTERACTIONS_URL, jsonHeaders, interactionHeaders, generationConfig
+};

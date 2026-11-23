@@ -160,7 +160,7 @@ The profile has its own settings, registry and single-instance lock. Source runs
 4. **Start a session.** Select the project and choose Claude, Codex or OpenCode. It opens in a terminal tab by default.
 5. **Try a second pane.** Open a shell or another agent beside the current terminal, then resize the divider.
 6. **Find earlier work.** Press <kbd>Ctrl</kbd> + <kbd>K</kbd>, type a project name or phrase from a conversation, and inspect the preview.
-7. **Add voice when you want it.** Configure your provider key and microphone, then press <kbd>Ctrl</kbd> + <kbd>Space</kbd> to dictate.
+7. **Add voice when you want it.** Add a provider key in **Settings → Models**, choose your microphone, then press <kbd>Ctrl</kbd> + <kbd>Space</kbd> to dictate.
 
 > [!TIP]
 > Press <kbd>F1</kbd> in the manager to see its shortcuts. The edge menu has its own keyboard-help panel showing the currently registered global shortcuts.
@@ -247,7 +247,7 @@ Hover-opened menus retract when you leave. The handle hides while a fullscreen a
 
 ### Voice tools
 
-Voice tools work across applications through global shortcuts, a recording overlay, provider transcription and delivery back to the target window. Configure **OpenAI** or **Gemini** with your own API key, choose a microphone and set your language and recording preferences.
+Voice tools work across applications through global shortcuts, a recording overlay, provider transcription and delivery back to the target window. Add your own **OpenAI** or **Gemini** API key in **Settings → Models**, where every task - dictation, voice commands, rewriting, editing, questions, read aloud, meeting transcription and meeting summary - also gets its own provider and model (any model id can be typed in). Retiring models are replaced by their successors and you are told once. Choose a microphone and set your language and recording preferences under Dictation.
 
 #### Dictate into the active application
 
@@ -263,7 +263,7 @@ AgentDeck tries to deliver the result to the application that was in front when 
 | **Clean** | Removes fillers, repetitions and false starts while preserving meaning | Messages, notes and prose |
 | **Prompt** | Turns free speech into a clearer coding-agent prompt | Describing a task aloud |
 
-Clean and Prompt make an additional text-model request using your configured provider. Prompt output can follow the spoken language or use English. If rewriting fails, dictation falls back to the recognized text; History retains original and rewritten versions where applicable.
+Clean and Prompt make an additional text-model request with the provider and model chosen for rewriting (by default the dictation's provider). Prompt output can follow the spoken language or use English. If rewriting fails, dictation falls back to the recognized text; History retains original and rewritten versions where applicable.
 
 #### Teach it your vocabulary
 
@@ -279,25 +279,36 @@ Select text in an application and use <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Sp
 >
 > “Make this shorter and keep the technical details.”
 
-AgentDeck sends the selected text and your instruction to the configured text provider and replaces the selection with the result. If processing fails, the delivery workflow restores the original selection text.
+AgentDeck sends the selected text and your instruction to the provider and model chosen for editing and replaces the selection with the result. If processing fails, the delivery workflow restores the original selection text.
 
 #### Ask a quick question
 
 Use <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>/</kbd> to ask a short question by voice. The answer appears in a small popup and is copied to the clipboard, making short commands or snippets convenient to paste.
 
-This uses the configured provider's text model. It is a quick-answer workflow without a browsing tool.
+This uses the provider and model chosen for voice questions. It is a quick-answer workflow without a browsing tool.
 
 #### Read selected text aloud
 
 Select text and press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd>. Gemini generates the speech; the playback panel offers pause, stop and speed controls. Speed adjustment preserves voice pitch, and the selection-copy workflow restores the previous clipboard contents.
 
-Press the shortcut again to stop playback. Configure the read-aloud model and voice separately from dictation.
+Press the shortcut again to stop playback. The read-aloud model is chosen in **Settings → Models**, the voice and speed under **Read aloud**.
 
 #### History and recovery
 
 Failed recordings remain available for retry. The overlay shows the error, the tray marks pending failures, and you can retry one recording or retry/discard the failed queue from the tray.
 
 History keeps recordings and results, including original recognition when rewriting changed the text. Audio and text have separate retention limits; see [Data and storage](#data-and-storage).
+
+### Meetings
+
+On Windows, **Meetings** in the top bar records the microphone and the computer's sound for the active local project; a key (<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F9</kbd> by default, while recording) saves screenshots of the monitors you chose. After the recording, **Transcribe** shows the provider, the model, the spoken language (detected unless you choose one) and an estimated cost, and only when you confirm sends the audio. The result is a transcript with times - "Me" for the microphone, "Others" for the computer's sound - and a short summary that points to transcript lines and screenshots. Screenshots are never sent to a provider.
+
+The meetings stay in the project, in `.claude/meetings`; each folder AgentDeck writes there ignores itself, and recording does not start if git would still see it. An `agentdeck-meetings` skill in `.claude/skills` and `.agents/skills` lets Claude Code, Codex and OpenCode find the meetings by themselves. Nothing is deleted automatically; deleting moves to the Recycle Bin.
+
+> [!WARNING]
+> `git clean -x` or `-X` (for example `git clean -fdx`) deletes every meeting of the project for good.
+
+On Windows 11 AgentDeck's own playback stays out of the recording; on Windows 10 the default output is recorded, AgentDeck's sound included. AgentDeck does not ask the other participants for consent or tell them they are recorded: that is yours to decide. File layout, providers, recovery and what is not verified yet: [docs/MEETINGS.md](docs/MEETINGS.md).
 
 ### The command centre
 
@@ -522,6 +533,7 @@ The mesh design notes and implementation history are in [`docs/MESH.md`](docs/ME
 | <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd> | Read selected text aloud; press again to stop |
 | <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Space</kbd> | Edit selected text with a spoken instruction |
 | <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>/</kbd> | Ask a quick question by voice |
+| <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F9</kbd> | Screenshot of the chosen monitors, only while a meeting is recorded |
 | <kbd>Esc</kbd> | Cancel an active recording |
 
 The launcher tries the first available shortcut from `Alt+Backtick`, `Ctrl+Alt+Space` and `Ctrl+Alt+Shift+Space`. Check the tray/menu for the actual registered combination; a fallback can conflict with another global voice shortcut. Keyboard help reports the current bindings.
@@ -558,9 +570,11 @@ Agent-launch shortcuts require the corresponding CLI. In the search palette, arr
 | **General** | English/Bulgarian, colour theme, window scale, notifications, the taskbar strip, startup, updates and disk space |
 | **Terminal** | Built-in tabs or Windows Terminal, external window behavior, font size and automatic compaction |
 | **Source control** | The editor the Git screens open a changed file in: VS Code or IntelliJ IDEA |
-| **Dictation** | Provider, model, language, microphone, recording length, delivery, text mode and push-to-talk |
+| **Models** | API keys, and the provider and model of each voice and meeting task |
+| **Dictation** | Language, microphone, recording length, delivery, text mode and push-to-talk |
 | **Dictionary** | Recognition terms, replacement rules and project vocabulary |
-| **Read aloud** | Gemini model, voice and playback speed |
+| **Read aloud** | Voice and playback speed |
+| **Meetings** | The screenshot key (Windows) |
 | **Commands** | Enable/disable spoken commands and choose their trigger |
 | **Network** | System/PAC/manual/direct proxy modes, credentials and connection testing |
 | **Computers** | Node identity, discovery, pairing, peers and host setup |
@@ -609,10 +623,11 @@ Some features intentionally communicate beyond the local app:
 | --- | --- |
 | Coding sessions | The selected CLI communicates using its own configuration and account |
 | Dictation | Audio and relevant recognition context go to the selected provider |
-| Clean / Prompt | Recognized text and rewrite context go to the text provider |
-| Voice editing | Selected text and spoken instruction go to the provider |
-| Voice questions | The question and relevant vocabulary go to the provider |
+| Clean / Prompt | Recognized text and rewrite context go to the provider chosen for rewriting |
+| Voice editing | Selected text and spoken instruction go to the provider chosen for editing |
+| Voice questions | The question and relevant vocabulary go to the provider chosen for questions |
 | Read aloud | Selected text goes to Gemini for speech generation |
+| Meetings | After you confirm, the audio in parts goes to the transcription provider, the title and transcript text to the summary provider; screenshots are not sent. An agent that reads a meeting sends what it opens to its own provider |
 | Command centre | Requests and tool results enter its Claude Code conversation |
 | Generated day summaries | An activity digest is passed to Claude Code |
 | Updates | The app contacts the release service |
@@ -643,6 +658,7 @@ The active profile contains the encryption context associated with its `Local St
 | `search.db` | Local transcript full-text index |
 | `usage-cache.json`, `usage-cache.journal` | Cached usage calculations: the base and the changes since it was written |
 | `voice/records/` | Audio files and per-record JSON metadata |
+| `meetings-work/` | A meeting's raw recording until it is compressed, and the providers' answers while it is processed. The meetings themselves are in each project's `.claude/meetings` |
 | `node/` | Mesh identity and pairing state |
 | `orchestrator/` | Command-centre instructions, MCP configuration and state |
 
@@ -786,7 +802,8 @@ flowchart TB
 | `src/workspace.js`, `src/workspace-ui.js` | Layout state and terminal pane rendering |
 | `src/host/` | Reusable core: discovery, launches, terminals, search, git, usage and setup |
 | `src/mesh/` | Identity, pairing, peer links, discovery, protocol and served host methods |
-| `src/voice/` | Recording, transcription, rewrite, delivery, playback and durable history |
+| `src/voice/` | Recording, transcription, rewrite, delivery, playback, durable history and the model catalog |
+| `src/meetings/` | Meeting recording, compression, transcription and summary, the project's meetings folder and the agents' skill |
 | `src/orchestrator.js` | Claude-based coordination and local MCP tools |
 | `src/day.js`, `src/day-ui.js` | Activity estimation and work-log summaries |
 | `src/prefs.js`, `src/i18n.js`, `src/theme.css` | Preferences, translations and visual tokens |
@@ -821,14 +838,14 @@ Discovery relies on local product formats that can change independently. Include
 
 Open the tray menu or shortcut-help panel to see the bindings AgentDeck actually registered. Other applications may own a shortcut. Stop the conflicting app or adjust the supported voice hotkey settings.
 
-Dictation and read-aloud shortcuts are configurable in voice settings. Edit-selection and question bindings are stored in `settings.json` under `voice.hotkeys.editSelection` and `voice.hotkeys.ask`.
+Dictation and read-aloud shortcuts are configurable in voice settings, the meeting screenshot key under **Settings → Meetings**. Edit-selection and question bindings are stored in `settings.json` under `voice.hotkeys.editSelection` and `voice.hotkeys.ask`.
 
 </details>
 
 <details>
 <summary><strong>Dictation failed, or the text did not paste</strong></summary>
 
-Check microphone selection, provider key, model and network/proxy settings. Use Retry for a failed recording rather than recording again.
+Check microphone selection, the provider key and model in **Settings → Models**, and network/proxy settings. Use Retry for a failed recording rather than recording again.
 
 If AgentDeck cannot restore the target window, the result stays in the clipboard: focus your application and paste manually. Starting a recording from the tray also uses clipboard delivery.
 
@@ -863,6 +880,7 @@ On Windows, built-in terminals are designed to outlive the desktop. Reopen Agent
 - Discovery depends on supported CLI storage formats and available metadata.
 - Full-text indexing supports local Claude and Codex transcripts. Remote metadata search does not imply remote transcript full-text search.
 - The command centre currently coordinates local projects and depends on Claude Code.
+- Meetings are recorded on Windows only and for local projects only; there is no live transcript and no import of an existing recording.
 - Daily activity estimates derive from Claude transcripts and are not precise time tracking.
 - Persistence differs by backend. Windows DockPty processes can survive a desktop restart; Linux `node-pty` sessions belong to the host process and end when it stops.
 - Resuming conversation history cannot recover a process that no longer exists or preserve a live process across a machine reboot.

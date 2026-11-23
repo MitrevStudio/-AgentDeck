@@ -11,22 +11,24 @@ const atomic = require("../shared/atomic-file");
 const { isObj } = require("../shared/util");
 const dictation = require("./dictation-options");
 const commandOptions = require("./command-options");
-
-const PROVIDERS = ["OpenAI", "Gemini"];
+const { PROVIDERS, TASKS, REVISION, LAST_DAY, providerName, currentModel } = require("./catalog");
+const { DEFAULT_SHORTCUT } = require("../meetings/capture/shortcut");
 
 const defaults = Object.freeze({
-  provider: "OpenAI",
-  models: Object.freeze({ OpenAI: "", Gemini: "" }), // empty = the provider's default model
+  // Each task's provider ("" = the dictation's) and its model on each provider, empty = the default (catalog.js).
+  tasks: Object.freeze(Object.fromEntries(Object.entries(TASKS).map(([task, spec]) => [task, Object.freeze({
+    provider: spec.provider, models: Object.freeze(Object.fromEntries(Object.keys(spec.models).map(p => [p, ""])))
+  })]))),
+  modelChanges: Object.freeze([]), // [{from, to}] replaced by migrate(), until the user has been told
   language: "auto",
   // Browser deviceId of the chosen microphone; the name is kept so a device whose id changed can be matched again.
   microphoneName: "",
   microphoneDeviceId: "",
   useClipboardPaste: true, // paste with Ctrl+V; false = type the text as Unicode keystrokes
   maxRecordingMinutes: 10, // safety net against a recording left running by accident
-  readAloudModel: "", // empty = default
   readAloudVoice: "",
   readAloudSpeed: 1.0, // remembered from the last reading
-  hotkeys: Object.freeze({ dictate: "Control+Space", readAloud: "Control+Shift+Space", editSelection: "Control+Alt+Space", ask: "Control+Shift+/" }),
+  hotkeys: Object.freeze({ dictate: "Control+Space", readAloud: "Control+Shift+Space", editSelection: "Control+Alt+Space", ask: "Control+Shift+/", meetingScreenshot: DEFAULT_SHORTCUT }),
   importedFromVoiceTray: null,
   // dictationMode, promptLanguage, pushToTalk and the dictionary (dictation-options.js).
   ...dictation.DEFAULTS,
@@ -74,14 +76,65 @@ function readRoot() {
 // write back a stale copy of the other's keys).
 const writeRoot = patch => atomic.update(file(), text => JSON.stringify({ ...parseRoot(text), ...patch }, null, 2));
 
+function normalizeTasks(value) {
+  const out = {};
+  for (const [task, spec] of Object.entries(TASKS)) {
+    const own = isObj(value) && isObj(value[task]) ? value[task] : {};
+    out[task] = {
+      provider: Object.keys(spec.models).includes(own.provider) ? own.provider : spec.provider,
+      models: Object.fromEntries(Object.keys(spec.models).map(p => [p, str(own.models?.[p], "").trim()]))
+    };
+  }
+  return out;
+}
+
+// What the settings had before every task had a model of its own, and the models those versions used when none was
+// saved. An older version may share the file (a run from source uses the installed app's profile), so these stay in it
+// exactly as they are: read while there are no tasks, never after, never written.
+const OLD_KEYS = ["provider", "models", "readAloudModel"];
+const OLD_DEFAULTS = {
+  dictation: { OpenAI: "whisper-1", Gemini: "gemini-2.5-flash" },
+  rewrite: { OpenAI: "gpt-4.1-mini", Gemini: "gemini-3.1-flash-lite" }
+};
+
+// Without tasks the old keys become them; settings from before the catalog's revision move off the models that stop or
+// are re-routed. Only then: such a model typed in afterwards stays until its day. The user is told (modelChanges) about
+// what they use: a saved model of the provider in use or of one with a key, a default only of one with a key.
+function migrate(v) {
+  const tasks = normalizeTasks(v.tasks);
+  const changes = (Array.isArray(v.modelChanges) ? v.modelChanges : [])
+    .filter(c => typeof c?.from === "string" && typeof c?.to === "string").map(({ from, to }) => ({ from, to }));
+  const tell = (from, to) => { if (!changes.some(c => c.from === from && c.to === to)) changes.push({ from, to }); };
+  const hasKey = p => isObj(v.apiKeysEnc) && Boolean(v.apiKeysEnc[p]);
+  const old = !isObj(v.tasks) && OLD_KEYS.some(k => Object.hasOwn(v, k));
+  if (old) {
+    const { dictation, readAloud } = tasks;
+    dictation.provider = providerName(v.provider) || dictation.provider;
+    for (const p of PROVIDERS) dictation.models[p] = str(v.models?.[p], "").trim() || dictation.models[p];
+    readAloud.models.Gemini = str(v.readAloudModel, "").trim() || readAloud.models.Gemini;
+    const p = dictation.provider;
+    for (const [task, models] of Object.entries(OLD_DEFAULTS)) {
+      if (hasKey(p) && !tasks[task].models[p]) tell(models[p], TASKS[task].models[p]);
+    }
+  }
+  const outdated = old || !(v.modelsVersion >= REVISION);
+  for (const [task, choice] of Object.entries(tasks)) {
+    for (const [p, saved] of Object.entries(choice.models)) {
+      const model = outdated ? currentModel(p, saved, LAST_DAY) : saved;
+      if (model !== saved && (hasKey(p) || p === (choice.provider || tasks.dictation.provider))) tell(saved, model);
+      // The default is not stored, so that it follows the catalog.
+      choice.models[p] = model === TASKS[task].models[p] ? "" : model;
+    }
+  }
+  return { tasks, modelChanges: changes, modelsVersion: Math.max(REVISION, Number(v.modelsVersion) || 0) };
+}
+
 function normalize(v) {
   v = isObj(v) ? v : {};
-  const out = { ...clone(defaults), ...v };
-  out.provider = PROVIDERS.includes(v.provider) ? v.provider : defaults.provider;
-  out.models = { ...defaults.models, ...(isObj(v.models) ? v.models : {}) };
+  const out = { ...clone(defaults), ...v, ...migrate(v) };
   out.hotkeys = { ...defaults.hotkeys, ...(isObj(v.hotkeys) ? v.hotkeys : {}) };
   out.language = str(v.language, "").trim() || defaults.language;
-  for (const k of ["microphoneName", "microphoneDeviceId", "readAloudModel", "readAloudVoice"]) out[k] = str(v[k], defaults[k]);
+  for (const k of ["microphoneName", "microphoneDeviceId", "readAloudVoice"]) out[k] = str(v[k], defaults[k]);
   out.useClipboardPaste = typeof v.useClipboardPaste === "boolean" ? v.useClipboardPaste : defaults.useClipboardPaste;
   const minutes = Math.round(Number(v.maxRecordingMinutes));
   out.maxRecordingMinutes = Number.isFinite(minutes) ? Math.min(60, Math.max(1, minutes)) : defaults.maxRecordingMinutes;
@@ -108,22 +161,41 @@ function persist(next) {
   return writeRoot({ voice: next });
 }
 
-// A copy without the ciphertext: callers (and the settings page) never need it.
-function load() {
-  const { apiKeysEnc, ...rest } = clone(stored());
-  return rest;
+// What is the file's alone: the ciphertext and the old keys. Neither handed out by load() nor taken by save().
+function withoutPrivate(value) {
+  const out = { ...value };
+  for (const k of ["apiKeysEnc", ...OLD_KEYS]) delete out[k];
+  return out;
 }
+
+// A copy without those: callers (and the settings page) never need them.
+const load = () => withoutPrivate(clone(stored()));
 
 // Whether settings.json already has a voice section (the VoiceTray import must not overwrite one).
 const hasVoiceSection = async () => isObj(parseRoot(await atomic.readText(file())).voice);
 
-// Shallow patch; `models` and `hotkeys` merge one level deep so a partial object does not wipe the other entries.
+// A task in a patch changes only what it names: its provider, or the models of some providers. A provider the task
+// cannot have is refused, not turned into the default (normalizeTasks does that only to what the file holds).
+function mergeTasks(current, patch) {
+  const out = { ...current };
+  for (const [task, p] of Object.entries(isObj(patch) ? patch : {})) {
+    if (!isObj(p) || !Object.hasOwn(TASKS, task)) continue;
+    const spec = TASKS[task];
+    if (Object.hasOwn(p, "provider") && p.provider !== spec.provider && !Object.keys(spec.models).includes(p.provider)) {
+      throw new Error(`Unknown provider for ${task}: ${p.provider}`);
+    }
+    out[task] = { ...out[task], ...p, models: { ...out[task].models, ...(isObj(p.models) ? p.models : {}) } };
+  }
+  return out;
+}
+
+// Shallow patch; `tasks` and `hotkeys` merge deeper so a partial object does not wipe the other entries.
 async function save(patch = {}) {
   const cur = stored();
-  const { apiKeysEnc, ...p } = isObj(patch) ? patch : {};
+  const p = withoutPrivate(isObj(patch) ? patch : {});
   await persist(normalize({
     ...cur, ...p,
-    models: { ...cur.models, ...(isObj(p.models) ? p.models : {}) },
+    tasks: mergeTasks(cur.tasks, p.tasks),
     hotkeys: { ...cur.hotkeys, ...(isObj(p.hotkeys) ? p.hotkeys : {}) },
     apiKeysEnc: cur.apiKeysEnc
   }));

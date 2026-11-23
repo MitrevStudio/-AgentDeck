@@ -2,7 +2,7 @@
 <html lang="bg">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: agentdeck-meeting:; media-src agentdeck-meeting:">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AgentDeck</title>
 <link rel="stylesheet" href="theme.css">
@@ -13,6 +13,7 @@
 <link rel="stylesheet" href="git.css">
 <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css">
 <link rel="stylesheet" href="terminals.css">
+<link rel="stylesheet" href="meetings/ui/meetings.css">
 <script src="i18n.js"></script>
 </head>
 <body>
@@ -74,7 +75,14 @@
   <div class="splitter" id="splitter" role="separator" aria-orientation="vertical" tabindex="0" data-i18n-title="manager.splitter"></div>
   <!-- The shown project's tabs, and the shown tab split into panes (workspace-ui.js). -->
   <section class="work">
-    <div class="tabbar" id="tabbar" role="tablist"></div>
+    <div class="topbar">
+      <div class="tabbar" id="tabbar" role="tablist"></div>
+      <!-- Beside the tabs, which scroll: the recording and the active project's meetings (meetings/ui). -->
+      <div class="top-tools">
+        <div id="meetingRec" class="rec" role="group" hidden></div>
+        <button id="meetingsBtn" class="meetings-btn" type="button" aria-haspopup="menu" hidden><span data-icon="meeting"></span><span class="meetings-word" data-i18n="meetings.button"></span><span class="count" hidden></span></button>
+      </div>
+    </div>
     <div class="panes" id="panes" hidden></div>
     <div class="space-empty" id="spaceEmpty"></div>
   </section>
@@ -124,6 +132,14 @@
 <script src="device-view.js"></script>
 <script src="clone-ui.js"></script>
 <script src="renderer.js"></script>
+<script src="meetings/ui/shared.js"></script>
+<script src="meetings/ui/markdown.js"></script>
+<script src="meetings/ui/player.js"></script>
+<script src="meetings/ui/process-dialog.js"></script>
+<script src="meetings/ui/start-dialog.js"></script>
+<script src="meetings/ui/indicator.js"></script>
+<script src="meetings/ui/view.js"></script>
+<script src="meetings/ui/topbar.js"></script>
 <script src="git-workflow.js"></script>
 <script src="git-panel.js"></script>
 <script src="git-diff-ui.js"></script>

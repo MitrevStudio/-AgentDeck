@@ -14,7 +14,7 @@ const crypto = require("node:crypto");
 const gemini = require("./providers/gemini");
 const { VoiceError, classify, configuration } = require("./errors");
 const { pcmToWav } = require("./wav");
-const { DEFAULT_SPEECH_MODEL, DEFAULT_VOICE } = require("./catalog");
+const { DEFAULT_VOICE, resolveTask } = require("./catalog");
 const { t } = require("../i18n");
 
 const PROVIDER = "Gemini";
@@ -135,7 +135,7 @@ async function* streamSpeech({ text, model, voice, apiKey, signal, chunkChars, s
 
 const titleOf = text => (text.length <= 60 ? text : `${text.slice(0, 60).trimEnd()}…`);
 
-// overlay: createOverlay() result (its `player` plays the audio). getSettings() -> voice settings (readAloudModel,
+// overlay: createOverlay() result (its `player` plays the audio). getSettings() -> voice settings (tasks,
 // readAloudVoice, readAloudSpeed). getApiKey(provider) -> key (may be async). saveSettings(patch), optional, remembers
 // the speed. `speak` and `chunkChars` are there for tests.
 function createReadAloud({ overlay, getSettings = () => ({}), getApiKey, saveSettings, speak = gemini.speak, chunkChars = CHUNK_CHARACTERS } = {}) {
@@ -227,7 +227,7 @@ function createReadAloud({ overlay, getSettings = () => ({}), getApiKey, saveSet
     speed = clampSpeed(settings.readAloudSpeed ?? speed);
     const s = {
       id: crypto.randomUUID().replace(/-/g, ""), createdAt: new Date(), text, truncated, title: titleOf(text),
-      model: String(settings.readAloudModel || "").trim() || DEFAULT_SPEECH_MODEL,
+      model: resolveTask(settings, "readAloud").model,
       voice: String(settings.readAloudVoice || "").trim() || DEFAULT_VOICE,
       ac: new AbortController(), chunks: [], bytes: 0, playbackStarted: false, synthesisCompleted: false, saved: false
     };

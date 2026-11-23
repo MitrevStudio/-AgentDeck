@@ -1,5 +1,5 @@
 // Voice edit: a spoken instruction ("make it shorter", "преведи го на английски") applied to the text the user had
-// selected, by the same fast text model the dictation rewrite uses (rewrite.js generate()). The answer replaces the
+// selected, by its task's text model (catalog.js; through rewrite.js generate()). The answer replaces the
 // selection; the queue pastes the selection back unchanged when this fails, so the instruction is never typed over it.
 const { generate } = require("./rewrite");
 const { VoiceError } = require("./errors");
@@ -33,7 +33,7 @@ async function editText(source, instruction, { dictionary = [], language = "auto
   try { languageName = require("./providers/gemini").LANGUAGE_NAMES[language] || ""; } catch {}
   if (languageName) lines.push(`The user usually speaks ${languageName}, often with English technical terms mixed in.`);
   const text = `${tag("text", source)}\n${tag("instruction", instruction)}`;
-  const answer = await generate({ system: lines.join("\n"), text, provider, model, temperature: 0.2, signal, getApiKey,
+  const answer = await generate({ system: lines.join("\n"), text, task: "edit", provider, model, temperature: 0.2, signal, getApiKey,
     timeoutMs: Math.min(20_000 + String(source).length * 25, 120_000) });
   const out = clean(answer);
   if (!out) throw new VoiceError("MalformedResponse", t("voice.errors.rewrite.empty.short"), t("voice.errors.rewrite.empty.long", { provider: provider || "" }));
