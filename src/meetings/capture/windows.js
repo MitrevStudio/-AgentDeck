@@ -1,6 +1,7 @@
 // The windows to choose from and their screenshots, through desktopCapturer: a window is taken whole also while
 // another covers it, and not at all while it is minimised. The pixels go to whoever asked and nowhere else.
 // Windows only; koffi loads on first use.
+const { HIDDEN } = require("../text");
 const { isBlank } = require("./displays");
 
 const THUMBNAIL = { width: 320, height: 200 };
@@ -56,7 +57,7 @@ function ownWindows() {
   return require("electron").BrowserWindow.getAllWindows().filter(w => !w.isDestroyed()).map(w => w.getMediaSourceId());
 }
 
-const titleOf = source => Array.from(String(source.name || "").replace(/[\p{Cc}‪-‮⁦-⁩]/gu, " ").trim()).slice(0, TITLE_MAX).join("");
+const titleOf = source => Array.from(String(source.name || "").replace(HIDDEN, " ").trim()).slice(0, TITLE_MAX).join("");
 
 // The rest of the options: for tests.
 function createWindows({ sourcesMs = SOURCES_MS, sizeOf = windowSize, ownerOf = sizeOf === windowSize ? windowOwner : () => 0, own = ownWindows, sources: read } = {}) {

@@ -2,7 +2,8 @@
 // trusted: it stays one line, shows what it holds and cannot become a link, an image, HTML or a heading.
 const { flat, pad } = require("../shared/util");
 
-// Control characters, bidi overrides and what is invisible but read by a model (zero width, Unicode tags).
+// Control characters and bidi overrides, in whatever comes from outside (speech, a model, a window's title, a
+// meeting.json), and what is invisible but read by a model (zero width, Unicode tags).
 const HIDDEN = /[\p{Cc}\u202A-\u202E\u2066-\u2069]/gu;
 const INVISIBLE = /[\u200B\u2060\uFEFF\u{E0000}-\u{E007F}]/gu;
 const clean = value => (typeof value === "string" ? flat(value.replace(INVISIBLE, "").replace(HIDDEN, " ")) : "");
@@ -29,4 +30,4 @@ function readClock(value) {
 const WORD = /[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}]|(?:(?![\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}])[\p{L}\p{N}\p{M}])+/gu;
 const words = text => String(text).normalize("NFKC").toLowerCase().match(WORD) || [];
 
-module.exports = { clean, clip, escapeText, unescapeText, escapeLine, clock, length, readClock, words };
+module.exports = { HIDDEN, clean, clip, escapeText, unescapeText, escapeLine, clock, length, readClock, words };

@@ -3,6 +3,7 @@
 // project, where anybody can have written it.
 const { isObj, flat, pad } = require("../shared/util");
 const { fail } = require("./errors");
+const { HIDDEN } = require("./text");
 
 const SCHEMA = 1;
 const STATES = ["recording", "recorded", "processing", "transcribed", "ready", "failed"];
@@ -17,7 +18,7 @@ const AUDIO = { mic: "audio/mic.webm", system: "audio/system.webm" };
 const DOCUMENTS = ["summary.md", "transcript.md"];
 
 const clip = (text, max) => Array.from(text).slice(0, max).join("");
-const line = (v, max) => (typeof v === "string" ? clip(flat(v.replace(/[\p{Cc}\u202A-\u202E\u2066-\u2069]/gu, " ")), max) : undefined);
+const line = (v, max) => (typeof v === "string" ? clip(flat(v.replace(HIDDEN, " ")), max) : undefined);
 const amount = v => Number.isFinite(v) && v >= 0;
 const orNull = check => v => (v === null ? null : check(v));
 
