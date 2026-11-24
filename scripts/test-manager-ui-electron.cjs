@@ -740,6 +740,33 @@ app.whenReady().then(async () => {
   assert.deepEqual((await dragTo('.wtab[data-tab=t1]', '#terms', [0.5, 0.5])).commands, [{ cmd: 'close-tab', tab: 't1' }]);
   // A project dragged in its list is not a pane: nothing is hidden.
   assert.equal(await evaluate("(() => { const dt = new DataTransfer(); const p = document.querySelector('#projects .proj[draggable]'); dragFire(p, 'dragstart', dt); dragFire($('agents'), 'dragover', dt); const over = $('sideOverview').classList.contains('drop-hide'); dragFire(p, 'dragend', dt); return over; })()"), false);
+  // A project dragged near the list's bottom or top edge (#28): the list scrolls by itself, on with the pointer at
+  // rest, and stops with the drag. The list is made shorter than its rows here.
+  await evaluate("(() => { const box = $('projects'); box.style.flex = 'none'; box.style.height = '70px'; box.scrollTop = 0; })(); 0"); await settle();
+  assert.ok(await evaluate("$('projects').scrollHeight > $('projects').clientHeight + 40"), 'the list is longer than its box');
+  await evaluate("(() => { window.heldDrag = new DataTransfer(); dragFire(document.querySelector('#projects .proj[draggable]'), 'dragstart', heldDrag); dragFire($('projects'), 'dragover', heldDrag, [0.5, 0.97]); })(); 0");
+  await settle(200);
+  const scrolledDown = await evaluate("$('projects').scrollTop");
+  assert.ok(scrolledDown > 20, 'down near the bottom edge');
+  await settle(100);
+  assert.ok(await evaluate("$('projects').scrollTop") > scrolledDown || await evaluate("$('projects').scrollTop + $('projects').clientHeight >= $('projects').scrollHeight - 1"), 'and on, with no further move of the pointer');
+  await evaluate("dragFire($('projects'), 'dragover', heldDrag, [0.5, 0.5]); 0"); await settle(50);
+  const rested = await evaluate("$('projects').scrollTop");
+  await settle(100);
+  assert.equal(await evaluate("$('projects').scrollTop"), rested, 'still in the middle');
+  await evaluate("dragFire($('projects'), 'dragover', heldDrag, [0.5, 0.03]); 0"); await settle(150);
+  const scrolledUp = await evaluate("$('projects').scrollTop");
+  assert.ok(scrolledUp < rested, 'up near the top edge');
+  await evaluate("dragFire($('projects'), 'dragover', heldDrag, [0.5, 0.97]); 0"); await settle(50);
+  await evaluate("dragFire(document.querySelector('#projects .proj[draggable]'), 'dragend', heldDrag); 0");
+  const ended = await evaluate("$('projects').scrollTop");
+  await settle(150);
+  assert.equal(await evaluate("$('projects').scrollTop"), ended, 'the drag ended: no more scrolling');
+  // Something else dragged over the list (a pane) does not scroll it.
+  await evaluate("(() => { $('projects').scrollTop = 0; window.heldDrag = new DataTransfer(); dragFire(document.querySelector('.pane[data-term=y1] .pane-info'), 'dragstart', heldDrag); dragFire($('projects'), 'dragover', heldDrag, [0.5, 0.97]); })(); 0");
+  await settle(150);
+  assert.equal(await evaluate("$('projects').scrollTop"), 0);
+  await evaluate("(() => { dragFire(document.querySelector('.pane[data-term=y1] .pane-info'), 'dragend', heldDrag); const box = $('projects'); box.style.flex = ''; box.style.height = ''; box.scrollTop = 0; })(); 0"); await settle();
   // Dragging a pane onto another pane still moves it, as before.
   assert.deepEqual((await dragTo('.pane[data-term=y1] .pane-info', '.pane[data-term=y2] .pane-body', SIDE_AT.down)).commands, [{ cmd: 'move-pane', term: 'y1', into: 't1', at: 'y2', side: 'down' }]);
 

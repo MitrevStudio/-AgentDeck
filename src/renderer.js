@@ -1277,7 +1277,11 @@ $("projects").addEventListener("dragstart", e => {
   e.dataTransfer.setData("text/plain", card.dataset.path || card.dataset.group);
   card.classList.add("dragging");
 });
+// While a project is dragged the list scrolls near its top and bottom edges (drag-scroll.js), so the project can be
+// taken to a place out of view.
+const projectsScroll = createDragScroll($("projects"));
 $("projects").addEventListener("dragover", e => {
+  if (drag) projectsScroll.at(e.clientY);
   const card = getDropCard(e);
   if (!card) return;
   e.preventDefault();
@@ -1286,7 +1290,11 @@ $("projects").addEventListener("dragover", e => {
   clearDropMarks(true);
   card.classList.add(cls);
 });
+$("projects").addEventListener("dragleave", e => {
+  if (!$("projects").contains(e.relatedTarget)) projectsScroll.stop();
+});
 $("projects").addEventListener("drop", e => {
+  projectsScroll.stop();
   const card = getDropCard(e);
   if (!card) return;
   e.preventDefault();
@@ -1296,6 +1304,7 @@ $("projects").addEventListener("drop", e => {
   applyDrop(plan).catch(err => toast(err.message, true));
 });
 $("projects").addEventListener("dragend", () => {
+  projectsScroll.stop();
   drag = null;
   clearDropMarks();
 });
