@@ -34,6 +34,8 @@ const { localSnapshot } = require("./projects");
 const { SESSION_ID, isAgent } = require("../host/launch");
 const { TEXT_MAX } = require("../host/send-text");
 const { createPortStreams } = require("../host/port-streams");
+const { resolveFolder } = require("../host/project-folder");
+const { getProject, addProject } = require("../host/registry");
 // The most of one message a peer may ask sessions.preview for. A preview is six messages: at this bound it is at
 // most about 100 000 characters (a few hundred kilobytes for text that is not Latin) - still quick over a mobile
 // link, which carries it through the relay in 32 KB pieces - and all but the longest answers fit whole.
@@ -119,7 +121,21 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
   const METHODS = {
     // terminals: 2 - this host shares its terminals as docs/SHARED-SESSIONS.md 4 says (viewers, driver, resize).
     // ports: 1 - it forwards its loopback ports (ports.*, docs/PORT-FORWARDING.md).
-    "host.info": () => ({ ...(links?.self() || {}), code: undefined, platform: process.platform, home: host.home, agents: sessions.get()?.agents || [], terminals: 2, ports: 1, ...info() }),
+    // projects: 1 - it takes a folder of its own as a project from a peer (projects.add).
+    "host.info": () => ({ ...(links?.self() || {}), code: undefined, platform: process.platform, home: host.home, agents: sessions.get()?.agents || [], terminals: 2, ports: 1, projects: 1, ...info() }),
+    // {path}: a folder of this computer listed as a project here, so a peer has somewhere to work on a computer that
+    // lists nothing yet. The path is the peer's own typing (it sees none of the folders here): project-folder.js takes
+    // it only when it is a whole path to a folder that exists (folderNotAbsolute, folderMissing, notFolder). Nothing
+    // is made or changed on the disk. -> { name, path, added } - added: false when it was a project already. The
+    // peers hear of it with the next "data", as of any change of the list.
+    "projects.add": p => {
+      const dir = resolveFolder(p?.path, { home: host.home });
+      const reg = sessions.registry.read();
+      const added = !getProject(reg, dir);
+      const item = addProject(reg, dir);
+      sessions.registry.save(reg);
+      return { name: String(item.name || ""), path: item.path, added };
+    },
     "sessions.list": async () => localSnapshot(await sessions.data()),
     // Each with `term`: the terminal here the session runs in, or "". With a stand-in for each agent terminal that
     // has no live session (host/index.js liveAgents), so a peer lists it under its agents too.

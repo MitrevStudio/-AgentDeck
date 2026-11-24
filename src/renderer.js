@@ -112,6 +112,9 @@ function renderProjects(v) {
   const counts = new Map(v.projects.map(x => [x.p, x.count]));
   const listed = v.projects.map(x => x.p);
   html += byDevice() ? buildSections(listed, devices, filter).map(s => buildDeviceHtml(s, v, counts)).join("") : buildUnitsHtml(listed, v, counts);
+  // The one list names a computer only on its projects, so a connected one that has none yet (a new machine) gets
+  // its heading here, with its menu: where a project is added on it or a terminal opened (device-view.js).
+  if (!byDevice() && !v.toks.length) html += listIdleDevices(devices).map(buildDeviceHead).join("");
   if (!total && ui.loaded) html += `<div class="empty small">${esc(t("manager.projects.empty"))}</div>`;
   patchChildren($("projects"), html);
 }
@@ -288,9 +291,43 @@ function buildDeviceHtml({ device: d, projects }, v, counts) {
         ${state ? `<span class="dev-state">${esc(state)}</span>` : ""}
         <span class="count">${projects.length}</span>
       </div>
+      ${buildDeviceTools(d)}
     </div>`;
   if (shut) return head;
   return head + (projects.length ? buildUnitsHtml(projects, v, counts) : `<div class="dev-empty">${esc(t("manager.devices.noProjects"))}</div>`);
+}
+// A computer's heading alone, in the one list (renderProjects): for one with no project yet. Nothing folds under it,
+// so a click or Enter on it opens its menu (data-device-bare).
+function buildDeviceHead(d) {
+  return `
+    <div class="proj dev bare ${d.status}" data-device="${esc(d.id)}" data-device-bare tabindex="0" aria-haspopup="menu">
+      <div class="proj-row" title="${esc(`${deviceTip(d)}\n${t("manager.devices.more", { device: deviceName(d) })}`)}">
+        <span class="dev-icon">${icon(deviceIcon(d))}</span><span class="proj-name">${esc(deviceName(d))}</span>
+        <span class="dev-state">${esc(t("manager.devices.noProjects"))}</span>
+      </div>
+      ${buildDeviceTools(d)}
+    </div>`;
+}
+// A heading's tools, as a project's row has them: a terminal on the computer, and its menu (also on a right-click, the
+// Menu key and Shift+F10). Only for a computer with such a menu (device-view.js hasDeviceMenu).
+function buildDeviceTools(d) {
+  if (!hasDeviceMenu(d)) return "";
+  const name = deviceName(d);
+  return `<span class="proj-tools">
+        <button class="icon-btn" data-action="device-terminal" ${canWorkOn(d) ? "" : "disabled"} title="${esc(t("manager.devices.terminalTitle", { device: name }))}">${icon("terminal")}</button>
+        <button class="icon-btn" data-action="device-menu" title="${esc(t("manager.devices.more", { device: name }))}" aria-haspopup="menu">${icon("more")}</button>
+      </span>`;
+}
+// A computer's own menu: a folder there added as a project, a terminal in its home folder (nodes-ui.js). Both wait
+// for the computer to be connected. id: the device's (a node's id).
+function openDeviceMenu(btn, id) {
+  const d = listDevices(data.projects, nodes).find(x => x.id === id);
+  if (!hasDeviceMenu(d)) return;
+  const off = !canWorkOn(d);
+  openMenu(btn, "", [
+    { label: t("manager.devices.addProject"), icon: "plus", disabled: off, run: async () => openNodeProjectDialog(id) },
+    { label: t("action.terminalHere"), icon: "terminal", disabled: off, run: () => openNodeTerminal(id) }
+  ]);
 }
 
 function renderOrderToggle() {
@@ -877,6 +914,8 @@ async function runAction(action, btn) {
     case "ungroup": return applyRegistry(await window.manager.deleteGroup(groupId));
     case "fold": return toggleCollapsed(groupId);
     case "fold-device": return toggleDeviceFold(btn.closest("[data-device]").dataset.device);
+    case "device-terminal": return openNodeTerminal(btn.closest("[data-device]").dataset.device);
+    case "device-menu": return openDeviceMenu(btn, btn.closest("[data-device]").dataset.device);
     case "remove":
       if (!(await confirmDialog({ title: t("action.remove"), body: t("manager.confirm.remove", { path: folder }), danger: true }))) return;
       return applyRegistry(await window.manager.removeProject(path));
@@ -906,10 +945,22 @@ $("add").addEventListener("click", async () => {
 $("projects").addEventListener("click", async e => {
   if (e.target.classList.contains("rename") || await onAction(e)) return;
   const card = e.target.closest(".proj");
-  if (card?.dataset.device) return toggleDeviceFold(card.dataset.device);
+  if (card?.dataset.device) return activateDevice(card);
   if (card) selectProject(getCardKey(card));
 });
+// A computer's heading, clicked or entered: its section folds, or - alone in the one list - its menu opens.
+function activateDevice(card) {
+  if ("deviceBare" in card.dataset) openDeviceMenu(card.querySelector("[data-action=device-menu]"), card.dataset.device);
+  else toggleDeviceFold(card.dataset.device);
+}
 $("projects").addEventListener("contextmenu", e => {
+  // A computer's heading: its own menu, when it has one.
+  const head = e.target.closest(".proj[data-device]");
+  const more = head?.querySelector("[data-action=device-menu]");
+  if (more) {
+    e.preventDefault();
+    return openDeviceMenu(more, head.dataset.device);
+  }
   const card = e.target.closest(".proj[data-path]");
   if (!card?.dataset.path || e.target.classList.contains("rename")) return;
   e.preventDefault();
@@ -923,7 +974,7 @@ $("projects").addEventListener("keydown", e => {
   }
   if ((e.key === "Enter" || e.key === " ") && e.target.classList.contains("proj")) {
     e.preventDefault();
-    if (e.target.dataset.device) toggleDeviceFold(e.target.dataset.device);
+    if (e.target.dataset.device) activateDevice(e.target);
     else selectProject(getCardKey(e.target));
   }
   if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown") && e.target.matches(".proj[draggable]")) {
@@ -964,6 +1015,13 @@ $("projectView").addEventListener("click", toggleDeviceMode);
 $("deviceChips").addEventListener("click", e => {
   const chip = e.target.closest("[data-device-filter]");
   if (chip) chooseDevice(chip.dataset.deviceFilter);
+});
+// A computer's chip, right-clicked: the same menu as its heading's.
+$("deviceChips").addEventListener("contextmenu", e => {
+  const chip = e.target.closest("[data-device-filter]");
+  if (!chip || !hasDeviceMenu(listDevices(data.projects, nodes).find(d => d.id === chip.dataset.deviceFilter))) return;
+  e.preventDefault();
+  openDeviceMenu(chip, chip.dataset.deviceFilter);
 });
 
 // ---------- projects: the group menu ----------

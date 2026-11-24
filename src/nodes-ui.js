@@ -4,7 +4,8 @@
 // (common.js) turns a node's list into projects and sessions the way it does for this computer's. Loaded before
 // renderer.js, which calls nodesHtml(), remoteAgentsHtml() and renderRemoteSpace() and renders again on
 // onNodesChanged. Uses $, esc, icon, t, tn, buildData, sessionKey, statusMark, agentMark, hue, initials, ago,
-// fullDate, pathHtml and countLiveGroups from common.js.
+// fullDate, pathHtml and countLiveGroups from common.js. A computer's own menu (renderer.js openDeviceMenu) ends here
+// too: the dialog that adds a folder there as a project, and the terminal in its home folder.
 const REMOTE_KEY = "node:"; // a remote project's space key: node:<id>:<project path, normalized>
 let nodes = []; // [{ id, name, kind, status, data, live, git, view: { projects, sessions }, liveMap }]
 const nodeNameOf = id => getNode(id)?.name || id.slice(0, 8);
@@ -118,6 +119,72 @@ async function onRemoteSpaceClick(e, n, p) {
     return;
   }
   toast(t("manager.node.toast.opened", { node: n.name }));
+}
+
+// ---------- a computer's own menu: a project added there, a terminal in its home ----------
+// For a computer that lists nothing yet (renderer.js openDeviceMenu puts both in its menu). The folder is typed -
+// nothing of that computer's folders is shown here - and that computer checks it (mesh/serve.js projects.add); what
+// it answers when it will not take it shows in the dialog, which stays open for another try.
+let nodeProjectDialog = null;
+// What the folder field starts with: the computer's home folder with its separator, to type on from; "~/" until its
+// host.info is read (that computer reads ~ as its home).
+function nodeFolderStart(n) {
+  const home = typeof n?.info?.home === "string" ? n.info.home.replace(/[\\/]+$/, "") : "";
+  if (!home) return "~/";
+  return home + (home.includes("\\") ? "\\" : "/");
+}
+function buildNodeProjectDialog() {
+  const d = document.createElement("dialog");
+  d.id = "nodeProjectDialog";
+  d.className = "modal";
+  d.innerHTML = `<form method="dialog" class="modal-form">
+    <h2>${icon("folder")}<span id="nodeProjectTitle"></span></h2>
+    <label><span>${esc(t("nodeProject.dir"))}</span><input id="nodeProjectDir" class="input mono" spellcheck="false" maxlength="4096"><span class="modal-note" id="nodeProjectNote"></span></label>
+    <div class="modal-hint" id="nodeProjectHint" role="alert"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn" id="nodeProjectCancel">${esc(t("common.cancel"))}</button>
+      <button type="submit" class="btn primary" id="nodeProjectGo">${icon("plus")}${esc(t("nodeProject.go"))}</button>
+    </div>
+  </form>`;
+  document.body.append(d);
+  d.querySelector("#nodeProjectCancel").addEventListener("click", () => d.close());
+  d.querySelector("form").addEventListener("submit", e => {
+    e.preventDefault();
+    submitNodeProject().catch(err => { $("nodeProjectHint").textContent = getErrorText(err.message || err); $("nodeProjectHint").className = "modal-hint err"; });
+  });
+  return d;
+}
+function openNodeProjectDialog(id) {
+  const n = getNode(id);
+  if (!n) return;
+  nodeProjectDialog ||= buildNodeProjectDialog();
+  nodeProjectDialog.dataset.node = n.id;
+  $("nodeProjectTitle").textContent = t("nodeProject.title", { node: n.name });
+  $("nodeProjectNote").textContent = t("nodeProject.note", { node: n.name });
+  $("nodeProjectDir").value = nodeFolderStart(n);
+  $("nodeProjectHint").textContent = "";
+  $("nodeProjectHint").className = "modal-hint";
+  nodeProjectDialog.showModal();
+  const input = $("nodeProjectDir");
+  input.focus();
+  input.setSelectionRange(input.value.length, input.value.length);
+}
+// The folder is a project there and so here: the list takes it and it is the chosen project.
+async function submitNodeProject() {
+  const id = nodeProjectDialog.dataset.node, dir = $("nodeProjectDir").value.trim();
+  if (!dir) throw new Error(t("nodeProject.need"));
+  $("nodeProjectGo").disabled = true;
+  let r;
+  try { r = await window.manager.remoteAddProject(id, dir); } finally { $("nodeProjectGo").disabled = false; }
+  nodeProjectDialog.close();
+  applyRegistry(r.registry);
+  selectProject(r.key);
+  toast(t(r.added ? "nodeProject.added" : "nodeProject.already", { name: r.name, node: nodeNameOf(id) }));
+}
+// A terminal on the computer, in its home folder, in a pane here (main: mesh:terminal).
+async function openNodeTerminal(id) {
+  await window.manager.remoteTerminal(id);
+  toast(t("manager.node.toast.opened", { node: nodeNameOf(id) }));
 }
 
 // The other computers' sessions and live states are part of the lists (prepare), so a change there - a session

@@ -46,6 +46,7 @@ jobs:
       - run: npm run test:terminal-viewers
       - run: npm run test:desktop-terminals
       - run: npm run test:mesh
+      - run: npm run test:remote-projects
       - run: npm run test:pairing
       - run: npm run test:host-pair
       - run: npm run test:port-forward

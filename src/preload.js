@@ -53,6 +53,10 @@ contextBridge.exposeInMainWorld("manager", {
   remoteLaunch: (node, args) => ipcRenderer.invoke("mesh:launch", node, args),
   // The project's repository cloned on another computer, an agent started in it (clone-ui.js).
   remoteClone: (node, args) => ipcRenderer.invoke("mesh:clone", node, args),
+  // A computer's own menu (renderer.js openDeviceMenu): a folder there listed as a project (the path typed, checked
+  // there), and a terminal in its home folder - both work on a computer that lists nothing yet.
+  remoteAddProject: (node, dir) => ipcRenderer.invoke("mesh:add-project", node, dir),
+  remoteTerminal: node => ipcRenderer.invoke("mesh:terminal", node),
   gitInfo: p => ipcRenderer.invoke("project:git-info", p),
   onNodesChanged: cb => ipcRenderer.on("mesh:nodes", (_e, nodes) => cb(nodes)),
   centreStart: () => ipcRenderer.invoke("centre:start"),

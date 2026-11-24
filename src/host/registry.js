@@ -43,6 +43,14 @@ function createRegistry(file) {
 }
 
 const getProject = (data, p) => data.projects.find(x => keyOf(x) === keyify(p));
+// A folder of this computer joins the projects, by its own name, and is no longer one the user removed. -> its entry
+// (the one it had when it was listed already).
+function addProject(data, dir) {
+  data.removed = data.removed.filter(x => x !== norm(dir));
+  let item = getProject(data, dir);
+  if (!item) data.projects.push(item = { name: path.basename(dir) || dir, path: dir });
+  return item;
+}
 const isPinned = x => Number.isInteger(x?.pin);
 // slot: where to keep the item, or null to let it move again.
 function setPin(item, slot) {
@@ -82,4 +90,4 @@ function repin(data) {
   for (const x of data.projects.filter(isPinned)) x.pin = units.indexOf(keyOf(x));
 }
 
-module.exports = { createRegistry, norm, keyOf, keyify, getProject, isPinned, setPin, setGroups, unpinEmptyGroups, repin };
+module.exports = { createRegistry, norm, keyOf, keyify, getProject, addProject, isPinned, setPin, setGroups, unpinEmptyGroups, repin };

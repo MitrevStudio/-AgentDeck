@@ -3,6 +3,9 @@
 // own - translates `errors.<code>`. The message is a plain English fallback for logs.
 const MESSAGES = {
   folderMissing: "The folder does not exist.",
+  // A folder a paired computer names as a project here (project-folder.js).
+  folderNotAbsolute: "Give the folder's whole path there (it may start with ~).",
+  notFolder: "That path is a file, not a folder.",
   unknownAgent: "Unknown agent.",
   invalidSession: "Invalid session.",
   invalidData: "Invalid data.",

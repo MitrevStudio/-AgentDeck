@@ -67,6 +67,16 @@ const FIXTURE = `(() => {
   const answers = {
     getData: async () => fx.data, getLive: async () => fx.live, getNodes: async () => fx.nodes, getGit: async () => fx.git,
     getSessionLoad: async () => { fx.loadAsked++; return fx.load; }, getLimits: async () => limits(16), getResources: async () => stats('WORK-01'), getUsage: async () => null, refreshGit: async () => {},
+    // A computer's own menu: what the page asked main for (a folder there as a project, a terminal in its home), and
+    // main's answer - the registry with the project in it, or what that computer refused the folder with.
+    remoteTerminal: async node => { (fx.homeTerms ||= []).push(node); return 'r-home'; },
+    remoteAddProject: async (node, dir) => {
+      (fx.addAsked ||= []).push([node, dir]);
+      if (fx.addError) throw new Error("Error invoking remote method 'mesh:add-project': Error: " + fx.addError);
+      const p = { node, name: 'shop', path: '/home/dev/shop' };
+      fx.data = { ...fx.data, registry: { ...fx.data.registry, projects: [...fx.data.registry.projects, p] } };
+      return { key: 'node:' + node + ':' + p.path, name: p.name, path: p.path, added: true, registry: fx.data.registry };
+    },
     copyText: async text => { fx.copied.push(text); }, gitQuery: async () => ({ status: fx.git.repos.r1, branches: ['main'], remotes: ['origin'], worktrees: [], operation: '' })
   };
   // Answers come a moment later, as over IPC: never within the turn that asked.
@@ -934,6 +944,60 @@ app.whenReady().then(async () => {
   assert.deepEqual(await evaluate("(() => { const kept = data.projects; data.projects = []; render(); const el = $('projectView'), seen = [el.hidden, el.getAttribute('aria-pressed')]; data.projects = kept; render(); return seen; })()"), [false, 'true']);
   await click('#deviceChips [data-device-filter=""]'); await click('#projectView');
   assert.deepEqual([await termKeys(), await evaluate("$('termCount').textContent")], [['term:q3', 'term:q5'], '2'], 'the filter cleared: every terminal again');
+
+  // ---------- a computer with no project yet: its heading, its menu, a terminal in its home, a project added there ----------
+  {
+    const bare = '#projects .proj.dev.bare[data-device="node-b"]';
+    const has = selector => evaluate(`document.querySelector(${JSON.stringify(selector)}) !== null`);
+    const menuItems = () => evaluate("[...document.querySelectorAll('.menu [data-i]')].map(b => [b.textContent.trim(), b.disabled])");
+    const escape = async () => { await evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))"); await settle(); };
+    const both = [['Add project…', false], ['Open terminal', false]];
+    assert.equal(await has(bare), true, 'a connected computer with no project has its heading in the one list');
+    assert.equal(await has('#projects .proj.dev.bare[data-device="node-c"]'), false, 'an offline one has none: nothing can be done there now');
+    assert.equal(await has('#projects .proj.dev.bare[data-device="local"]'), false, 'never this computer');
+    // A click on the heading, a right-click and its "more" button all open the same menu.
+    await click(bare);
+    assert.deepEqual(await menuItems(), both);
+    await escape();
+    assert.equal(await has('.menu'), false);
+    await evaluate(`document.querySelector(${JSON.stringify(bare)}).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })); 0`); await settle();
+    assert.deepEqual(await menuItems(), both, 'on a right-click too');
+    // Open terminal: from the menu, and from the heading's own button.
+    await evaluate("document.querySelectorAll('.menu [data-i]')[1].click()"); await settle();
+    await click(bare + ' [data-action=device-terminal]');
+    assert.deepEqual(await evaluate('fx.homeTerms'), ['node-b', 'node-b'], 'main is asked for a terminal in that computer\'s home');
+    // Add project: the folder is typed; what that computer refuses shows in the dialog, which stays for another try.
+    await click(bare + ' [data-action=device-menu]');
+    await evaluate("document.querySelector('.menu [data-i]').click()"); await settle();
+    assert.deepEqual(await evaluate("[$('nodeProjectDialog').open, $('nodeProjectDir').value, $('nodeProjectTitle').textContent === 'Add a project on ' + fx.nodes.find(n => n.id === 'node-b').name]"), [true, '~/', true], 'no home known yet: the path starts from ~');
+    await evaluate("$('nodeProjectDir').value = '   '; $('nodeProjectGo').click()"); await settle();
+    assert.deepEqual(await evaluate("[$('nodeProjectDialog').open, $('nodeProjectHint').textContent, fx.addAsked || null]"), [true, "Type the folder's path.", null], 'nothing typed: main is not asked');
+    await evaluate("fx.addError = 'The folder does not exist.'; $('nodeProjectDir').value = '~/nowhere'; $('nodeProjectGo').click()"); await settle();
+    assert.deepEqual(await evaluate("[$('nodeProjectDialog').open, $('nodeProjectHint').textContent, $('nodeProjectHint').classList.contains('err')]"), [true, 'The folder does not exist.', true]);
+    await evaluate("fx.addError = ''; $('nodeProjectDir').value = ' ~/shop '; $('nodeProjectGo').click()"); await settle();
+    assert.deepEqual(await evaluate('fx.addAsked'), [['node-b', '~/nowhere'], ['node-b', '~/shop']]);
+    assert.equal(await evaluate("$('nodeProjectDialog').open"), false);
+    // The project is listed on that computer and chosen; the heading went with it.
+    assert.equal(await evaluate("document.querySelector('#projects .proj[data-node=\"node-b\"] .proj-name')?.textContent"), 'shop');
+    assert.equal(await evaluate("ui.selected"), 'node:node-b:/home/dev/shop');
+    assert.equal(await has(bare), false, 'a computer with a project needs no heading of its own in the one list');
+    // By device its heading has the tools too; this computer's and an offline relay's have what they had.
+    await click('#projectView'); await settle();
+    assert.equal(await has('#projects .proj.dev[data-device="node-b"] [data-action=device-menu]'), true);
+    assert.equal(await has('#projects .proj.dev[data-device="local"] [data-action=device-menu]'), false);
+    assert.equal(await evaluate("document.querySelector('#projects .proj.dev[data-device=\"node-c\"] [data-action=device-terminal]').disabled"), true, 'offline: the terminal waits');
+    await click('#projects .proj.dev[data-device="node-c"] [data-action=device-menu]');
+    assert.deepEqual(await menuItems(), [['Add project…', true], ['Open terminal', true]], 'offline: the menu says what there is, greyed');
+    await escape();
+    // A chip's right-click opens the menu as well; "All" and this computer's have none.
+    await evaluate(`document.querySelector('#deviceChips [data-device-filter="node-b"]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })); 0`); await settle();
+    assert.deepEqual(await menuItems(), both);
+    await escape();
+    await evaluate(`document.querySelector('#deviceChips [data-device-filter="local"]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })); 0`); await settle();
+    assert.equal(await has('.menu'), false);
+    await capture('device-menu');
+    await click('#projectView');
+  }
 
   await settle(3200);
   assert.equal(await evaluate("document.querySelectorAll('.toast-item').length"), 0, 'messages leave by themselves');

@@ -23,6 +23,7 @@
     "test:port-forward": "node scripts/test-port-forward.js && node scripts/test-port-forward-relay.js",
     "test:ports-app": "node scripts/test-ports-electron.cjs",
     "test:mesh": "node scripts/test-mesh.js && node scripts/test-mesh-mapped-port.js",
+    "test:remote-projects": "node scripts/test-remote-projects.js",
     "test:pairing": "node scripts/test-mesh-pairing.js",
     "test:mesh-proxy": "node scripts/test-mesh-proxy.js",
     "test:mesh-relay-only": "node scripts/test-mesh-relay-only.js",

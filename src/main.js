@@ -583,6 +583,54 @@ async function remoteLaunch(node, args) {
   const space = tab.already ? desk.remoteSpace(readRegistry().projects, node, tab.cwd) : `node:${node}:${normPath(args.cwd)}`;
   return paneForRemote(node, tab, space);
 }
+// ---------- a computer with nothing listed yet (a project added there, a terminal in its home) ----------
+// What the other computer says of itself (host.info): as read when its link came up, or asked now when that failed.
+async function remoteInfo(node) {
+  const known = remote.get(node)?.info;
+  if (isObj(known)) return known;
+  const info = await links.call(node, "host.info", {}, { timeout: 15000 });
+  if (isObj(info)) remote.set(node, { ...remote.get(node), info });
+  return isObj(info) ? info : {};
+}
+const needsUpdate = node => new Error(t("manager.node.needsUpdate", { name: nodeName(node) }));
+// A folder of another computer listed as a project there (mesh/serve.js projects.add: that computer checks the
+// path), and so here. dir: the path as typed, whole or from ~. -> { key, name, path, added, registry } - key: the
+// project's key (and space) here. An AgentDeck there that is too old to know the request (no `projects: 1` in its
+// host.info, or it answers "unknownMethod") is said so in words.
+async function remoteAddProject(node, dir) {
+  if (!links.online(node)) throw new HostError("offline");
+  let r;
+  try {
+    if ((await remoteInfo(node)).projects !== 1) throw needsUpdate(node);
+    r = await links.call(node, "projects.add", { path: dir }, { timeout: 15000 });
+  } catch (e) {
+    throw e?.code === "unknownMethod" ? needsUpdate(node) : e;
+  }
+  if (!isObj(r) || typeof r.path !== "string" || !r.path || r.path.length > 4096) throw new HostError("invalidData");
+  const project = { node, name: (typeof r.name === "string" && r.name.trim() ? r.name.trim() : r.path.split(/[\\/]/).filter(Boolean).at(-1) || r.path).slice(0, 80), path: r.path };
+  const key = keyOf(project);
+  // Its list as it is now, when the "data" that follows a change there has not brought the folder yet: else the
+  // next sync would drop the project again for not being there.
+  const listed = () => (remote.get(node)?.data?.registry?.projects || []).some(p => typeof p?.path === "string" && keyOf({ node, path: p.path }) === key);
+  if (!listed()) remote.set(node, { ...remote.get(node), data: await links.call(node, "sessions.list") });
+  // One removed here earlier is wanted again.
+  const data = readRegistry();
+  if (data.removed.includes(key)) {
+    data.removed = data.removed.filter(x => x !== key);
+    saveRegistry(data);
+  }
+  syncRemoteProjects();
+  nodesChanged();
+  return { key, name: project.name, path: project.path, added: r.added !== false, registry: readRegistry() };
+}
+// A plain terminal on another computer in its user's home folder, in a pane here: for a computer with no project to
+// open one in. The home is what its host.info says; one that says none is too old.
+async function remoteHomeTerminal(node) {
+  if (!links.online(node)) throw new HostError("offline");
+  const home = (await remoteInfo(node)).home;
+  if (typeof home !== "string" || !home) throw needsUpdate(node);
+  return remoteLaunch(node, { kind: "shell", cwd: home });
+}
 // What the peers may ask of this computer, and what it pushes to them (mesh/serve.js).
 const served = createServed({ host, env: async () => terminalEnv(process.env, await network.terminalProxy().catch(() => null)) });
 const links = createLinks({ dir: path.join(app.getPath("userData"), "node"), defaultName: os.hostname(), kind: "desktop", version: app.getVersion(), api: served.api, log: meshLog });
@@ -1654,6 +1702,8 @@ function registerIpc() {
   handle("mesh:nodes", () => nodesView());
   handle("mesh:launch", (node, args) => remoteLaunch(text(node, 64), isObj(args) ? args : {}));
   handle("mesh:clone", (node, args) => remoteClone(text(node, 64), isObj(args) ? args : {}));
+  handle("mesh:add-project", (node, dir) => remoteAddProject(text(node, 64), text(dir)));
+  handle("mesh:terminal", node => remoteHomeTerminal(text(node, 64)));
   handle("project:git-info", p => (isDir(p) ? gitInfo(p) : { url: "", branch: "" }));
   handle("centre:send", s => orchestrator.send(text(s, 20000)));
   // Every page, voice ones included, reads the language and theme from its preload before it renders.

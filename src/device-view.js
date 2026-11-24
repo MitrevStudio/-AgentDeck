@@ -16,16 +16,24 @@ function listDevices(projects, nodes) {
   for (const n of nodes || []) {
     if (!n?.id || known.has(n.id)) continue;
     known.set(n.id, { id: n.id, local: false, name: n.name || n.id.slice(0, 8), kind: n.kind === "host" ? "host" : "desktop",
-      status: n.status === "online" ? "online" : "offline", lastSeen: Number(n.lastSeen) || 0 });
+      status: n.status === "online" ? "online" : "offline", lastSeen: Number(n.lastSeen) || 0, relay: Boolean(n.relayOnly) });
   }
   for (const id of counts.keys()) {
-    if (id !== LOCAL_DEVICE && !known.has(id)) known.set(id, { id, local: false, name: id.slice(0, 8), kind: "desktop", status: "offline", lastSeen: 0 });
+    if (id !== LOCAL_DEVICE && !known.has(id)) known.set(id, { id, local: false, name: id.slice(0, 8), kind: "desktop", status: "offline", lastSeen: 0, relay: false });
   }
   const others = [...known.values()].sort((a, b) => (a.status === "online" ? 0 : 1) - (b.status === "online" ? 0 : 1)
     || a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || a.id.localeCompare(b.id));
-  const local = { id: LOCAL_DEVICE, local: true, name: "", kind: "desktop", status: "online", lastSeen: 0 };
+  const local = { id: LOCAL_DEVICE, local: true, name: "", kind: "desktop", status: "online", lastSeen: 0, relay: false };
   return [local, ...others].map(d => ({ ...d, count: counts.get(d.id) || 0 }));
 }
+// Whether a device has a menu of its own (a project added there, a terminal in its home): another computer that
+// runs sessions and terminals - not this one, whose "Add project" is the list's own button, and not a relay only
+// (`relay`: it serves nothing to work on). Whether its items can be used now is canWorkOn.
+const hasDeviceMenu = d => Boolean(d) && !d.local && !d.relay;
+const canWorkOn = d => hasDeviceMenu(d) && d.status === "online";
+// The computers that list no project and can be worked on now. The one list of projects shows no computers, so a
+// newly paired one would be nowhere in it: it gets a heading there, with its menu, until it has a project.
+const listIdleDevices = devices => devices.filter(d => canWorkOn(d) && !d.count);
 
 // The chosen devices that exist; none (or only unknown ones) means every device.
 function activeFilter(filter, devices) {
@@ -67,5 +75,5 @@ function deviceViewState(view, devices) {
 }
 
 if (typeof module === "object" && module.exports) {
-  module.exports = { LOCAL_DEVICE, deviceOf, listDevices, activeFilter, toggleFilter, toggleCollapsedDevice, buildSections, countInSections, keepDevices, normalizeDeviceView, deviceViewState };
+  module.exports = { LOCAL_DEVICE, deviceOf, listDevices, hasDeviceMenu, canWorkOn, listIdleDevices, activeFilter, toggleFilter, toggleCollapsedDevice, buildSections, countInSections, keepDevices, normalizeDeviceView, deviceViewState };
 }

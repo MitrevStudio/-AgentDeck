@@ -40,6 +40,27 @@ assert.equal(dv.deviceOf(projects[0]), dv.LOCAL_DEVICE);
 assert.equal(dv.deviceOf(projects[1]), H);
 assert.deepEqual(dv.listDevices([], []).map(d => d.id), [dv.LOCAL_DEVICE], 'this computer is always there');
 
+// ---------- a computer's own menu, and the computers with no project yet ----------
+{
+  const R = 'f'.repeat(64), OFF = '9'.repeat(64);
+  const all = dv.listDevices(projects, [...nodes, { id: R, name: 'Relay', kind: 'host', status: 'online', relayOnly: true }, { id: OFF, name: 'Away', kind: 'desktop', status: 'offline' }]);
+  const of = id => all.find(d => d.id === id);
+  assert.equal(of(R).relay, true, 'a relay only is marked');
+  assert.equal(of(A).relay, false);
+  assert.equal(dv.hasDeviceMenu(of(dv.LOCAL_DEVICE)), false, 'this computer has the list\'s own Add project');
+  assert.equal(dv.hasDeviceMenu(of(R)), false, 'a relay only runs nothing to work on');
+  assert.equal(dv.hasDeviceMenu(of(A)), true);
+  assert.equal(dv.hasDeviceMenu(of(H)), true, 'an offline computer keeps its menu');
+  assert.equal(dv.hasDeviceMenu(undefined), false);
+  assert.equal(dv.canWorkOn(of(A)), true);
+  assert.equal(dv.canWorkOn(of(H)), false, 'offline: its menu\'s items wait');
+  assert.equal(dv.canWorkOn(of(R)), false);
+  assert.equal(dv.canWorkOn(of(dv.LOCAL_DEVICE)), false);
+  assert.deepEqual(dv.listIdleDevices(all).map(d => d.id), [A], 'online, no project, not a relay: only such a computer gets a heading in the one list');
+  assert.deepEqual(dv.listIdleDevices(dv.listDevices([...projects, { n: 'p7', name: 'seven', path: '/srv/seven', node: A }], nodes)), [], 'gone with its first project');
+  assert.deepEqual(dv.listIdleDevices(dv.listDevices([], [])), [], 'never this computer');
+}
+
 // ---------- sections ----------
 let sections = dv.buildSections(projects, devices, []);
 assert.deepEqual(sections.map(s => s.device.id), [dv.LOCAL_DEVICE, A, B, GONE, H]);
