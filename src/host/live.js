@@ -7,7 +7,8 @@
 // "busy" alone does not tell whether anything is still happening, so the newest write to the transcript or to
 // one of its subagent transcripts is reported as `activityAt`.
 // Its subagents (<transcript>/subagents/agent-*.jsonl, described by the .meta.json beside each) come along as
-// `subagents`, newest first; one written to within SUBAGENT_ACTIVE_MS counts as working.
+// `subagents`, newest first; one counts as working until it ended - by the mark Claude Code leaves in its .meta.json
+// or by how its transcript ends - and by its last write only where neither can be read (isSubagentWorking).
 //
 // A turn sent to the background (ctrl+b, Claude Code 2.1.3xx) runs in a "bg" process of its own: a fork of the session
 // (--fork-session --resume <parent>: a transcript and sessionId of its own, `jobId`) that the interactive parent names in
@@ -39,7 +40,14 @@ const CLAUDE_HOME = path.join(os.homedir(), ".claude");
 const REGISTRY_DIR = path.join(CLAUDE_HOME, "sessions");
 const PROJECTS_DIR = path.join(CLAUDE_HOME, "projects");
 
+// A subagent's state (isSubagentWorking): how long after its last write it counts as working when its transcript's end
+// cannot be read; how long at most when the end says it has not finished (a tool call may run that long - past it, it
+// crashed or was never marked as ended); how much of the transcript's end is read; and how much earlier than the
+// transcript's last line the .meta.json that marks the end may have been written (seen: up to 0.1 s before, 3.4 s after).
 const SUBAGENT_ACTIVE_MS = 30000;
+const SUBAGENT_STALL_MS = 30 * 60 * 1000;
+const SUBAGENT_TAIL_BYTES = 256 * 1024;
+const META_SLACK_MS = 3000;
 const FS_AT_ONCE = 8;
 // A registry file written this shortly before it was read may be written again within the same tick of the file
 // system's clock (FAT counts in 2 s), at the same size ("idle" -> "busy"): it is read again the next time.
@@ -49,7 +57,8 @@ const SEEK_MS = 5000;
 
 const startVerified = new Map(); // `${pid}:${procStart}` -> boolean
 const transcripts = new Map();   // sessionId -> transcript path
-const subagentMeta = new Map();  // .meta.json path -> {type, description}
+const subagentMeta = new Map();  // .meta.json path -> {type, description, ended, at}
+const subagentEnds = new Map();  // subagent transcript path -> { at, size, end }: how it ended when it was last read
 const registry = new Map();      // registry file name -> { mtimeMs, size, settled, x }: the entry as last parsed
 const sought = new Map();        // sessionId -> when its transcript was last looked for in every project folder
 
@@ -68,6 +77,8 @@ function limiter(max) {
 const io = limiter(FS_AT_ONCE);
 // When a file was last written; -1 when it is not there.
 const mtime = f => io(() => fs.promises.stat(f)).then(s => s.mtimeMs, () => -1);
+// The same with its size: { at, size }, null when it is not there.
+const stat = f => io(() => fs.promises.stat(f)).then(s => ({ at: s.mtimeMs, size: s.size }), () => null);
 
 function pidAlive(pid) {
   try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; }
@@ -160,20 +171,85 @@ async function transcriptOf(id, cwd = "") {
 }
 const locateTranscript = async (id, cwd = "") => (await transcriptOf(id, cwd)).file;
 
-// What Claude Code wrote about a subagent when it started it (agentType, description); remembered once read, it does
-// not change. A file not there yet, or still being written, is read again on the next poll.
-const NO_META = Object.freeze({ type: "", description: "" });
-async function readSubagentMeta(file) {
-  let meta = subagentMeta.get(file);
-  if (!meta) {
-    let m;
-    try { m = JSON.parse(await io(() => fs.promises.readFile(file, "utf8"))); } catch { return NO_META; }
-    meta = { type: String(m?.agentType || ""), description: String(m?.description || "") };
-    subagentMeta.set(file, meta);
-  }
+// What Claude Code wrote about a subagent: when it started it (agentType, description) and, from 2.1.302 on, when it
+// ended (`finished: true`, written within a few seconds of the transcript's last line; `stoppedByUser: true` in some
+// versions when the user interrupted it). Remembered once read; read again only for a subagent that may still work,
+// when the file's time changed (`at`: that time, 0 when it was not asked). A file not there yet, or still being
+// written, is read again on the next poll.
+const NO_META = Object.freeze({ type: "", description: "", ended: false, at: 0 });
+async function readSubagentMeta(file, at = 0) {
+  const had = subagentMeta.get(file);
+  if (had && (!at || had.at === at)) return had;
+  let m;
+  try { m = JSON.parse(await io(() => fs.promises.readFile(file, "utf8"))); } catch { return had || NO_META; }
+  const meta = { type: String(m?.agentType || ""), description: String(m?.description || ""), ended: m?.finished === true || m?.stoppedByUser === true, at };
+  subagentMeta.set(file, meta);
   return meta;
 }
-async function listSubagents(dir, now) {
+
+// How a subagent's transcript ends, by its last line: "ended" - its turn is over (a last answer with nothing asked
+// of a tool, the result of a tool that ends the turn, or the mark of the user's interruption); "open" - anything
+// else: a tool was asked for and its result is awaited, a result came and the model's answer is awaited, a line of
+// the request log; "unknown" - the last line could not be read (it is being written, it is longer than the piece
+// read, it is not JSON). Only the file's end is read, SUBAGENT_TAIL_BYTES at most.
+const INTERRUPTED = "[Request interrupted";
+function subagentEndOf(entry) {
+  const message = entry?.message, content = message?.content;
+  const blocks = Array.isArray(content) ? content : [];
+  if (entry?.type === "assistant") {
+    const over = message?.stop_reason === "end_turn" || message?.stop_reason === "stop_sequence";
+    return over && !blocks.some(b => b?.type === "tool_use") ? "ended" : "open";
+  }
+  if (entry?.type === "user") {
+    const text = typeof content === "string" ? content : String(blocks.find(b => b?.type === "text")?.text || "");
+    return entry.toolEndsTurn === true || text.startsWith(INTERRUPTED) ? "ended" : "open";
+  }
+  return entry && typeof entry === "object" ? "open" : "unknown";
+}
+async function readSubagentEnd(file, size) {
+  const length = Math.min(size, SUBAGENT_TAIL_BYTES);
+  if (!length) return "unknown";
+  let text;
+  try {
+    text = await io(async () => {
+      const handle = await fs.promises.open(file, "r");
+      try { return (await handle.read(Buffer.alloc(length), 0, length, size - length)).buffer.toString("utf8"); } finally { await handle.close(); }
+    });
+  } catch { return "unknown"; }
+  if (!text.endsWith("\n")) return "unknown"; // the last line is still being written
+  const lines = text.trimEnd().split("\n");
+  if (lines.length === 1 && length < size) return "unknown"; // it began before the piece that was read
+  try { return subagentEndOf(JSON.parse(lines.at(-1))); } catch { return "unknown"; }
+}
+// Whether a subagent still works. Its last write alone does not tell: one that waits for a long tool call writes
+// nothing for minutes, one that just gave its answer wrote a moment ago. So, in this order:
+// - written to before its session's process started (`since`), or not for SUBAGENT_STALL_MS: not working - the first
+//   is a subagent of a process that is gone, the second the limit that ends one that crashed or was never marked;
+// - its .meta.json says it ended, and was written after the transcript's last line (a subagent continued later is
+//   written to again, and its old mark does not count): not working;
+// - else by its transcript's end: ended - not working; open - working; unknown - working if written to within
+//   SUBAGENT_ACTIVE_MS, as before any of this was read.
+// What was found is kept by the transcript's time and size, so the end is read again only when the file changed, the
+// .meta.json is looked at only while the subagent may still work, and one past the limit costs nothing more.
+async function isSubagentWorking(file, metaFile, s, now, since) {
+  if (s.at < since || now - s.at >= SUBAGENT_STALL_MS) { subagentEnds.delete(file); return false; }
+  let known = subagentEnds.get(file);
+  if (known?.at !== s.at || known.size !== s.size) known = null;
+  if (known?.end === "ended") return false;
+  const metaAt = await mtime(metaFile);
+  if (metaAt >= s.at - META_SLACK_MS && (await readSubagentMeta(metaFile, metaAt)).ended) {
+    subagentEnds.set(file, { at: s.at, size: s.size, end: "ended" });
+    return false;
+  }
+  if (!known) {
+    known = { at: s.at, size: s.size, end: await readSubagentEnd(file, s.size) };
+    subagentEnds.set(file, known);
+  }
+  if (known.end === "ended") return false;
+  return known.end === "open" || now - s.at < SUBAGENT_ACTIVE_MS;
+}
+// since: when the session's process started.
+async function listSubagents(dir, now, since = 0) {
   let names;
   try { names = (await io(() => fs.promises.readdir(dir))).filter(f => f.endsWith(".jsonl")); } catch { return []; }
   // The subagents gone from this folder are forgotten.
@@ -181,19 +257,25 @@ async function listSubagents(dir, now) {
   for (const file of subagentMeta.keys()) {
     if (path.dirname(file) === dir && !ids.has(path.basename(file, ".meta.json"))) subagentMeta.delete(file);
   }
+  for (const file of subagentEnds.keys()) {
+    if (path.dirname(file) === dir && !ids.has(path.basename(file, ".jsonl"))) subagentEnds.delete(file);
+  }
   const list = await Promise.all(names.map(async f => {
-    const id = f.slice(0, -".jsonl".length);
-    const [written, meta] = await Promise.all([mtime(path.join(dir, f)), readSubagentMeta(path.join(dir, `${id}.meta.json`))]);
-    const at = Math.max(0, written); // 0 for one that went meanwhile
-    return { id, at, working: now - at < SUBAGENT_ACTIVE_MS, ...meta };
+    const id = f.slice(0, -".jsonl".length), file = path.join(dir, f), metaFile = path.join(dir, `${id}.meta.json`);
+    const [s, meta] = await Promise.all([stat(file), readSubagentMeta(metaFile)]);
+    if (!s) return { id, at: 0, working: false, type: meta.type, description: meta.description }; // it went meanwhile
+    const working = await isSubagentWorking(file, metaFile, s, now, since);
+    // The description as it is now: the end's reading may have read the .meta.json anew.
+    const { type, description } = subagentMeta.get(metaFile) || meta;
+    return { id, at: s.at, working, type, description };
   }));
   return list.sort((a, b) => b.at - a.at);
 }
-// The newest write to the transcript or to a subagent's, and the subagents.
-async function getActivity(id, cwd) {
+// The newest write to the transcript or to a subagent's, and the subagents. since: when the session's process started.
+async function getActivity(id, cwd, since = 0) {
   const { file, at } = await transcriptOf(id, cwd);
   if (!file) return { at: 0, subagents: [] };
-  const subagents = await listSubagents(path.join(file.slice(0, -".jsonl".length), "subagents"), Date.now());
+  const subagents = await listSubagents(path.join(file.slice(0, -".jsonl".length), "subagents"), Date.now(), since);
   return { at: Math.max(at, ...subagents.map(a => a.at)), subagents };
 }
 
@@ -250,7 +332,7 @@ async function claudeLive() {
   const ids = new Set(sessions.flatMap(x => [x, ...x.jobs]).map(e => e.sessionId));
   for (const id of sought.keys()) if (!ids.has(id)) sought.delete(id);
   const read = await Promise.all(sessions.map(async x =>
-    ({ x, lead: leadingEntry(x), activities: await Promise.all([x, ...x.jobs].map(e => getActivity(e.sessionId, e.cwd))) })));
+    ({ x, lead: leadingEntry(x), activities: await Promise.all([x, ...x.jobs].map(e => getActivity(e.sessionId, e.cwd, Number(e.startedAt) || 0))) })));
   return read.map(({ x, lead, activities }) => ({
       agent: "Claude", id: x.sessionId, pid: x.pid, procStart: String(x.procStart || ""), cwd: x.cwd || "", name: x.name || "",
       // A background job left on its own (its parent gone): Claude Code's daemon restarts its process when it dies,
@@ -287,4 +369,4 @@ async function liveIds() {
   return ids;
 }
 
-module.exports = { liveSessions, liveIds, findTranscript, locateTranscript, foldJobs, leadingEntry, getStatus };
+module.exports = { liveSessions, liveIds, findTranscript, locateTranscript, foldJobs, leadingEntry, getStatus, subagentEndOf, SUBAGENT_ACTIVE_MS, SUBAGENT_STALL_MS, SUBAGENT_TAIL_BYTES };

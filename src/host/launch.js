@@ -13,6 +13,7 @@ const { execFile } = require("node:child_process");
 const promptLaunch = require("./prompt-launch");
 const { fail } = require("./errors");
 const { launchIdentity } = require("./codex-link");
+const { liveStatus } = require("../shared/live-status");
 
 const { psQuote } = promptLaunch;
 const NEW_SESSION = { Claude: "claude", OpenCode: "opencode", Codex: "codex" };
@@ -216,7 +217,8 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
     if (runningTab(agent, id)) fail("sessionRunning");
     const entry = (await liveSessions({ fresh: true })).find(l => l.agent === agent && l.id === id);
     if (!entry) fail("moveNotRunning");
-    if (entry.status === "busy") fail("moveBusy");
+    // Also while only a subagent of it works: stopping the session would end that work too.
+    if (liveStatus(entry) === "busy") fail("moveBusy");
     // Checked before the session is stopped: one that cannot be resumed (no prompt sent yet) keeps running where it is.
     if (agent === "Claude" && !findTranscript(id)) fail("moveNoConversation");
     checkResumable(agent, id, entry.cwd);

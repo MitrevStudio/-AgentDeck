@@ -72,7 +72,7 @@ function computeTiles() {
     out.push({
       key: "p:" + p.n, kind: u.group ? "group" : "project", p, label: p.name, count: inside.length, whole,
       waiting: states.some(l => l.status === "waiting"),
-      busy: states.some(l => l.status === "busy" && !isStale(l)), idle: states.some(l => l.status !== "busy")
+      busy: states.some(l => liveStatus(l) === "busy" && !isStale(l)), idle: states.some(l => liveStatus(l) !== "busy")
     });
   }
   // A search puts the projects whose name is closest to it first, ahead of the session results.

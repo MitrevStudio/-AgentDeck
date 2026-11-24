@@ -14,6 +14,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { isObj } = require("./shared/util");
+const { liveStatus } = require("./shared/live-status");
 const { createSendText, TEXT_MAX } = require("./host/send-text");
 
 const SPACE = "orchestrator";
@@ -169,7 +170,8 @@ function createOrchestrator(deps) {
 
   // ---------- the tools ----------
   const inFolder = (cwd, n) => typeof cwd === "string" && (deps.norm(cwd) === n || deps.norm(cwd).startsWith(n + "/"));
-  const statusOf = l => (!l ? "stopped" : l.status === "busy" ? "working" : l.status === "idle" ? "idle" : l.status === "waiting" ? "waiting" : "starting");
+  // A session whose subagent still works is working, though its own turn is over (shared/live-status.js).
+  const statusOf = l => { const s = liveStatus(l); return !l ? "stopped" : s === "busy" ? "working" : s === "idle" ? "idle" : s === "waiting" ? "waiting" : "starting"; };
   const projectOf = (data, cwd) => (data.registry?.projects || []).filter(p => inFolder(cwd, deps.norm(p.path))).sort((a, b) => b.path.length - a.path.length)[0] || null;
   // The project named or pointed at; the names may come misspelled from speech recognition, so a part of one counts.
   function resolveProject(data, text) {
@@ -273,7 +275,7 @@ function createOrchestrator(deps) {
       const waited = Date.now() - from;
       if (!l) {
         if (sawWork || waited > SETTLE_MS) return done("ended", { note: "The session is not running any more." });
-      } else if (l.status === "busy") {
+      } else if (liveStatus(l) === "busy") {
         sawWork = true;
       } else if (l.status === "waiting") {
         return done("waiting", { waitingFor: l.waitingFor || "", note: "The session needs the user: show_session and tell them." });
@@ -360,7 +362,7 @@ function createOrchestrator(deps) {
       const tab = deps.terminals.getTabs().find(x => x.id === tabId);
       if (!tab || tab.exited || !tab.sessionId) continue;
       const l = (await deps.liveSessions()).find(x => x.id === tab.sessionId);
-      if (l?.status === "busy") { sawWork = true; continue; }
+      if (liveStatus(l) === "busy") { sawWork = true; continue; }
       if (!sawWork || !l || l.status !== "idle") continue;
       if (answerWatch !== mark) return;
       answerWatch = null;

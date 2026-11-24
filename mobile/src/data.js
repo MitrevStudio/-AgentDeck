@@ -86,6 +86,7 @@
 // "state" offline / online and "reset" with the new scrollback). A host too old for a method answers unknownMethod:
 // that part is left empty and store.missing(node, method) says so.
 import { emitter, sessionKey, normPath, baseName } from "./util.js";
+import { liveStatus } from "../../src/shared/live-status.js";
 
 // "unreachable": the session ran when its computer was last seen, and the computer is away now - what it does
 // meanwhile is not known. It is listed with the recent ones, before those that had stopped.
@@ -234,7 +235,9 @@ export function createStore(provider) {
   }
   function statusOf(live) {
     if (!live) return "stopped";
-    return live.status === "busy" || live.status === "waiting" || live.status === "idle" ? live.status : "other";
+    // As the desktop counts it: idle with a subagent still working is busy.
+    const status = liveStatus(live);
+    return status === "busy" || status === "waiting" || status === "idle" ? status : "other";
   }
   function projectOf(e, cwd, s) {
     if (s?.projectName) return s.projectName;

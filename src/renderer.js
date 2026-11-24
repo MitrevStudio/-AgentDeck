@@ -88,7 +88,7 @@ function renderCentre() {
   const l = key ? allLive.get(key) : null;
   const running = Boolean(term && !term.exited);
   const sub = !running ? t("centre.status.off") : !l ? t("live.hint.loading")
-    : l.status === "busy" ? t("manager.group.working") : l.status === "waiting" ? t("manager.group.needs") : t("manager.group.ready");
+    : liveStatus(l) === "busy" ? t("manager.group.working") : l.status === "waiting" ? t("manager.group.needs") : t("manager.group.ready");
   const html = `<div class="proj ${ui.selected === CENTRE ? "active" : ""}" data-centre tabindex="0" title="${esc(t("centre.sub"))}">
       <div class="proj-row"><span class="centre-mark">${icon("bolt")}</span><span class="proj-name">${esc(t("centre.title"))}</span>
         <span class="centre-sub">${esc(sub)}</span>${running ? statusMark(l, !l) : ""}</div></div>`;

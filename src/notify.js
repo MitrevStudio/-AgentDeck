@@ -1,11 +1,13 @@
 // Tells when a Claude Code session stops working - it finished, or it waits for an answer or a permission - with a
 // tray balloon that brings its terminal up, and keeps the list of such sessions for the tray (badge, tooltip, menu).
 //
-// Fed by the live registry (live.js), polled here every few seconds whether or not a window is open. A session only
+// Fed by the live registry (live.js), polled here every few seconds whether or not a window is open. A session works
+// while liveStatus says so (shared/live-status.js: also while a subagent of an idle session does). A session only
 // counts after it worked for a while, so a quick reply does not ring; a balloon is skipped while the edge menu is
 // out (the user is looking at the sessions already). A waiting session leaves the list when it works again, when it
 // is brought up from here, or when its process ends.
 const path = require("node:path");
+const { liveStatus } = require("./shared/live-status");
 
 const POLL_MS = 3000;
 const MIN_BUSY_MS = 15000;
@@ -40,13 +42,16 @@ function createNotifier({ liveSessions, describe, balloon, focus, quiet = () => 
         const key = `${l.agent}:${l.id}`;
         seen.add(key);
         const p = prev.get(key);
-        if (l.status === "busy") {
+        // Idle with a subagent still working is busy: the turn is over, the work is not, so it rings when the last
+        // subagent stops, with the work counted from where the turn began.
+        const status = liveStatus(l);
+        if (status === "busy") {
           if (p?.status !== "busy") prev.set(key, { status: "busy", since: now });
           if (waiting.delete(key)) changed = true;
           continue;
         }
         // Blocked on the user (a permission, a question) rings at once; a finished turn only after real work.
-        const blocked = l.status === "waiting" && p?.status !== "waiting";
+        const blocked = status === "waiting" && p?.status !== "waiting";
         if ((blocked || p?.status === "busy" && now - p.since >= MIN_BUSY_MS) && !waiting.has(key)) {
           const d = describe(l.agent, l.id, l.cwd) || {};
           const w = { key, agent: l.agent, id: l.id, cwd: l.cwd, title: d.title || l.id.slice(0, 8), project: d.project || path.basename(l.cwd || ""), at: now };
@@ -54,7 +59,7 @@ function createNotifier({ liveSessions, describe, balloon, focus, quiet = () => 
           fresh.push(w);
           changed = true;
         }
-        if (p?.status !== l.status) prev.set(key, { status: l.status, since: now });
+        if (p?.status !== status) prev.set(key, { status, since: now });
       }
       for (const k of [...prev.keys()]) if (!seen.has(k)) prev.delete(k);
       for (const k of [...waiting.keys()]) if (!seen.has(k)) { waiting.delete(k); changed = true; }

@@ -31,7 +31,7 @@ app.whenReady().then(async () => {
   const menu = 'let groupMenu = null, menuLayers = [];\n' + renderer.slice(renderer.indexOf('function openMenu('), renderer.indexOf('// ---------- projects: drag'));
   let html = fs.readFileSync(path.join(src, 'index.html'), 'utf8').replace(/<script[\s\S]*?<\/script>/g, '')
     .replace('<head>', `<head><base href="${pathToFileURL(src + path.sep).href}">`);
-  html = html.replace('</body>', script('i18n.js') + script('common.js') + script('git-ui.js') + fixture('data.js', `
+  html = html.replace('</body>', script('i18n.js') + script('shared/live-status.js') + script('common.js') + script('git-ui.js') + fixture('data.js', `
     let data={projects:[{n:'demo',path:'C:/work/agentdeck'}]}, ws={spaces:{demo:{tabs:['demo']}},tabs:{demo:{}},terminals:[]}, nodes=[];
     git={repos:{demo:{root:'C:/work/agentdeck',branch:'feature/git',at:Date.now(),staged:1,unstaged:2,untracked:1,conflicts:0,ahead:0,behind:0,fileCount:4,files:[{path:'package.json',status:'M.'},{path:'README.md',status:'.M'},{path:'src/git-panel.js',status:'.M'},{path:'scripts/new-test.js',status:'??'}]}}};
     let fixtureDetails={status:git.repos.demo,branches:['main','feature/git'],remotes:['origin','backup'],operation:'',worktrees:[]};

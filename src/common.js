@@ -159,7 +159,8 @@ window.addEventListener("blur", hideTip);
 const sessionKey = s => `${s.node ? `node:${s.node}:` : ""}${s.agent}:${s.id}`;
 const STALE_MS = 10 * 60 * 1000;
 const lastSign = l => Math.max(l.activityAt || 0, l.statusAt || 0);
-const isStale = l => l.status === "busy" && Date.now() - lastSign(l) > STALE_MS;
+// The state everywhere below is liveStatus(l) (shared/live-status.js): idle with a subagent still working is busy.
+const isStale = l => liveStatus(l) === "busy" && Date.now() - lastSign(l) > STALE_MS;
 // A session AgentDeck has just opened loads until its new process waits for the user; an entry older than the launch
 // (the terminal it was moved from) does not count, and "running" (registered, no status yet) is still starting.
 const LOADING_MAX_MS = 120000;
@@ -187,12 +188,13 @@ function getLiveRank(l) {
   if (isStale(l)) {
     return 2;
   }
-  return LIVE_RANKS[l.status] ?? 3;
+  return LIVE_RANKS[liveStatus(l)] ?? 3;
 }
 // The group a running session is counted and drawn in: busy, waiting (on the user) or idle (anything else).
 function getLiveGroup(l) {
-  if (l.status === "busy" || l.status === "waiting") {
-    return l.status;
+  const status = liveStatus(l);
+  if (status === "busy" || status === "waiting") {
+    return status;
   }
   return "idle";
 }
@@ -205,8 +207,9 @@ function countLiveGroups(states) {
 }
 // The state as drawn: busy, waiting, idle, or other for a status this version does not know.
 function getLiveKind(l) {
-  if (l.status === "busy" || l.status === "waiting" || l.status === "idle") {
-    return l.status;
+  const status = liveStatus(l);
+  if (status === "busy" || status === "waiting" || status === "idle") {
+    return status;
   }
   return "other";
 }
@@ -223,8 +226,9 @@ function shortAgo(ms) {
   return t("time.short.hour", { n: Math.round(s / 3600) });
 }
 function liveText(l) {
-  if (l.status === "busy") return t(isStale(l) ? "live.staleFor" : "live.busyFor", { t: shortAgo(lastSign(l)) });
-  if (l.status === "idle" || l.status === "waiting") return t("live.idleFor", { t: shortAgo(lastSign(l)) });
+  const status = liveStatus(l);
+  if (status === "busy") return t(isStale(l) ? "live.staleFor" : "live.busyFor", { t: shortAgo(lastSign(l)) });
+  if (status === "idle" || status === "waiting") return t("live.idleFor", { t: shortAgo(lastSign(l)) });
   return "";
 }
 // A running session's state as one small mark (the words are in its tooltip): a spinner while it works, a red dot
@@ -354,7 +358,7 @@ function getSessionGroup(s, l) {
   if (isLoading(sessionKey(s), l)) return t("manager.group.working");
   if (!l) return dayGroup(s.updatedAt);
   if (l.status === "waiting") return t("manager.group.needs");
-  return l.status === "busy" ? t("manager.group.working") : t("manager.group.ready");
+  return liveStatus(l) === "busy" ? t("manager.group.working") : t("manager.group.ready");
 }
 // The agent as a small plain glyph in its colour; its name in the tooltip.
 const agentMark = agent => `<span class="agent-mark" title="${esc(agent)}">${icon(`agent${agent}`)}</span>`;

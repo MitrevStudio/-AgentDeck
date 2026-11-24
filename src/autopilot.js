@@ -1,6 +1,8 @@
 // Big Claude Code sessions in AgentDeck tabs: once the context passes the threshold, right after a finished turn
 // (the cache still warm) and with nothing typed since, `/remember:remember` and then `/compact` are typed in. Not
 // again until the context fell below the threshold.
+const { liveStatus } = require("./shared/live-status");
+
 const POLL_MS = 5000;
 const QUIET_AFTER_TURN_MS = 15000;
 // A command that does not get the session working within this time is taken as not available, and skipped.
@@ -60,8 +62,9 @@ function createAutopilot({ terminals, liveSessions, getContext, getPrefs, t }) {
       nextStep(tabId, run);
     }
   }
+  // Not while a subagent of it still works (liveStatus): its result is yet to come into this context.
   function isReadyToStart(tab, l, tokens, threshold) {
-    return l.status === "idle"
+    return liveStatus(l) === "idle"
       && !l.hasBackgroundShell
       && tokens >= threshold
       && !disarmed.has(tab.id)
