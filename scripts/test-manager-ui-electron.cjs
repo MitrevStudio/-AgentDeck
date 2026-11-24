@@ -49,7 +49,7 @@ const FIXTURE = `(() => {
   fx.nodes = [
     { id: 'node-a', name: 'StudioPc', kind: 'desktop', status: 'online', limits: limits(15), resources: stats('StudioPc'), live: [], git: {},
       data: { agents: ['Claude'], registry: { projects: [{ name: 'ClinicDesk', path: 'D:/src/clinicdesk' }] }, sessions: [] } },
-    { id: 'node-b', name: 'WSF0029727', kind: 'desktop', status: 'online', limits: limits(98), resources: stats('WSF0029727'), live: [], git: {}, data: { agents: ['Claude'], registry: { projects: [] }, sessions: [] } },
+    { id: 'node-b', name: 'WORK-02', kind: 'desktop', status: 'online', limits: limits(98), resources: stats('WORK-02'), live: [], git: {}, data: { agents: ['Claude'], registry: { projects: [] }, sessions: [] } },
     { id: 'node-c', name: 'agentdeck-relay', kind: 'host', status: 'offline', live: [], git: {} }
   ];
   fx.git = { dirs: { 'c:/work/agentdeck': 'r1', 'c:/work/docs': 'r2' }, repos: {
@@ -531,7 +531,7 @@ app.whenReady().then(async () => {
   // Pointing at a computer brings its card: every limit with a bar, then the computer's own figures.
   await evaluate("document.querySelector('#limits [data-card=node-b]').dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); 0"); await settle();
   assert.equal(await evaluate("document.querySelector('.machine-card').hidden"), false);
-  assert.equal(await evaluate("document.querySelector('.machine-card header b').textContent"), 'WSF0029727');
+  assert.equal(await evaluate("document.querySelector('.machine-card header b').textContent"), 'WORK-02');
   assert.equal(await evaluate("document.querySelectorAll('.machine-card .mc-part.claude .mc-row').length"), 2);
   assert.equal(await evaluate("document.querySelector('.machine-card .mc-row.danger .mc-v').textContent"), '98%');
   assert.equal(await evaluate("(() => { const r = document.querySelector('.machine-card').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.top >= 0; })()"), true, 'the card stays inside the window');
