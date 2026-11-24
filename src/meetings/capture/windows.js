@@ -114,11 +114,13 @@ function createWindows({ sourcesMs = SOURCES_MS, sizeOf = windowSize, ownerOf = 
   }
   async function captureOne(id) {
     const size = isWindowId(id) ? sizeOf(id) : null;
-    if (!size || (owners.has(id) && owner(id) !== owners.get(id))) return { id, code: "meetingsWindowMissing" };
+    // Whose it was when it was offered; the handle may pass to another process while the picture is waited for too.
+    const whose = owners.has(id) ? owners.get(id) : owner(id);
+    if (!size || owner(id) !== whose) return { id, code: "meetingsWindowMissing" };
     if (size.minimized) return { id, code: "meetingsWindowBlank" };
     const source = (await sources({ width: size.width, height: size.height })).find(s => s.id === id);
-    const image = source?.thumbnail, bgra = image && !image.isEmpty() ? image.toBitmap() : null;
-    if (!source) return { id, code: "meetingsWindowMissing" };
+    if (!source || owner(id) !== whose) return { id, code: "meetingsWindowMissing" };
+    const image = source.thumbnail, bgra = image && !image.isEmpty() ? image.toBitmap() : null;
     if (!bgra || isBlank(bgra)) return { id, code: "meetingsWindowBlank" };
     return { id, ...image.getSize(), bgra };
   }

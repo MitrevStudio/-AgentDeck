@@ -835,6 +835,30 @@ test("a window that is closed or minimised fails its own picture, never the reco
   await w.settled();
 });
 
+test("a window that does not answer costs the pictures taken before it nothing", async () => {
+  const w = world({ shotsWaitMs: 300 });
+  const { meeting } = await w.start({ monitors: ["11"], windows: ["window:300:0", "window:200:0"] });
+  w.page().send(10);
+  const asked = [];
+  let answer;
+  w.captureWindows = ids => {
+    asked.push(ids);
+    if (ids[0] === "window:300:0") return ids.map(id => ({ id, width: 48, height: 30, bgra: picture({ width: 48, height: 30 }) }));
+    return new Promise(resolve => { answer = () => resolve(ids.map(id => ({ id, width: 48, height: 30, bgra: picture({ width: 48, height: 30 }) }))); });
+  };
+  const shot = w.recorder.screenshot();
+  await w.recorder.stop();
+  const kept = ["screens/00-00-01-m1.png", "screens/00-00-01-w1.png"];
+  assert.deepEqual((await w.read(meeting.id)).screens.map(s => s.file), kept, "saved before the window that hangs was waited for");
+  for (const file of kept) assert.ok(fs.existsSync(path.join(meeting.dir, file)), file);
+  answer();
+  const { screens, failed } = await shot;
+  assert.deepEqual([screens.map(s => s.file), failed], [kept, [{ window: 2, code: "meetingsScreenFailed" }]], "late, so only it is not written");
+  assert.deepEqual(asked, [["window:300:0"], ["window:200:0"]], "a window at a time");
+  assert.deepEqual((await w.read(meeting.id)).screens.map(s => s.file), kept);
+  await w.settled();
+});
+
 test("the windows: ours, the untitled and the minimised are not offered, each is asked for at its own size", async () => {
   const image = (width, height, { empty = false, black = false } = {}) => ({
     isEmpty: () => empty, getSize: () => ({ width, height }), toDataURL: () => "data:image/png;base64,AAAA",
@@ -881,6 +905,30 @@ test("the windows: ours, the untitled and the minimised are not offered, each is
   owners["window:200:0"] = 7;
   broken = true;
   assert.deepEqual((await reused.capture(["window:200:0", "window:500:0"])).map(g => g.code || g.width), ["meetingsScreenFailed", 20]);
+
+  // The handle passes to another process while the picture is waited for: what comes back is not the window chosen.
+  const hands = { "window:200:0": 7, "window:500:0": 9 };
+  let passes = false;
+  const passed = createWindows({
+    own: () => [], sizeOf: id => sizes[id] || null, ownerOf: id => hands[id] || 0,
+    sources: async size => {
+      if (passes && size.width === 60) hands["window:200:0"] = 8;
+      return open.map(source => ({ ...source, thumbnail: image(size.width, size.height) }));
+    }
+  });
+  await passed.list();
+  passes = true;
+  assert.deepEqual((await passed.capture(["window:200:0", "window:500:0"])).map(g => g.code || g.width), ["meetingsWindowMissing", 20]);
+  // One that was never offered is held to whose it was when its picture was asked for.
+  hands["window:200:0"] = 7;
+  const unlisted = createWindows({
+    own: () => [], sizeOf: id => sizes[id] || null, ownerOf: id => hands[id] || 0,
+    sources: async size => {
+      if (size.width === 60) hands["window:200:0"] = 8;
+      return open.map(source => ({ ...source, thumbnail: image(size.width, size.height) }));
+    }
+  });
+  assert.deepEqual((await unlisted.capture(["window:200:0", "window:500:0"])).map(g => g.code || g.width), ["meetingsWindowMissing", 20]);
 
   const never = createWindows({ own: () => [], sizeOf: () => ({ width: 8, height: 8 }), sourcesMs: 50, sources: () => new Promise(() => {}) });
   await assert.rejects(never.list(), /did not answer/);

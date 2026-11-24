@@ -36,13 +36,11 @@ async function pictures(capturer, sources) {
 // is written. Never rejects: -> { screens, failed }, failed: [{ monitor | window, code }].
 async function takeScreenshot({ store, displays, windows, project, id, monitors = [], chosen = [], atMs, taken, late = () => false }) {
   const screens = [], failed = [];
-  const taking = [...monitors, ...chosen];
-  const got = [...await pictures(displays, monitors), ...await pictures(windows, chosen)];
-  for (const [i, source] of taking.entries()) {
-    const picture = got[i], what = about(source), where = source.monitor ? { monitor: source.monitor } : { window: source.window };
+  async function save(source, picture) {
+    const what = about(source), where = source.monitor ? { monitor: source.monitor } : { window: source.window };
     if (!picture || picture.code || late()) {
       failed.push({ ...where, code: picture?.code || "meetingsScreenFailed" });
-      continue;
+      return;
     }
     try {
       const file = source.monitor ? screenName(atMs, source.monitor, taken) : screenName(atMs, source.window, taken, "w");
@@ -51,7 +49,7 @@ async function takeScreenshot({ store, displays, windows, project, id, monitors 
       if (late()) {
         taken.delete(file);
         failed.push({ ...where, code: "meetingsScreenFailed" });
-        continue;
+        return;
       }
       await store.write(project, id, file, png);
       await store.update(project, id, m => ({ screens: [...m.screens, screen].sort(byTime) }));
@@ -61,6 +59,11 @@ async function takeScreenshot({ store, displays, windows, project, id, monitors 
       failed.push({ ...where, code: error.code === "meetingsDiskFull" ? error.code : "meetingsScreenFailed" });
     }
   }
+  // Each picture is saved before the next is waited for: a window that does not answer costs the ones before it
+  // nothing, also when the recording ends meanwhile.
+  const shown = await pictures(displays, monitors);
+  for (const [i, source] of monitors.entries()) await save(source, shown[i]);
+  for (const source of chosen) await save(source, (await pictures(windows, [source]))[0]);
   return { screens, failed };
 }
 
