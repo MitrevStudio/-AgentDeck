@@ -109,7 +109,7 @@ replaceModule('recorder', {
     let cur = null, releaseThumbs = null;
     const status = () => (cur ? { phase: cur.phase, recording: {
       project: cur.project, id: cur.id, title: cur.title, startedAt: cur.startedAt, elapsedMs: cur.elapsedMs,
-      microphone: cur.microphone, monitors: cur.monitors, screens: cur.screens,
+      microphone: cur.microphone, monitors: cur.monitors, windows: cur.windows, screens: cur.screens,
       shortcut: { accelerator: getShortcut(), registered: true }, warnings: [...cur.warnings]
     } } : { phase: 'idle', recording: null });
     const changed = () => recorder.emit('status', status());
@@ -134,7 +134,8 @@ replaceModule('recorder', {
         fake.calls.push(['record', options]);
         const meeting = await store.create(options.project, { title: options.title, startedAt: Date.now(), state: 'recording' });
         cur = { phase: 'recording', project: options.project, id: meeting.id, title: meeting.title, startedAt: Date.now(), elapsedMs: 0,
-          microphone: { deviceId: options.microphone, label: 'Conference headset' }, monitors: options.monitors.map(id => DISPLAYS.find(d => d.id === id)), screens: 0, warnings: [] };
+          microphone: { deviceId: options.microphone, label: 'Conference headset' }, monitors: options.monitors.map(id => DISPLAYS.find(d => d.id === id)),
+          windows: (options.windows || []).map((id, i) => ({ id, window: i + 1, title: (fake.windows || []).find(w => w.id === id)?.title || '' })), screens: 0, warnings: [] };
         changed();
         return { meeting, status: status() };
       },
@@ -934,6 +935,19 @@ app.whenReady().then(async () => {
   const windowAsked = fake.calls.filter(call => call[0] === 'record').at(-1)[1];
   assert.deepEqual([windowAsked.monitors, windowAsked.windows], [[], ['window:4242:0']]);
   assert.equal(JSON.parse(await evaluate("localStorage.getItem('agentdeck.meetingRecording')")).windowsOnly, true, 'no monitor is ticked for it the next time');
+  // What is wrong with a window says which window, by its title; the title is text there too.
+  await evaluate("document.querySelectorAll('.toast-item').forEach(x => x.remove())");
+  fake.recorder.warn('meetingsWindowBlank', { window: 1 });
+  await waitFor("/gives no picture/.test($('toasts').textContent)", 'the warning of a window');
+  const named = 'Window \u201c<img src=x onerror=alert(1)> Weekly call\u201d: The window gives no picture';
+  assert.ok((await text('#toasts')).includes(named), await text('#toasts'));
+  assert.equal(await has('#toasts img'), false);
+  assert.ok((await evaluate("document.querySelector('.rec-warn').title")).includes(named), 'on the button');
+  await click('[data-rec=warnings]');
+  assert.ok((await text('.meetings-notes')).includes(named), 'in the list');
+  assert.equal(await has('.meetings-notes img'), false);
+  await key('Escape');
+  assert.match(await evaluate("meetingsIndicator.warningText({ code: 'meetingsWindowMissing', window: 2 })"), /^Window 2: /, 'a window without a title by its number');
   await click('[data-rec=discard]');
   await confirm(true);
   await waitFor("$('meetingRec').hidden", 'discarded');

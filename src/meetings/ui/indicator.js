@@ -3,6 +3,7 @@
 const meetingsIndicator = (() => {
   const { live, call, report, errorText, clock } = meetingsShared;
   const METER_FLOOR_DB = 60; // below it a meter is empty
+  const NAME_MAX = 60; // characters of a window's title in a warning
   const box = $("meetingRec");
 
   box.innerHTML = `<span class="rec-dot" aria-hidden="true"></span><b class="rec-state"></b><span class="rec-time" role="timer"></span><span class="rec-project"></span>
@@ -16,8 +17,15 @@ const meetingsIndicator = (() => {
   const meters = [...box.querySelectorAll(".rec-meter")];
   let elapsedMs = 0;
 
+  // A chosen window by the title it was chosen with, by its number when the recording that had it is over. The title
+  // is another program's text: what is returned is text, never markup, and whoever shows it escapes it.
+  function windowName(number) {
+    const title = Array.from(live.status.recording?.windows?.find(shown => shown.window === number)?.title || "");
+    if (!title.length) return t("meetings.window", { n: number });
+    return t("meetings.windowNamed", { name: title.length > NAME_MAX ? `${title.slice(0, NAME_MAX).join("")}…` : title.join("") });
+  }
   function warningText({ code, monitor, window: chosen }) {
-    if (chosen) return `${t("meetings.window", { n: chosen })}: ${errorText(code)}`;
+    if (chosen) return `${windowName(chosen)}: ${errorText(code)}`;
     return monitor ? `${t("meetings.monitor", { n: monitor })}: ${errorText(code)}` : errorText(code);
   }
   function label(button, text) {
