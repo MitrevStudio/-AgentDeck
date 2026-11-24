@@ -2,7 +2,7 @@
 // another covers it, and not at all while it is minimised. The pixels go to whoever asked and nowhere else.
 // Windows only; koffi loads on first use.
 const { HIDDEN } = require("../text");
-const { isBlank } = require("./displays");
+const { sourcesWithin, bySize, pixelsOf } = require("./displays");
 
 const THUMBNAIL = { width: 320, height: 200 };
 const NO_PICTURE = { width: 0, height: 0 };
@@ -62,10 +62,7 @@ const titleOf = source => Array.from(String(source.name || "").replace(HIDDEN, "
 // The rest of the options: for tests.
 function createWindows({ sourcesMs = SOURCES_MS, sizeOf = windowSize, ownerOf = sizeOf === windowSize ? windowOwner : () => 0, own = ownWindows, sources: read } = {}) {
   const getSources = read || (thumbnailSize => require("electron").desktopCapturer.getSources({ types: ["window"], thumbnailSize }));
-  const sources = thumbnailSize => new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("the windows did not answer")), sourcesMs);
-    Promise.resolve().then(() => getSources(thumbnailSize)).then(resolve, reject).finally(() => clearTimeout(timer));
-  });
+  const sources = thumbnailSize => sourcesWithin(getSources, thumbnailSize, sourcesMs, "windows");
 
   // A minimised window gives no picture, so it is not offered; one whose size cannot be asked for is.
   function owner(id) {
@@ -96,32 +93,60 @@ function createWindows({ sourcesMs = SOURCES_MS, sizeOf = windowSize, ownerOf = 
       }));
   }
 
-  // chosen: [{ id, owner }], the owner as list() gave it when the window was chosen. -> for each: { id, width, height,
-  // bgra } or { id, code }. A window at a time: a thumbnail is scaled to fit the box that was asked for, so each is
-  // asked for at its own size. What one window fails with is its own.
-  async function capture(chosen) {
-    const results = [];
+  // chosen: [{ id, owner }], the owner as list() gave it when the window was chosen; nothing here remembers it, so no
+  // later list() can loosen it. Yields for each, as it is known, { id, width, height, bgra } or { id, code }.
+  //
+  // An enumeration brings every open window at the one size it was asked for, so the windows of a press are asked for
+  // a size at a time (bySize): once when they share one. What can be said without a picture is said first. Whoever
+  // reads this is handed a size's pictures before the next size is asked for, so what has come is never held back by
+  // what has not. A size that fails fails alone; after one that did not answer no other is asked for, so a press
+  // waits for at most one unanswered enumeration (sourcesMs).
+  //
+  // A handle is the chosen window only in its owner's hands: before the picture is asked for, and again when it has
+  // come, as the handle may pass on while it is waited for.
+  async function* capture(chosen) {
+    const taken = [];
     for (const { id, owner: whose } of chosen) {
+      let size = null;
       try {
-        results.push(await captureOne(id, whose));
+        size = isWindowId(id) ? sizeOf(id) : null;
       } catch (error) {
         console.error("A window could not be taken:", error.message);
-        results.push({ id, code: "meetingsScreenFailed" });
+        yield { id, code: "meetingsScreenFailed" };
+        continue;
+      }
+      if (!size || owner(id) !== whose) yield { id, code: "meetingsWindowMissing" };
+      else if (size.minimized) yield { id, code: "meetingsWindowBlank" };
+      else taken.push({ id, whose, width: size.width, height: size.height });
+    }
+    let unanswered = false;
+    for (const group of bySize(taken)) {
+      let found = null;
+      if (!unanswered) {
+        try {
+          found = await sources({ width: group[0].width, height: group[0].height });
+        } catch (error) {
+          console.error("Windows could not be taken:", error.message);
+          unanswered = error.unanswered === true;
+        }
+      }
+      // Whose each is, all of them now: the next one is only come to when this one's picture is saved.
+      const theirs = found ? group.map(({ id, whose }) => (owner(id) === whose ? found.find(s => s.id === id) : null)) : [];
+      for (const [i, { id }] of group.entries()) {
+        if (!found) yield { id, code: "meetingsScreenFailed" };
+        else if (!theirs[i]) yield { id, code: "meetingsWindowMissing" };
+        else yield pictured(id, theirs[i].thumbnail);
       }
     }
-    return results;
   }
-  // whose: nothing here remembers it, so no later list() can loosen it. A handle is the chosen window only in that
-  // process's hands, before the picture is asked for and again once it came: it may pass on while it is waited for.
-  async function captureOne(id, whose) {
-    const size = isWindowId(id) ? sizeOf(id) : null;
-    if (!size || owner(id) !== whose) return { id, code: "meetingsWindowMissing" };
-    if (size.minimized) return { id, code: "meetingsWindowBlank" };
-    const source = (await sources({ width: size.width, height: size.height })).find(s => s.id === id);
-    if (!source || owner(id) !== whose) return { id, code: "meetingsWindowMissing" };
-    const image = source.thumbnail, bgra = image && !image.isEmpty() ? image.toBitmap() : null;
-    if (!bgra || isBlank(bgra)) return { id, code: "meetingsWindowBlank" };
-    return { id, ...image.getSize(), bgra };
+  function pictured(id, image) {
+    try {
+      const picture = pixelsOf(image);
+      return picture ? { id, ...picture } : { id, code: "meetingsWindowBlank" };
+    } catch (error) {
+      console.error("A window could not be taken:", error.message);
+      return { id, code: "meetingsScreenFailed" };
+    }
   }
   return { list, capture };
 }

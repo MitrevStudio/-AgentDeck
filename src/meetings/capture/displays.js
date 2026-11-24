@@ -35,6 +35,31 @@ function isBlank(bgra) {
   return true;
 }
 
+// One enumeration by desktopCapturer, given up after ms: read(thumbnailSize) -> its sources. The error of one that
+// did not answer says so (unanswered).
+function sourcesWithin(read, thumbnailSize, ms, what) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(Object.assign(new Error(`the ${what} did not answer`), { unanswered: true })), ms);
+    Promise.resolve().then(() => read(thumbnailSize)).then(resolve, reject).finally(() => clearTimeout(timer));
+  });
+}
+// A thumbnail is scaled to fit the box that was asked for, up as well as down, so a picture is exact only when it is
+// asked for at its own size. What shares a size shares one enumeration: -> [[{ width, height, ... }]].
+function bySize(items) {
+  const groups = new Map();
+  for (const item of items) {
+    const size = `${item.width}x${item.height}`;
+    if (!groups.has(size)) groups.set(size, []);
+    groups.get(size).push(item);
+  }
+  return [...groups.values()];
+}
+// -> { width, height, bgra }, null for no picture or a black one.
+function pixelsOf(image) {
+  const bgra = image && !image.isEmpty() ? image.toBitmap() : null;
+  return !bgra || isBlank(bgra) ? null : { ...image.getSize(), bgra };
+}
+
 // sourcesMs: for tests.
 function createDisplays({ sourcesMs = SOURCES_MS } = {}) {
   function current() {
@@ -43,13 +68,8 @@ function createDisplays({ sourcesMs = SOURCES_MS } = {}) {
     const at = m => screen.getDisplayNearestPoint(screen.screenToDipPoint({ x: m.x + Math.floor(m.width / 2), y: m.y + Math.floor(m.height / 2) }));
     return matchDisplays(listMonitors(), screen.getAllDisplays(), at).map(d => ({ ...d, primary: d.id === primary }));
   }
-  const getSources = thumbnailSize => new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("the screens did not answer")), sourcesMs);
-    Promise.resolve()
-      .then(() => require("electron").desktopCapturer.getSources({ types: ["screen"], thumbnailSize }))
-      .then(resolve, reject)
-      .finally(() => clearTimeout(timer));
-  });
+  const read = thumbnailSize => require("electron").desktopCapturer.getSources({ types: ["screen"], thumbnailSize });
+  const getSources = thumbnailSize => sourcesWithin(read, thumbnailSize, sourcesMs, "screens");
 
   async function list({ thumbnails = false } = {}) {
     const displays = current();
@@ -61,26 +81,19 @@ function createDisplays({ sourcesMs = SOURCES_MS } = {}) {
     });
   }
 
-  // -> for each id: { id, width, height, bgra } or { id, code }. A size at a time: a thumbnail is scaled to fit the
-  // box that was asked for, up as well as down.
+  // -> for each id: { id, width, height, bgra } or { id, code }. A size at a time (bySize).
   async function capture(ids) {
-    const displays = current(), results = new Map(), bySize = new Map();
+    const displays = current(), results = new Map(), connected = [];
     for (const id of ids) {
       const display = displays.find(d => d.id === id);
-      if (!display) {
-        results.set(id, { id, code: "meetingsScreenMissing" });
-        continue;
-      }
-      const size = `${display.width}x${display.height}`;
-      if (!bySize.has(size)) bySize.set(size, []);
-      bySize.get(size).push(display);
+      if (display) connected.push(display);
+      else results.set(id, { id, code: "meetingsScreenMissing" });
     }
-    for (const group of bySize.values()) {
+    for (const group of bySize(connected)) {
       const sources = await getSources({ width: group[0].width, height: group[0].height });
       for (const display of group) {
-        const image = sourceOf(sources, display)?.thumbnail, id = display.id;
-        const bgra = image && !image.isEmpty() ? image.toBitmap() : null;
-        results.set(id, !bgra || isBlank(bgra) ? { id, code: "meetingsScreenBlank" } : { id, ...image.getSize(), bgra });
+        const id = display.id, picture = pixelsOf(sourceOf(sources, display)?.thumbnail);
+        results.set(id, picture ? { id, ...picture } : { id, code: "meetingsScreenBlank" });
       }
     }
     return ids.map(id => results.get(id));
@@ -88,4 +101,4 @@ function createDisplays({ sourcesMs = SOURCES_MS } = {}) {
   return { list, capture };
 }
 
-module.exports = { createDisplays, matchDisplays, sourceOf, isBlank };
+module.exports = { createDisplays, matchDisplays, sourceOf, isBlank, sourcesWithin, bySize, pixelsOf };

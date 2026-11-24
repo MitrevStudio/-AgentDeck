@@ -15,26 +15,27 @@ function screenName(atMs, number, taken, kind = "m") {
 
 // A monitor before a window, each by its number.
 const order = screen => (screen.monitor ?? 1000 + screen.window);
-const byTime = (a, b) => a.atMs - b.atMs || order(a) - order(b);
+const bySource = (a, b) => order(a) - order(b);
+const byTime = (a, b) => a.atMs - b.atMs || bySource(a, b);
 
 // What one source is in meeting.json.
 const about = ({ monitor, window, title }) => (monitor ? { monitor } : { window, title });
 
-// One kind's pictures: -> for each source a picture or { code }. Never rejects. ask(source): what the capturer takes
-// for it.
-async function pictures(capturer, sources, ask) {
-  if (!sources.length) return [];
+// The monitors' pictures: -> for each a picture or { code }. Never rejects.
+async function pictures(displays, monitors) {
+  if (!monitors.length) return [];
   try {
-    return await capturer.capture(sources.map(ask));
+    return await displays.capture(monitors.map(source => source.id));
   } catch (error) {
     console.error("A screenshot could not be taken:", error);
-    return sources.map(() => ({ code: "meetingsScreenFailed" }));
+    return monitors.map(() => ({ code: "meetingsScreenFailed" }));
   }
 }
 
-// monitors: [{ id, monitor }] for displays (displays.js); chosen: [{ id, window, title, owner }] for windows (windows.js);
-// taken: the names this recording has used; late() -> true once the recording was saved without it, and nothing more
-// is written. Never rejects: -> { screens, failed }, failed: [{ monitor | window, code }].
+// monitors: [{ id, monitor }] for displays (displays.js); chosen: [{ id, window, title, owner }] for windows
+// (windows.js); taken: the names this recording has used; late() -> true once the recording was saved without it, and
+// nothing more is written. Never rejects: -> { screens, failed }, failed: [{ monitor | window, code }], both in the
+// sources' order.
 async function takeScreenshot({ store, displays, windows, project, id, monitors = [], chosen = [], atMs, taken, late = () => false }) {
   const screens = [], failed = [];
   async function save(source, picture) {
@@ -60,12 +61,25 @@ async function takeScreenshot({ store, displays, windows, project, id, monitors 
       failed.push({ ...where, code: error.code === "meetingsDiskFull" ? error.code : "meetingsScreenFailed" });
     }
   }
-  // Each picture is saved before the next is waited for: a window that does not answer costs the ones before it
-  // nothing, also when the recording ends meanwhile.
-  const shown = await pictures(displays, monitors, source => source.id);
+  // The monitors come together, the windows as windows.js yields them, a size at a time. A picture that has come is
+  // saved before anything more is waited for: windows that do not answer cost the pictures before them nothing, also
+  // when the recording ends meanwhile, and then nothing more is asked for.
+  const shown = await pictures(displays, monitors);
   for (const [i, source] of monitors.entries()) await save(source, shown[i]);
-  for (const source of chosen) await save(source, (await pictures(windows, [source], ({ id, owner }) => ({ id, owner })))[0]);
-  return { screens, failed };
+  const waiting = [...chosen];
+  try {
+    if (waiting.length) {
+      for await (const picture of windows.capture(chosen.map(({ id, owner }) => ({ id, owner })))) {
+        const at = waiting.findIndex(source => source.id === picture?.id);
+        if (at >= 0) await save(waiting.splice(at, 1)[0], picture);
+        if (late()) break;
+      }
+    }
+  } catch (error) {
+    console.error("A screenshot could not be taken:", error);
+  }
+  for (const source of waiting) await save(source, null);
+  return { screens: screens.sort(bySource), failed: failed.sort(bySource) };
 }
 
 module.exports = { screenName, takeScreenshot, byTime };
