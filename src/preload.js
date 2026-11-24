@@ -133,6 +133,7 @@ contextBridge.exposeInMainWorld("meetings", {
   list: project => ipcRenderer.invoke("meetings:list", project),
   sizes: project => ipcRenderer.invoke("meetings:sizes", project),
   devices: opts => ipcRenderer.invoke("meetings:devices", opts),
+  windows: () => ipcRenderer.invoke("meetings:windows"),
   start: (project, opts) => ipcRenderer.invoke("meetings:start", project, opts),
   stop: () => ipcRenderer.invoke("meetings:stop"),
   discard: () => ipcRenderer.invoke("meetings:discard"),

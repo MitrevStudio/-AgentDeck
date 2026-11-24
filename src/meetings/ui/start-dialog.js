@@ -81,10 +81,11 @@ const meetingsStart = (() => {
         || `<p class="modal-note">${esc(t("meetings.start.noWindows"))}</p>`;
       renderGo();
     }
-    // Asked for again whenever this window is come back to: the call's window may have been opened meanwhile.
+    // Asked for again whenever this window is come back to: the call's window may have been opened meanwhile. Only
+    // the windows: the microphones and the monitors are as they were listed.
     async function refreshWindows() {
       const mine = ++listing;
-      const { windows } = await call("devices", { thumbnails: true });
+      const windows = await call("windows");
       if (d.open && mine === listing) showWindows(windows || []);
     }
     function fail(error) {

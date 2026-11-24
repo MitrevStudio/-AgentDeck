@@ -117,12 +117,17 @@ replaceModule('recorder', {
       status,
       capabilities: () => fake.capabilities,
       async devices({ thumbnails }) {
+        fake.calls.push(['devices', thumbnails]);
         if (thumbnails) await new Promise(resolve => { releaseThumbs = resolve; });
         return {
           microphones: [{ deviceId: 'default', label: 'Default - Desk microphone', isDefault: true }, { deviceId: 'desk', label: 'Desk microphone', isDefault: false }, { deviceId: 'headset', label: 'Conference headset', isDefault: false }],
           displays: DISPLAYS.map((d, i) => ({ ...d, thumbnail: thumbnails ? `data:image/png;base64,${picture(320, 200, i * 60).toString('base64')}` : null })),
           windows: (fake.windows || []).map(w => ({ ...w, thumbnail: null }))
         };
+      },
+      async windows() {
+        fake.calls.push(['windows']);
+        return (fake.windows || []).map(w => ({ ...w, thumbnail: null }));
       },
       showThumbnails: () => { releaseThumbs?.(); releaseThumbs = null; },
       async start(options) {
@@ -886,6 +891,12 @@ app.whenReady().then(async () => {
   await waitFor("document.querySelectorAll('.meeting-start [data-part=monitors] .mr-thumb img').length === 2", 'the pictures, and the windows again');
   assert.equal(await has('.meeting-start .mr-window img'), false, 'a title is text, and no picture is one');
   assert.match(await text('.meeting-start .mr-window'), /<img src=x onerror=alert\(1\)> Weekly call/);
+  // Come back to: the windows are read again, and nothing else is.
+  const devicesAsked = calls('devices').length;
+  fake.windows = [...fake.windows, { id: 'window:4343:0', title: 'Notes' }];
+  await evaluate("window.dispatchEvent(new Event('focus'))");
+  await waitFor("document.querySelectorAll('.meeting-start .mr-window').length === 2", 'the window opened meanwhile');
+  assert.deepEqual([calls('devices').length - devicesAsked, calls('windows').length], [0, 1], 'the windows alone, once');
   await click('.meeting-start [data-part=monitors] input[value="11"]');
   await click('.meeting-start [data-part=monitors] input[value="22"]');
   assert.equal(await evaluate("document.querySelector('.meeting-start [data-part=go]').disabled"), true, 'nothing to take a picture of');
@@ -915,8 +926,8 @@ app.whenReady().then(async () => {
   step('refusals');
   stranger = new BrowserWindow(options);
   await stranger.loadFile(page);
-  const refused = await stranger.webContents.executeJavaScript("Promise.all([window.meetings.list('C:/work/sample-shop'), window.meetings.start('C:/work/sample-shop', { monitors: ['11'], microphone: 'default' }), window.meetings.state()])");
-  assert.deepEqual(refused.map(answer => [answer.ok, answer.code]), [[false, 'accessDenied'], [false, 'accessDenied'], [false, 'accessDenied']], 'the manager window only');
+  const refused = await stranger.webContents.executeJavaScript("Promise.all([window.meetings.list('C:/work/sample-shop'), window.meetings.start('C:/work/sample-shop', { monitors: ['11'], microphone: 'default' }), window.meetings.state(), window.meetings.devices({}), window.meetings.windows()])");
+  assert.deepEqual(refused.map(answer => [answer.ok, answer.code]), Array(5).fill([false, 'accessDenied']), 'the manager window only');
   stranger.destroy();
   const answer = code => evaluate(`window.meetings.${code}.then(a => (a.ok ? 'ok' : a.code))`);
   const shop = "'C:/work/sample-shop'", id = js(ids.recorded);

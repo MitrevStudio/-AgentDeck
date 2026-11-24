@@ -146,6 +146,8 @@ function registerIpc({ getWindow, use, project, placeOf, firstLook, prepareOnce,
     const { recorder } = use();
     return recorder.devices({ thumbnails: options?.thumbnails === true });
   });
+  // The open windows by themselves, for the start dialog to read again.
+  handle("windows", () => use().recorder.windows());
   handle("start", async (value, options) => {
     await use().recorder.start({ project: project(value), ...recordingOptions(options) });
     return true;

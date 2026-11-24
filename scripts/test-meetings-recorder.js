@@ -818,7 +818,11 @@ test("a chosen window is taken alone or beside the monitors, under its own name"
   // Whose the window was at the start goes with every press, whatever the dialog lists meanwhile; nobody is told it.
   w = world();
   await w.start({ monitors: [], windows: ["window:200:0"] });
-  assert.deepEqual((await w.recorder.devices()).windows, WINDOWS.map(({ id, title, thumbnail }) => ({ id, title, thumbnail })), "no owner for the dialog");
+  const offered = WINDOWS.map(({ id, title, thumbnail }) => ({ id, title, thumbnail }));
+  assert.deepEqual((await w.recorder.devices()).windows, offered, "no owner for the dialog");
+  const pages = w.pages.length;
+  assert.deepEqual([await w.recorder.windows(), w.pages.length - pages], [offered, 0], "the windows alone: no page for them, no owner either");
+  await rejects("meetingsWindowsOnly", world({ platform: "linux" }).recorder.windows());
   assert.equal(JSON.stringify(w.recorder.status()).includes("owner"), false);
   w.shown = [{ id: "window:200:0", title: "Another program", thumbnail: null, owner: 8 }];
   await w.recorder.devices();

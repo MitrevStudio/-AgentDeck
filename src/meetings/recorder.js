@@ -6,6 +6,7 @@
 //   devices({ thumbnails }) -> { microphones: [{ deviceId, label, isDefault }], displays: [{ id, monitor, label,
 //     primary, width, height, bounds, thumbnail }], windows: [{ id, title, thumbnail }] }: physical pixels, bounds in
 //     DIP; the windows that are open now, without our own.
+//   windows() -> [{ id, title, thumbnail }]: the same windows by themselves, with their pictures.
 //   start({ project, title, microphone, monitors, windows }) -> { meeting, status }: microphone a deviceId, monitors
 //     display ids, windows window ids, at least one of the two. The meeting exists from here on, in the state
 //     "recording".
@@ -366,10 +367,17 @@ function createMeetingRecorder({
         return [];
       });
       const [microphones, screens, shown] = await Promise.all([page.call("list"), displays.list({ thumbnails }), open]);
-      return { microphones, displays: screens, windows: shown.map(({ id, title, thumbnail }) => ({ id, title, thumbnail })) };
+      return { microphones, displays: screens, windows: shown.map(offered) };
     } finally {
       page.close();
     }
+  }
+  // A window as it is offered: whose it is stays here.
+  const offered = ({ id, title, thumbnail }) => ({ id, title, thumbnail });
+  // The windows alone, with their pictures: no page is opened and no microphone or monitor is asked for them.
+  async function openWindows() {
+    if (!supported) fail("meetingsWindowsOnly");
+    return (await windows.list({ thumbnails: true })).map(offered);
   }
 
   async function release(project, id) {
@@ -387,7 +395,7 @@ function createMeetingRecorder({
 
   return Object.assign(recorder, {
     capabilities, status,
-    devices: api(devices), start: api(start), stop: api(stop), discard: api(discard), screenshot: api(screenshot),
+    devices: api(devices), windows: api(openWindows), start: api(start), stop: api(stop), discard: api(discard), screenshot: api(screenshot),
     recoverable: api(recovery.list), recover: api(recovery.recover), discardRecoverable: api(recovery.discard),
     release: api(release), shutdown
   });
