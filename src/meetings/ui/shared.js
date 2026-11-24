@@ -7,7 +7,7 @@ const meetingsShared = (() => {
   const SETTINGS_CODES = ["meetingsNoKey", "meetingsKeyRefused", "meetingsModelMissing", "meetingsModelUnsuitable"];
 
   const live = {
-    capabilities: { supported: false, code: null, ownAudioExcluded: true },
+    capabilities: { supported: false, code: null },
     status: { phase: "idle", recording: null },
     jobs: new Map(),         // key -> { step, done, total, waitMs }
     compressions: new Map(), // key -> { done, total }

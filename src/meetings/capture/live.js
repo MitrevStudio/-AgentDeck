@@ -18,7 +18,7 @@ const LOST = { mic: "meetingsMicLost", system: "meetingsSystemLost" };
 const REFUSED = { mic: "meetingsMicUnavailable", system: "meetingsSystemUnavailable" };
 
 // openPage: capture-page.js's. warn(code, active, channel), onLevels({ elapsedMs, mic, system }), onMicrophone(device).
-function createLive({ openPage, deviceId, excludeOwn, warn, onLevels, onMicrophone, now = () => performance.now() }) {
+function createLive({ openPage, deviceId, warn, onLevels, onMicrophone, now = () => performance.now() }) {
   let page = null, sink = null, timer = null;
   let lastAt = 0, triedAt = 0, tickAt = 0;
   let gap = false, restarting = false, closed = false;
@@ -85,7 +85,7 @@ function createLive({ openPage, deviceId, excludeOwn, warn, onLevels, onMicropho
     try {
       page?.close();
       const next = openNext();
-      const opened = await next.call("open", { deviceId, excludeOwn, resume: true });
+      const opened = await next.call("open", { deviceId, resume: true });
       if (closed) return;
       for (const channel of CHANNELS) setLost(channel, opened.lost.includes(channel));
       if (opened.microphone) onMicrophone(opened.microphone);
@@ -113,7 +113,7 @@ function createLive({ openPage, deviceId, excludeOwn, warn, onLevels, onMicropho
   async function open() {
     let opened;
     try {
-      opened = await openNext().call("open", { deviceId, excludeOwn });
+      opened = await openNext().call("open", { deviceId });
     } catch (error) {
       fail("meetingsCaptureFailed", error.message);
     }

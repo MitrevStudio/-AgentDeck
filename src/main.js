@@ -17,8 +17,6 @@ else if (fs.existsSync(formerProfile)) app.setPath("userData", formerProfile);
 const wayland = process.platform === "linux" && Boolean(process.env.WAYLAND_DISPLAY)
   && !/x11/i.test(app.commandLine.getSwitchValue("ozone-platform") || process.env.ELECTRON_OZONE_PLATFORM_HINT || "");
 if (wayland && !app.commandLine.hasSwitch("force-device-scale-factor")) app.commandLine.appendSwitch("force-device-scale-factor", "1");
-// Windows, before ready: our own playback stays out of a recorded meeting's system sound (meetings/capture/own-audio.js).
-require("./meetings/capture/own-audio").excludeOwnPlayback(app);
 const { terminalEnv } = require("./host/terminal-env");
 const { focusSession, allowForeground, terminalWindows, raiseNewTerminal } = require("./terminal-focus");
 const { createLog } = require("./shared/log-file");

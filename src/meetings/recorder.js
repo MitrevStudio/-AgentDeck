@@ -2,7 +2,7 @@
 // recording in the whole app, Windows only. The dictation has a window and a session of its own and is not touched.
 //
 //   createMeetingRecorder({ store, workDir, audio, getShortcut })   audio: audio.js; getShortcut() -> accelerator
-//   capabilities() -> { supported, code, ownAudioExcluded, longRecordingMs }
+//   capabilities() -> { supported, code, longRecordingMs }
 //   devices({ thumbnails }) -> { microphones: [{ deviceId, label, isDefault }], displays: [{ id, monitor, label,
 //     primary, width, height, bounds, thumbnail }], windows: [{ id, title, thumbnail }] }: physical pixels, bounds in
 //     DIP; the windows that are open now, without our own.
@@ -31,7 +31,6 @@ const { createDisplays } = require("./capture/displays");
 const { createWindows } = require("./capture/windows");
 const { takeScreenshot } = require("./capture/screenshot");
 const { DEFAULT_SHORTCUT, registerShortcut } = require("./capture/shortcut");
-const { canExclude } = require("./capture/own-audio");
 
 const LONG_RECORDING_MS = 4 * 60 * 60 * 1000;
 const DISK_CHECK_MS = 30_000;
@@ -63,7 +62,7 @@ function keepAwake() {
 // The rest of the options: for tests.
 function createMeetingRecorder({
   store, workDir, audio, getShortcut = () => DEFAULT_SHORTCUT,
-  platform = process.platform, excludeOwn = canExclude(),
+  platform = process.platform,
   openPage = options => require("./capture/capture-page").openCapturePage(options),
   displays = createDisplays(), windows = createWindows(), shortcuts = registerShortcut, awake = keepAwake, free = freeBytes, shotsWaitMs = SHOTS_WAIT_MS
 }) {
@@ -89,7 +88,7 @@ function createMeetingRecorder({
   };
 
   function capabilities() {
-    return { supported, code: supported ? null : "meetingsWindowsOnly", ownAudioExcluded: supported && excludeOwn, longRecordingMs: LONG_RECORDING_MS };
+    return { supported, code: supported ? null : "meetingsWindowsOnly", longRecordingMs: LONG_RECORDING_MS };
   }
 
   function status() {
@@ -101,7 +100,7 @@ function createMeetingRecorder({
         project: c.project, id: c.id, title: c.title, startedAt: c.startedAt, elapsedMs: c.endedMs ?? c.live?.elapsedMs() ?? 0,
         microphone: c.microphone, monitors: c.monitors.map(({ id, monitor, label }) => ({ id, monitor, label })),
         windows: c.windows.map(({ id, window, title }) => ({ id, window, title })),
-        screens: c.screens, ownAudioExcluded: excludeOwn,
+        screens: c.screens,
         shortcut: { accelerator: c.accelerator, registered: Boolean(c.shortcut) },
         warnings: [...c.warnings.values()]
       }
@@ -133,7 +132,7 @@ function createMeetingRecorder({
     c.windows = c.chosenWindows.map((id, i) => ({ id, window: i + 1, title: open.find(w => w.id === id).title }));
 
     c.live = createLive({
-      openPage, deviceId: c.deviceId, excludeOwn,
+      openPage, deviceId: c.deviceId,
       warn: (code, active, channel) => warn(c, code, active, channel ? { channel } : {}),
       onMicrophone: microphone => {
         if (cur !== c || (c.microphone?.deviceId === microphone.deviceId && c.microphone.label === microphone.label)) return;

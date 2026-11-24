@@ -75,7 +75,7 @@ function replaceModule(name, exports) {
   Object.assign(fake, { filename: file, loaded: true, exports });
   require.cache[file] = fake;
 }
-const fake = { calls: [], recorder: null, pipeline: null, audio: null, store: null, capabilities: { supported: true, code: null, ownAudioExcluded: true, longRecordingMs: 4 * 3600e3 }, left: [] };
+const fake = { calls: [], recorder: null, pipeline: null, audio: null, store: null, capabilities: { supported: true, code: null, longRecordingMs: 4 * 3600e3 }, left: [] };
 async function withSound(store, project, id) {
   for (const channel of ['mic', 'system']) await store.write(project, id, `audio/${channel}.webm`, SOUND);
   return store.update(project, id, { audio: { mic: 'audio/mic.webm', system: 'audio/system.webm' } });
@@ -109,7 +109,7 @@ replaceModule('recorder', {
     let cur = null, releaseThumbs = null;
     const status = () => (cur ? { phase: cur.phase, recording: {
       project: cur.project, id: cur.id, title: cur.title, startedAt: cur.startedAt, elapsedMs: cur.elapsedMs,
-      microphone: cur.microphone, monitors: cur.monitors, screens: cur.screens, ownAudioExcluded: true,
+      microphone: cur.microphone, monitors: cur.monitors, screens: cur.screens,
       shortcut: { accelerator: getShortcut(), registered: true }, warnings: [...cur.warnings]
     } } : { phase: 'idle', recording: null });
     const changed = () => recorder.emit('status', status());
@@ -546,7 +546,7 @@ app.whenReady().then(async () => {
   await waitFor("document.querySelectorAll('.meeting-start .mr-thumb img').length === 2", 'the pictures');
   assert.equal(await evaluate("[...document.querySelectorAll('.mr-monitor input:checked')].map(x => x.value).join()"), '11', 'the main one to begin with');
   assert.match(await text('.meeting-start [data-part=key]'), /Ctrl.*Shift.*F9/);
-  assert.equal(await has('.meeting-start [data-part=own]'), false);
+  assert.match(await text('.meeting-start [data-part=own]'), /default output.*AgentDeck's own sound/, 'what the sound of the computer is');
   assert.doesNotMatch(await text('.meeting-start'), /consent|participants|permission|notify/i, 'no reminder of any consent');
   await evaluate("document.querySelector('.meeting-start [data-part=title]').value = 'Roadmap sync'");
   await evaluate("(() => { const s = document.querySelector('.meeting-start [data-part=mic]'); s.value = 'headset'; })()");
@@ -902,21 +902,14 @@ app.whenReady().then(async () => {
   fake.windows = null;
   await evaluate(`localStorage.setItem('agentdeck.meetingRecording', ${JSON.stringify(choiceBefore)})`);
 
-  fake.capabilities = { ...fake.capabilities, ownAudioExcluded: false };
-  await openMenuList();
-  await pick('Record a meeting');
-  await waitFor("Boolean(document.querySelector('.meeting-start [data-part=own]')) && document.querySelectorAll('.mr-monitor').length === 2", 'the Windows 10 notice');
-  fake.recorder.showThumbnails();
-  await both('23-windows-10');
-  await closeDialogs();
-  fake.capabilities = { supported: false, code: 'meetingsWindowsOnly', ownAudioExcluded: false };
+  fake.capabilities = { supported: false, code: 'meetingsWindowsOnly' };
   await openMenuList();
   assert.deepEqual(await evaluate("[groupMenu.querySelector('button').disabled, groupMenu.querySelector('button').textContent.includes('Windows only')]"), [true, true], 'elsewhere only the recording is missing');
   await capture('24-not-windows-dark');
   await pick('Supplier call');
   await waitFor("Boolean(document.querySelector('.meeting-view .mt-line'))", 'reading works there');
   await closeDialogs();
-  fake.capabilities = { supported: true, code: null, ownAudioExcluded: true };
+  fake.capabilities = { supported: true, code: null, longRecordingMs: 4 * 3600e3 };
 
   // ---------- refusals ----------
   step('refusals');

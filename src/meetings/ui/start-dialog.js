@@ -58,7 +58,7 @@ const meetingsStart = (() => {
         <div class="mr-grid" data-part="windows"><p class="modal-note">${esc(t("meetings.loading"))}</p></div>
         <p class="modal-note">${esc(t("meetings.start.windowsHint"))}</p></fieldset>
       <p class="modal-note mr-key"><span>${esc(t("meetings.start.shortcut"))}</span><span data-part="key">${accelerator(live.shortcut)}</span><button type="button" class="mr-link" data-part="change">${esc(t("meetings.start.change"))}</button></p>
-      ${live.capabilities.ownAudioExcluded ? "" : `<p class="mr-notice warn" data-part="own">${icon("alert")}<span>${esc(t("meetings.start.ownAudio"))}</span></p>`}
+      <p class="mr-notice warn" data-part="own">${icon("alert")}<span>${esc(t("meetings.start.ownAudio"))}</span></p>
       <p class="modal-hint err" data-part="error" role="alert"></p>
       <div class="modal-actions">
         <button type="button" class="btn" data-part="cancel">${esc(t("common.cancel"))}</button>

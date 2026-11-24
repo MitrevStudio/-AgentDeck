@@ -49,7 +49,6 @@ const { matchDisplays, sourceOf, isBlank } = meetings("capture/displays");
 const { screenName } = meetings("capture/screenshot");
 const { createWindows, isWindowId } = meetings("capture/windows");
 const { encodePng } = meetings("capture/png");
-const { excludeOwnPlayback } = meetings("capture/own-audio");
 const { isScreen } = meetings("meeting");
 const { MESSAGES } = meetings("errors");
 const { workKey } = meetings("work");
@@ -144,7 +143,7 @@ function world(options = {}) {
   w.open = (extra = {}) => {
     const audio = createMeetingAudio({ store: w.store, workDir, withCodec });
     const recorder = createMeetingRecorder({
-      store: w.store, workDir, audio, platform: "win32", excludeOwn: true, openPage, displays, windows,
+      store: w.store, workDir, audio, platform: "win32", openPage, displays, windows,
       shortcuts: (accelerator, press) => {
         if (w.keys.refuse) return { code: "meetingsShortcutTaken" };
         w.pressed = press;
@@ -296,6 +295,8 @@ test("start, record, screenshots, stop, compressed, audio back", async () => {
   assert.deepEqual(status.recording.monitors, [{ id: "11", monitor: 1, label: "Left" }, { id: "22", monitor: 2, label: "Right" }]);
   assert.deepEqual(status.recording.shortcut, { accelerator: DEFAULT_SHORTCUT, registered: true });
   assert.deepEqual(status.recording.warnings, []);
+  assert.deepEqual(w.recorder.capabilities(), { supported: true, code: null, longRecordingMs: 4 * 3600e3 });
+  assert.deepEqual(w.page().calls[0], ["open", { deviceId: "default" }], "the microphone, and the default output's sound as it is");
   assert.deepEqual([w.keys.held, w.awake], [1, 1]);
   await rejects("meetingsAlreadyRecording", w.start());
   await rejects("meetingsStillRecording", w.audio.openAudio(w.project, meeting));
@@ -501,7 +502,7 @@ test("a held up main process is no dead page", async () => {
     opened++;
     return { call: async cmd => (cmd === "open" ? { microphone: null, lost: [] } : true), close() {} };
   };
-  const live = createLive({ openPage, deviceId: "default", excludeOwn: true, warn() {}, onLevels() {}, onMicrophone() {}, now: () => time });
+  const live = createLive({ openPage, deviceId: "default", warn() {}, onLevels() {}, onMicrophone() {}, now: () => time });
   await live.open();
   await live.begin({ frames: 0, silence() {}, append() {} });
   time += 4000; // what a blocked event loop looks like: the tick comes before the chunks that wait
@@ -516,7 +517,7 @@ test("a sleep owes no sound, a stalled page does", async () => {
     opened++;
     return { call: async cmd => (cmd === "open" ? { microphone: null, lost: [] } : true), close() {} };
   };
-  const live = createLive({ openPage, deviceId: "default", excludeOwn: true, warn() {}, onLevels() {}, onMicrophone() {}, now: () => time });
+  const live = createLive({ openPage, deviceId: "default", warn() {}, onLevels() {}, onMicrophone() {}, now: () => time });
   await live.open();
   await live.begin({ frames: 0, silence: n => { silence += n; }, append() {} });
   time += 8 * 3600 * 1000;
@@ -1018,14 +1019,6 @@ test("the capture session gives only sound, only to its pages", () => {
   assert.deepEqual(shows({}), { audio: "loopback" });
   assert.equal(shows({ videoRequested: true }), null, "no screen is captured");
   assert.equal(shows({ frame: {} }), null);
-});
-
-test("the switch keeps what is already switched off", () => {
-  let value = "SomeFeature,Other";
-  const app = { commandLine: { getSwitchValue: () => value, appendSwitch: (_name, v) => { value = v; } } };
-  excludeOwnPlayback(app);
-  excludeOwnPlayback(app);
-  assert.equal(value, process.platform === "win32" ? "SomeFeature,Other,RestrictOwnAudioAddChromiumBack" : "SomeFeature,Other");
 });
 
 test("every code has its texts in both languages", () => {

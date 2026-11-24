@@ -61,7 +61,6 @@ async function inElectron(role, temp) {
     app.setPath(name, path.join(profile, name));
   }
   app.commandLine.appendSwitch("use-fake-device-for-media-stream"); // a second lock on the real microphone
-  require(path.join(SRC, "meetings", "capture", "own-audio")).excludeOwnPlayback(app);
   app.on("window-all-closed", () => {});
 
   // The pipeline's network: a provider that says one line for every part that has sound.
@@ -91,7 +90,6 @@ async function inElectron(role, temp) {
   const { createDisplays } = meetings("capture/displays");
   const { openPage } = meetings("capture/hidden-page");
   const files = meetings("capture/recording-file");
-  const { canExclude } = meetings("capture/own-audio");
   const { workKey } = meetings("work");
   const pcm = meetings("pcm");
 
@@ -196,7 +194,6 @@ contextBridge.executeInMainWorld({ func: ${synthetic.toString()}, args: ${JSON.s
   }
 
   // ---------- role "main" ----------
-  assert.match(app.commandLine.getSwitchValue("disable-features"), /RestrictOwnAudioAddChromiumBack/);
   const offered = await recorder.devices({ thumbnails: false });
   assert.deepEqual(offered.microphones, [{ deviceId: "default", label: "Default - Synthetic microphone", isDefault: true }]);
   assert.equal(offered.displays.length, screen.getAllDisplays().length);
@@ -212,7 +209,7 @@ contextBridge.executeInMainWorld({ func: ${synthetic.toString()}, args: ${JSON.s
   const asked = await page.webContents.executeJavaScript("JSON.parse(JSON.stringify(window.synthetic.asked))");
   const raw = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
   assert.deepEqual(asked.find(a => a.channel === "mic").constraints.audio, { ...raw, channelCount: 1 });
-  assert.deepEqual(asked.find(a => a.channel === "system").constraints, { video: false, audio: canExclude() ? { ...raw, restrictOwnAudio: true } : raw });
+  assert.deepEqual(asked.find(a => a.channel === "system").constraints, { video: false, audio: raw });
   assert.equal(await page.webContents.executeJavaScript("typeof require"), "undefined", "sandboxed");
   say("ok   start: hidden, sandboxed, raw sound, no screen for the sound");
 
@@ -222,7 +219,7 @@ contextBridge.executeInMainWorld({ func: ${synthetic.toString()}, args: ${JSON.s
   await sleep(3000);
   assert.ok(levels().at(-1).mic > 0.2 && levels().at(-1).system > 0.2);
 
-  // The dictation, with the switch and beside the recording.
+  // The dictation, beside the recording.
   const dictation = require(path.join(SRC, "voice", "recorder")).createRecorder({ preloadPath: withStubs(path.join(SRC, "voice", "ui", "recorder-preload.js")) });
   const wav = path.join(temp, "dictation.wav");
   const before = levels().length;
@@ -236,21 +233,6 @@ contextBridge.executeInMainWorld({ func: ${synthetic.toString()}, args: ${JSON.s
   assert.ok(tones(body).slice(5, -2).every(t => Math.abs(t.mic - AMPLITUDE) < 0.05), "the dictation heard its microphone");
   assert.ok(levels().length - before >= 18, "and the recording went on");
   say("ok   dictation while recording", `${dictated.durationMs} ms`);
-
-  // Read aloud plays through a 24 kHz context; here without any sound.
-  const player = new BrowserWindow({ show: false, webPreferences: { sandbox: true, partition: "meetings-test-player" } });
-  await player.loadFile(path.join(SRC, "meetings", "capture", "codec.html"));
-  const played = await player.webContents.executeJavaScript(`(async () => {
-    const context = new AudioContext({ sampleRate: 24000, latencyHint: "playback" });
-    const source = new AudioBufferSourceNode(context, { buffer: context.createBuffer(1, 24000, 24000) });
-    source.connect(context.destination); source.start();
-    await context.resume();
-    await new Promise(done => setTimeout(done, 1500));
-    const at = context.currentTime; await context.close(); return at;
-  })()`);
-  player.destroy();
-  assert.ok(played > 0.5, `playback ran ${played} s`);
-  say("ok   read aloud's player runs with the switch", `${played.toFixed(2)} s`);
 
   const shot = await recorder.screenshot();
   assert.equal(shot.screens.length, offered.displays.length);

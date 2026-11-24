@@ -29,12 +29,10 @@ async function openMicrophone(deviceId, fallback) {
     return navigator.mediaDevices.getUserMedia({ audio });
   }
 }
-// video: false: no screen is captured for the sound.
-const openSystem = excludeOwn => navigator.mediaDevices.getDisplayMedia({
-  video: false, audio: excludeOwn ? { ...RAW, restrictOwnAudio: true } : RAW
-});
+// The default output's loopback. video: false: no screen is captured for the sound.
+const openSystem = () => navigator.mediaDevices.getDisplayMedia({ video: false, audio: RAW });
 
-const openChannel = (c, channel, fallback) => (channel === "mic" ? openMicrophone(c.deviceId, fallback) : openSystem(c.excludeOwn));
+const openChannel = (c, channel, fallback) => (channel === "mic" ? openMicrophone(c.deviceId, fallback) : openSystem());
 
 function connect(c, channel) {
   if (!c.node || !c.streams[channel]) return;
@@ -86,8 +84,8 @@ async function followed(c) {
   return {
     // A chosen microphone stays; the default is followed, as a stream stays on the device it was opened on.
     mic: VIRTUAL_IDS.has(c.deviceId) ? await labelOf("audioinput", c.deviceId) : "",
-    // Without process loopback the system sound is one output's, the default's of when it was opened.
-    system: c.excludeOwn ? "" : await labelOf("audiooutput", "default")
+    // The system sound is one output's, the default's of when it was opened.
+    system: await labelOf("audiooutput", "default")
   };
 }
 async function devicesChanged() {
@@ -110,9 +108,9 @@ async function release() {
 }
 
 // resume: in place of a page that died mid-recording, so one missing source does not hold back the other.
-async function open({ deviceId, excludeOwn, resume }) {
+async function open({ deviceId, resume }) {
   await release();
-  const c = { deviceId, excludeOwn, context: null, node: null, streams: {}, sources: {}, mending: {}, following: {}, retry: null, stopped: null };
+  const c = { deviceId, context: null, node: null, streams: {}, sources: {}, mending: {}, following: {}, retry: null, stopped: null };
   const opened = await Promise.allSettled(CHANNELS.map(channel => openChannel(c, channel, Boolean(resume))));
   const refused = opened.findIndex(r => r.status === "rejected");
   if (refused >= 0 && !resume) {
