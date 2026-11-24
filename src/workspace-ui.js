@@ -198,9 +198,14 @@ function isForeignSize(id) {
   const size = termViews.get(id)?.size;
   return Boolean(size && !size.mine && size.by && !getTerminal(id)?.legacy);
 }
-function fitTerm(id) {
+// dragging: a divider beside the pane is being dragged, and this is one of many fits on its way. The pane is drawn in
+// what fits it each time; the terminal itself (a pty, maybe on another computer) hears a size only when it changed, and
+// DRAG_TELL_MS apart at most. Answers true when a size is still to be told (fitWhileDragging comes again for it).
+const DRAG_TELL_MS = 100;
+function fitTerm(id, dragging = false) {
   const view = termViews.get(id);
-  if (!view || !view.host.isConnected || !view.host.offsetWidth) return;
+  if (!view || !view.host.isConnected || !view.host.offsetWidth) return false;
+  let owed = false;
   try {
     // What fits the pane itself: measured without the scrollbars it has while the size is another's (.sized), which
     // would make the want a cell short - and the terminal resized twice once this pane drives.
@@ -212,11 +217,18 @@ function fitTerm(id) {
       pane.classList.add("sized");
       if (scroll) [body.scrollLeft, body.scrollTop] = scroll;
     }
-    if (!want?.cols || !want?.rows) return;
-    window.terminals.resize(id, want.cols, want.rows);
+    if (!want?.cols || !want?.rows) return false;
+    const told = view.told, now = performance.now();
+    const changed = !told || told.cols !== want.cols || told.rows !== want.rows;
+    owed = dragging && changed && Boolean(told) && now - told.at < DRAG_TELL_MS;
+    if (!dragging || changed && !owed) {
+      window.terminals.resize(id, want.cols, want.rows);
+      view.told = { cols: want.cols, rows: want.rows, at: now };
+    }
     const size = isForeignSize(id) ? view.size : want;
     if (view.term.cols !== size.cols || view.term.rows !== size.rows) view.term.resize(size.cols, size.rows);
   } catch {}
+  return owed;
 }
 // The terminal drawn in the size it has to have now: another device's, or its pane's own - fitted again when it just
 // stopped being another's (or `refit`).
@@ -245,6 +257,20 @@ function takeSize(id) {
   window.terminals.takeSize(id).catch(e => toast(e.message, true));
 }
 const fitShown = () => document.querySelectorAll("#panes .pane[data-term]").forEach(el => fitTerm(el.dataset.term));
+// The panes of a split whose divider is being dragged, fitted as it moves: once a frame however often the pointer
+// reports (ask), and again while a pane still owes its terminal a size (fitTerm), so a pointer held still leaves none
+// behind. stop() when the divider is let go - the fit that follows there tells every size for good.
+function fitWhileDragging(split) {
+  let frame = 0;
+  const run = () => {
+    frame = 0;
+    let owed = false;
+    for (const el of split.querySelectorAll(".pane[data-term]")) owed = fitTerm(el.dataset.term, true) || owed;
+    if (owed) ask();
+  };
+  const ask = () => { frame ||= requestAnimationFrame(run); };
+  return { ask, stop() { cancelAnimationFrame(frame); frame = 0; } };
+}
 
 // ---------- keys ----------
 // Ctrl+Shift+1/2/3: a new session of that agent in the shown project (Alt as well: beside the focused pane). By
@@ -805,7 +831,8 @@ $("panes").addEventListener("click", e => {
   // A pane's buttons act on that pane: it is focused first.
   if (tab?.focus !== term) runWorkspace("focus", { term }).then(run); else run();
 });
-// Dragging a divider: the panes follow the pointer, main hears the new share once it is let go.
+// Dragging a divider: the panes follow the pointer and their terminals are fitted as it goes (fitWhileDragging); main
+// hears the new share once it is let go.
 $("panes").addEventListener("pointerdown", e => {
   const divider = e.target.closest(".divider");
   if (!divider) return;
@@ -813,16 +840,18 @@ $("panes").addEventListener("pointerdown", e => {
   const split = divider.parentElement;
   const across = split.classList.contains("right");
   const rect = split.getBoundingClientRect();
+  const fits = fitWhileDragging(split);
   let ratio = null; // the pointer's, once it moved
   divider.setPointerCapture(e.pointerId);
   split.classList.add("dragging");
   const move = ev => {
     ratio = Math.min(0.9, Math.max(0.1, across ? (ev.clientX - rect.left) / rect.width : (ev.clientY - rect.top) / rect.height));
-    setSplitRatio(split, ratio);
+    if (setSplitRatio(split, ratio)) fits.ask();
   };
   divider.addEventListener("pointermove", move);
   divider.addEventListener("lostpointercapture", () => {
     divider.removeEventListener("pointermove", move);
+    fits.stop();
     split.classList.remove("dragging");
     if (ratio === null) return; // a click: the split stays as it is
     fitShown();

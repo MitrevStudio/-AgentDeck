@@ -322,6 +322,38 @@ app.whenReady().then(async () => {
   assert.deepEqual(await evaluate("fx.wsCommands.filter(c => c.cmd === 'split').map(c => c.dir)"), ['right']);
   assert.equal(await evaluate("document.querySelectorAll('#panes .pane').length"), 2);
   assert.equal(await evaluate("document.querySelector('.pane[data-term=x1] .pane-title').textContent"), 'Polish the manager UI');
+  // The divider dragged (#27): the panes are fitted as it moves, before it is let go - x2 in what fits it now, x1 (in
+  // another device's size) only telling what fits it. A burst of moves does not tell the terminals a size each.
+  const colsOf = id => evaluate(`termViews.get('${id}').term.cols`);
+  const wantsOf = id => evaluate(`fx.resized.filter(r => r[0] === '${id}').map(r => r[1])`);
+  const x2Cols = await colsOf('x2');
+  await evaluate(`(() => {
+    const d = document.querySelector('#panes .divider'), r = d.parentElement.getBoundingClientRect();
+    window.dividerAt = share => d.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerId: 1, clientX: r.left + r.width * share, clientY: r.top + 50 }));
+    fx.resized.length = 0;
+    d.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerId: 1, clientX: r.left + r.width / 2, clientY: r.top + 50 }));
+    dividerAt(0.3);
+  })(); 0`);
+  await settle(80);
+  assert.equal(await evaluate("document.querySelector('#panes .split').classList.contains('dragging')"), true, 'still held');
+  assert.ok(await colsOf('x2') > x2Cols, 'the pane that grew is fitted while the divider is held');
+  assert.deepEqual(await wantsOf('x2'), [await colsOf('x2')], 'and its terminal is told that size, once');
+  assert.equal(await colsOf('x1'), 120, "a pane in another device's size keeps it");
+  assert.equal((await wantsOf('x1')).length, 1, 'and tells what fits it now');
+  // Twelve moves within a moment: drawn as they come, told at most a size every 100 ms - and the last one for sure,
+  // with the pointer held still.
+  await evaluate("fx.resized.length = 0; (async () => { for (let i = 1; i <= 12; i++) { dividerAt(0.3 + i * 0.02); await new Promise(r => requestAnimationFrame(r)); } })()");
+  assert.ok((await wantsOf('x2')).length <= 4, 'the terminal does not hear every step');
+  await settle(250);
+  assert.equal((await wantsOf('x2')).at(-1), await colsOf('x2'), 'the size it stopped at is told while the divider is still held');
+  assert.ok((await wantsOf('x2')).length <= 6);
+  // Let go at the middle again: main hears the share, and every pane is fitted and told for good.
+  await evaluate("fx.resized.length = 0; dividerAt(0.5); document.querySelector('#panes .divider').dispatchEvent(new PointerEvent('lostpointercapture', { pointerId: 1 })); 0");
+  await settle();
+  assert.deepEqual(await evaluate("fx.wsCommands.filter(c => c.cmd === 'ratio')"), [{ cmd: 'ratio', tab: 't1', path: await evaluate("document.querySelector('#panes .divider').dataset.path"), ratio: 0.5 }]);
+  assert.equal(await evaluate("document.querySelector('#panes .split').classList.contains('dragging')"), false);
+  assert.equal(await colsOf('x2'), x2Cols, 'back at half: the size it had');
+  assert.deepEqual([(await wantsOf('x1')).length, (await wantsOf('x2')).at(-1)], [1, x2Cols]);
   // The button of a pane that is not the focused one: focused first, then split.
   await click('.pane[data-term=x1] [data-ws=split-down]'); await settle(150);
   assert.deepEqual(await evaluate("fx.wsCommands.filter(c => c.cmd === 'split').map(c => c.dir)"), ['right', 'down']);
