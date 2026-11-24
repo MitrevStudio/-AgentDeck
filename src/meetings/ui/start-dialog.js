@@ -38,11 +38,18 @@ const meetingsStart = (() => {
   }
 
   const PICTURE = /^data:image\/(png|jpeg);base64,[\w+/=]+$/;
-  function windowHtml(shown, chosen) {
-    const picture = PICTURE.test(shown.thumbnail || "") ? `<img src="${shown.thumbnail}" alt="">` : `<span>${esc(t("meetings.start.noPicture"))}</span>`;
-    return `<label class="mr-monitor mr-window">
-      <span class="mr-thumb">${picture}</span>
-      <span class="mr-pick"><input type="checkbox" class="check" value="${esc(shown.id)}" ${chosen ? "checked" : ""}><b>${esc(shown.title)}</b></span></label>`;
+  // A window's row, not ticked; its picture and its title are drawn by drawWindow, also over the ones it had.
+  function windowRow(shown) {
+    const row = document.createElement("label");
+    row.className = "mr-monitor mr-window";
+    row.innerHTML = `<span class="mr-thumb"></span><span class="mr-pick"><input type="checkbox" class="check" value="${esc(shown.id)}"><b></b></span>`;
+    return row;
+  }
+  function drawWindow(row, shown) {
+    setHtml(row.querySelector(".mr-thumb"), PICTURE.test(shown.thumbnail || "") ? `<img src="${shown.thumbnail}" alt="">` : `<span>${esc(t("meetings.start.noPicture"))}</span>`);
+    const title = row.querySelector("b");
+    if (title.textContent !== shown.title) title.textContent = shown.title;
+    return row;
   }
 
   function open(project) {
@@ -74,11 +81,18 @@ const meetingsStart = (() => {
       const full = tickedWindows().length >= WINDOWS_MAX;
       for (const box of part("windows").querySelectorAll("input")) box.disabled = full && !box.checked;
     }
-    // The windows that are open now; one that was ticked stays ticked while it is still there.
+    // The windows that are open now, over the ones that were shown. A window that is still there keeps its row: its
+    // tick, the keyboard and a click that is on its way stay with it, and the list stays where it was scrolled to.
     function showWindows(list) {
-      const chosen = tickedWindows();
-      part("windows").innerHTML = list.map(shown => windowHtml(shown, chosen.includes(shown.id))).join("")
-        || `<p class="modal-note">${esc(t("meetings.start.noWindows"))}</p>`;
+      const box = part("windows"), top = box.scrollTop, active = document.activeElement;
+      const rows = new Map([...box.querySelectorAll(".mr-window")].map(row => [row.querySelector("input").value, row]));
+      const next = list.map(shown => drawWindow(rows.get(shown.id) || windowRow(shown), shown));
+      for (const el of [...box.children]) if (!next.includes(el)) el.remove();
+      if (!next.length) box.innerHTML = `<p class="modal-note">${esc(t("meetings.start.noWindows"))}</p>`;
+      next.forEach((row, i) => { if (box.children[i] !== row) box.insertBefore(row, box.children[i] || null); });
+      box.scrollTop = top;
+      // A row that changed its place lost the keyboard on the way.
+      if (box.contains(active) && document.activeElement !== active) active.focus({ preventScroll: true });
       renderGo();
     }
     // Asked for again whenever this window is come back to: the call's window may have been opened meanwhile. Only

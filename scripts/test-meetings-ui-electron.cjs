@@ -897,6 +897,33 @@ app.whenReady().then(async () => {
   await evaluate("window.dispatchEvent(new Event('focus'))");
   await waitFor("document.querySelectorAll('.meeting-start .mr-window').length === 2", 'the window opened meanwhile');
   assert.deepEqual([calls('devices').length - devicesAsked, calls('windows').length], [0, 1], 'the windows alone, once');
+
+  // More windows than fit: one ticked and under the keyboard, the list scrolled. They are read again in another order,
+  // with another title for the ticked one, and it all stays.
+  const shownBefore = fake.windows;
+  const many = Array.from({ length: 14 }, (_x, i) => ({ id: `window:${5000 + i}:0`, title: `Sample window ${i + 1}` }));
+  fake.windows = many;
+  await click('.meeting-start [data-part=refresh]');
+  await waitFor("document.querySelectorAll('.meeting-start .mr-window').length === 14", 'many windows');
+  const held = `(() => {
+    const box = document.querySelector('.meeting-start [data-part=windows]'), input = box.querySelector('input[value="window:5012:0"]');
+    return { box, input, row: input.closest('.mr-window') };
+  })()`;
+  await evaluate(`(() => { const { box, input, row } = ${held}; input.click(); input.focus(); row.kept = true; box.scrollTop = 90; })()`);
+  const where = () => evaluate(`(() => {
+    const { box, input, row } = ${held};
+    return [box.scrollTop, document.activeElement === input, input.checked, row.kept === true];
+  })()`);
+  assert.deepEqual(await where(), [90, true, true, true], 'scrolled, ticked, under the keyboard');
+  fake.windows = [many[13], ...many.slice(0, 13)].map(w => (w.id === 'window:5012:0' ? { ...w, title: 'Renamed call' } : w));
+  await evaluate("window.dispatchEvent(new Event('focus'))");
+  await waitFor("document.querySelector('.meeting-start .mr-window b').textContent === 'Sample window 14'", 'the windows in their new order');
+  assert.deepEqual(await where(), [90, true, true, true], 'the list did not jump, the tick and the keyboard stayed on the same row');
+  assert.equal(await evaluate(`${held}.row.querySelector('b').textContent`), 'Renamed call');
+  fake.windows = shownBefore;
+  await click('.meeting-start [data-part=refresh]');
+  await waitFor("document.querySelectorAll('.meeting-start .mr-window').length === 2", 'the two windows again');
+  assert.equal(await has('.meeting-start [data-part=windows] input:checked'), false, 'a ticked window that is gone is not chosen');
   await click('.meeting-start [data-part=monitors] input[value="11"]');
   await click('.meeting-start [data-part=monitors] input[value="22"]');
   assert.equal(await evaluate("document.querySelector('.meeting-start [data-part=go]').disabled"), true, 'nothing to take a picture of');
