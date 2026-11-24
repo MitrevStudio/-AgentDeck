@@ -138,8 +138,12 @@ const meetingsView = (() => {
     redraw(self, self.part(".mv-status"), statusHtml(self));
   }
 
-  function screenName({ atMs, monitor }) {
-    return t("meetings.screen.name", { time: clock(atMs), monitor });
+  // What a screenshot is of: a monitor, or the window that was chosen, by the title it had then.
+  function sourceName({ monitor, window: chosen, title }) {
+    return chosen ? title || t("meetings.window", { n: chosen }) : t("meetings.monitor", { n: monitor });
+  }
+  function screenName(screen) {
+    return screen.window ? `${clock(screen.atMs)} · ${sourceName(screen)}` : t("meetings.screen.name", { time: clock(screen.atMs), monitor: screen.monitor });
   }
   function screensHtml(self) {
     const { meeting, media } = self.data;
@@ -147,7 +151,7 @@ const meetingsView = (() => {
     return `<div class="mv-grid">${meeting.screens.map(screen => `<figure>
       <button type="button" class="mv-shot" data-screen="${esc(screen.file)}" aria-label="${esc(screenName(screen))}"><img src="${esc(media + screen.file)}" alt="" loading="lazy" decoding="async"></button>
       <figcaption><button type="button" class="md-time" data-at="${Number(screen.atMs)}" aria-label="${esc(t("meetings.view.goTo", { time: clock(screen.atMs) }))}">${esc(clock(screen.atMs))}</button>
-        <span>${esc(t("meetings.monitor", { n: screen.monitor }))}</span>
+        <span>${esc(sourceName(screen))}</span>
         <button type="button" class="icon-btn danger" data-mv="remove-screen" data-file="${esc(screen.file)}" title="${esc(t("meetings.screen.remove"))}" aria-label="${esc(`${t("meetings.screen.remove")}: ${screenName(screen)}`)}">${icon("trash")}</button></figcaption>
     </figure>`).join("")}</div>`;
   }

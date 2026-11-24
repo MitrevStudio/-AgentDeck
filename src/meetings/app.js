@@ -156,10 +156,10 @@ function createMeetingsApp({ getWindow, getProjects, openSettings }) {
     recorder.on("status", value => queue("status", () => status(value)));
     recorder.on("ended", () => { quitAllowed = false; }); // the next recording is asked about again
     recorder.on("levels", ({ elapsedMs, mic, system }) => send("levels", { elapsedMs, mic, system }));
-    recorder.on("warning", event => queue("warning", () => ({ code: event.code, active: event.active, channel: event.channel, monitor: event.monitor })));
+    recorder.on("warning", event => queue("warning", () => ({ code: event.code, active: event.active, channel: event.channel, monitor: event.monitor, window: event.window })));
     recorder.on("screenshot", event => queue("screenshot", async () => ({
       place: await placeOf(event.project), id: event.id, taken: event.screens.length,
-      failed: event.failed.map(({ monitor, code }) => ({ monitor, code }))
+      failed: event.failed.map(({ monitor, window, code }) => ({ monitor, window, code }))
     })));
     recorder.on("ended", event => queue("ended", async () => ({
       project: event.project, place: await placeOf(event.project), id: event.id,

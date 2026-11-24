@@ -4,9 +4,11 @@
 //   createMeetingRecorder({ store, workDir, audio, getShortcut })   audio: audio.js; getShortcut() -> accelerator
 //   capabilities() -> { supported, code, ownAudioExcluded, longRecordingMs }
 //   devices({ thumbnails }) -> { microphones: [{ deviceId, label, isDefault }], displays: [{ id, monitor, label,
-//     primary, width, height, bounds, thumbnail }] }: physical pixels, bounds in DIP.
-//   start({ project, title, microphone, monitors }) -> { meeting, status }: microphone a deviceId, monitors display
-//     ids. The meeting exists from here on, in the state "recording".
+//     primary, width, height, bounds, thumbnail }], windows: [{ id, title, thumbnail }] }: physical pixels, bounds in
+//     DIP; the windows that are open now, without our own.
+//   start({ project, title, microphone, monitors, windows }) -> { meeting, status }: microphone a deviceId, monitors
+//     display ids, windows window ids, at least one of the two. The meeting exists from here on, in the state
+//     "recording".
 //   stop() -> the meeting, compressed afterwards by itself; discard() -> boolean; screenshot(); status();
 //   shutdown(): for quitting.
 //   recoverable(); recover(): at the app's start; recover(project): wherever pipeline.recover(project) is, for that
@@ -26,6 +28,7 @@ const { recordingDir, createRecordingFile, removeRecording } = require("./captur
 const { createRecovery, saveRecorded } = require("./capture/recovery");
 const { createLive } = require("./capture/live");
 const { createDisplays } = require("./capture/displays");
+const { createWindows } = require("./capture/windows");
 const { takeScreenshot } = require("./capture/screenshot");
 const { DEFAULT_SHORTCUT, registerShortcut } = require("./capture/shortcut");
 const { canExclude } = require("./capture/own-audio");
@@ -37,7 +40,7 @@ const DISK_LEAST_BYTES = 100 * 1024 ** 2; // not started with less: half an hour
 const SHOTS_WAITING_MAX = 3;
 const SHOTS_WAIT_MS = 12_000; // then it is saved without them: a screen or a disk that hangs never holds the recording
 const SHOTS_WAIT_AT_QUIT_MS = 500; // of the app's grace for quitting
-const SCREEN_CODES = ["meetingsScreenBlank", "meetingsScreenMissing", "meetingsScreenFailed"];
+const SCREEN_CODES = ["meetingsScreenBlank", "meetingsScreenMissing", "meetingsScreenFailed", "meetingsWindowBlank", "meetingsWindowMissing"];
 
 // -> after the promise or ms, whichever is first.
 function waitAtMost(promise, ms) {
@@ -62,7 +65,7 @@ function createMeetingRecorder({
   store, workDir, audio, getShortcut = () => DEFAULT_SHORTCUT,
   platform = process.platform, excludeOwn = canExclude(),
   openPage = options => require("./capture/capture-page").openCapturePage(options),
-  displays = createDisplays(), shortcuts = registerShortcut, awake = keepAwake, free = freeBytes, shotsWaitMs = SHOTS_WAIT_MS
+  displays = createDisplays(), windows = createWindows(), shortcuts = registerShortcut, awake = keepAwake, free = freeBytes, shotsWaitMs = SHOTS_WAIT_MS
 }) {
   const recorder = new EventEmitter();
   const supported = platform === "win32";
@@ -97,6 +100,7 @@ function createMeetingRecorder({
       recording: {
         project: c.project, id: c.id, title: c.title, startedAt: c.startedAt, elapsedMs: c.endedMs ?? c.live?.elapsedMs() ?? 0,
         microphone: c.microphone, monitors: c.monitors.map(({ id, monitor, label }) => ({ id, monitor, label })),
+        windows: c.windows.map(({ id, window, title }) => ({ id, window, title })),
         screens: c.screens, ownAudioExcluded: excludeOwn,
         shortcut: { accelerator: c.accelerator, registered: Boolean(c.shortcut) },
         warnings: [...c.warnings.values()]
@@ -105,10 +109,10 @@ function createMeetingRecorder({
   }
   const changed = () => announce("status", status());
 
-  // about: { channel } or { monitor }.
+  // about: { channel }, { monitor } or { window }.
   function warn(c, code, active, about = {}) {
     if (cur !== c || c.phase === "stopping") return;
-    const key = `${code}:${about.channel ?? about.monitor ?? ""}`;
+    const key = `${code}:${about.channel ?? about.monitor ?? (about.window ? `w${about.window}` : "")}`;
     if (c.warnings.has(key) === active) return;
     if (active) c.warnings.set(key, { code, ...about });
     else c.warnings.delete(key);
@@ -123,6 +127,10 @@ function createMeetingRecorder({
     const connected = await displays.list();
     if (!c.chosen.every(id => connected.some(d => d.id === id))) fail("meetingsScreenMissing");
     c.monitors = connected.filter(d => c.chosen.includes(d.id));
+    // A window is numbered among the chosen, and keeps the title it has now.
+    const open = c.chosenWindows.length ? await windows.list() : [];
+    if (!c.chosenWindows.every(id => open.some(w => w.id === id))) fail("meetingsWindowMissing");
+    c.windows = c.chosenWindows.map((id, i) => ({ id, window: i + 1, title: open.find(w => w.id === id).title }));
 
     c.live = createLive({
       openPage, deviceId: c.deviceId, excludeOwn,
@@ -199,16 +207,17 @@ function createMeetingRecorder({
   async function start(options) {
     if (!supported) fail("meetingsWindowsOnly");
     if (closed) fail("meetingsInterrupted");
-    const { project, title = "", microphone = "default", monitors } = isObj(options) ? options : {};
+    const { project, title = "", microphone = "default", monitors = [], windows: chosenWindows = [] } = isObj(options) ? options : {};
     if (typeof project !== "string" || typeof title !== "string" || typeof microphone !== "string") fail("invalidData");
-    if (!Array.isArray(monitors) || !monitors.length || !monitors.every(id => typeof id === "string")) fail("invalidData", "monitors");
+    const ids = list => Array.isArray(list) && list.every(id => typeof id === "string");
+    if (!ids(monitors) || !ids(chosenWindows) || !(monitors.length + chosenWindows.length)) fail("invalidData", "monitors");
     while (cur?.ending) await cur.ending.catch(() => {});
     if (cur) fail("meetingsAlreadyRecording");
     if (closed) fail("meetingsInterrupted");
     const c = {
-      phase: "starting", project, title, deviceId: microphone, chosen: [...monitors],
+      phase: "starting", project, title, deviceId: microphone, chosen: [...monitors], chosenWindows: [...chosenWindows],
       id: null, key: null, dir: null, meeting: null, startedAt: null, live: null, file: null,
-      microphone: null, monitors: [], warnings: new Map(), screens: 0, taken: new Set(),
+      microphone: null, monitors: [], windows: [], warnings: new Map(), screens: 0, taken: new Set(),
       shots: Promise.resolve(), late: false, waiting: 0, accelerator: "", shortcut: null, release: null, diskTimer: null,
       fileError: null, endedMs: null, ending: null, started: null
     };
@@ -231,21 +240,25 @@ function createMeetingRecorder({
   }
 
   // ---------- screenshots ----------
+  // What each picture of a press is of: { monitor } or { window }.
+  const sourcesOf = c => [...c.monitors.map(({ monitor }) => ({ monitor })), ...c.windows.map(({ window }) => ({ window }))];
   function shoot(c) {
     const atMs = c.live.elapsedMs(), { project, id } = c;
     if (c.waiting >= SHOTS_WAITING_MAX) {
-      const event = { project, id, atMs, screens: [], failed: c.monitors.map(({ monitor }) => ({ monitor, code: "meetingsScreenFailed" })) };
+      const event = { project, id, atMs, screens: [], failed: sourcesOf(c).map(about => ({ ...about, code: "meetingsScreenFailed" })) };
       announce("screenshot", event);
       return Promise.resolve(event);
     }
     c.waiting++;
     const shot = c.shots.then(async () => {
       try {
-        const { screens, failed } = await takeScreenshot({ store, displays, project, id, monitors: c.monitors, atMs, taken: c.taken, late: () => c.late });
+        const { screens, failed } = await takeScreenshot({
+          store, displays, windows, project, id, monitors: c.monitors, chosen: c.windows, atMs, taken: c.taken, late: () => c.late
+        });
         c.screens += screens.length;
-        for (const { monitor } of c.monitors) {
-          const code = failed.find(f => f.monitor === monitor)?.code;
-          for (const one of SCREEN_CODES) warn(c, one, one === code, { monitor });
+        for (const about of sourcesOf(c)) {
+          const code = failed.find(f => f.monitor === about.monitor && f.window === about.window)?.code;
+          for (const one of SCREEN_CODES) warn(c, one, one === code, about);
         }
         const event = { project, id, atMs, screens, failed };
         announce("screenshot", event);
@@ -344,8 +357,13 @@ function createMeetingRecorder({
     if (!supported) fail("meetingsWindowsOnly");
     const page = openPage({});
     try {
-      const [microphones, screens] = await Promise.all([page.call("list"), displays.list({ thumbnails })]);
-      return { microphones, displays: screens };
+      // The windows are extra: without them a monitor can still be chosen.
+      const open = windows.list({ thumbnails }).catch(error => {
+        console.error("The open windows could not be listed:", error.message);
+        return [];
+      });
+      const [microphones, screens, shown] = await Promise.all([page.call("list"), displays.list({ thumbnails }), open]);
+      return { microphones, displays: screens, windows: shown };
     } finally {
       page.close();
     }

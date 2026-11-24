@@ -72,7 +72,7 @@ function merge(results, { grain, screens = [] }) {
       entries.push({ type: "speech", speaker, ...line, ...(speaker === "me" && isEcho(line, others, grain) && { echo: true }) });
     }
   }
-  for (const { file, atMs, monitor } of screens) entries.push({ type: "screen", start: atMs, file, monitor });
+  for (const { file, atMs, monitor, window } of screens) entries.push({ type: "screen", start: atMs, file, ...(window ? { window } : { monitor }) });
   const order = { gap: 0, note: 1, speech: 2, screen: 3 };
   return entries.sort((a, b) => a.start - b.start || order[a.type] - order[b.type]);
 }

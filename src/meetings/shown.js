@@ -7,6 +7,8 @@ const CODE = /^[A-Za-z]{1,60}$/;
 
 const str = (value, max = MODEL_MAX) => (typeof value === "string" ? value.slice(0, max) : "");
 const codeOf = value => (typeof value === "string" && CODE.test(value) ? value : "meetingsUnexpected");
+// A monitor before a window, each by its number.
+const order = screen => (Number.isInteger(screen.monitor) ? screen.monitor : 1000 + Number(screen.window));
 const madeBy = step => (isObj(step) ? { provider: str(step.provider), model: str(step.model) } : null);
 
 function meetingRow(meeting) {
@@ -21,7 +23,7 @@ function meetingDetails(meeting) {
   return {
     ...meetingRow(meeting),
     audio: { mic: Boolean(audio.mic), system: Boolean(audio.system) },
-    screens: [...screens].sort((a, b) => a.atMs - b.atMs || a.monitor - b.monitor),
+    screens: [...screens].sort((a, b) => a.atMs - b.atMs || order(a) - order(b)),
     transcription: transcription && {
       ...madeBy(transcription),
       failed: Number(transcription.failed) > 0 || (Array.isArray(transcription.failed) && transcription.failed.length > 0)
@@ -33,15 +35,16 @@ function meetingDetails(meeting) {
 // place: which folder of meetings it is (app.js), the same for a worktree and its main checkout.
 function recordingStatus({ phase, recording }, { place = "", name = "" } = {}) {
   if (!recording) return { phase, recording: null };
-  const { project, id, title, elapsedMs, microphone, monitors, screens, shortcut, warnings } = recording;
+  const { project, id, title, elapsedMs, microphone, monitors, windows, screens, shortcut, warnings } = recording;
   return {
     phase,
     recording: {
       project, place, name, id, title, elapsedMs, screens,
       microphone: microphone?.label || "",
       monitors: (monitors || []).map(m => m.monitor),
+      windows: (windows || []).map(w => ({ window: w.window, title: str(w.title, 200) })),
       shortcut: { accelerator: shortcut?.accelerator || "", registered: shortcut?.registered === true },
-      warnings: (warnings || []).map(({ code, channel, monitor }) => ({ code: codeOf(code), channel, monitor }))
+      warnings: (warnings || []).map(({ code, channel, monitor, window }) => ({ code: codeOf(code), channel, monitor, window }))
     }
   };
 }

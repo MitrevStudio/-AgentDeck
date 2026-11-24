@@ -24,7 +24,8 @@ function heading({ id, title, durationMs }) {
   return { title: escapeText(title) || t("meetings.doc.untitled"), when: durationMs === null ? date : `${date}, ${length(durationMs)}` };
 }
 
-const screenLink = ({ atMs, file, monitor }) => `[${clock(atMs)}${monitor > 1 ? ` m${monitor}` : ""}](${file})`;
+// A window's picture says so (w1), a monitor's past the first one too (m2).
+const screenLink = ({ atMs, file, monitor, window }) => `[${clock(atMs)}${window ? ` w${window}` : monitor > 1 ? ` m${monitor}` : ""}](${file})`;
 
 // A document with the links to a deleted screenshot struck out where they stand: still a screenshot's moment, to
 // parseTranscript() as well, and every line where it was.

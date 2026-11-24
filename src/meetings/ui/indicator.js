@@ -16,7 +16,8 @@ const meetingsIndicator = (() => {
   const meters = [...box.querySelectorAll(".rec-meter")];
   let elapsedMs = 0;
 
-  function warningText({ code, monitor }) {
+  function warningText({ code, monitor, window: chosen }) {
+    if (chosen) return `${t("meetings.window", { n: chosen })}: ${errorText(code)}`;
     return monitor ? `${t("meetings.monitor", { n: monitor })}: ${errorText(code)}` : errorText(code);
   }
   function label(button, text) {
