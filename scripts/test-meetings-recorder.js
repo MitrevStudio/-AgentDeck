@@ -63,7 +63,7 @@ async function until(check, what, ms = 5000) {
 const rejects = (code, promise) => assert.rejects(promise, e => e.code === code && Boolean(e.message), code);
 
 // ---------- the fakes ----------
-const WINDOWS = [{ id: "window:200:0", title: "Weekly call", thumbnail: null }, { id: "window:300:0", title: "Notes", thumbnail: null }];
+const WINDOWS = [{ id: "window:200:0", title: "Weekly call", thumbnail: null, owner: 7 }, { id: "window:300:0", title: "Notes", thumbnail: null, owner: 9 }];
 const DISPLAYS = [
   { id: "11", monitor: 1, label: "Left", primary: true, width: 64, height: 40, bounds: { x: 0, y: 0, width: 64, height: 40 } },
   { id: "22", monitor: 2, label: "Right", primary: false, width: 32, height: 20, bounds: { x: 64, y: 0, width: 32, height: 20 } }
@@ -135,10 +135,16 @@ function world(options = {}) {
       return { id, width, height, bgra: picture({ width, height }) };
     }))
   };
-  // The windows that are open: w.shown when a test has its own, w.captureWindows for what a press gets of them.
+  // The windows that are open: w.shown when a test has its own, w.captureWindows for what a press gets of them;
+  // w.chosen: what each press asked for.
+  w.chosen = [];
   const windows = {
     list: async () => w.shown || WINDOWS,
-    capture: async ids => (w.captureWindows ? w.captureWindows(ids) : ids.map(id => ({ id, width: 48, height: 30, bgra: picture({ width: 48, height: 30 }) })))
+    capture: async chosen => {
+      w.chosen.push(chosen);
+      const ids = chosen.map(one => one.id);
+      return w.captureWindows ? w.captureWindows(ids) : ids.map(id => ({ id, width: 48, height: 30, bgra: picture({ width: 48, height: 30 }) }));
+    }
   };
   w.open = (extra = {}) => {
     const audio = createMeetingAudio({ store: w.store, workDir, withCodec });
@@ -798,6 +804,20 @@ test("a chosen window is taken alone or beside the monitors, under its own name"
   assert.deepEqual((await w.read(meeting.id)).screens, shot.screens, "meeting.json keeps the window and its title");
   await w.settled();
 
+  // Whose the window was at the start goes with every press, whatever the dialog lists meanwhile; nobody is told it.
+  w = world();
+  await w.start({ monitors: [], windows: ["window:200:0"] });
+  assert.deepEqual((await w.recorder.devices()).windows, WINDOWS.map(({ id, title, thumbnail }) => ({ id, title, thumbnail })), "no owner for the dialog");
+  assert.equal(JSON.stringify(w.recorder.status()).includes("owner"), false);
+  w.shown = [{ id: "window:200:0", title: "Another program", thumbnail: null, owner: 8 }];
+  await w.recorder.devices();
+  w.shown = [];
+  await w.recorder.devices();
+  await w.recorder.screenshot();
+  assert.deepEqual(w.chosen, [[{ id: "window:200:0", owner: 7 }]]);
+  assert.equal(w.events.some(e => JSON.stringify(e).includes("owner")), false, "nor in an event");
+  await w.recorder.discard();
+
   w = world();
   await w.start({ monitors: ["22"], windows: ["window:300:0", "window:200:0"] });
   assert.deepEqual(w.recorder.status().recording.windows.map(x => [x.window, x.title]), [[1, "Notes"], [2, "Weekly call"]], "numbered as they were chosen");
@@ -879,13 +899,13 @@ test("the windows: ours, the untitled and the minimised are not offered, each is
     }
   });
   assert.deepEqual(await windows.list(), [
-    { id: "window:200:0", title: "Weekly  call", thumbnail: null }, { id: "window:500:0", title: "Dark", thumbnail: null }
+    { id: "window:200:0", title: "Weekly  call", owner: 0, thumbnail: null }, { id: "window:500:0", title: "Dark", owner: 0, thumbnail: null }
   ], "not ours, not the untitled, not a screen, not the minimised");
   assert.deepEqual(asked, [{ width: 0, height: 0 }], "no pictures unless they are asked for");
   assert.equal((await windows.list({ thumbnails: true }))[0].thumbnail, "data:image/png;base64,AAAA");
 
   asked.length = 0;
-  const got = await windows.capture(["window:200:0", "window:400:0", "window:500:0", "window:600:0", "screen:0:0"]);
+  const got = await windows.capture(["window:200:0", "window:400:0", "window:500:0", "window:600:0", "screen:0:0"].map(id => ({ id, owner: 0 })));
   assert.deepEqual(got.map(g => g.code || [g.width, g.height, g.bgra.length]), [[60, 40, 60 * 40 * 4], "meetingsWindowBlank", "meetingsWindowBlank", "meetingsWindowMissing", "meetingsWindowMissing"]);
   assert.deepEqual(asked, [{ width: 60, height: 40 }, { width: 20, height: 10 }], "a minimised or closed window is not asked for");
   assert.deepEqual(["window:200:0", "window:0x1:0", "screen:1:0", 5].map(isWindowId), [true, false, false, false]);
@@ -900,12 +920,23 @@ test("the windows: ours, the untitled and the minimised are not offered, each is
       return open.map(source => ({ ...source, thumbnail: image(size.width, size.height) }));
     }
   });
-  await reused.list();
+  const chosen = (await reused.list()).map(({ id, owner }) => ({ id, owner }));
+  assert.deepEqual(chosen, [{ id: "window:200:0", owner: 7 }, { id: "window:500:0", owner: 9 }]);
   owners["window:200:0"] = 8;
-  assert.deepEqual((await reused.capture(["window:200:0", "window:500:0"])).map(g => g.code || g.width), ["meetingsWindowMissing", 20]);
+  assert.deepEqual((await reused.capture(chosen)).map(g => g.code || g.width), ["meetingsWindowMissing", 20]);
+  // A list in between is of the windows as they are then, the handle's new holder among them or the handle not at
+  // all: what was chosen stays what it was.
+  assert.equal((await reused.list())[0].owner, 8);
+  assert.deepEqual((await reused.capture(chosen)).map(g => g.code || g.width), ["meetingsWindowMissing", 20]);
+  sizes["window:200:0"] = { minimized: true };
+  assert.deepEqual((await reused.list()).map(shown => shown.id), ["window:500:0"]);
+  sizes["window:200:0"] = { width: 60, height: 40 };
+  assert.deepEqual((await reused.capture(chosen)).map(g => g.code || g.width), ["meetingsWindowMissing", 20], "the handle is another process's still");
+  assert.deepEqual((await reused.capture([{ id: "window:200:0" }, { id: "window:500:0", owner: 0 }])).map(g => g.code), ["meetingsWindowMissing", "meetingsWindowMissing"], "nobody's is nobody's window");
   owners["window:200:0"] = 7;
+  assert.deepEqual((await reused.capture(chosen)).map(g => g.code || g.width), [60, 20], "back in the same hands");
   broken = true;
-  assert.deepEqual((await reused.capture(["window:200:0", "window:500:0"])).map(g => g.code || g.width), ["meetingsScreenFailed", 20]);
+  assert.deepEqual((await reused.capture(chosen)).map(g => g.code || g.width), ["meetingsScreenFailed", 20]);
 
   // The handle passes to another process while the picture is waited for: what comes back is not the window chosen.
   const hands = { "window:200:0": 7, "window:500:0": 9 };
@@ -917,19 +948,9 @@ test("the windows: ours, the untitled and the minimised are not offered, each is
       return open.map(source => ({ ...source, thumbnail: image(size.width, size.height) }));
     }
   });
-  await passed.list();
+  const held = (await passed.list()).map(({ id, owner }) => ({ id, owner }));
   passes = true;
-  assert.deepEqual((await passed.capture(["window:200:0", "window:500:0"])).map(g => g.code || g.width), ["meetingsWindowMissing", 20]);
-  // One that was never offered is held to whose it was when its picture was asked for.
-  hands["window:200:0"] = 7;
-  const unlisted = createWindows({
-    own: () => [], sizeOf: id => sizes[id] || null, ownerOf: id => hands[id] || 0,
-    sources: async size => {
-      if (size.width === 60) hands["window:200:0"] = 8;
-      return open.map(source => ({ ...source, thumbnail: image(size.width, size.height) }));
-    }
-  });
-  assert.deepEqual((await unlisted.capture(["window:200:0", "window:500:0"])).map(g => g.code || g.width), ["meetingsWindowMissing", 20]);
+  assert.deepEqual((await passed.capture(held)).map(g => g.code || g.width), ["meetingsWindowMissing", 20]);
 
   const never = createWindows({ own: () => [], sizeOf: () => ({ width: 8, height: 8 }), sourcesMs: 50, sources: () => new Promise(() => {}) });
   await assert.rejects(never.list(), /did not answer/);

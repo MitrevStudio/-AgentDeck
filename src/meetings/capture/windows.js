@@ -61,7 +61,6 @@ const titleOf = source => Array.from(String(source.name || "").replace(HIDDEN, "
 
 // The rest of the options: for tests.
 function createWindows({ sourcesMs = SOURCES_MS, sizeOf = windowSize, ownerOf = sizeOf === windowSize ? windowOwner : () => 0, own = ownWindows, sources: read } = {}) {
-  const owners = new Map(); // whose each window was when it was last offered
   const getSources = read || (thumbnailSize => require("electron").desktopCapturer.getSources({ types: ["window"], thumbnailSize }));
   const sources = thumbnailSize => new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("the windows did not answer")), sourcesMs);
@@ -85,27 +84,26 @@ function createWindows({ sourcesMs = SOURCES_MS, sizeOf = windowSize, ownerOf = 
     }
   }
 
-  // -> [{ id, title, thumbnail }], as the system orders them (the front one first).
+  // -> [{ id, title, thumbnail, owner }], as the system orders them (the front one first). owner: the process a
+  // window belongs to now, which is for whoever chooses it to keep and give back to capture().
   async function list({ thumbnails = false } = {}) {
     const ours = new Set(own());
-    const open = (await sources(thumbnails ? THUMBNAIL : NO_PICTURE))
-      .filter(source => isWindowId(source.id) && !ours.has(source.id) && titleOf(source) && takable(source.id));
-    owners.clear();
-    for (const source of open) owners.set(source.id, owner(source.id));
-    return open
+    return (await sources(thumbnails ? THUMBNAIL : NO_PICTURE))
+      .filter(source => isWindowId(source.id) && !ours.has(source.id) && titleOf(source) && takable(source.id))
       .map(source => ({
-        id: source.id, title: titleOf(source),
+        id: source.id, title: titleOf(source), owner: owner(source.id),
         thumbnail: thumbnails && source.thumbnail && !source.thumbnail.isEmpty() ? source.thumbnail.toDataURL() : null
       }));
   }
 
-  // -> for each id: { id, width, height, bgra } or { id, code }. A window at a time: a thumbnail is scaled to fit the
-  // box that was asked for, so each is asked for at its own size. What one window fails with is its own.
-  async function capture(ids) {
+  // chosen: [{ id, owner }], the owner as list() gave it when the window was chosen. -> for each: { id, width, height,
+  // bgra } or { id, code }. A window at a time: a thumbnail is scaled to fit the box that was asked for, so each is
+  // asked for at its own size. What one window fails with is its own.
+  async function capture(chosen) {
     const results = [];
-    for (const id of ids) {
+    for (const { id, owner: whose } of chosen) {
       try {
-        results.push(await captureOne(id));
+        results.push(await captureOne(id, whose));
       } catch (error) {
         console.error("A window could not be taken:", error.message);
         results.push({ id, code: "meetingsScreenFailed" });
@@ -113,10 +111,10 @@ function createWindows({ sourcesMs = SOURCES_MS, sizeOf = windowSize, ownerOf = 
     }
     return results;
   }
-  async function captureOne(id) {
+  // whose: nothing here remembers it, so no later list() can loosen it. A handle is the chosen window only in that
+  // process's hands, before the picture is asked for and again once it came: it may pass on while it is waited for.
+  async function captureOne(id, whose) {
     const size = isWindowId(id) ? sizeOf(id) : null;
-    // Whose it was when it was offered; the handle may pass to another process while the picture is waited for too.
-    const whose = owners.has(id) ? owners.get(id) : owner(id);
     if (!size || owner(id) !== whose) return { id, code: "meetingsWindowMissing" };
     if (size.minimized) return { id, code: "meetingsWindowBlank" };
     const source = (await sources({ width: size.width, height: size.height })).find(s => s.id === id);

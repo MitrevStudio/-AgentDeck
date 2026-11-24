@@ -20,18 +20,19 @@ const byTime = (a, b) => a.atMs - b.atMs || order(a) - order(b);
 // What one source is in meeting.json.
 const about = ({ monitor, window, title }) => (monitor ? { monitor } : { window, title });
 
-// One kind's pictures: -> for each source a picture or { code }. Never rejects.
-async function pictures(capturer, sources) {
+// One kind's pictures: -> for each source a picture or { code }. Never rejects. ask(source): what the capturer takes
+// for it.
+async function pictures(capturer, sources, ask) {
   if (!sources.length) return [];
   try {
-    return await capturer.capture(sources.map(source => source.id));
+    return await capturer.capture(sources.map(ask));
   } catch (error) {
     console.error("A screenshot could not be taken:", error);
     return sources.map(() => ({ code: "meetingsScreenFailed" }));
   }
 }
 
-// monitors: [{ id, monitor }] for displays (displays.js); chosen: [{ id, window, title }] for windows (windows.js);
+// monitors: [{ id, monitor }] for displays (displays.js); chosen: [{ id, window, title, owner }] for windows (windows.js);
 // taken: the names this recording has used; late() -> true once the recording was saved without it, and nothing more
 // is written. Never rejects: -> { screens, failed }, failed: [{ monitor | window, code }].
 async function takeScreenshot({ store, displays, windows, project, id, monitors = [], chosen = [], atMs, taken, late = () => false }) {
@@ -61,9 +62,9 @@ async function takeScreenshot({ store, displays, windows, project, id, monitors 
   }
   // Each picture is saved before the next is waited for: a window that does not answer costs the ones before it
   // nothing, also when the recording ends meanwhile.
-  const shown = await pictures(displays, monitors);
+  const shown = await pictures(displays, monitors, source => source.id);
   for (const [i, source] of monitors.entries()) await save(source, shown[i]);
-  for (const source of chosen) await save(source, (await pictures(windows, [source]))[0]);
+  for (const source of chosen) await save(source, (await pictures(windows, [source], ({ id, owner }) => ({ id, owner })))[0]);
   return { screens, failed };
 }
 

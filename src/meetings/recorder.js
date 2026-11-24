@@ -126,10 +126,14 @@ function createMeetingRecorder({
     const connected = await displays.list();
     if (!c.chosen.every(id => connected.some(d => d.id === id))) fail("meetingsScreenMissing");
     c.monitors = connected.filter(d => c.chosen.includes(d.id));
-    // A window is numbered among the chosen, and keeps the title it has now.
+    // A window is numbered among the chosen, and keeps the title and the owner it has now: a handle in another
+    // process's hands later is another window.
     const open = c.chosenWindows.length ? await windows.list() : [];
     if (!c.chosenWindows.every(id => open.some(w => w.id === id))) fail("meetingsWindowMissing");
-    c.windows = c.chosenWindows.map((id, i) => ({ id, window: i + 1, title: open.find(w => w.id === id).title }));
+    c.windows = c.chosenWindows.map((id, i) => {
+      const { title, owner } = open.find(w => w.id === id);
+      return { id, window: i + 1, title, owner };
+    });
 
     c.live = createLive({
       openPage, deviceId: c.deviceId,
@@ -362,7 +366,7 @@ function createMeetingRecorder({
         return [];
       });
       const [microphones, screens, shown] = await Promise.all([page.call("list"), displays.list({ thumbnails }), open]);
-      return { microphones, displays: screens, windows: shown };
+      return { microphones, displays: screens, windows: shown.map(({ id, title, thumbnail }) => ({ id, title, thumbnail })) };
     } finally {
       page.close();
     }
