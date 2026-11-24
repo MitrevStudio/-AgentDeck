@@ -1,5 +1,8 @@
 // Standalone statusLine command. Save only context metadata, then run the user's
 // original command with the original stdin and forward its output unchanged.
+// On Windows native/StatusLine.cs does the same as a program of its own, and this one serves the sessions whose
+// command cannot reach it (claude-context.js: statusCommand). The two must write the same files for the same input:
+// scripts/test-claude-statusline.js runs them side by side.
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');

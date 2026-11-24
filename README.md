@@ -111,6 +111,8 @@ Local verification baseline (2026-11-09): Claude Code **2.1.282**, Codex CLI **0
 
 Run `npm run test:context` to check context accounting, compaction, subagent isolation, status-line preservation, model limits, and OpenCode 2 session discovery. Run `npm run test:statusline` to run the status-line command in the shells Claude Code uses (bash, PowerShell). One command line serves both shells and starts the collector directly, with no shell in between; the existing display command then runs in the kind of shell Claude Code itself would use for it. Existing Claude terminals need to be resumed through AgentDeck to receive the status-line collector; transcript-based estimates remain available meanwhile.
 
+On Windows the collector is a small program of its own, `StatusLine-<hash>.exe` in AgentDeck's data folder, compiled there from `native/StatusLine.cs` at the first Claude launch with the C# compiler that ships with Windows (the way DockPty is). A status update therefore starts nothing from the install folder, which an update must be able to replace while Claude sessions keep working in their terminals, and it starts a program of a few kilobytes instead of AgentDeck's executable. The command falls back to AgentDeck's executable when the program is missing or is not allowed to run, so the status line stays either way. A session keeps the command it was started with: sessions started by a version before this one go on starting AgentDeck's executable until they are resumed through AgentDeck. A new version of the program is a new file beside the old one; old ones are removed once nothing has used them for 30 days. On Linux and on the headless host the collector still runs as Node from the application itself.
+
 ### Other requirements
 
 | Component | Needed for |
@@ -655,6 +657,8 @@ The active profile contains the encryption context associated with its `Local St
 | `registry.json` | Project catalog, groups and organization |
 | `workspace.json` | Saved spaces, tabs and pane arrangements |
 | `terminals/` | Metadata for reconnecting to Windows terminal processes |
+| `DockPty-<hash>.exe`, `StatusLine-<hash>.exe` | Windows helper programs compiled on this machine from `native/`: the terminal bridge and the Claude status-line collector |
+| `claude-context/` | Per-launch status-line settings for Claude Code and the context figures each session last reported |
 | `search.db` | Local transcript full-text index |
 | `usage-cache.json`, `usage-cache.journal` | Cached usage calculations: the base and the changes since it was written |
 | `voice/records/` | Audio files and per-record JSON metadata |
@@ -675,7 +679,7 @@ npm ci
 npm start
 ```
 
-The desktop uses Electron, plain JavaScript, HTML and CSS. Windows integration uses Koffi and the C# DockPty bridge. Linux host terminals use `node-pty` from the separate `host/` package.
+The desktop uses Electron, plain JavaScript, HTML and CSS. Windows integration uses Koffi and two small C# programs, the DockPty bridge and the Claude status-line collector. Linux host terminals use `node-pty` from the separate `host/` package.
 
 ### Checks
 
@@ -808,6 +812,7 @@ flowchart TB
 | `src/day.js`, `src/day-ui.js` | Activity estimation and work-log summaries |
 | `src/prefs.js`, `src/i18n.js`, `src/theme.css` | Preferences, translations and visual tokens |
 | `native/DockPty.cs` | Windows persistent pseudoconsole bridge |
+| `native/StatusLine.cs` | Windows status-line collector for Claude Code sessions |
 | `host/` | Headless package, CLI and Linux installer |
 | `scripts/` | Syntax checks, regression tests and maintenance utilities |
 
