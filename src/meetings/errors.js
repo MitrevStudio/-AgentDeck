@@ -61,6 +61,8 @@ const MESSAGES = {
   meetingsScreenMissing: "The chosen screen is not connected.",
   meetingsScreenBlank: "The screen gives no picture: it is locked or not shown.",
   meetingsScreenFailed: "The screenshot could not be saved.",
+  meetingsWindowMissing: "The chosen window is closed or minimised.",
+  meetingsWindowBlank: "The window gives no picture: it is minimised or not drawn.",
   meetingsRecordingInterrupted: "The recording was interrupted; what was recorded until then is kept.",
   meetingsRecordingEmpty: "Nothing was recorded.",
   meetingsCompressionFailed: "The audio could not be compressed; it is kept as recorded."

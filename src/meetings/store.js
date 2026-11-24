@@ -1,7 +1,7 @@
 // The meetings of the local projects, kept in their folders (location.js) as files that git does not see and agents
 // read (agent-skill.js):
 //   .claude/meetings/.gitignore, INDEX.md
-//   .claude/meetings/<id>/meeting.json, summary.md, transcript.md, screens/<h-m-s-mN>.png, audio/{mic,system}.webm
+//   .claude/meetings/<id>/meeting.json, summary.md, transcript.md, screens/<h-m-s-mN|wN>.png, audio/{mic,system}.webm
 // A list is always what is in the folder now: entries deleted by hand are gone, others' entries are not meetings, one
 // whose meeting.json cannot be used is listed as broken, so that it can still be deleted.
 // Whatever changes meetings runs one operation after another, in the order it was asked for, so two updates of a

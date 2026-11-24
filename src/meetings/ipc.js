@@ -11,12 +11,14 @@ const { t } = require("../i18n");
 const { fail } = require("./errors");
 const { problem } = require("./problems");
 const { isId, isScreen } = require("./meeting");
+const { isWindowId } = require("./capture/windows");
 const { AUDIO } = require("./media");
 const { meetingRow, meetingDetails } = require("./shown");
 
 const TITLE_MAX = 1000;
 const DEVICE_MAX = 512;
 const MONITORS_MAX = 16;
+const WINDOWS_MAX = 8;
 const DOCUMENT_MAX_BYTES = 3 * 1024 * 1024; // two hours of speech are about 0.2 MB
 const SIZES_AT_A_TIME = 8;
 const MODEL = /^[A-Za-z0-9][\w.:/-]{0,99}$/; // as Settings takes one
@@ -46,10 +48,12 @@ function processing(value) {
 }
 function recordingOptions(value) {
   if (!isObj(value)) fail("invalidData");
-  const { title = "", microphone, monitors } = value;
+  const { title = "", microphone, monitors, windows = [] } = value;
   const isMonitor = id => typeof id === "string" && id.length > 0 && id.length <= 100;
-  if (!Array.isArray(monitors) || !monitors.length || monitors.length > MONITORS_MAX || !monitors.every(isMonitor)) fail("invalidData", "monitors");
-  return { title: text(title, TITLE_MAX), microphone: text(microphone, DEVICE_MAX) || "default", monitors: [...new Set(monitors)] };
+  if (!Array.isArray(monitors) || monitors.length > MONITORS_MAX || !monitors.every(isMonitor)) fail("invalidData", "monitors");
+  if (!Array.isArray(windows) || windows.length > WINDOWS_MAX || !windows.every(isWindowId)) fail("invalidData", "windows");
+  if (!monitors.length && !windows.length) fail("invalidData", "monitors");
+  return { title: text(title, TITLE_MAX), microphone: text(microphone, DEVICE_MAX) || "default", monitors: [...new Set(monitors)], windows: [...new Set(windows)] };
 }
 
 // What each of the two tasks can be done with, and what the settings say.

@@ -12,7 +12,7 @@ const ID = /^\d{4}-\d{2}-\d{2}-\d{4}-[\p{L}\p{N}\p{M}-]{1,64}$/u;
 const SLUG_MAX = 40; // characters: agents open these paths, and not every tool takes more than 260 in all
 const TITLE_MAX = 200;
 const BRIEF_MAX = 500;
-const SCREEN = /^screens\/\d{2,4}-\d{2}-\d{2}-m\d{1,2}(-\d{1,3})?\.png$/;
+const SCREEN = /^screens\/\d{2,4}-\d{2}-\d{2}-[mw]\d{1,2}(-\d{1,3})?\.png$/; // m: a monitor's, w: a window's
 const AUDIO = { mic: "audio/mic.webm", system: "audio/system.webm" };
 const DOCUMENTS = ["summary.md", "transcript.md"];
 
@@ -21,10 +21,19 @@ const line = (v, max) => (typeof v === "string" ? clip(flat(v.replace(/[\p{Cc}\u
 const amount = v => Number.isFinite(v) && v >= 0;
 const orNull = check => v => (v === null ? null : check(v));
 
+// A screenshot is a monitor's ({ monitor }) or a chosen window's ({ window, title }: its number among the chosen and
+// what it was called when it was chosen).
+const number = v => Number.isInteger(v) && v >= 1;
+function checkScreen(s) {
+  if (!isObj(s) || !SCREEN.test(s.file) || !amount(s.atMs)) return undefined;
+  const { file, atMs } = s;
+  if (s.window === undefined) return number(s.monitor) ? { file, atMs, monitor: s.monitor } : undefined;
+  return number(s.window) && s.monitor === undefined ? { file, atMs, window: s.window, title: line(s.title ?? "", TITLE_MAX) ?? "" } : undefined;
+}
 function checkScreens(list) {
   if (!Array.isArray(list)) return undefined;
-  const valid = list.every(s => isObj(s) && SCREEN.test(s.file) && amount(s.atMs) && Number.isInteger(s.monitor) && s.monitor >= 1);
-  return valid ? list.map(({ file, atMs, monitor }) => ({ file, atMs, monitor })) : undefined;
+  const screens = list.map(checkScreen);
+  return screens.includes(undefined) ? undefined : screens;
 }
 function checkAudio(v) {
   if (!isObj(v)) return undefined;

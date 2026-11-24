@@ -74,6 +74,10 @@ body.usage-open.meeting-recording .topbar > .tabbar { display: none; }
 .mr-thumb img { width: 100%; height: 100%; object-fit: contain; }
 .mr-pick { display: flex; align-items: center; gap: 7px; color: var(--text); }
 .mr-monitor small { overflow-wrap: anywhere; }
+.mr-monitors legend .mr-link { margin-left: 8px; }
+.mr-grid > .modal-note { grid-column: 1 / -1; }
+.mr-window b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; font-weight: 500; }
+.mr-monitors + .mr-monitors .mr-grid { max-height: 260px; overflow-y: auto; }
 .mr-key { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; color: var(--muted); }
 .modal-form > p.modal-note { margin: 0; color: var(--muted); }
 .mr-link { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }

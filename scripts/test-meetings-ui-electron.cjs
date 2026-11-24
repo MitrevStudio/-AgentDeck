@@ -120,7 +120,8 @@ replaceModule('recorder', {
         if (thumbnails) await new Promise(resolve => { releaseThumbs = resolve; });
         return {
           microphones: [{ deviceId: 'default', label: 'Default - Desk microphone', isDefault: true }, { deviceId: 'desk', label: 'Desk microphone', isDefault: false }, { deviceId: 'headset', label: 'Conference headset', isDefault: false }],
-          displays: DISPLAYS.map((d, i) => ({ ...d, thumbnail: thumbnails ? `data:image/png;base64,${picture(320, 200, i * 60).toString('base64')}` : null }))
+          displays: DISPLAYS.map((d, i) => ({ ...d, thumbnail: thumbnails ? `data:image/png;base64,${picture(320, 200, i * 60).toString('base64')}` : null })),
+          windows: (fake.windows || []).map(w => ({ ...w, thumbnail: null }))
         };
       },
       showThumbnails: () => { releaseThumbs?.(); releaseThumbs = null; },
@@ -874,6 +875,33 @@ app.whenReady().then(async () => {
   await waitFor("$('meetingRec').hidden", 'discarded');
   assert.equal(await has('.meeting-view'), false);
 
+  // ---------- a window instead of a monitor ----------
+  step('a window for the screenshots');
+  const choiceBefore = await evaluate("localStorage.getItem('agentdeck.meetingRecording')");
+  fake.windows = [{ id: 'window:4242:0', title: '<img src=x onerror=alert(1)> Weekly call' }];
+  await openMenuList();
+  await pick('Record a meeting');
+  await waitFor("document.querySelectorAll('.meeting-start .mr-window').length === 1", 'the open windows');
+  fake.recorder.showThumbnails();
+  await waitFor("document.querySelectorAll('.meeting-start [data-part=monitors] .mr-thumb img').length === 2", 'the pictures, and the windows again');
+  assert.equal(await has('.meeting-start .mr-window img'), false, 'a title is text, and no picture is one');
+  assert.match(await text('.meeting-start .mr-window'), /<img src=x onerror=alert\(1\)> Weekly call/);
+  await click('.meeting-start [data-part=monitors] input[value="11"]');
+  await click('.meeting-start [data-part=monitors] input[value="22"]');
+  assert.equal(await evaluate("document.querySelector('.meeting-start [data-part=go]').disabled"), true, 'nothing to take a picture of');
+  await click('.meeting-start .mr-window input');
+  assert.equal(await evaluate("document.querySelector('.meeting-start [data-part=go]').disabled"), false);
+  await click('.meeting-start [data-part=go]');
+  await waitFor("!$('meetingRec').hidden && !document.querySelector('.meeting-start')", 'recording a window');
+  const windowAsked = fake.calls.filter(call => call[0] === 'record').at(-1)[1];
+  assert.deepEqual([windowAsked.monitors, windowAsked.windows], [[], ['window:4242:0']]);
+  assert.equal(JSON.parse(await evaluate("localStorage.getItem('agentdeck.meetingRecording')")).windowsOnly, true, 'no monitor is ticked for it the next time');
+  await click('[data-rec=discard]');
+  await confirm(true);
+  await waitFor("$('meetingRec').hidden", 'discarded');
+  fake.windows = null;
+  await evaluate(`localStorage.setItem('agentdeck.meetingRecording', ${JSON.stringify(choiceBefore)})`);
+
   fake.capabilities = { ...fake.capabilities, ownAudioExcluded: false };
   await openMenuList();
   await pick('Record a meeting');
@@ -918,6 +946,8 @@ app.whenReady().then(async () => {
     [`estimate(${shop}, ${id}, { transcription: 'all' })`, 'invalidData'],
     [`rename(${shop}, ${id}, 5)`, 'invalidData'],
     [`start(${shop}, { monitors: [], microphone: 'default' })`, 'invalidData'],
+    [`start(${shop}, { monitors: [], windows: ['screen:0:0'], microphone: 'default' })`, 'invalidData'],
+    [`start(${shop}, { monitors: ['11'], windows: 'window:1:0', microphone: 'default' })`, 'invalidData'],
     [`start(${shop}, { monitors: [11], microphone: 'default' })`, 'invalidData'],
     ["discardRecoverable('../../../x')", 'meetingsNotFound']
   ]) assert.equal(await answer(code), expected, code);

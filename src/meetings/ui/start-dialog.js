@@ -1,16 +1,18 @@
-// Before a recording: the title, the microphone and the monitors the screenshot key takes. The last choice is
-// remembered by this window (localStorage), as its other conveniences are.
+// Before a recording: the title, the microphone and what the screenshot key takes: monitors, windows that are open
+// now, or both. The last choice is remembered by this window (localStorage), as its other conveniences are; a window
+// is not, it is another one the next time.
 const meetingsStart = (() => {
   const { live, call, dialog, accelerator } = meetingsShared;
   const CHOICE_KEY = "agentdeck.meetingRecording";
+  const WINDOWS_MAX = 8; // as ipc.js takes
   const PSEUDO = ["default", "communications"]; // Chromium's entries for a device that is listed anyway
 
   function readChoice() {
     try {
       const saved = JSON.parse(localStorage.getItem(CHOICE_KEY));
-      return { microphone: saved?.microphone || null, monitors: Array.isArray(saved?.monitors) ? saved.monitors : [] };
+      return { microphone: saved?.microphone || null, monitors: Array.isArray(saved?.monitors) ? saved.monitors : [], windowsOnly: saved?.windowsOnly === true };
     } catch {
-      return { microphone: null, monitors: [] };
+      return { microphone: null, monitors: [], windowsOnly: false };
     }
   }
   function saveChoice(choice) {
@@ -35,6 +37,14 @@ const meetingsStart = (() => {
       <small>${esc(about)}</small></label>`;
   }
 
+  const PICTURE = /^data:image\/(png|jpeg);base64,[\w+/=]+$/;
+  function windowHtml(shown, chosen) {
+    const picture = PICTURE.test(shown.thumbnail || "") ? `<img src="${shown.thumbnail}" alt="">` : `<span>${esc(t("meetings.start.noPicture"))}</span>`;
+    return `<label class="mr-monitor mr-window">
+      <span class="mr-thumb">${picture}</span>
+      <span class="mr-pick"><input type="checkbox" class="check" value="${esc(shown.id)}" ${chosen ? "checked" : ""}><b>${esc(shown.title)}</b></span></label>`;
+  }
+
   function open(project) {
     const saved = readChoice();
     const d = dialog("modal meeting-start", `<form method="dialog" class="modal-form">
@@ -44,6 +54,9 @@ const meetingsStart = (() => {
       <label><span>${esc(t("meetings.start.microphone"))}</span><select class="select" data-part="mic" disabled><option>${esc(t("meetings.loading"))}</option></select></label>
       <fieldset class="mr-monitors"><legend>${esc(t("meetings.start.monitors"))}</legend>
         <div class="mr-grid" data-part="monitors"><p class="modal-note">${esc(t("meetings.loading"))}</p></div></fieldset>
+      <fieldset class="mr-monitors"><legend>${esc(t("meetings.start.windows"))}<button type="button" class="mr-link" data-part="refresh">${esc(t("meetings.start.refresh"))}</button></legend>
+        <div class="mr-grid" data-part="windows"><p class="modal-note">${esc(t("meetings.loading"))}</p></div>
+        <p class="modal-note">${esc(t("meetings.start.windowsHint"))}</p></fieldset>
       <p class="modal-note mr-key"><span>${esc(t("meetings.start.shortcut"))}</span><span data-part="key">${accelerator(live.shortcut)}</span><button type="button" class="mr-link" data-part="change">${esc(t("meetings.start.change"))}</button></p>
       ${live.capabilities.ownAudioExcluded ? "" : `<p class="mr-notice warn" data-part="own">${icon("alert")}<span>${esc(t("meetings.start.ownAudio"))}</span></p>`}
       <p class="modal-hint err" data-part="error" role="alert"></p>
@@ -52,11 +65,27 @@ const meetingsStart = (() => {
         <button type="submit" class="btn primary" data-part="go" disabled>${icon("record")}${esc(t("meetings.start.go"))}</button>
       </div></form>`);
     const part = name => d.querySelector(`[data-part="${name}"]`);
-    const ticked = () => [...d.querySelectorAll(".mr-monitor input:checked")].map(box => box.value);
-    let displays = null, busy = false;
+    const tickedIn = name => [...part(name).querySelectorAll("input:checked")].map(box => box.value);
+    const ticked = () => tickedIn("monitors"), tickedWindows = () => tickedIn("windows");
+    let displays = null, busy = false, listing = 0;
 
     function renderGo() {
-      part("go").disabled = busy || !displays || !ticked().length;
+      part("go").disabled = busy || !displays || !(ticked().length + tickedWindows().length);
+      const full = tickedWindows().length >= WINDOWS_MAX;
+      for (const box of part("windows").querySelectorAll("input")) box.disabled = full && !box.checked;
+    }
+    // The windows that are open now; one that was ticked stays ticked while it is still there.
+    function showWindows(list) {
+      const chosen = tickedWindows();
+      part("windows").innerHTML = list.map(shown => windowHtml(shown, chosen.includes(shown.id))).join("")
+        || `<p class="modal-note">${esc(t("meetings.start.noWindows"))}</p>`;
+      renderGo();
+    }
+    // Asked for again whenever this window is come back to: the call's window may have been opened meanwhile.
+    async function refreshWindows() {
+      const mine = ++listing;
+      const { windows } = await call("devices", { thumbnails: true });
+      if (d.open && mine === listing) showWindows(windows || []);
     }
     function fail(error) {
       if (d.open) part("error").textContent = error.message;
@@ -70,40 +99,44 @@ const meetingsStart = (() => {
       mic.value = value;
       mic.disabled = false;
       const ids = displays.map(display => display.id), kept = saved.monitors.filter(id => ids.includes(id));
-      const chosen = kept.length ? kept : [(displays.find(display => display.primary) || displays[0])?.id];
+      const chosen = kept.length || saved.windowsOnly ? kept : [(displays.find(display => display.primary) || displays[0])?.id];
       part("monitors").innerHTML = displays.map(display => monitorHtml(display, chosen.includes(display.id))).join("")
         || `<p class="modal-note">${esc(t("meetings.start.noMonitors"))}</p>`;
-      renderGo();
+      showWindows(devices.windows || []);
     }
     // The pixels can take seconds and may not come at all: the choice does not wait for them.
     function showThumbnails(list) {
       for (const slot of d.querySelectorAll("[data-thumb]")) {
         const picture = list.find(display => display.id === slot.dataset.thumb)?.thumbnail;
-        slot.innerHTML = /^data:image\/(png|jpeg);base64,[\w+/=]+$/.test(picture || "") ? `<img src="${picture}" alt="">`
+        slot.innerHTML = PICTURE.test(picture || "") ? `<img src="${picture}" alt="">`
           : `<span>${esc(t("meetings.start.noPicture"))}</span>`;
       }
     }
     async function load() {
       showDevices(await call("devices", { thumbnails: false }));
       if (!d.open) return;
+      const mine = ++listing;
       try {
-        showThumbnails((await call("devices", { thumbnails: true })).displays);
+        const pictured = await call("devices", { thumbnails: true });
+        showThumbnails(pictured.displays);
+        if (d.open && mine === listing) showWindows(pictured.windows || []);
       } catch {
         showThumbnails([]);
       }
     }
 
     async function submit() {
-      const mic = part("mic"), monitors = ticked();
+      const mic = part("mic"), monitors = ticked(), windows = tickedWindows();
       busy = true;
       renderGo();
       part("error").textContent = "";
       try {
-        await call("start", project.path, { title: part("title").value.trim(), microphone: mic.value, monitors });
-        saveChoice({ microphone: { deviceId: mic.value, label: mic.selectedOptions[0].textContent }, monitors });
+        await call("start", project.path, { title: part("title").value.trim(), microphone: mic.value, monitors, windows });
+        saveChoice({ microphone: { deviceId: mic.value, label: mic.selectedOptions[0].textContent }, monitors, windowsOnly: !monitors.length });
         d.close();
       } catch (error) {
         fail(error);
+        if (error.code === "meetingsWindowMissing") refreshWindows().catch(() => {});
       } finally {
         busy = false;
         renderGo();
@@ -113,6 +146,7 @@ const meetingsStart = (() => {
     d.addEventListener("change", renderGo);
     part("cancel").addEventListener("click", () => d.close());
     part("change").addEventListener("click", () => meetingsShared.openSettings("meetings").catch(fail));
+    part("refresh").addEventListener("click", () => refreshWindows().catch(fail));
     d.querySelector("form").addEventListener("submit", e => {
       e.preventDefault();
       if (!part("go").disabled) submit();
@@ -122,8 +156,12 @@ const meetingsStart = (() => {
       live.shortcut = state.shortcut;
       setHtml(part("key"), accelerator(state.shortcut));
     }).catch(fail);
-    window.addEventListener("focus", readKey);
-    d.addEventListener("close", () => window.removeEventListener("focus", readKey));
+    const cameBack = () => {
+      readKey();
+      if (displays) refreshWindows().catch(fail);
+    };
+    window.addEventListener("focus", cameBack);
+    d.addEventListener("close", () => window.removeEventListener("focus", cameBack));
     readKey();
     load().catch(fail);
   }
