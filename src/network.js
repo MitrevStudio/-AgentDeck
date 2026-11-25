@@ -1,4 +1,4 @@
-// AgentDeck's connections to the cloud (Gemini, OpenAI) and to GitHub for updates, and the proxy they go through:
+// AgentDeck's connections to the cloud (Gemini, OpenAI, Soniox) and to GitHub for updates, and the proxy they go through:
 // the `network` key of settings.json. Main process only.
 //
 // Requests go through Chromium's network stack (Electron's net), not Node's fetch. Chromium follows the Windows

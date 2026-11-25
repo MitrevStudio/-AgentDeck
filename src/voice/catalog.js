@@ -1,6 +1,7 @@
 // Every model the app knows, described by what it can do, and the voices. The code asks here what a request may
 // carry, what a task's default is and what replaces a model that stops; it never reads anything out of a model's name.
-// Checked against the providers' documentation (models, parameters, prices, deprecations) on 2026-11-22.
+// Checked against the providers' documentation (models, parameters, prices, deprecations) on 2026-11-22, Soniox's on
+// 2026-11-25.
 //
 // A model: tasks (what it is suitable for), api (the endpoint), thinking ({levels}, the least first, or {budget} for
 // the models that take tokens instead), temperature (the request may carry one), language and vocabulary (the field
@@ -34,6 +35,12 @@ const transcriptions = {
 };
 const chat = { api: "chat", tasks: TEXT, limits: { inputTokens: 922_000, outputTokens: 128_000 } };
 const speech = { api: "interactions", tasks: ["readAloud"] };
+// Soniox: a file is uploaded, transcribed as a job and fetched; a file may be 300 minutes long.
+const SONIOX_CHECKED = "2026-11-25";
+const fileJob = {
+  api: "async", tasks: SPEECH, language: "language_hints", vocabulary: "context", timestamps: "word",
+  limits: { audioSeconds: 18_000 }
+};
 // OpenAI's older models, with the day they stop.
 const speechUntil = shutdown => ({ ...transcriptions, shutdown, successor: "gpt-transcribe" });
 const chatUntil = shutdown => ({ api: "chat", tasks: TEXT, temperature: true, shutdown, successor: "gpt-6-luna" });
@@ -90,6 +97,13 @@ const MODELS = Object.freeze({
     "gemini-3.1-flash-tts-preview": { ...speech, shutdown: "2026-12-18", successor: "gemini-3.8-flash-tts" },
     "gemini-2.5-flash-preview-tts": { ...speech, shutdown: "2026-12-18", successor: "gemini-3.8-flash-tts" },
     "gemini-2.5-pro-preview-tts": { ...speech, shutdown: "2026-12-18", successor: "gemini-3.8-flash-tts" }
+  }),
+  // Only hears and speaks: it has no text models.
+  Soniox: Object.freeze({
+    "stt-async-v6": { ...fileJob, price: [{ from: SONIOX_CHECKED, perMinute: 0.1 / 60 }] },
+    "tts-rt-v2": { api: "tts", tasks: ["readAloud"], price: [tokens(4, 21.5, SONIOX_CHECKED)] },
+
+    "stt-async-v5": { ...fileJob, shutdown: "2026-12-15", successor: "stt-async-v6" }
   })
 });
 const PROVIDERS = Object.freeze(Object.keys(MODELS));
@@ -97,12 +111,13 @@ const PROVIDERS = Object.freeze(Object.keys(MODELS));
 // An id the catalog does not know gets only what every model of that provider takes: no thinking, no temperature.
 const CUSTOM = Object.freeze({
   OpenAI: { language: "language", vocabulary: "prompt", timestamps: "none" },
-  Gemini: { api: "generateContent", vocabulary: "prompt", timestamps: "prompted" }
+  Gemini: { api: "generateContent", vocabulary: "prompt", timestamps: "prompted" },
+  Soniox: { api: "async", language: "language_hints", vocabulary: "context", timestamps: "word" }
 });
 
 // provider: the task's default, "" = the dictation's (sameModel: with the dictation's model as well). models: each
 // provider's default; a provider without one cannot do the task.
-const SPEECH_DEFAULTS = Object.freeze({ OpenAI: "gpt-transcribe", Gemini: "gemini-3.5-flash-lite" });
+const SPEECH_DEFAULTS = Object.freeze({ OpenAI: "gpt-transcribe", Gemini: "gemini-3.5-flash-lite", Soniox: "stt-async-v6" });
 const TEXT_DEFAULTS = Object.freeze({ OpenAI: "gpt-6-luna", Gemini: "gemini-3.5-flash-lite" });
 const TASKS = Object.freeze({
   dictation: { provider: "OpenAI", models: SPEECH_DEFAULTS },
@@ -110,8 +125,8 @@ const TASKS = Object.freeze({
   rewrite: { provider: "", models: TEXT_DEFAULTS },
   edit: { provider: "", models: TEXT_DEFAULTS },
   ask: { provider: "", models: TEXT_DEFAULTS },
-  readAloud: { provider: "Gemini", models: { Gemini: "gemini-3.8-flash-tts" } },
-  meetingTranscription: { provider: "Gemini", models: { OpenAI: "gpt-transcribe", Gemini: "gemini-3.5-transcribe" } },
+  readAloud: { provider: "Gemini", models: { Gemini: "gemini-3.8-flash-tts", Soniox: "tts-rt-v2" } },
+  meetingTranscription: { provider: "Gemini", models: { OpenAI: "gpt-transcribe", Gemini: "gemini-3.5-transcribe", Soniox: "stt-async-v6" } },
   meetingSummary: { provider: "Gemini", models: { OpenAI: "gpt-6-luna", Gemini: "gemini-3.8-flash" } }
 });
 
@@ -153,36 +168,59 @@ function choices(task, provider) {
 }
 
 // What does a task: settings.load() and, for one run, an override of either part -> { provider, model }. A provider
-// named without a model gets the task's model on that provider. The provider is never swapped for another one: a
-// name nobody knows comes back as given, for the request to refuse.
+// named without a model gets the task's model on that provider. A named provider is never swapped for another one: a
+// name nobody knows comes back as given, for the request to refuse. Only the dictation's provider, followed by a
+// task it has no model for (Soniox writes no text), gives way to the task's first.
 function resolveTask(settings, task, override = {}) {
   const spec = TASKS[task];
   if (!spec) throw new Error(`unknown task "${task}"`);
   const own = settings?.tasks?.[task] || {};
-  const chosen = override.provider || own.provider || spec.provider || resolveTask(settings, "dictation").provider;
-  const provider = providerName(chosen) || chosen;
+  const named = override.provider || own.provider || spec.provider;
+  const chosen = named || resolveTask(settings, "dictation").provider;
+  let provider = providerName(chosen) || chosen;
+  if (!named && !spec.models[provider]) provider = Object.keys(spec.models)[0];
   const saved = (spec.sameModel && !own.provider ? settings?.tasks?.dictation : own)?.models;
   const model = String(override.model || "").trim() || saved?.[provider] || spec.models[provider];
   return { provider, model: currentModel(provider, model) };
 }
 
-// Gemini's prebuilt voices.
-const VOICES = Object.freeze(["Kore", "Puck", "Charon", "Zephyr", "Fenrir", "Leda", "Orus", "Aoede", "Callirrhoe",
+// The voices of each provider that reads aloud, its default first: Gemini's prebuilt ones, Soniox's built-in ones
+// (every one of them speaks every language).
+const GEMINI_VOICES = Object.freeze(["Kore", "Puck", "Charon", "Zephyr", "Fenrir", "Leda", "Orus", "Aoede", "Callirrhoe",
   "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba", "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia",
   "Achernar", "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi", "Vindemiatrix", "Sadachbia",
   "Sadaltager", "Sulafat"]);
+const SONIOX_VOICES = Object.freeze(["Maya", "Daniel", "Noah", "Nina", "Emma", "Jack", "Adrian", "Claire", "Grace",
+  "Owen", "Mina", "Kenji", "Rafael", "Mateo", "Lucia", "Sofia", "Oliver", "Arthur", "Isla", "Victoria", "Cooper",
+  "Mason", "Ruby", "Elise", "Arjun", "Rohan", "Priya", "Meera"]);
+const VOICES = Object.freeze({ Gemini: GEMINI_VOICES, Soniox: SONIOX_VOICES });
 
-// The character Google gives each prebuilt voice; the Settings page shows it as t("voice.catalog.style.<id>").
+// What tells the voices apart, shown by the Settings page as t("voice.catalog.style.<id>"), several joined: the
+// character Google gives each prebuilt voice; of Soniox's, whose voice it is and its accent in English.
 const VOICE_STYLES = Object.freeze({
   Kore: "firm", Puck: "upbeat", Charon: "informative", Zephyr: "bright", Fenrir: "excitable", Leda: "youthful",
   Orus: "firm", Aoede: "breezy", Callirrhoe: "easyGoing", Autonoe: "bright", Enceladus: "breathy", Iapetus: "clear",
   Umbriel: "easyGoing", Algieba: "smooth", Despina: "smooth", Erinome: "clear", Algenib: "gravelly",
   Rasalgethi: "informative", Laomedeia: "upbeat", Achernar: "soft", Alnilam: "firm", Schedar: "even", Gacrux: "mature",
   Pulcherrima: "forward", Achird: "friendly", Zubenelgenubi: "casual", Vindemiatrix: "gentle",
-  Sadachbia: "lively", Sadaltager: "knowledgeable", Sulafat: "warm"
+  Sadachbia: "lively", Sadaltager: "knowledgeable", Sulafat: "warm",
+  ...Object.fromEntries([
+    ["female", "Maya Nina Emma Claire Grace Mina"], ["male", "Daniel Noah Jack Adrian Owen Kenji"],
+    ["female spanish", "Lucia Sofia"], ["male spanish", "Rafael Mateo"],
+    ["female british", "Isla Victoria"], ["male british", "Oliver Arthur"],
+    ["female australian", "Ruby Elise"], ["male australian", "Cooper Mason"],
+    ["female indian", "Priya Meera"], ["male indian", "Arjun Rohan"]
+  ].flatMap(([styles, names]) => names.split(" ").map(name => [name, styles.split(" ")])))
 });
+
+// The voice a reading on `provider` uses: the saved one, else the provider's first. Gemini's is `readAloudVoice`, the
+// name it had while only Gemini read: a version from then that shares the settings keeps sending it to Gemini, so no
+// other provider's voice may ever be in it. The others' are in `readAloudVoices`.
+const savedVoice = (settings, provider) =>
+  String((provider === "Gemini" ? settings?.readAloudVoice : settings?.readAloudVoices?.[provider]) || "").trim();
+const voiceFor = (settings, provider) => savedVoice(settings, provider) || VOICES[provider]?.[0] || "";
 
 module.exports = {
   MODELS, PROVIDERS, TASKS, REVISION, LAST_DAY, providerName, modelInfo, currentModel, choices, resolveTask,
-  VOICES, VOICE_STYLES, DEFAULT_VOICE: VOICES[0]
+  VOICES, VOICE_STYLES, voiceFor
 };

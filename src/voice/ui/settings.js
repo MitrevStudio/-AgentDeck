@@ -357,11 +357,26 @@ function renderLengthHint() {
 function modelsChanged() {
   renderLengthHint();
   dictationUi.modelsChanged();
+  renderVoices();
+  renderReadAloudHint();
 }
+
+// ---------- read aloud ----------
+// The voice of each provider that reads; the list shows those of the one chosen for reading (Models). Shown with what
+// tells each voice apart; only the name is stored.
+const voices = {};
+const reader = () => modelsUi.target("readAloud").provider;
+function renderVoices() {
+  const voice = voices[reader()];
+  const label = (name, style) => (style ? `${name}  —  ${style}` : name);
+  fillSelect($("raVoice"), withCustom(st.data.voices[reader()].map(([n, style]) => [n, label(n, style)]), voice,
+    v => label(v, t("voice.settings.customVoice"))), voice);
+}
+$("raVoice").addEventListener("change", () => { voices[reader()] = $("raVoice").value; });
 
 function renderReadAloudHint() {
   const hk = $("hkRead").value.trim() || st.data.settings.hotkeys.readAloud;
-  $("raHint").textContent = t("voice.settings.readAloudHint", { hotkey: pretty(hk) });
+  $("raHint").textContent = t("voice.settings.readAloudHint", { hotkey: pretty(hk), provider: reader() });
 }
 
 // ---------- errors ----------
@@ -477,7 +492,8 @@ $("form").addEventListener("submit", async e => {
     microphoneDeviceId: dev.deviceId,
     microphoneName: dev.fallback ? "" : dev.label,
     maxRecordingMinutes: Number($("maxLen").value),
-    readAloudVoice: $("raVoice").value,
+    readAloudVoice: voices.Gemini,
+    readAloudVoices: Object.fromEntries(Object.entries(voices).filter(([provider]) => provider !== "Gemini")),
     hotkeys: {
       dictate: $("hkDictate").value.trim(), readAloud: $("hkRead").value.trim(),
       ...(!$("tabMeetings").hidden && { meetingScreenshot: $("hkMeetingShot").value.trim() })
@@ -675,11 +691,11 @@ async function init() {
   const lengths = [...new Set([...d.lengths, s.maxRecordingMinutes])].sort((a, b) => a - b);
   fillSelect($("maxLen"), lengths.map(m => [String(m), tn("voice.settings.minutes", m)]), s.maxRecordingMinutes);
 
-  // Shown with the character of each voice; only the name is stored.
-  const voice = s.readAloudVoice || d.defaultVoice;
-  const voiceLabel = (name, style) => (style ? `${name}  —  ${style}` : name);
-  fillSelect($("raVoice"), withCustom(d.voices.map(([n, style]) => [n, voiceLabel(n, style)]), voice,
-    v => voiceLabel(v, t("voice.settings.customVoice"))), voice);
+  // Gemini's saved voice has a key of its own (settings.js); a provider with none saved has its first.
+  for (const [provider, list] of Object.entries(d.voices)) {
+    voices[provider] = (provider === "Gemini" ? s.readAloudVoice : s.readAloudVoices?.[provider]) || list[0][0];
+  }
+  renderVoices();
 
   $("hkDictate").value = s.hotkeys.dictate;
   $("hkRead").value = s.hotkeys.readAloud;

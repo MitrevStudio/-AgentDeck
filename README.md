@@ -124,7 +124,7 @@ On Windows the collector is a small program of its own, `StatusLine-<hash>.exe` 
 | Windows Terminal (`wt.exe`) | External Windows Terminal mode |
 | Git on the relevant machine | Repository status, branches and clone workflows |
 | Microphone and a provider API key | Dictation and other voice input features |
-| Gemini API key | Gemini read-aloud generation |
+| Gemini or Soniox API key | Read-aloud generation |
 | Claude Code | The command centre and generated daily summaries |
 
 Built-in **AgentDeck tabs** are the default terminal destination. Windows Terminal is an alternative you can select in settings or the tray menu.
@@ -249,7 +249,7 @@ Hover-opened menus retract when you leave. The handle hides while a fullscreen a
 
 ### Voice tools
 
-Voice tools work across applications through global shortcuts, a recording overlay, provider transcription and delivery back to the target window. Add your own **OpenAI** or **Gemini** API key in **Settings → Models**, where every task - dictation, voice commands, rewriting, editing, questions, read aloud, meeting transcription and meeting summary - also gets its own provider and model (any model id can be typed in). Retiring models are replaced by their successors and you are told once. Choose a microphone and set your language and recording preferences under Dictation.
+Voice tools work across applications through global shortcuts, a recording overlay, provider transcription and delivery back to the target window. Add your own **OpenAI**, **Gemini** or **Soniox** API key in **Settings → Models**, where every task - dictation, voice commands, rewriting, editing, questions, read aloud, meeting transcription and meeting summary - also gets its own provider and model (any model id can be typed in). Soniox only hears and speaks: with it as the dictation's provider, the text tasks that follow the dictation go to another provider, and the page says which. Retiring models are replaced by their successors and you are told once. Choose a microphone and set your language and recording preferences under Dictation.
 
 #### Dictate into the active application
 
@@ -291,7 +291,7 @@ This uses the provider and model chosen for voice questions. It is a quick-answe
 
 #### Read selected text aloud
 
-Select text and press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd>. Gemini generates the speech; the playback panel offers pause, stop and speed controls. Speed adjustment preserves voice pitch, and the selection-copy workflow restores the previous clipboard contents.
+Select text and press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd>. Gemini generates the speech, or Soniox if you choose it for read aloud in **Settings → Models** (each has voices of its own); the playback panel offers pause, stop and speed controls. Speed adjustment preserves voice pitch, and the selection-copy workflow restores the previous clipboard contents.
 
 Press the shortcut again to stop playback. The read-aloud model is chosen in **Settings → Models**, the voice and speed under **Read aloud**.
 
@@ -634,7 +634,7 @@ Some features intentionally communicate beyond the local app:
 | Clean / Prompt | Recognized text and rewrite context go to the provider chosen for rewriting |
 | Voice editing | Selected text and spoken instruction go to the provider chosen for editing |
 | Voice questions | The question and relevant vocabulary go to the provider chosen for questions |
-| Read aloud | Selected text goes to Gemini for speech generation |
+| Read aloud | Selected text goes to the provider chosen for read aloud (Gemini or Soniox) for speech generation |
 | Meetings | After you confirm, the audio in parts goes to the transcription provider, the title and transcript text to the summary provider; screenshots are not sent. An agent that reads a meeting sends what it opens to its own provider |
 | Command centre | Requests and tool results enter its Claude Code conversation |
 | Generated day summaries | An activity digest is passed to Claude Code |
@@ -802,7 +802,7 @@ flowchart TB
     IPC --> M["Mesh links · pairing · WSS"]
     M <--> R["Remote host core"]
     R --> P["Linux node-pty / Windows DockPty"]
-    V --> API["OpenAI / Gemini"]
+    V --> API["OpenAI / Gemini / Soniox"]
 ```
 
 | Path | Responsibility |

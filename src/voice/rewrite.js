@@ -9,6 +9,7 @@ const { providerName, resolveTask } = require("./catalog");
 const { MODES } = require("./dictation-options");
 const { t } = require("../i18n");
 
+// The providers that write text.
 const PROVIDERS = { OpenAI: require("./providers/openai"), Gemini: require("./providers/gemini") };
 const LANGUAGE_NAMES = PROVIDERS.Gemini.LANGUAGE_NAMES;
 
@@ -29,7 +30,8 @@ const target = (task, provider, model) => resolveTask(provider && model ? {} : s
 async function generate({ system, text, task = "rewrite", provider, model, exact = false, temperature = 0.2, effort, schema, signal, timeoutMs, getApiKey } = {}) {
   if (!exact) ({ provider, model } = target(task, provider, model));
   const name = providerName(provider);
-  if (!name) throw configuration(t("voice.errors.unknownProvider", { provider }));
+  // Not every provider writes text (Soniox only hears and speaks).
+  if (!PROVIDERS[name]) throw configuration(t("voice.errors.unknownProvider", { provider }));
   const apiKey = String((await (getApiKey || settings().getApiKey)(name)) || "").trim();
   if (!apiKey) throw configuration(t("voice.errors.noApiKey", { provider: name }));
   const timeout = AbortSignal.timeout(timeoutMs ?? timeoutFor(text));

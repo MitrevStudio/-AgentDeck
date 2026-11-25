@@ -95,4 +95,4 @@ async function generateText({ model, system, text, temperature = 0.2, effort, sc
   }
 }
 
-module.exports = { transcribe, generateText, MAX_UPLOAD_BYTES, TRANSCRIPTIONS_URL };
+module.exports = { transcribe, generateText, MAX_UPLOAD_BYTES, MAX_RECORDING_BYTES: MAX_UPLOAD_BYTES, TRANSCRIPTIONS_URL };

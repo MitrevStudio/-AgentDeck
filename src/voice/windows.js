@@ -5,7 +5,7 @@ const { BrowserWindow, ipcMain, screen } = require("electron");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { maxRecordingMinutesFor } = require("./transcription");
-const { MODELS, TASKS, VOICES, VOICE_STYLES, DEFAULT_VOICE, choices } = require("./catalog");
+const { MODELS, TASKS, VOICES, VOICE_STYLES, choices } = require("./catalog");
 const { SAFE_ID, isObj, sleep } = require("../shared/util");
 const { classify } = require("./errors");
 const dictation = require("./dictation-options");
@@ -26,7 +26,9 @@ const taskChoices = () => Object.entries(TASKS).map(([id, spec]) => ({
   models: Object.fromEntries(Object.keys(spec.models).map(p => [p, choices(id, p)]))
 }));
 const LENGTH_PRESETS = [1, 2, 3, 5, 10, 15, 20, 30, 45, 60];
-const voiceStyle = name => (VOICE_STYLES[name] ? t(`voice.catalog.style.${VOICE_STYLES[name]}`) : "");
+const voiceStyle = name => [VOICE_STYLES[name] || []].flat().map(id => t(`voice.catalog.style.${id}`)).join(", ");
+// A prebuilt voice is a name; a cloned one of Soniox's is an id.
+const VOICE_RE = /^[A-Za-z0-9_-]*$/;
 
 // ---------- hotkeys ----------
 const MOD_NAMES = { control: "Control", ctrl: "Control", commandorcontrol: "Control", cmdorctrl: "Control",
@@ -218,8 +220,8 @@ function createVoiceWindows({ settings, store, queue, listDevices, onReread, onS
     providerMinutes: Object.fromEntries(settings.PROVIDERS.map(p => [p, maxRecordingMinutesFor(p)])),
     languages: languageChoices(),
     lengths: LENGTH_PRESETS,
-    voices: VOICES.map(name => [name, voiceStyle(name)]),
-    defaultVoice: DEFAULT_VOICE,
+    // Of each provider that reads aloud, its default first.
+    voices: Object.fromEntries(Object.entries(VOICES).map(([p, names]) => [p, names.map(name => [name, voiceStyle(name)])])),
     hotkeyDefaults: { ...settings.defaults.hotkeys },
     projectNames: (() => { try { return projectNames() || []; } catch { return []; } })()
   }));
@@ -385,9 +387,16 @@ function validateSettings(p, providers, inUse = {}) {
   if (!Number.isInteger(minutes) || minutes < 1 || minutes > 60) errors.maxRecordingMinutes = t("voice.settings.err.minutes", { min: 1, max: 60 });
   else patch.maxRecordingMinutes = minutes;
 
+  // Gemini's voice, and those of the providers that came after it (settings.js); the page sends each one's.
   const voice = str(p.readAloudVoice ?? "", 40);
   if (voice === null || (voice && !/^[A-Za-z]+$/.test(voice))) errors.readAloudVoice = t("voice.settings.err.voice");
-  else patch.readAloudVoice = voice || DEFAULT_VOICE;
+  else patch.readAloudVoice = voice || VOICES.Gemini[0];
+  if (p.readAloudVoices !== undefined) {
+    const others = Object.keys(VOICES).filter(name => name !== "Gemini");
+    const given = isObj(p.readAloudVoices) ? others.map(name => [name, str(p.readAloudVoices[name] ?? "", 100)]) : [[null, null]];
+    if (given.some(([, v]) => v === null || !VOICE_RE.test(v))) errors.readAloudVoice = t("voice.settings.err.voice");
+    else patch.readAloudVoices = Object.fromEntries(given);
+  }
 
   const dictate = normalizeAccelerator(p.hotkeys?.dictate), readAloud = normalizeAccelerator(p.hotkeys?.readAloud);
   if (dictate.error) errors["hotkeys.dictate"] = dictate.error;

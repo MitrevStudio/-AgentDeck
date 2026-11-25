@@ -2,10 +2,11 @@
 // exact its times (grain: "word", "segment" or "part"). And how every request of a meeting is repeated.
 const timers = require("node:timers/promises");
 const { classify } = require("../../voice/errors");
-const { providerName, modelInfo } = require("../../voice/catalog");
+const { TASKS, providerName, modelInfo } = require("../../voice/catalog");
 const { fail } = require("../errors");
 const gemini = require("./gemini");
 const openai = require("./openai");
+const soniox = require("./soniox");
 
 const SECOND = 1000, MINUTE = 60 * SECOND;
 
@@ -13,8 +14,8 @@ const PAUSES_MS = [2, 5, 15, 30].map(s => s * SECOND);
 const PAUSE_MAX_MS = 2 * MINUTE;
 const RETRIED = new Set(["RateLimited", "ServerError", "Network", "Timeout", "MalformedResponse"]);
 // Failed without being billed: Google says it of its 500, and a refusal for the rate or the load did no work. Of
-// OpenAI's 500, of a 502 and of a 504 nobody says it, and behind each the work may have been done.
-const UNBILLED_STATUS = { Gemini: [429, 500, 503], OpenAI: [429, 503] };
+// OpenAI's and Soniox's 500, of a 502 and of a 504 nobody says it, and behind each the work may have been done.
+const UNBILLED_STATUS = { Gemini: [429, 500, 503], OpenAI: [429, 503], Soniox: [429, 503] };
 // Failures from before there was a connection to send on: names, refusals, proxies, certificates, offline. Any other
 // lost connection, a reset or a "timed out" included, cannot be told from one lost while the answer was on its way.
 const NEVER_SENT = [
@@ -79,10 +80,11 @@ function createCaller({ provider, signal, timeoutMs, wait = (ms, abort) => timer
   return call;
 }
 
-// The catalog's model for this task, or a refusal before anything is sent.
+// The catalog's model for this task, or a refusal before anything is sent. A provider that has no model for the task
+// cannot do it with a model of any name (Soniox writes no summaries).
 function suitable(task, { provider, model }) {
   const name = providerName(provider);
-  if (!name || !model) fail("meetingsModelUnsuitable", `${provider} ${model}`.trim());
+  if (!name || !model || !TASKS[task].models[name]) fail("meetingsModelUnsuitable", `${provider} ${model}`.trim());
   const info = modelInfo(name, model);
   if (info.tasks && !info.tasks.includes(task)) fail("meetingsModelUnsuitable", `${name} ${model}`);
   return { provider: name, info };
@@ -91,8 +93,9 @@ function suitable(task, { provider, model }) {
 // The length of a part: { min, target, max, gap } in ms, gap being the silence that ends one.
 function partLimits(provider, info) {
   if (provider === "OpenAI") return { min: 30 * SECOND, target: 45 * SECOND, max: 90 * SECOND, gap: 15 * SECOND };
-  if (info.api === "interactions") {
+  if (info.api === "interactions" || info.api === "async") {
     // Under both of the limits Google documents with word times (30 and 15 minutes): past them it cuts off silently.
+    // Soniox takes a file of hours; its parts are as long, so that a part that fails costs as little to ask again.
     const max = Math.min(14 * MINUTE, (info.limits?.timedAudioSeconds ?? Infinity) * SECOND);
     const target = Math.min(12 * MINUTE, max);
     return { min: Math.round(target * 2 / 3), target, max, gap: 2 * MINUTE };
@@ -107,6 +110,7 @@ function createTranscriber(choice) {
   const { provider, info } = suitable("meetingTranscription", choice);
   const common = { provider, model: choice.model, limits: partLimits(provider, info) };
   if (provider === "OpenAI") return { ...common, ...openai.text, grain: "part", parallel: 4 };
+  if (provider === "Soniox") return { ...common, ...soniox.words, grain: "word", parallel: 2, removeFile: soniox.removeFile };
   return info.api === "interactions"
     ? { ...common, ...gemini.words, grain: "word", parallel: 2, removeFile: gemini.removeFile }
     : { ...common, ...gemini.segments, grain: "segment", parallel: 2, removeFile: gemini.removeFile };

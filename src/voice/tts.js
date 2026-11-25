@@ -1,10 +1,11 @@
-// Read-aloud: text -> Gemini speech, streamed into the panel's player (overlay.player). Port of VoiceTray's
-// ReadAloudService and SpeechService; capturing the selection is the caller's job (selection.js).
+// Read-aloud: text -> speech from the task's provider (Gemini or Soniox), streamed into the panel's player
+// (overlay.player). Port of VoiceTray's ReadAloudService and SpeechService; capturing the selection is the caller's job
+// (selection.js).
 //
 // One reading at a time: a new one replaces the last. Streaming synthesis runs at ~1.6x real time, which keeps up
 // with 1x playback but not 2x, so the next chunk is always requested while the current one plays (two in flight).
 //
-// events: "state" {phase: "preparing" | "playing" | "paused" | "idle", title, speed, truncated}
+// events: "state" {phase: "preparing" | "playing" | "paused" | "idle", title, speed, truncated, provider}
 //         "done"  {id, createdAt, completedAt, text, provider, model, voice, wavBuffer, durationMs, completed}
 //                 - once per heard reading, for history: with the audio when synthesis finished (playback may still
 //                 be running), text only (wavBuffer null) when it was stopped or cut off before that
@@ -12,19 +13,24 @@
 const { EventEmitter } = require("node:events");
 const crypto = require("node:crypto");
 const gemini = require("./providers/gemini");
+const soniox = require("./providers/soniox");
 const { VoiceError, classify, configuration } = require("./errors");
 const { pcmToWav } = require("./wav");
-const { DEFAULT_VOICE, resolveTask } = require("./catalog");
+const { resolveTask, voiceFor } = require("./catalog");
 const { t } = require("../i18n");
-
-const PROVIDER = "Gemini";
 
 // A cost guard: Ctrl+A on a long page would otherwise send the whole thing to a paid API. About ten minutes of speech.
 const MAX_CHARACTERS = 10_000;
 // About a minute and a half of speech - small enough to retry cheaply.
 const CHUNK_CHARACTERS = 1_500;
+// Who reads, and how much text one request of theirs gets. Soniox speaks for two minutes a request at most and stops
+// there without saying so: its chunks are about a minute, so that no slow passage reaches the limit.
+const SPEAKERS = {
+  Gemini: { speak: gemini.speak, chunkChars: CHUNK_CHARACTERS },
+  Soniox: { speak: soniox.speak, chunkChars: 900 }
+};
 const LOOKAHEAD = 1; // chunks requested beyond the one being delivered
-const SAMPLE_RATE = gemini.SPEECH_SAMPLE_RATE;
+const SAMPLE_RATE = gemini.SPEECH_SAMPLE_RATE; // both stream 24 kHz mono s16le
 // Enough audio in hand to absorb the jitter between streamed pieces; starting on the first piece tends to stutter.
 const START_BUFFER_MS = 750;
 const MIN_SPEED = 0.5;
@@ -120,11 +126,11 @@ function pump(iterable) {
 }
 
 // The passage as one continuous PCM stream, in order, with LOOKAHEAD chunks requested ahead of the one being read.
-async function* streamSpeech({ text, model, voice, apiKey, signal, chunkChars, speak }) {
+async function* streamSpeech({ text, model, voice, language, apiKey, signal, chunkChars, speak }) {
   const chunks = splitIntoChunks(text, chunkChars);
   const pumps = [];
   const startNext = () => {
-    if (pumps.length < chunks.length) pumps.push(pump(speak({ text: chunks[pumps.length], model, voice, apiKey, signal })));
+    if (pumps.length < chunks.length) pumps.push(pump(speak({ text: chunks[pumps.length], model, voice, language, apiKey, signal })));
   };
   for (let i = 0; i <= LOOKAHEAD; i++) startNext();
   for (let i = 0; i < chunks.length; i++) {
@@ -135,16 +141,16 @@ async function* streamSpeech({ text, model, voice, apiKey, signal, chunkChars, s
 
 const titleOf = text => (text.length <= 60 ? text : `${text.slice(0, 60).trimEnd()}…`);
 
-// overlay: createOverlay() result (its `player` plays the audio). getSettings() -> voice settings (tasks,
-// readAloudVoice, readAloudSpeed). getApiKey(provider) -> key (may be async). saveSettings(patch), optional, remembers
-// the speed. `speak` and `chunkChars` are there for tests.
-function createReadAloud({ overlay, getSettings = () => ({}), getApiKey, saveSettings, speak = gemini.speak, chunkChars = CHUNK_CHARACTERS } = {}) {
+// overlay: createOverlay() result (its `player` plays the audio). getSettings() -> voice settings (tasks, the voices,
+// language, readAloudSpeed). getApiKey(provider) -> key (may be async). saveSettings(patch), optional, remembers the
+// speed. `speak` and `chunkChars` replace the provider's own, for tests.
+function createReadAloud({ overlay, getSettings = () => ({}), getApiKey, saveSettings, speak, chunkChars } = {}) {
   const emitter = new EventEmitter();
   let session = null;
   let phase = "idle";
   let speed = clampSpeed(getSettings()?.readAloudSpeed ?? 1);
 
-  const info = () => ({ phase, title: session?.title ?? null, speed, truncated: Boolean(session?.truncated) });
+  const info = () => ({ phase, title: session?.title ?? null, speed, truncated: Boolean(session?.truncated), provider: session?.provider ?? null });
   function setPhase(next) {
     if (phase === next) return;
     phase = next;
@@ -157,17 +163,23 @@ function createReadAloud({ overlay, getSettings = () => ({}), getApiKey, saveSet
     s.saved = true;
     const wavBuffer = s.synthesisCompleted ? pcmToWav(s.chunks, SAMPLE_RATE) : null;
     emitter.emit("done", {
-      id: s.id, createdAt: s.createdAt, completedAt: new Date(), text: s.text, provider: PROVIDER, model: s.model, voice: s.voice,
+      id: s.id, createdAt: s.createdAt, completedAt: new Date(), text: s.text, provider: s.provider, model: s.model, voice: s.voice,
       wavBuffer, durationMs: wavBuffer ? Math.round((s.bytes / 2 / SAMPLE_RATE) * 1000) : 0, completed: s.synthesisCompleted
     });
   }
 
   async function synthesise(s) {
     try {
-      const apiKey = String((await getApiKey(PROVIDER)) || "").trim();
-      if (!apiKey) throw configuration(t("voice.errors.noApiKey", { provider: PROVIDER }));
+      const speaker = SPEAKERS[s.provider];
+      if (!speaker) throw configuration(t("voice.errors.unknownProvider", { provider: s.provider }));
+      const apiKey = String((await getApiKey(s.provider)) || "").trim();
+      if (!apiKey) throw configuration(t("voice.errors.noApiKey", { provider: s.provider }));
       if (s.ac.signal.aborted) return;
-      for await (const pcm of streamSpeech({ text: s.text, model: s.model, voice: s.voice, apiKey, signal: s.ac.signal, chunkChars, speak })) {
+      const request = {
+        text: s.text, model: s.model, voice: s.voice, language: s.language, apiKey, signal: s.ac.signal,
+        speak: speak || speaker.speak, chunkChars: chunkChars || speaker.chunkChars
+      };
+      for await (const pcm of streamSpeech(request)) {
         if (session !== s) return;
         s.chunks.push(pcm);
         s.bytes += pcm.length;
@@ -180,7 +192,7 @@ function createReadAloud({ overlay, getSettings = () => ({}), getApiKey, saveSet
     } catch (e) {
       // Stopped by the user or replaced by a new reading: not a failure.
       if (s.ac.signal.aborted || session !== s) return;
-      fail(s, classify({ error: e, provider: PROVIDER, signal: s.ac.signal }));
+      fail(s, classify({ error: e, provider: s.provider, signal: s.ac.signal }));
     }
   }
 
@@ -225,10 +237,12 @@ function createReadAloud({ overlay, getSettings = () => ({}), getApiKey, saveSet
     if (!text) return false;
     const settings = getSettings() || {};
     speed = clampSpeed(settings.readAloudSpeed ?? speed);
+    const { provider, model } = resolveTask(settings, "readAloud");
     const s = {
       id: crypto.randomUUID().replace(/-/g, ""), createdAt: new Date(), text, truncated, title: titleOf(text),
-      model: resolveTask(settings, "readAloud").model,
-      voice: String(settings.readAloudVoice || "").trim() || DEFAULT_VOICE,
+      // The voice is the provider's own: a name of Gemini's means nothing to Soniox. The language is for the provider
+      // that has to be told one.
+      provider, model, voice: voiceFor(settings, provider), language: settings.language || "auto",
       ac: new AbortController(), chunks: [], bytes: 0, playbackStarted: false, synthesisCompleted: false, saved: false
     };
     session = s;

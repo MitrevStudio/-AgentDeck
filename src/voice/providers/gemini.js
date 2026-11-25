@@ -225,7 +225,7 @@ async function* speak({ text, model, voice, apiKey, signal, timeoutMs }) {
 }
 
 module.exports = {
-  transcribe, generateText, speak, LANGUAGE_NAMES, MAX_INLINE_BYTES, SPEECH_SAMPLE_RATE,
+  transcribe, generateText, speak, LANGUAGE_NAMES, MAX_INLINE_BYTES, MAX_RECORDING_BYTES: MAX_INLINE_BYTES, SPEECH_SAMPLE_RATE,
   // For the meetings' requests (../../meetings/providers/gemini.js).
   LANGUAGE_TAGS, GENERATE_URL, INTERACTIONS_URL, jsonHeaders, interactionHeaders, generationConfig
 };

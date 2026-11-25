@@ -10,10 +10,12 @@ const modelsUi = (() => {
 
   const options = list => list.map(([value, label]) => `<option value="${esc(value)}">${esc(label)}</option>`).join("");
 
-  // What does a task as the page stands: as catalog.js resolveTask(), plus the task whose model that is.
+  // What does a task as the page stands: as catalog.js resolveTask(), plus the task whose model that is. A task that
+  // follows the dictation to a provider with no model for it (Soniox writes no text) is done by its own first one.
   function target(id) {
     const spec = st.specs.get(id), own = st.tasks[id];
-    const provider = own.provider || st.tasks.dictation.provider;
+    let provider = own.provider || st.tasks.dictation.provider;
+    if (!own.provider && !spec.models[provider]) provider = Object.keys(spec.models)[0];
     const from = spec.sameModel && !own.provider ? "dictation" : id;
     return { provider, from, model: st.tasks[from].models[provider] || spec.models[provider][0] };
   }
@@ -90,11 +92,13 @@ const modelsUi = (() => {
     renderWarning(id);
   }
 
-  // A model that stops or is re-routed, and a meeting transcript whose times will only be approximate.
+  // A task done by another provider than the dictation it follows, a model that stops or is re-routed, and a meeting
+  // transcript whose times will only be approximate.
   function warnings(id) {
     const { provider, from, model } = target(id);
     if (from !== id) return []; // the dictation's row says it
-    const info = st.data.catalog[provider][model.toLowerCase()], out = [];
+    const info = st.data.catalog[provider][model.toLowerCase()], out = [], dictation = st.tasks.dictation.provider;
+    if (!st.tasks[id].provider && provider !== dictation) out.push(t("voice.settings.models.notAsDictation", { dictation, provider }));
     if (info?.rerouted) out.push(t("voice.settings.models.rerouted", { model, successor: info.successor }));
     else if (info?.shutdown) {
       out.push(t("voice.settings.models.stops", { model, successor: info.successor, date: I18N.formatDate(Date.parse(info.shutdown), DAY) }));
