@@ -17,6 +17,8 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm run test:image-paste
+      - run: npm run test:terminal-env
+      - run: npm run test:terminal-copy
       - run: npm run test:git
       - run: npm run test:git-ui
       - run: node scripts/test-remote-state.js
@@ -78,6 +80,8 @@ jobs:
       - run: npm run setup:linux
       - run: npm run check
       - run: npm run test:image-paste
+      - run: npm run test:terminal-env
+      - run: npm run test:terminal-copy
       - run: npm run test:git
       - run: node scripts/test-remote-state.js
       - run: node scripts/test-resources.js

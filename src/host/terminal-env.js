@@ -24,6 +24,10 @@ function terminalEnv(env = process.env, proxy = null) {
   const out = Object.fromEntries(Object.entries(env).filter(([k]) =>
     !SESSION_MARKERS.test(k) && !(fromAgent && AGENT_SHELL_VARS.has(k.toLowerCase())) && !(proxy && PROXY_VARS.test(k))));
   if (proxy) Object.assign(out, { HTTPS_PROXY: proxy.url, HTTP_PROXY: proxy.url, NO_PROXY: proxy.noProxy, NODE_USE_ENV_PROXY: "1" });
+  // A terminal here may be looked at from another computer, whose clipboard only an OSC 52 reaches (workspace-ui.js).
+  // Codex, selecting with its own mouse, writes just this computer's clipboard ("copied to host clipboard") unless it
+  // takes itself for a remote session; under Herdr's marker it does both - this clipboard and an OSC 52.
+  out.HERDR_ENV = "1";
   return out;
 }
 
