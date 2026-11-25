@@ -13,6 +13,7 @@ const { execFile } = require("node:child_process");
 const promptLaunch = require("./prompt-launch");
 const { fail } = require("./errors");
 const { launchIdentity } = require("./codex-link");
+const { codexEnv } = require("./terminal-env");
 const { liveStatus } = require("../shared/live-status");
 
 const { psQuote } = promptLaunch;
@@ -165,7 +166,10 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
   // ---------- the host's own terminals ----------
   // A terminal of the host's own with the command in it (null: a shell): on Windows the PowerShell line `command`
   // (DockPty, terminals.js), elsewhere the program of `argv` (terminals-pty.js). env: already prepared by
-  // terminal-env.js. how: for the launch log. Refused (tooManyTerminals) once MAX_TERMINALS run here.
+  // terminal-env.js. Here, the one place every terminal of the host opens through (a new session, one resumed or
+  // reopened after a restart, one a peer or a phone asked for), it also gets Claude's renderer and, for a Codex
+  // session, the marker under which Codex also sends what it copies (codexEnv).
+  // how: for the launch log. Refused (tooManyTerminals) once MAX_TERMINALS run here.
   // meta: { title, agent, sessionId, codexLog, owner }, and from the host's restore only (never from a peer's params):
   // id, createdAt, reopened - the terminal opened anew under the id it had (host/index.js restoreTerminals).
   async function openTerminal(cwd, command, meta, env, how, argv = null) {
@@ -176,7 +180,7 @@ function createLaunch({ dataDir, terminals, liveSessions, findTranscript, sessio
     const commandLine = command ? `powershell.exe -NoLogo ${meta.agent ? "" : "-NoExit "}-EncodedCommand ${encoded}` : "powershell.exe -NoLogo";
     const id = await terminals.open({
       cwd, commandLine, argv, title: meta.title || path.basename(cwd), agent: meta.agent, agentOnly: Boolean(meta.agent), sessionId: meta.sessionId, codexLog: meta.codexLog, owner: meta.owner,
-      env: getClaudeEnv(env || process.env),
+      env: codexEnv(getClaudeEnv(env || process.env), meta.agent),
       ...(meta.id ? { id: meta.id, createdAt: meta.createdAt, reopened: meta.reopened === true } : {})
     });
     log(`agentdeck ${how}`, `cwd="${cwd}" cmd=${command ? `"${command.slice(0, 120)}"` : "-"}`);

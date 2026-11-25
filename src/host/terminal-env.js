@@ -24,11 +24,22 @@ function terminalEnv(env = process.env, proxy = null) {
   const out = Object.fromEntries(Object.entries(env).filter(([k]) =>
     !SESSION_MARKERS.test(k) && !(fromAgent && AGENT_SHELL_VARS.has(k.toLowerCase())) && !(proxy && PROXY_VARS.test(k))));
   if (proxy) Object.assign(out, { HTTPS_PROXY: proxy.url, HTTP_PROXY: proxy.url, NO_PROXY: proxy.noProxy, NODE_USE_ENV_PROXY: "1" });
-  // A terminal here may be looked at from another computer, whose clipboard only an OSC 52 reaches (workspace-ui.js).
-  // Codex, selecting with its own mouse, writes just this computer's clipboard ("copied to host clipboard") unless it
-  // takes itself for a remote session; under Herdr's marker it does both - this clipboard and an OSC 52.
-  out.HERDR_ENV = "1";
   return out;
 }
 
-module.exports = { terminalEnv };
+// A terminal here may be looked at from another computer, whose clipboard only an OSC 52 reaches (workspace-ui.js).
+// Codex, selecting with its own mouse, writes just the clipboard of the computer it runs on ("copied to host
+// clipboard") unless it takes itself for a remote session; under Herdr's marker it does both - that clipboard and an
+// OSC 52. Only the terminal of a Codex session AgentDeck starts gets the marker (launch.js openTerminal, by the
+// terminal's agent): it reaches every program in the terminal, and others act on it - OpenCode drops its session
+// tabs, Herdr's own hooks take the terminal for one of Herdr's. So a plain shell stays without it, and a `codex`
+// typed into one copies to its own computer only; a session opened in Windows Terminal needs none, as nobody looks
+// at that from another computer. A HERDR_ENV the user set, in any letter case (Windows names are
+// case-insensitive, so a second spelling would be a second, contradicting entry), stays exactly as it is.
+const HERDR_MARKER = /^HERDR_ENV$/i;
+function codexEnv(env, agent) {
+  if (agent !== "Codex" || Object.keys(env).some(k => HERDR_MARKER.test(k))) return env;
+  return { ...env, HERDR_ENV: "1" };
+}
+
+module.exports = { terminalEnv, codexEnv };
