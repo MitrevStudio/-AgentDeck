@@ -9,7 +9,7 @@ const fsp = fs.promises;
 const os = require("node:os");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { createFiles, CHUNK, PAGE, PART } = require("../src/host/files");
+const { createFiles, writeAll, CHUNK, PAGE, PART } = require("../src/host/files");
 const { withPhone, waitFor } = require("./phone-test-rig");
 
 const code = c => ({ code: c });
@@ -307,6 +307,25 @@ async function hard(root) {
   assert.equal((await files.commit("A", { upload: up.upload })).path, at("dst", "up (2).txt"));
   assert.equal(await fsp.readFile(at("dst", "up.txt"), "utf8"), "theirs");
   console.log("ok: two for one name both keep theirs; a stopped copy removes only its own; a late name is not written over");
+
+  // ---------- a write that takes less than it was given; what a copy keeps of its file ----------
+  const taken = Buffer.alloc(5000);
+  const stingy = { calls: 0, async write(buf, off, len, pos) { this.calls++; const n = Math.min(len, 1024); buf.copy(taken, pos, off, off + n); return { bytesWritten: n }; } };
+  const body = crypto.randomBytes(4000);
+  await writeAll(stingy, body, 500);
+  assert.ok(taken.subarray(500, 4500).equals(body) && stingy.calls === 4, "what a short write left is written again");
+  await assert.rejects(writeAll({ write: async () => ({ bytesWritten: 0 }) }, body, 0), { code: "ENOSPC" }, "a write that takes nothing is a full disk, not a file made whole");
+  await fsp.writeFile(at("tool.sh"), "#!/bin/sh\n"); await fsp.writeFile(at("secret.key"), "k");
+  await fsp.chmod(at("tool.sh"), 0o755); await fsp.chmod(at("secret.key"), 0o600);
+  const then = new Date(2025, 4, 6, 7, 8, 9);
+  await fsp.utimes(at("tool.sh"), then, then);
+  for (const n of ["tool.sh", "secret.key"]) await done(files, (await files.copy("A", { from: at(n), to: at("dst", n) })).job);
+  assert.equal(Math.round((await fsp.stat(at("dst", "tool.sh"))).mtimeMs), then.getTime(), "a copy has its file's time");
+  if (process.platform !== "win32") {
+    assert.equal((await fsp.stat(at("dst", "tool.sh"))).mode & 0o777, 0o755, "a program copied is still one");
+    assert.equal((await fsp.stat(at("dst", "secret.key"))).mode & 0o777, 0o600, "a private file copied is still private");
+  }
+  console.log("ok: a short write is finished or fails; a copy keeps its file's permissions and time");
 
   // ---------- limits, with requests sent together ----------
   const begun = await Promise.allSettled(Array.from({ length: 10 }, (_, i) => files.begin("L", { path: at("dst", `u${i}.bin`), size: 1 })));

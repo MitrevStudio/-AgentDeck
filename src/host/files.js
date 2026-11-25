@@ -76,6 +76,15 @@ async function reserve(wanted, dir) {
   }
   return fail("exists");
 }
+// All of buf at pos. A write may take fewer bytes than it was given (a quota, a limit on a file's size) and only say
+// how many: the rest is written again, and a write that takes none is a full disk - never a shorter file called whole.
+async function writeAll(fh, buf, pos) {
+  for (let done = 0; done < buf.length;) {
+    const { bytesWritten } = await fh.write(buf, done, buf.length - done, pos + done);
+    if (!bytesWritten) throw Object.assign(new Error("no more of the file is taken"), { code: "ENOSPC" });
+    done += bytesWritten;
+  }
+}
 // A finished file gets its name without taking another's: a hard link fails when the name is there, where a rename
 // would write over it. A volume without links gets a copy that refuses a name that is there. Throws EEXIST.
 async function place(part, dst) {
@@ -294,10 +303,15 @@ function createFiles({ home = "", trash = null, notify = () => {}, rm = p => fsp
         stopped(j);
         const buf = await readAt(from, pos, COPY_CHUNK);
         if (!buf.length) break;
-        await to.write(buf, 0, buf.length, pos);
+        await writeAll(to, buf, pos);
         pos += buf.length;
         j.bytes += buf.length;
       }
+      // The copy is the file it was copied from: a program stays one and a private file private (the new file was
+      // made with the defaults), and its time is the file's, not the copy's. A volume that keeps neither is no failure.
+      const st = await from.stat();
+      if (process.platform !== "win32") await to.chmod(st.mode & 0o777).catch(() => {});
+      await to.utimes(st.atime, st.mtime).catch(() => {});
     } catch (e) {
       await Promise.all([from.close(), to.close()].map(x => x.catch(() => {})));
       await fsp.rm(part, { force: true }).catch(() => {});
@@ -324,6 +338,8 @@ function createFiles({ home = "", trash = null, notify = () => {}, rm = p => fsp
     if (isRoot(real) || chain.some(x => same(x, real)) || (j.toReal && same(real, j.toReal))) { j.skipped++; return; }
     if (!top) await fsp.mkdir(dst).catch(failed);         // the job's own folder was made when its name was taken
     for (const name of await fsp.readdir(src).catch(failed)) await copyTree(j, path.join(src, name), path.join(dst, name), [...chain, real], false);
+    // A folder's permissions after what is in it: one that may not be written to could not have been filled.
+    if (process.platform !== "win32") await fsp.chmod(dst, st.mode & 0o777).catch(() => {});
   }
   async function runJob(j) {
     // Once the source of a move begins to go, the copy is all there is of what went: it stays, whatever happens.
@@ -428,7 +444,7 @@ function createFiles({ home = "", trash = null, notify = () => {}, rm = p => fsp
     const buf = Buffer.from(p.data, "base64");
     if (u.writing || !buf.length || buf.length > CHUNK || p.pos !== u.written || u.written + buf.length > u.size) fail("invalidData");
     u.writing = true;
-    u.busy = u.fh.write(buf, 0, buf.length, u.written);
+    u.busy = writeAll(u.fh, buf, u.written);
     try { await u.busy; } catch (e) { await drop(u); return failed(e); } finally { u.writing = false; }
     u.written += buf.length;
     touch(u);
@@ -464,4 +480,4 @@ function createFiles({ home = "", trash = null, notify = () => {}, rm = p => fsp
   return { list, stat, read, mkdir, rename, remove, copy, job, cancel, begin, write, commit, abort, drop: dropPeer, dispose, hasTrash: Boolean(trash) };
 }
 
-module.exports = { createFiles, CHUNK, PAGE, PART };
+module.exports = { createFiles, writeAll, CHUNK, PAGE, PART };

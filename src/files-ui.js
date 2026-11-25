@@ -273,12 +273,13 @@ async function sendEntries(from, entries, folder = null) {
   }
 }
 // Files dragged in from the system (Explorer) onto the remote pane: from this computer.
-async function sendDropped(to, files) {
+// folder: the folder row they were let go on, else the folder the pane shows.
+async function sendDropped(to, files, folder) {
   const from = otherPane(to);
   for (const f of files) {
     const p = window.terminals.getPathForFile(f);
     if (!p) continue;
-    const r = await window.files.send({ node: from.node, path: p }, { node: to.node, folder: to.path });
+    const r = await window.files.send({ node: from.node, path: p }, { node: to.node, folder: folder || to.path });
     if (r.error) return filesFailed(from, r);
   }
 }
@@ -656,7 +657,7 @@ function wireFilesView(el) {
     const folder = into?.dir ? filePathOf(pane, into.name) : null;
     const from = filesDrag;
     filesDrag = null;
-    const work = from ? sendEntries(from, selectedOf(from), folder) : sendDropped(pane, [...e.dataTransfer.files]);
+    const work = from ? sendEntries(from, selectedOf(from), folder) : sendDropped(pane, [...e.dataTransfer.files], folder);
     work.catch(err => toast(err.message, true));
   });
   el.addEventListener("keydown", e => {
