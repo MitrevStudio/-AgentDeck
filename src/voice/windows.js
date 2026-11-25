@@ -288,6 +288,8 @@ function createVoiceWindows({ settings, store, queue, listDevices, onReread, onS
   // Phones (docs/MOBILE.md 4, 5): a QR code of one-time invites; forgetting one everywhere.
   handle("mesh:invite-phone", settingsOwner, args => mesh?.invitePhone(isObj(args) ? args : {}) ?? { ok: false });
   handle("mesh:forget-phone", settingsOwner, id => mesh?.forgetPhone(String(id ?? "")) ?? null);
+  // A file of this computer offered to a phone linked now (docs/FILES.md 3.6); the picker is the system's.
+  handle("mesh:send-file", settingsOwner, id => mesh?.sendFile?.(String(id ?? "")) ?? { ok: false });
   handle("mesh:setup", settingsOwner, id => mesh?.setup(String(id ?? "")) ?? null);
   handle("mesh:setup-action", settingsOwner, (id, action, args) => mesh?.setupAction(String(id ?? ""), String(action ?? ""), args) ?? { ok: false });
   mesh?.on(state => { if (alive(settingsWin)) settingsWin.webContents.send("mesh:changed", state); });

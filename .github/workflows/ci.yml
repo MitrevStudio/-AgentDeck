@@ -52,6 +52,8 @@ jobs:
       - run: npm run test:pairing
       - run: npm run test:host-pair
       - run: npm run test:port-forward
+      - run: npm run test:files
+      - run: npm run test:mobile-files
       - run: npm run test:ports-list
       - run: npm run test:ports-app
       - run: npm run test:web-link
@@ -103,6 +105,7 @@ jobs:
       - run: npm run test:taskbar
       - run: npm run test:scratchpads
       - run: npm run test:port-forward
+      - run: npm run test:files
       - run: npm run test:ports-list
       - run: npm run test:release
       - run: npm run test:audit

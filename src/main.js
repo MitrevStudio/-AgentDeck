@@ -37,6 +37,7 @@ const { createHost } = require("./host");
 const { savePaste } = require("./host/paste");
 const { createLinks } = require("./mesh/links");
 const { createPortForwards } = require("./port-forwards");
+const { createFileTransfers, goodName } = require("./file-transfers");
 const { listListening } = require("./host/ports");
 const { createServed } = require("./mesh/serve");
 const { DEFAULT_PORT } = require("./mesh/identity");
@@ -636,7 +637,7 @@ async function remoteHomeTerminal(node) {
   return remoteLaunch(node, { kind: "shell", cwd: home });
 }
 // What the peers may ask of this computer, and what it pushes to them (mesh/serve.js).
-const served = createServed({ host, env: async () => terminalEnv(process.env, await network.terminalProxy().catch(() => null)) });
+const served = createServed({ host, trash: f => shell.trashItem(f), env: async () => terminalEnv(process.env, await network.terminalProxy().catch(() => null)) });
 const links = createLinks({ dir: path.join(app.getPath("userData"), "node"), defaultName: os.hostname(), kind: "desktop", version: app.getVersion(), api: served.api, log: meshLog });
 served.attach(links);
 
@@ -753,6 +754,129 @@ async function portAddress(id, port, https = false) {
     catch (e) { throw e?.code === "unknownMethod" ? outdated() : e; }
   }
   return `${https ? "https" : "http"}://localhost:${local}`;
+}
+
+// ---------- the "Files" dialog of a terminal (docs/FILES.md 6) ----------
+// Two panes: this computer on the left, starting in its Downloads, and the terminal's computer on the right, starting
+// in the terminal's folder; file-transfers.js carries what goes between them. The left side is this computer's own
+// host/files.js (served.files, which has the system's bin): no network. The window names a computer ("" this one) and
+// paths there, and gets { value } or { error, message }: the dialog acts on the codes ("exists" offers "name (2)",
+// "unknownMethod" asks for an update), so they are not turned into words only.
+// A file of this computer sent to a phone is offered to it (served.offers) and is a row of the same queue; its
+// state also shows on the phone's row in Settings -> Computers (meshSettings, transferWatchers).
+const transferWatchers = new Set();
+const transfers = createFileTransfers({ links, local: served.files, offers: served.offers, nameOf: node => (node ? nodeName(node) : selfName()), onChange: list => {
+  sendToManager("files:transfers", list);
+  for (const fn of transferWatchers) try { fn(list); } catch {}
+} });
+links.on("link", ({ node, up }) => { if (!up) transfers.linkDown(node); });
+// The paired phones, for "Send to phone" in the dialog's menu (files-ui.js builds it at once, so the list is pushed to
+// the window as phones come and go): [{ id, name, online }].
+const phonesView = () => links.nodes().filter(n => n.kind === "mobile").map(n => ({ id: n.id, name: n.name || n.id.slice(0, 8), online: links.online(n.id) }));
+let phonesSent = "";
+function phonesChanged() {
+  const list = phonesView(), sig = JSON.stringify(list);
+  if (sig === phonesSent) return;
+  phonesSent = sig;
+  sendToManager("files:phones", list);
+}
+links.on("nodes", phonesChanged);
+links.on("link", phonesChanged);
+// A phone a file may be sent to: paired, and linked to this computer now.
+function phoneNode(node) {
+  if (typeof node !== "string" || !links.nodes().some(n => n.id === node && n.kind === "mobile")) throw new HostError("invalidData");
+  if (!links.online(node)) throw new HostError("offline");
+  return node;
+}
+// "Send file…" on a phone's row in Settings: a file of this computer chosen in the system's picker, offered to it.
+// -> { ok, name } | { ok: false, cancelled } | { ok: false, error } (in the user's language).
+async function sendFileToPhone(id) {
+  try {
+    const node = phoneNode(id);
+    const picked = await dialog.showOpenDialog({ title: t("settings.phones.sendTitle", { name: nodeName(node) }), properties: ["openFile"], defaultPath: downloadsDir() });
+    if (picked.canceled || !picked.filePaths?.[0]) return { ok: false, cancelled: true };
+    const row = await transfers.offer({ node: phoneNode(id), path: picked.filePaths[0] });
+    return { ok: true, name: row.name };
+  } catch (e) {
+    return { ok: false, error: translated(e).message };
+  }
+}
+// The last file sent to each phone and how it went, for its row in Settings: { [phone id]: { name, state, error } }.
+function phoneSends(list = transfers.list()) {
+  const out = {};
+  for (const r of list) if (r.kind === "offer") out[r.to.node] = { name: r.name, state: r.state, error: r.error ? errorWords(r.error) : "" };
+  return out;
+}
+// A code as words, or the code itself where there are none (a phone's codes may be newer than this app).
+function errorWords(code) {
+  const words = t(`errors.${code}`);
+  return words === `errors.${code}` ? code : words;
+}
+// Where the left pane starts. A profile whose Downloads cannot be found (an isolated test profile) starts in the home.
+function downloadsDir() {
+  try { const dir = app.getPath("downloads"); if (isDir(dir)) return dir; } catch {}
+  const dir = path.join(os.homedir(), "Downloads");
+  return isDir(dir) ? dir : os.homedir();
+}
+// A side of the dialog: this computer, or a computer paired here (not a phone: it has no files to show).
+function filesNode(node) {
+  if (node === "") return "";
+  if (typeof node !== "string" || !computers().some(n => n.id === node)) throw new HostError("invalidData");
+  return node;
+}
+async function filesAnswer(work) {
+  try { return { value: await work() }; } catch (e) {
+    const code = e?.code === "closed" ? "offline" : typeof e?.code === "string" ? e.code : "";
+    const words = code ? t(`errors.${code}`) : "";
+    return { error: code || "failed", message: words && words !== `errors.${code}` ? words : String(e?.message || e) };
+  }
+}
+// -> { left, right }: each { node, name, start, trash (a delete there goes to its bin), error?: "offline" | "update" }.
+// Only a terminal of another computer has the dialog. Its computer is asked what it is when that is not known yet.
+async function filesSides(id) {
+  const { node, name } = portsTarget(id);
+  if (node === "") throw new HostError("invalidData");
+  const cwd = (remoteTerms.get(id) || remoteLists.get(node)?.find(x => x.id === id))?.cwd;
+  const left = { node: "", name: selfName(), start: downloadsDir(), trash: served.files.hasTrash };
+  const right = { node, name, start: typeof cwd === "string" && cwd ? cwd : "~", trash: false };
+  if (!links.online(node)) return { left, right: { ...right, error: "offline" } };
+  const info = await remoteInfo(node).catch(() => null);
+  if (isObj(info) && info.files !== 1) return { left, right: { ...right, error: "update" } };
+  return { left, right: { ...right, trash: info?.trash === 1 } };
+}
+// A preview: a picture or text in the dialog, a PDF in the system's program from a copy in a temporary folder.
+const PREVIEW_MAX = { text: 1024 * 1024, image: 20 * 1024 * 1024, pdf: 200 * 1024 * 1024 };
+const IMAGE_TYPES = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", bmp: "image/bmp", ico: "image/x-icon", svg: "image/svg+xml" };
+let previewDir = "";
+// -> { kind: "image", data } | { kind: "text" | "markdown", text } | { kind: "pdf" } | { kind: "binary" } | { kind:
+// "tooBig", max }
+async function previewFile(node, file) {
+  const ext = (/\.([^.\\/]+)$/.exec(file)?.[1] || "").toLowerCase();
+  const kind = IMAGE_TYPES[ext] ? "image" : ext === "pdf" ? "pdf" : "text";
+  try {
+    if (kind === "image") return { kind, data: `data:${IMAGE_TYPES[ext]};base64,${(await transfers.readAll(node, file, PREVIEW_MAX.image)).toString("base64")}` };
+    if (kind === "text") {
+      const buf = await transfers.readAll(node, file, PREVIEW_MAX.text);
+      return buf.includes(0) ? { kind: "binary" } : { kind: ext === "md" || ext === "markdown" ? "markdown" : "text", text: buf.toString("utf8") };
+    }
+    previewDir ||= await fs.promises.mkdtemp(path.join(os.tmpdir(), "agentdeck-preview-"));
+    const dir = await fs.promises.mkdtemp(path.join(previewDir, "f-"));
+    const name = file.split(/[\\/]/).pop();
+    const out = path.join(dir, goodName(name, path.sep) ? name : "preview.pdf");
+    const fh = await fs.promises.open(out, "wx");
+    try { await transfers.readAll(node, file, PREVIEW_MAX.pdf, buf => fh.write(buf)); } catch (e) {
+      await fh.close();
+      await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {});
+      throw e;
+    }
+    await fh.close();
+    const err = await shell.openPath(out);
+    if (err) throw new Error(err);
+    return { kind };
+  } catch (e) {
+    if (e?.code === "tooBig") return { kind: "tooBig", max: PREVIEW_MAX[kind] };
+    throw e;
+  }
 }
 // The mesh starts with the app. A file of the node that cannot be read (identity.js readKept: locked, or damaged)
 // keeps only the mesh off - the rest of AgentDeck runs - with the reason in Settings -> Computers and once in a
@@ -938,7 +1062,9 @@ async function forgetPhone(id) {
 }
 const meshSettings = {
   // error: why the mesh is off (self is null then).
-  state: () => ({ self: links.self(), error: meshError, nodes: computers(), phones: links.nodes().filter(n => n.kind === "mobile"), discovered: links.discovered(), lan: lanAddresses() }),
+  // sends: the last file sent to each phone (phoneSends).
+  state: () => ({ self: links.self(), error: meshError, nodes: computers(), phones: links.nodes().filter(n => n.kind === "mobile"), sends: phoneSends(), discovered: links.discovered(), lan: lanAddresses() }),
+  sendFile: id => sendFileToPhone(String(id ?? "")),
   invitePhone: async args => {
     try { return await invitePhone(isObj(args) ? args : {}); } catch (e) { return { ok: false, error: translated(e).message }; }
   },
@@ -969,7 +1095,17 @@ const meshSettings = {
       return { ok: false, error: translated(e).message };
     }
   },
-  on: cb => { for (const ev of ["nodes", "self", "discovered"]) links.on(ev, () => cb(meshSettings.state())); }
+  on: cb => {
+    for (const ev of ["nodes", "self", "discovered"]) links.on(ev, () => cb(meshSettings.state()));
+    // Only when what a phone's row says changed: the page is drawn again whole, and a transfer's progress ticks often.
+    let sendsSent = "";
+    transferWatchers.add(list => {
+      const sig = JSON.stringify(phoneSends(list));
+      if (sig === sendsSent) return;
+      sendsSent = sig;
+      cb(meshSettings.state());
+    });
+  }
 };
 function spawnDetached(file, args, opts) {
   const child = spawn(file, args, { detached: true, stdio: "ignore", ...opts });
@@ -1589,6 +1725,27 @@ function registerIpc() {
     setSavedPorts(space, getSavedPorts(space).filter(p => p !== gone));
     return true;
   });
+  // The "Files" dialog of a pane (filesSides, previewFile above; file-transfers.js). Every answer but the queue's is
+  // { value } or { error, message }. Nothing is read on a timer: a folder is listed when it is opened.
+  handle("files:open", id => filesSides(text(id, 64)));
+  // One request on a side: list, stat, mkdir, rename, delete (into the bin where that computer has one).
+  const FILE_REQUESTS = new Set(["list", "stat", "mkdir", "rename", "delete"]);
+  handle("files:call", (node, method, params) => filesAnswer(() => {
+    if (!FILE_REQUESTS.has(method) || !isObj(params)) throw new HostError("invalidData");
+    return transfers.side(filesNode(node)).call(method, params);
+  }));
+  // A file or a folder from one side into a folder of the other: a row of the queue.
+  handle("files:send", (from, to) => filesAnswer(() => transfers.send({ from: { node: filesNode(from?.node), path: text(from?.path) }, to: { node: filesNode(to?.node), folder: text(to?.folder) } })));
+  // A copy, or a move across volumes, done on that computer: a row of the queue too.
+  handle("files:copy", (node, from, to, move) => filesAnswer(() => transfers.copy({ node: filesNode(node), from: text(from), to: text(to), move: move === true })));
+  handle("files:preview", (node, file) => filesAnswer(() => previewFile(filesNode(node), text(file))));
+  handle("files:transfers", () => transfers.list());
+  handle("files:stop", id => transfers.stop(text(id, 64)));
+  handle("files:clear", () => transfers.clear());
+  // A file of this computer offered to a phone linked now (docs/FILES.md 3.6): a row of the queue that follows the
+  // phone's answers. The phones that could take one: [{ id, name, online }], and again as they come and go.
+  handle("files:offer", (node, file) => filesAnswer(() => transfers.offer({ node: phoneNode(node), path: text(file) })));
+  handle("files:phones", () => phonesView());
   // Tokens and API-equivalent cost (usage.js): the last result at once, or a fresh pass over the transcripts.
   handle("usage:get", () => usage.get());
   // The shortcuts as set now: the menu's hotkey and the voice ones (labels such as "Ctrl + Shift + Space").
@@ -1846,7 +2003,8 @@ if (!app.requestSingleInstanceLock()) {
       return;
     }
     quitting = true;
-    const shutdown = Promise.all([(async () => { await voiceStarting; await voice?.dispose(); })(), host.flush(), saveWorkspaceFinal()]);
+    // A file under way stops after its piece and leaves no unfinished file behind.
+    const shutdown = Promise.all([(async () => { await voiceStarting; await voice?.dispose(); })(), host.flush(), saveWorkspaceFinal(), transfers.dispose(), served.files.dispose()]);
     const graced = Promise.race([shutdown, new Promise(r => setTimeout(r, QUIT_GRACE_MS))])
       .catch(err => console.error("Voice shutdown failed:", err));
     // A recording being saved has a limit of its own.
@@ -1857,6 +2015,10 @@ if (!app.requestSingleInstanceLock()) {
     orchestrator.stop();
     host.stop();
     forwards.dispose();
+    transfers.dispose();
+    served.files.dispose().catch(() => {});
+    // The copies of PDFs opened from the Files dialog (one still open in its program stays).
+    if (previewDir) try { fs.rmSync(previewDir, { recursive: true, force: true }); } catch {}
     links.stop();
     globalShortcut.unregisterAll();
     // Quitting without before-quit (Windows ending the session) still saves the layout, at once.

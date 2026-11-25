@@ -8,6 +8,7 @@ class ViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(SecureStorePlugin())
         bridge?.registerPluginInstance(PhonePlugin())
         bridge?.registerPluginInstance(ForwardPlugin())
+        bridge?.registerPluginInstance(FilesPlugin())
         // A swipe from the screen's left edge goes back, as the Back button does on Android: the app keeps its
         // screens in the page's history (main.js go / popstate).
         webView?.allowsBackForwardNavigationGestures = true

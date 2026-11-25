@@ -13,6 +13,8 @@ import { nativeForward } from "./forward-native.js";
 import { keystore, lock, deviceModel } from "./keystore.js";
 import { isIos, setupPhone } from "./phone.js";
 import { generateKeypair } from "../../src/mesh/noise.js";
+import { checkOffer, takeOffer, bytesText } from "./files.js";
+import { nativeFiles } from "./files-native.js";
 import pkg from "../package.json";
 import { openSession } from "./screens/parts.js";
 import * as pairScreen from "./screens/pair.js";
@@ -26,8 +28,9 @@ import * as terminalScreen from "./screens/terminal.js";
 import * as newScreen from "./screens/new-session.js";
 import * as computersScreen from "./screens/computers.js";
 import * as nodeScreen from "./screens/node.js";
+import * as filesScreen from "./screens/files.js";
 
-const SCREENS = { pair: pairScreen, pairing: pairingScreen, routes: routesScreen, scan: scanScreen, diag: diagScreen, inbox: inboxScreen, session: sessionScreen, terminal: terminalScreen, new: newScreen, computers: computersScreen, node: nodeScreen };
+const SCREENS = { pair: pairScreen, pairing: pairingScreen, routes: routesScreen, scan: scanScreen, diag: diagScreen, inbox: inboxScreen, session: sessionScreen, terminal: terminalScreen, files: filesScreen, new: newScreen, computers: computersScreen, node: nodeScreen };
 const TABS = ["inbox", "new", "computers"];
 const META_KEY = "agentdeck.nodes"; // provider-relay.js meta: which nodes are relays, when each was last seen (not secret)
 
@@ -35,6 +38,7 @@ const app = $("#app");
 let store = null;
 let link = null; // the relay provider, once there is an identity (paired, or pairing)
 let forwards = null; // the forwarded ports over that provider (forward.js)
+let offOffers = null; // stops listening for files the computers send (offerHeard)
 let stack = []; // [{ name, params, scroll }]
 let cleanup = null;
 let shown = null; // the stack entry on the screen now
@@ -103,13 +107,14 @@ function sheetKeys(el, cancel) {
   });
 }
 
-// confirmSheet(text, okLabel, { danger, extra: [label] }) -> true | false | the extra button's index (2, 3, ...).
-function confirmSheet(text, okLabel, { danger = false, extra = [] } = {}) {
+// confirmSheet(text, okLabel, { danger, extra: [label], cancelLabel, cls }) -> true | false | the extra button's index
+// (2, 3, ...). cls: a class of the backdrop's own (what it is, for a test).
+function confirmSheet(text, okLabel, { danger = false, extra = [], cancelLabel = t("common.cancel"), cls = "" } = {}) {
   return new Promise(resolve => {
     const el = document.createElement("div");
-    el.className = "sheet-backdrop";
+    el.className = `sheet-backdrop${cls ? ` ${cls}` : ""}`;
     el.innerHTML = `<div class="sheet" role="dialog" aria-modal="true"><p>${esc(text)}</p>
-      <div class="sheet-actions"><button class="btn" data-v="0">${esc(t("common.cancel"))}</button>
+      <div class="sheet-actions"><button class="btn" data-v="0">${esc(cancelLabel)}</button>
       ${extra.map((label, i) => `<button class="btn" data-v="${i + 2}">${esc(label)}</button>`).join("")}
       <button class="btn ${danger ? "danger-solid" : "primary"}" data-v="1">${esc(okLabel)}</button></div></div>`;
     const focusOn = danger ? "0" : "1"; // a hardware Enter never confirms what cannot be undone
@@ -154,15 +159,16 @@ function menuSheet(items) {
   });
 }
 
-// promptSheet(title, value, okLabel, { multiline }) -> the text, or null when cancelled. multiline: a few lines of
-// any length (text to paste into a terminal), kept as typed; else one short line, trimmed.
-function promptSheet(title, value, okLabel, { multiline = false } = {}) {
+// promptSheet(title, value, okLabel, { multiline, maxLength }) -> the text, or null when cancelled. multiline: a few
+// lines of any length (text to paste into a terminal), kept as typed; else one line, trimmed, of at most maxLength
+// characters (a name: 60; a file's name there: 255).
+function promptSheet(title, value, okLabel, { multiline = false, maxLength = 60 } = {}) {
   return new Promise(resolve => {
     const el = document.createElement("div");
     el.className = "sheet-backdrop";
     el.innerHTML = `<form class="sheet" role="dialog" aria-modal="true"><p>${esc(title)}</p>
       ${multiline ? `<textarea class="sheet-input" rows="4" autocomplete="off" autocapitalize="off" spellcheck="false">${esc(value)}</textarea>`
-        : `<input class="sheet-input" maxlength="60" autocomplete="off" value="${esc(value)}">`}
+        : `<input class="sheet-input" maxlength="${maxLength}" autocomplete="off" value="${esc(value)}">`}
       <div class="sheet-actions"><button class="btn" type="button" data-v="0">${esc(t("common.cancel"))}</button>
       <button class="btn primary" type="submit">${esc(okLabel)}</button></div></form>`;
     const input = el.querySelector(".sheet-input");
@@ -197,6 +203,84 @@ function banner({ node, item }) {
   buzz();
   clearTimeout(bannerTimer);
   bannerTimer = setTimeout(() => { el.hidden = true; }, current()?.name === "terminal" ? 5000 : 9000);
+}
+
+// ---------- a file a computer sends (docs/FILES.md 3.6) ----------
+// A paired computer offers one of its files ("files.offer"): the phone serves nothing, so the computer cannot put it
+// here - the user is asked every time (else any paired computer could fill Downloads), whatever screen is open, naming
+// the computer (by the link the offer came on, never by what it sent), the file and its size. Save pulls it with the
+// Files screen's own download (files.js takeOffer) into Downloads, its progress and Stop in a bar of its own; Not now
+// tells the computer so. Without the Files plugin (a browser, an app whose native part is older) Save says the app
+// must be updated, and the computer hears that it failed. One prompt at a time and never over another sheet: an offer
+// that comes meanwhile waits until that closes (the computer keeps it a couple of minutes). A save may run beside a
+// transfer of the Files screen: two pieces on the link then, each at most 256 KB.
+const offersWaiting = [];
+let offerBusy = false, sheetWatch = null;
+function offerHeard({ node, event, payload }) {
+  if (event !== "files.offer" || !store) return;
+  const offer = checkOffer(payload);
+  if (!offer) return;
+  if (offersWaiting.length >= 10) offersWaiting.shift();
+  offersWaiting.push({ node, offer });
+  nextOffer();
+}
+function nextOffer() {
+  if (offerBusy || !offersWaiting.length) return;
+  if ($(".sheet-backdrop")) {
+    // Asked again once no sheet is open.
+    sheetWatch ||= new MutationObserver(() => {
+      if ($(".sheet-backdrop")) return;
+      sheetWatch.disconnect();
+      sheetWatch = null;
+      nextOffer();
+    });
+    sheetWatch.observe(document.body, { childList: true });
+    return;
+  }
+  offerBusy = true;
+  const { node, offer } = offersWaiting.shift();
+  askOffer(node, offer).catch(e => console.error("a file sent from a computer", e)).finally(() => { offerBusy = false; nextOffer(); });
+}
+async function askOffer(node, offer) {
+  if (!store) return;
+  const computer = store.nodeName(node), provider = store.provider;
+  buzz();
+  const save = (await confirmSheet(t("offer.ask", { computer, name: offer.name, size: bytesText(offer.size) }), t("offer.save"), { cancelLabel: t("offer.notNow"), cls: "offer-ask" })) === true;
+  const plugin = nativeFiles();
+  if (!save || !plugin) {
+    try { await takeOffer({ provider, node, plugin, offer, save }); }
+    catch (e) { if (e?.code === "needsApp") toast(t("offer.needsApp"), 6000); else fail(e); }
+    return;
+  }
+  const stop = new AbortController();
+  const bar = offerBar(t("offer.saving", { name: offer.name, computer }), () => stop.abort());
+  try {
+    const r = await takeOffer({ provider, node, plugin, offer, save, signal: stop.signal, onProgress: bar.progress });
+    toast(t("files.downloaded", { name: r.shown }));
+  } catch (e) {
+    if (e?.code === "cancelled") toast(t("files.stopped"));
+    else if (e?.code === "jobMissing") toast(t("offer.gone", { computer }), 5000);
+    else fail(e);
+  } finally { bar.close(); }
+}
+// The bar of a save under way: its name, how far, Stop. Above every screen, below the sheets.
+function offerBar(label, onStop) {
+  const el = document.createElement("div");
+  el.className = "offer-task";
+  el.setAttribute("role", "status");
+  el.innerHTML = `<div class="task-text"><b></b><small></small><i class="task-bar"><i></i></i></div>
+    <button class="btn sm" data-act="stop">${icon("stop")}<span>${esc(t("files.stop"))}</span></button>`;
+  el.querySelector("b").textContent = label;
+  el.querySelector("small").textContent = t("files.starting");
+  el.querySelector("[data-act='stop']").onclick = onStop;
+  document.body.append(el);
+  return {
+    progress: ({ bytes = 0, total = 0 }) => {
+      el.querySelector("small").textContent = total ? `${t("files.progress", { done: bytesText(bytes), total: bytesText(total) })} · ${Math.floor((bytes / total) * 100)} %` : t("files.starting");
+      el.querySelector(".task-bar > i").style.width = total ? `${Math.min(100, (bytes / total) * 100)}%` : "0";
+    },
+    close: () => el.remove()
+  };
 }
 
 // ---------- screens ----------
@@ -274,6 +358,9 @@ async function useProvider(provider) {
   ctx.forwards = forwards;
   forwards.on("lost", ({ node }) => toast(t("ports.lost", { name: store?.nodeName(node) || "" }), 5000));
   store.on("waiting", banner);
+  // A file a computer sends: asked whatever screen is open (on the provider: the store has no word for it).
+  offOffers?.();
+  offOffers = provider.on("notify", offerHeard);
   // The tab bar's badge follows the waiting count.
   store.on("change", () => {
     const tab = app.querySelector(".tabbar [data-tab='inbox']");
@@ -321,6 +408,8 @@ async function unpair() {
   forwards?.dispose();
   forwards = null;
   ctx.forwards = null;
+  offOffers?.();
+  offOffers = null;
   store?.disconnect();
   store = null;
   ctx.store = null;

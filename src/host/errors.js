@@ -28,6 +28,20 @@ const MESSAGES = {
   // Forwarded ports (port-streams.js; docs/PORT-FORWARDING.md).
   refused: "Nothing listens on that port there.",
   tooManyStreams: "Too many connections are open through forwarded ports there.",
+  // The files of this computer for a paired one (files.js; docs/FILES.md).
+  fileMissing: "That file or folder is no longer there.",
+  notFile: "That is a folder, not a file.",
+  exists: "Something with that name is already there.",
+  fileDenied: "That computer does not allow it (no permission, or the file is in use).",
+  changed: "The file changed while it was being read.",
+  crossDevice: "That is on another drive there.",
+  rootRefused: "A whole drive or the home folder is not copied, moved or deleted.",
+  intoItself: "A folder cannot go into itself.",
+  tooManyJobs: "Too many copies or uploads run there. Wait for one to finish.",
+  jobMissing: "That copy or upload is no longer known there.",
+  diskFull: "The disk there is full.",
+  sourceLeft: "It was copied, but the original could not be removed and was left where it was.",
+  fileFailed: "The file system there refused it.",
   // Typing into a session (send-text.js); the command centre shows these texts as they are.
   agentNotReady: "The agent is not ready; nothing was sent.",
   agentStopped: "The agent stopped before the message could be submitted.",

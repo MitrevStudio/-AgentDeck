@@ -12,6 +12,8 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(SecureStorePlugin.class);
         // Port forwarding (docs/PORT-FORWARDING.md 4.1): the listener on 127.0.0.1 and the in-app view of the page.
         registerPlugin(ForwardPlugin.class);
+        // Files from a computer (docs/FILES.md 5.1): saved to Downloads a piece at a time, a PDF shown by the system.
+        registerPlugin(FilesPlugin.class);
         super.onCreate(savedInstanceState);
         // A terminal zoomed out to its whole width draws text at a few pixels; the WebView's default minimum (8 px)
         // would draw it bigger than its cells and the rows would overlap.
