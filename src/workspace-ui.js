@@ -13,7 +13,7 @@ const TERM_FONT = '"Cascadia Mono", "Cascadia Code", Consolas, monospace';
 const TERM_FONT_SIZES = window.prefs.terminalFontSizes, TERM_FONT_DEFAULT = 16;
 let termFontSize = window.prefs.terminalFontSize || TERM_FONT_DEFAULT;
 let ws = { activeSpace: "", spaces: {}, tabs: {}, terminals: [] };
-const termViews = new Map(); // terminal id -> { host, term, fit, attachedEnd, queue }
+const termViews = new Map(); // terminal id -> { host, term, fit, attachedEnd, queue, size, sized, replaying }
 let layoutSig = "";          // what the panes were last built from
 let wsPushed = false;        // main sent the layout at least once
 let focusAfterRender = false;
@@ -92,21 +92,41 @@ function terminalFilePath(file) {
   const value = /^(?:[a-z]:[\\/]|\\\\)/i.test(file) ? file.replace(/\\/g, "/") : file;
   return /\s/.test(value) ? `"${value}"` : value;
 }
-// Output that arrived before the scrollback did: only what the scrollback does not hold yet is written.
-function writeAfter(view, data, end) {
+// Output written again - the scrollback at an attach, what a pane missed while it or its computer's link was away
+// (main.js fillGap) - is old: what a program copied in it (OSC 52) must not take the clipboard. xterm parses the
+// chunks it is given later, in order, and calls a chunk's callback before it parses the next one: the flag goes up
+// in the callback of an empty chunk in front of the data and down in the data's own, so it is up for exactly this
+// data - not for live output still waiting to be parsed before it, nor for any after it. A write that throws
+// (xterm refuses data once too much waits) must not leave it up, or the pane would never copy again.
+function writeReplay(view, data) {
+  let written = true;
+  try {
+    view.term.write("", () => { view.replaying = written; });
+    view.term.write(data, () => { view.replaying = false; });
+  } catch (e) {
+    written = false;
+    view.replaying = false;
+    throw e;
+  }
+}
+// Output that arrived before the scrollback did: only what the scrollback does not hold yet is written. replay: as
+// main marked it (old output, writeReplay).
+function writeAfter(view, data, end, replay = false) {
   const start = end - data.length;
-  if (end > view.attachedEnd) view.term.write(data.slice(Math.max(0, view.attachedEnd - start)));
+  if (end <= view.attachedEnd) return;
+  const rest = data.slice(Math.max(0, view.attachedEnd - start));
+  if (replay) writeReplay(view, rest);
+  else view.term.write(rest);
 }
 async function attachView(id, view) {
   const a = await window.terminals.attach(id);
   if (!a || termViews.get(id) !== view) return; // its pane went meanwhile, and the view with it
   // The terminal's size first, so the scrollback wraps as it was written.
   setTermSize(id, a);
-  // What a program copied in the scrollback is old: written again here, its OSC 52 must not take the clipboard.
-  view.replaying = true;
-  view.term.write(a.scrollback, () => { view.replaying = false; });
+  // What a program copied in the scrollback is old.
+  writeReplay(view, a.scrollback);
   view.attachedEnd = a.end;
-  view.queue.forEach(chunk => writeAfter(view, chunk.data, chunk.end));
+  view.queue.forEach(chunk => writeAfter(view, chunk.data, chunk.end, chunk.replay === true));
   view.queue = [];
 }
 function createTermView(id) {
@@ -181,7 +201,8 @@ function createTermView(id) {
   term.textarea?.addEventListener("focus", () => { if (getShownTab()?.focus !== id) runWorkspace("focus", { term: id }); });
   // size: the terminal's size on its computer and who sets it ({cols, rows, mine, by}), null until attached or when
   // main does not say.
-  const view = { host, term, fit, attachedEnd: null, queue: [], size: null, sized: false };
+  // replaying: old output is being parsed right now (writeReplay); what it copies is ignored.
+  const view = { host, term, fit, attachedEnd: null, queue: [], size: null, sized: false, replaying: false };
   termViews.set(id, view);
   attachView(id, view).catch(e => toast(e.message, true));
   return view;
@@ -721,11 +742,12 @@ function renderWorkspace() {
 // ---------- events ----------
 // Output of a terminal with a pane (main sends no other; the layout that adds a pane comes before its output). One
 // that arrives after its pane went (hidden just now) has nothing to go to.
-window.terminals.onData(({ id, data, end }) => {
+// replay: output the pane missed, sent now that it or its computer is back (main.js fillGap) - old, as a scrollback is.
+window.terminals.onData(({ id, data, end, replay }) => {
   const view = termViews.get(id) || (getPanedIds().has(id) ? createTermView(id) : null);
   if (!view) return;
-  if (view.attachedEnd === null) view.queue.push({ data, end });
-  else writeAfter(view, data, end);
+  if (view.attachedEnd === null) view.queue.push({ data, end, replay });
+  else writeAfter(view, data, end, replay === true);
 });
 // Another viewer (a phone) sized the terminal and let go of it: its pane, when shown, gives it its own size back (a
 // hidden one does when it is shown next). Only older hosts send this; newer ones hand the size back themselves.

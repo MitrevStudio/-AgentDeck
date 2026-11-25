@@ -170,18 +170,21 @@ function syncLocalViewers() {
 function shownAgain(id) {
   const x = remoteTerms.get(id);
   if (x) {
-    if (sentEnd.has(id) && links.online(x.node)) attachRemote(x).catch(e => meshLog(`attaching ${id.slice(0, 8)} on ${nodeName(x.node)} failed: ${e.message}`));
+    if (sentEnd.has(id) && links.online(x.node)) attachRemote(x, true).catch(e => meshLog(`attaching ${id.slice(0, 8)} on ${nodeName(x.node)} failed: ${e.message}`));
     return;
   }
-  if (sentEnd.has(id)) fillGap(id, terminals.attach(id));
+  if (sentEnd.has(id)) fillGap(id, terminals.attach(id), true);
   const s = host.viewers.state(id);
   if (s) sendToManager("terminal:size", { id, ...desk.sizeView(s, "", localNameOf) });
 }
 // The output the window missed of a terminal it got output of before, from an attach's scrollback.
-function fillGap(id, a) {
+// replay: the gap may be old - the pane was away, or its computer's link was down, for who knows how long - so the
+// window writes it as it writes an attach's scrollback: what a program copied in it (OSC 52) does not take the
+// clipboard (workspace-ui.js writeReplay). Without it the data is ordinary output.
+function fillGap(id, a, replay) {
   if (!sentEnd.has(id) || !isObj(a)) return;
   const data = desk.missedOutput(a.scrollback, a.end, sentEnd.get(id));
-  if (data) sendToManager("terminal:data", { id, data, end: a.end });
+  if (data) sendToManager("terminal:data", { id, data, end: a.end, ...(replay ? { replay: true } : {}) });
   noteSent(id, a.end);
 }
 // Who is who in the names the window shows: this computer, the paired nodes (phones too).
@@ -460,8 +463,9 @@ function answerAttachWaits(node) {
   }
 }
 // Attaching again to a terminal there whose pane the window already shows (its computer came back, a resync, the
-// pane shown again): the output it missed, the size there, and this pane's want.
-async function attachRemote(x) {
+// pane shown again): the output it missed, the size there, and this pane's want. replay: what it missed may be old
+// (fillGap).
+async function attachRemote(x, replay) {
   const a = await links.call(x.node, "terminals.attach", { id: x.id });
   if (remoteTerms.get(x.id) !== x) {
     // Hidden meanwhile: not viewing it after all.
@@ -469,7 +473,7 @@ async function attachRemote(x) {
     return;
   }
   if (!isObj(a)) return;
-  fillGap(x.id, a);
+  fillGap(x.id, a, replay);
   sendToManager("terminal:size", { id: x.id, ...remoteSize(x.node, x.id, a) });
   sendWant(x);
 }
@@ -809,10 +813,14 @@ links.on("event", ({ node, name, data }) => {
     if (isObj(data) && remoteTerms.get(data.id)?.node === node) sendToManager("terminal:size", { id: data.id, ...remoteSize(node, data.id, data) });
     return;
   }
-  // This node fell behind on a terminal's output there (mesh/serve.js): attaching again brings what it missed.
+  // This node fell behind on a terminal's output there (mesh/serve.js): attaching again brings what it missed. No
+  // replay: the link was up all along and only too slow for the output, the host looks every second whether it
+  // drained, and the pane is in view - what was skipped is the last moments of a terminal somebody may be working
+  // in, and a copy made in them is one the user has just asked for. Guarded, copying would fail without a word
+  // exactly while a program prints a lot.
   if (name === "terminal.resync") {
     const x = remoteTerms.get(data?.id);
-    if (x?.node === node) attachRemote(x).catch(e => meshLog(`attaching ${x.id.slice(0, 8)} again on ${nodeName(node)} failed: ${e.message}`));
+    if (x?.node === node) attachRemote(x, false).catch(e => meshLog(`attaching ${x.id.slice(0, 8)} again on ${nodeName(node)} failed: ${e.message}`));
     return;
   }
   // From a host without terminals: 2 only: another peer (a phone) that sized our terminal there let go of it - its pane
@@ -850,7 +858,7 @@ links.on("link", async ({ node, up }) => {
     answerAttachWaits(node);
     for (const x of [...remoteTerms.values()]) {
       if (x.node !== node || waiting.has(x.id)) continue;
-      await attachRemote(x).catch(e => meshLog(`attaching ${x.id.slice(0, 8)} on ${nodeName(node)} again failed: ${e.message}`));
+      await attachRemote(x, true).catch(e => meshLog(`attaching ${x.id.slice(0, 8)} on ${nodeName(node)} again failed: ${e.message}`));
     }
   } catch (e) {
     meshLog(`reading ${node.slice(0, 8)} failed: ${e.message}`);

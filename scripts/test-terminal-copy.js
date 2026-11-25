@@ -8,14 +8,18 @@ const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../src/workspace-ui.js'), 'utf8');
 const copied = [], errors = [];
 const osc = text => `c;${Buffer.from(text).toString('base64')}`;
-let attached = null;
+let attached = null, output = null;
 // xterm.js as far as this needs it: a write is parsed later, in order, and its callback comes after its own data.
 // The data here is what xterm.js hands an OSC 52 handler ("c;<base64>"), one a line.
 class Terminal {
   constructor() { this.unicode = {}; this.parser = { registerOscHandler: (n, fn) => { this.osc = fn; } }; this.pending = []; }
   loadAddon() {} open() {} attachCustomKeyEventHandler() {} onData() {} focus() {}
   hasSelection() { return false; }
-  write(data, done) { this.pending.push({ data, done }); }
+  // refuse = n: the n-th write from now throws, as xterm.js does once too much data waits.
+  write(data, done) {
+    if (this.refuse && --this.refuse === 0) throw new Error('write data discarded');
+    this.pending.push({ data, done });
+  }
   flush() {
     for (let w; (w = this.pending.shift());) {
       w.data.split('\n').filter(Boolean).forEach(line => this.osc(line));
@@ -26,7 +30,7 @@ class Terminal {
 const ctx = vm.createContext({
   window: {
     prefs: { terminalFontSizes: [16] },
-    terminals: { attach: async () => attached },
+    terminals: { attach: async () => attached, onData: fn => { output = fn; } },
     manager: { copyText: text => copied.push(text) },
   },
   document: { documentElement: {}, createElement: () => ({ events: {}, addEventListener(name, fn) { this.events[name] = fn; }, closest: () => null }) },
@@ -37,6 +41,10 @@ const ctx = vm.createContext({
   toast: message => errors.push(message),
 });
 vm.runInContext(source.slice(0, source.indexOf('// The same keys when the keyboard')), ctx);
+// The window's own handler of a terminal's output (main's "terminal:data"), as shipped: `output` is what main calls.
+const handler = source.indexOf('window.terminals.onData(');
+vm.runInContext(source.slice(handler, source.indexOf('// Another viewer (a phone) sized', handler)), ctx);
+assert.equal(typeof output, 'function');
 const settle = () => new Promise(resolve => setImmediate(resolve));
 const run = code => vm.runInContext(code, ctx);
 
@@ -65,6 +73,37 @@ const run = code => vm.runInContext(code, ctx);
   await settle();
   run(`fresh.term.flush(); fresh.term.osc(${JSON.stringify(osc('first copy'))})`);
   assert.deepEqual(copied.splice(0), ['first copy']);
+
+  // The pane missed output while its computer's link was down: main sends it marked as a replay once the link is
+  // back. What was copied in it is old; output that waited to be parsed before it and what comes after it are live.
+  let end = old.length + live.length;
+  const send = (id, text, replay) => { const data = osc(text) + '\n'; end += data.length; output({ id, data, end, ...(replay ? { replay: true } : {}) }); };
+  send('tab', 'copied before the link dropped');
+  send('tab', 'copied while the link was down', true);
+  send('tab', 'copied once it was back');
+  run('view.term.flush()');
+  assert.deepEqual(copied.splice(0), ['copied before the link dropped', 'copied once it was back'], 'the catch-up copies nothing; live output around it does');
+  assert.equal(run('view.replaying'), false);
+
+  // The same for a catch-up that arrives while the pane is still attaching: it waits its turn, and stays a replay.
+  attached = { scrollback: old, end: old.length, cols: 120, rows: 32 };
+  end = old.length;
+  run(`globalThis.late = createTermView('late');`);
+  send('late', 'missed while attaching', true);
+  send('late', 'copied after the attach');
+  await settle();
+  run('late.term.flush()');
+  assert.deepEqual(copied.splice(0), ['copied after the attach']);
+  assert.equal(run('late.replaying'), false);
+
+  // A write xterm.js refuses leaves the pane copying: the catch-up is lost, the next copy is not.
+  run('late.term.refuse = 2');
+  assert.throws(() => send('late', 'never written', true));
+  run('late.term.flush()');
+  assert.equal(run('late.replaying'), false, 'the flag did not stay up');
+  send('late', 'copied after the refusal');
+  run('late.term.flush()');
+  assert.deepEqual(copied.splice(0), ['copied after the refusal']);
 
   assert.deepEqual(errors, []);
   console.log('terminal-copy: ok');
