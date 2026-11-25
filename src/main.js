@@ -789,11 +789,18 @@ function phoneNode(node) {
   return node;
 }
 // "Send file…" on a phone's row in Settings: a file of this computer chosen in the system's picker, offered to it.
+// The picker belongs to the Settings window (the one the button is in, so the one with the focus): it stays over it
+// and holds it until a file is chosen or not, and a press that still gets through meanwhile opens no second one.
 // -> { ok, name } | { ok: false, cancelled } | { ok: false, error } (in the user's language).
+let pickingForPhone = false;
 async function sendFileToPhone(id) {
+  if (pickingForPhone) return { ok: false, cancelled: true };
   try {
     const node = phoneNode(id);
-    const picked = await dialog.showOpenDialog({ title: t("settings.phones.sendTitle", { name: nodeName(node) }), properties: ["openFile"], defaultPath: downloadsDir() });
+    const options = { title: t("settings.phones.sendTitle", { name: nodeName(node) }), properties: ["openFile"], defaultPath: downloadsDir() };
+    const owner = BrowserWindow.getFocusedWindow();
+    pickingForPhone = true;
+    const picked = await (owner ? dialog.showOpenDialog(owner, options) : dialog.showOpenDialog(options)).finally(() => { pickingForPhone = false; });
     if (picked.canceled || !picked.filePaths?.[0]) return { ok: false, cancelled: true };
     const row = await transfers.offer({ node: phoneNode(id), path: picked.filePaths[0] });
     return { ok: true, name: row.name };

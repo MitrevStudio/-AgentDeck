@@ -73,6 +73,8 @@
 .files-mid { display: flex; flex-direction: column; justify-content: center; gap: 10px; }
 .files-send { width: 44px; height: 40px; padding: 0; justify-content: center; }
 .files-arrow { font-size: 15px; color: var(--accent); }
+/* A pane's Files button while its dialog is being opened (workspace-ui.js getFilesButtonHtml). */
+.pane-tools .icon-btn[data-ws="files"][aria-busy="true"] { opacity: .55; cursor: progress; }
 /* The menu of a row is opened where the pointer is: an empty element there is its anchor. */
 .files-anchor { position: fixed; width: 0; height: 0; pointer-events: none; }
 
@@ -113,6 +115,9 @@
 .files-preview header { display: flex; align-items: center; gap: 8px; padding: 12px 12px 10px 18px; border-bottom: 1px solid var(--line); }
 .files-preview h2 { flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 650; }
 .fpv-body { flex: 1; min-height: 0; overflow: auto; padding: 14px 18px; }
+/* While the file is being read. */
+.fpv-wait { display: flex; align-items: center; justify-content: center; gap: 10px; height: 100%; color: var(--muted); font-size: 13px; }
+.fpv-wait .spinner { width: 16px; height: 16px; flex: none; }
 .fpv-body pre { margin: 0; font: 12.5px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .fpv-body.image { display: grid; place-items: center; background: var(--bg); }
 .fpv-body.image img { max-width: 100%; max-height: 100%; object-fit: contain; }

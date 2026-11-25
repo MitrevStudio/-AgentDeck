@@ -165,7 +165,7 @@
     const how = !sent ? "" : sent.state === "running" ? t("files.state.saving") : sent.state === "noAnswer" || sent.state === "expired" ? t("files.toPhone.noAnswer", { name: who }) : t(`files.state.${sent.state}`);
     const last = sent ? t("settings.phones.last", { file: sent.name, state: [how, sent.error].filter(Boolean).join(": ") }) : "";
     return `<div class="vs-node" data-id="${esc(n.id)}">${icon("phone")}
-      <span class="who"><b title="${esc(n.id)}">${esc(n.name || n.id.slice(0, 8))}</b><small>${esc([t("settings.phones.pairedAt", { time: since(n.pairedAt) }), seen].filter(Boolean).join(" · "))}</small>${last ? `<small class="vs-sent" data-sent-state="${esc(sent.state)}">${esc(last)}</small>` : ""}</span>
+      <span class="who"><b title="${esc(n.id)}">${esc(n.name || n.id.slice(0, 8))}</b><small>${esc([t("settings.phones.pairedAt", { time: since(n.pairedAt) }), seen].filter(Boolean).join(" · "))}</small>${last ? `<small>${esc(last)}</small>` : ""}</span>
       <span class="tag${online ? " ok" : ""}">${esc(t(online ? "settings.nodes.online" : "settings.nodes.offline"))}</span>
       ${online ? `<button type="button" class="btn sm" data-send-phone="${esc(n.id)}" title="${esc(t("settings.phones.sendHint", { name: who }))}">${icon("upload")}<span>${esc(t("settings.phones.send"))}</span></button>` : ""}
       <button type="button" class="btn sm" data-forget-phone="${esc(n.id)}">${icon("x")}<span>${esc(t("settings.nodes.forget"))}</span></button></div>`;

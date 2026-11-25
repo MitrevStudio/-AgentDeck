@@ -32,7 +32,13 @@
 // answers - declined, and accepted and pulled through the app (mobile/src/files.js takeOffer into a fake plugin over a
 // temporary folder), byte for byte, to done. The order and the search of a pane: the Size column's head clicked twice
 // sorts H's folder largest first and then smallest first (folders first both ways), the order is remembered, and a name
-// typed into H's pane's search lists only the matches, with their count, until Escape clears it.
+// typed into H's pane's search lists only the matches, with their count, until Escape clears it. On a slow link (H's
+// answers to files.list held back here): Shift+arrows take a row more with each press; the window's own keys (hide the
+// pane, the search) do nothing behind the dialog and work again once it is closed, with the keyboard back in the
+// terminal; a row takes no action while its pane is opening another folder; a delete confirmed after the pane moved on
+// deletes the file that was shown, not its namesake in the folder shown now; an answer for an earlier opening of the
+// dialog is not drawn into the next one. The pane's Files button counts a transfer under way, and one that fails
+// while the dialog is closed is said in a message.
 //
 // Screenshots go to FILES_E2E_SHOTS (default: <repo>/.tmp/files-e2e). FILES_E2E_VERBOSE=1 prints the app's output.
 // Windows is where this was run. The app's window comes up and takes the focus for about a minute.
@@ -351,7 +357,15 @@ async function main() {
   const served = createServed({ host });
   // Every path the app asks H to change is in this test's folder, or refused here (and the run fails at the end).
   const outside = [];
-  const h = node("H-FILES", { api: (m, p, peer) => {
+  // A slow link, when a step asks for one: H's answers to the files.list requests that `test` picks wait for release().
+  let held = null;
+  const hold = test => {
+    let open;
+    const gate = held = { test, count: 0, wait: new Promise(r => { open = r; }) };
+    return { count: () => gate.count, release: () => { if (held === gate) held = null; open(); } };
+  };
+  const h = node("H-FILES", { api: async (m, p, peer) => {
+    if (m === "files.list" && held?.test(p)) { const gate = held; gate.count++; await gate.wait; }
     if (["files.delete", "files.rename", "files.copy", "files.mkdir", "files.begin"].includes(m)) {
       const wild = [p?.path, p?.from, p?.to].filter(v => v !== undefined && !(typeof v === "string" && inRoot(v)));
       if (wild.length) { outside.push(`${m} ${J(wild)}`); throw new HostError("notAllowed"); }
@@ -492,6 +506,104 @@ async function main() {
   assert.equal(await app.ev(`__ft.pane('right').querySelector('.fpane-filter').value`), "");
   say(`order and search: Size twice - largest then smallest first, folders first (${shotSorted}); "TA" lists taken.txt only (${shotFiltered}); Escape clears it`);
 
+  // ---------- 2d. the keys: Shift+arrows, and the window's own keys behind the dialog ----------
+  const selected = async side => (await app.ev(`__ft.rows(${J(side)})`)).filter(r => r.sel).map(r => r.name);
+  await u.click("__ft.row('right', 'build.bin')", "build.bin on H");
+  for (let i = 0; i < 3; i++) await u.keys("", "Down", ["shift"]);
+  assert.deepEqual(await selected("right"), ["build.bin", "huge.bin", "notes.md", "spec.pdf"], "Shift+Down takes one row more with each press");
+  await u.keys("", "Up", ["shift"]);
+  assert.deepEqual(await selected("right"), ["build.bin", "huge.bin", "notes.md"], "Shift+Up gives the last one back");
+  await u.keys("", "Down");
+  assert.deepEqual(await selected("right"), ["spec.pdf"], "an arrow alone goes on from the row reached last");
+  // The window's keys: Ctrl+Shift+W would hide the pane behind, "/" and Ctrl+K would open the search over the dialog.
+  const paneThere = () => app.ev(`Boolean(${paneSel(tH)})`);
+  await u.keys("", "W", ["control", "shift"]);
+  await u.keys("/");
+  await u.keys("", "K", ["control"]);
+  await sleep(400);
+  assert.equal(await paneThere(), true, "Ctrl+Shift+W in the dialog does not hide the pane behind it");
+  assert.equal(await app.ev("window.searchPalette.isOpen()"), false, '"/" and Ctrl+K in the dialog do not open the search');
+  assert.equal(await app.ev("__ft.shown()"), true);
+  // Closed: the keyboard is back in the terminal the dialog was opened from, and the same keys work again (which
+  // also says that the keys sent above were ones the window would have acted on).
+  await u.keys("", "Escape");
+  await until(async () => !(await app.ev("__ft.shown()")), "Escape closes the dialog");
+  assert.equal(await app.ev(`${paneSel(tH)}.contains(document.activeElement)`), true, "the keyboard is back in the terminal the dialog was opened from");
+  await u.keys("", "K", ["control"]);
+  await until(() => app.ev("window.searchPalette.isOpen()"), "Ctrl+K opens the search once the dialog is closed", 5000);
+  await u.keys("", "K", ["control"]);
+  await until(async () => !(await app.ev("window.searchPalette.isOpen()")), "and closes it", 5000);
+  await u.click(`${paneSel(tH)}.querySelector(".term-host")`, "H's terminal");
+  await u.keys("", "W", ["control", "shift"]);
+  await until(async () => !(await paneThere()), "Ctrl+Shift+W hides the pane once the dialog is closed", 5000);
+  await u.click(sideRow(tH), "H's terminal in the sidebar");
+  await until(() => app.ev(`Boolean(${filesBtn(tH)})`), "H's pane is back");
+  const openFiles = async () => {
+    await u.click(filesBtn(tH), "the Files button");
+    await until(() => app.ev("__ft.shown()"), "the dialog opens");
+    await until(async () => (await app.ev("__ft.path('right')")) && (await app.ev("__ft.path('left')")), "both panes are listed", 20000, 100);
+    await listed("left");
+    return listed("right");
+  };
+  await openFiles();
+  say('keys: Shift+arrows extend the selection row by row; Ctrl+Shift+W, "/" and Ctrl+K do nothing behind the dialog and work once it is closed; the keyboard goes back to the terminal');
+
+  // ---------- 2e. a slow link: what was shown is what is acted on ----------
+  // The same name in the folder shown and in the one above it.
+  write(path.join(hProject, "twin.txt"), "the one in shop-api");
+  write(path.join(hWork, "twin.txt"), "the one above it");
+  const refreshRight = `__ft.pane('right').querySelector('[data-fa="refresh"]')`;
+  await u.click(refreshRight, "refresh H's pane");
+  await u.rowThere("right", "twin.txt");
+  // Up is asked and not answered: the list still drawn is shop-api's. A row of it takes no action meanwhile.
+  let slow = hold(() => true);
+  await u.click(`__ft.pane('right').querySelector('[data-fa="up"]')`, "Up in H's pane");
+  await until(() => slow.count() === 1, "H is asked for the folder above and does not answer yet");
+  assert.equal((await app.ev("__ft.crumbs('right')")).at(-1), "shop-api", "the folder being left is still drawn");
+  await u.click("__ft.row('right', 'twin.txt')", "twin.txt in the list still drawn");
+  await u.keys("", "Delete");
+  await sleep(500);
+  assert.ok(!(await app.ev("__ft.dialog()")), "Delete on a row does nothing while its pane is opening another folder");
+  slow.release();
+  await until(async () => path.resolve(await app.ev("__ft.path('right')")) === path.resolve(hWork), "the folder above comes");
+  assert.ok(fs.existsSync(path.join(hProject, "twin.txt")) && fs.existsSync(path.join(hWork, "twin.txt")), "nothing was deleted");
+  // Asked in shop-api, confirmed after the pane has moved to the folder above: shop-api's file goes.
+  await u.click("__ft.row('right', 'shop-api')", "the shop-api folder", { count: 2 });
+  await until(async () => (await app.ev("__ft.crumbs('right')")).at(-1) === "shop-api", "back into shop-api");
+  await listed("right");
+  await u.click("__ft.row('right', 'twin.txt')", "twin.txt in shop-api");
+  await u.keys("", "Delete");
+  const asked = await u.dialog();
+  const shownFolder = await app.ev("__ft.path('right')");
+  assert.equal(asked.body, [await u.t("files.delete.forGood", { name: "twin.txt", computer: "H-FILES" }), await u.t("files.delete.where", { folder: shownFolder })].join("\n"), "the confirmation names the folder the file is in");
+  assert.equal(await app.ev("goTo(filesPanes[1], filesPanes[1].parent)"), true, "the pane moves to the folder above while the question is open");
+  assert.equal(path.resolve(await app.ev("__ft.path('right')")), path.resolve(hWork));
+  await u.rowThere("right", "twin.txt");
+  await u.click('__ft.dialogButton("ok")', "Delete");
+  await until(() => !fs.existsSync(path.join(hProject, "twin.txt")), "the file that was shown when Delete was pressed is deleted", 10000);
+  await sleep(400);
+  assert.equal(fs.readFileSync(path.join(hWork, "twin.txt"), "utf8"), "the one above it", "its namesake in the folder shown now is untouched");
+  fs.rmSync(path.join(hWork, "twin.txt"));
+  await u.click("__ft.row('right', 'shop-api')", "the shop-api folder", { count: 2 });
+  await until(async () => (await app.ev("__ft.crumbs('right')")).at(-1) === "shop-api", "back into shop-api");
+  await listed("right");
+  // An answer for an earlier opening: tree is asked for, the dialog is closed and opened again, and only then H answers.
+  slow = hold(q => /tree$/.test(String(q?.path)));
+  await u.click("__ft.row('right', 'tree')", "the tree folder", { count: 2 });
+  await until(() => slow.count() === 1, "H is asked for tree and does not answer yet");
+  await u.click("__ft.view().querySelector('[data-fa=\"close\"]')", "Close");
+  await until(async () => !(await app.ev("__ft.shown()")), "the dialog closes");
+  const fresh = (await openFiles()).map(r => r.name);
+  assert.equal((await app.ev("__ft.crumbs('right')")).at(-1), "shop-api", "the dialog opens in the terminal's folder again");
+  slow.release();
+  // A request sent after the one held back is answered after it: by then the late answer has been dealt with.
+  await app.ev("window.files.call(filesPanes[1].node, 'stat', { path: filesPanes[1].path }).then(() => true)");
+  await sleep(300);
+  assert.equal((await app.ev("__ft.crumbs('right')")).at(-1), "shop-api", "the answer for the earlier opening is not drawn into this one");
+  assert.deepEqual((await app.ev("__ft.rows('right')")).map(r => r.name), fresh, "its list neither");
+  assert.equal(await app.ev("__ft.loading('right')"), false);
+  say("a slow link: no action on a row while its pane opens another folder; a delete confirmed after the pane moved on deleted the file that was shown; a late answer for an earlier opening is dropped");
+
   // ---------- 3. a multi-megabyte file, downloaded with a double click onto a name that is taken ----------
   await u.click("__ft.row('right', 'build.bin')", "build.bin on H", { count: 2 });
   const down = await u.queueRow("build.bin", r => r.state === "done", "the download ends");
@@ -507,8 +619,11 @@ async function main() {
   await u.click("__ft.row('right', 'huge.bin')", "huge.bin on H", { count: 2 });
   await u.queueRow("huge.bin", r => r.state === "running" && /\d+ %/.test(r.shown) && r.shown !== "0 %", "huge.bin is on its way");
   const shotQueue = await u.shot("02-transfer-in-queue");
+  assert.equal(await app.ev(`${filesBtn(tH)}.querySelector(".port-count")?.textContent ?? null`), "1", "the pane's Files button counts the transfer under way");
+  assert.equal(await app.ev(`${filesBtn(tH)}.getAttribute("aria-label")`), await u.t("files.button.active", { name: "H-FILES", n: 1 }));
   await u.click(`[...document.querySelectorAll("#filesView .fq-row")].find(r => r.querySelector(".fq-name").textContent === "huge.bin" && r.classList.contains("running")).querySelector('[data-fa="stop"]')`, "Stop", { hold: 400 });
   await u.queueRow("huge.bin", r => r.state === "stopped", "the transfer stops");
+  await until(async () => (await app.ev(`${filesBtn(tH)}.querySelector(".port-count")?.textContent ?? null`)) === null, "the button's count goes with the transfer", 5000);
   assert.equal(fs.existsSync(path.join(downloads, "huge.bin")), false, "the stopped file is not there");
   assert.deepEqual(parts(downloads), [], "and nothing unfinished is left of it");
   say(`Stop: huge.bin stopped part-way, nothing of it left (${shotQueue})`);
@@ -658,7 +773,8 @@ async function main() {
   await u.menu("right", "build (2).bin", await u.t("files.menu.delete"));
   d = await u.dialog();
   assert.equal(d.title, await u.t("files.delete.title", { name: "build (2).bin" }));
-  assert.equal(d.body, await u.t("files.delete.forGood", { name: "build (2).bin", computer: "H-FILES" }), "the confirmation names H and says it is for good (H has no bin)");
+  const where = async side => u.t("files.delete.where", { folder: await app.ev(`__ft.path(${J(side)})`) });
+  assert.equal(d.body, [await u.t("files.delete.forGood", { name: "build (2).bin", computer: "H-FILES" }), await where("right")].join("\n"), "the confirmation names H and the folder and says it is for good (H has no bin)");
   const shotDelete = await u.shot("03-delete-confirmation");
   await u.click('__ft.dialogButton("ok")', "Delete");
   await u.rowGone("right", "build (2).bin");
@@ -666,7 +782,7 @@ async function main() {
   assert.ok(fs.existsSync(path.join(hProject, "build.bin")), "the rest is there");
   await u.menu("left", "build (2).bin", await u.t("files.menu.delete"));
   d = await u.dialog();
-  assert.equal(d.body, await u.t("files.delete.trash", { name: "build (2).bin", computer: "FILES-APP" }), "here the confirmation names this computer and says it goes to the Recycle Bin");
+  assert.equal(d.body, [await u.t("files.delete.trash", { name: "build (2).bin", computer: "FILES-APP" }), await where("left")].join("\n"), "here the confirmation names this computer and the folder and says it goes to the Recycle Bin");
   const shotDeleteLocal = await u.shot("04-delete-confirmation-local");
   await u.click('__ft.dialogButton("ok")', "Delete");
   await u.rowGone("left", "build (2).bin");
@@ -679,11 +795,21 @@ async function main() {
   await u.click('__ft.dialogButton("cancel")', "Cancel");
   await sleep(300);
   assert.ok(fs.existsSync(path.join(hProject, "huge.bin")), "a delete that was cancelled deletes nothing");
+  // Several at once: counted, in the plural.
+  await u.click("__ft.row('right', 'taken (2).txt')", "taken (2).txt");
+  await u.click("__ft.row('right', 'taken (3).txt')", "taken (3).txt", { modifiers: ["control"] });
+  await u.keys("", "Delete");
+  d = await u.dialog();
+  assert.equal(d.title, await app.ev('tn("files.delete.titleMany", 2)'));
+  assert.equal(d.body, [await app.ev('tn("files.delete.forGoodMany", 2, { computer: "H-FILES" })'), await where("right")].join("\n"), "two files: the confirmation counts them");
+  await u.click('__ft.dialogButton("cancel")', "Cancel");
+  await sleep(200);
+  await u.click("__ft.row('right', 'huge.bin')", "huge.bin alone");
   say(`delete: on H for good after a confirmation naming H (${shotDelete}); here into the bin, naming this computer (${shotDeleteLocal}); Cancel deletes nothing`);
 
   // ---------- 10. previews ----------
   await u.menu("right", "taken (3).txt", await u.t("files.menu.preview"));
-  d = await until(async () => { const x = await app.ev("__ft.dialog()"); return x?.cls.includes("files-preview") ? x : null; }, "the preview opens");
+  d = await until(async () => { const x = await app.ev("__ft.dialog()"); return x?.cls.includes("files-preview") && !x.cls.includes("loading") ? x : null; }, "the preview opens");
   assert.ok(d.html.includes("# Release notes"), "a text file is shown as it is");
   await u.keys("", "Escape");
   await sleep(200);
@@ -691,7 +817,7 @@ async function main() {
   await u.click(`document.querySelector('#filesView .fpane[data-side="right"] [data-fa="refresh"]')`, "refresh H's pane");
   await u.rowThere("right", "guide.md");
   await u.menu("right", "guide.md", await u.t("files.menu.preview"));
-  d = await until(async () => { const x = await app.ev("__ft.dialog()"); return x?.cls.includes("files-preview") ? x : null; }, "the .md preview opens");
+  d = await until(async () => { const x = await app.ev("__ft.dialog()"); return x?.cls.includes("files-preview") && !x.cls.includes("loading") ? x : null; }, "the .md preview opens");
   assert.ok(d.html.includes("<h3>Guide</h3>") && d.html.includes("<i>two</i>") && d.html.includes("<code>three</code>"), "the .md is laid out");
   assert.ok(d.html.includes("&lt;script&gt;") && !d.html.includes("<script>"), "and its text stays text");
   const shotPreview = await u.shot("05-preview-md");
@@ -725,18 +851,28 @@ async function main() {
   await u.rowThere("right", "huge.bin");
   await u.click("__ft.row('right', 'huge.bin')", "huge.bin on H", { count: 2 });
   await until(async () => (await app.ev("__ft.queue()")).some(r => r.name === "huge.bin" && r.state === "running" && r.shown !== "0 %"), "huge.bin is on its way again", 20000, 50);
+  // The dialog is closed while it runs: its failure is said in a message.
+  await u.click("__ft.view().querySelector('[data-fa=\"close\"]')", "Close");
+  await until(async () => !(await app.ev("__ft.shown()")), "the dialog closes");
   h.stop();
-  const lost = await u.queueRow("huge.bin", r => r.state === "failed", "the transfer fails with the link");
-  assert.equal(lost.detail.split(" · ").at(-1), await u.t("files.error", { computer: "H-FILES", message: await u.t("errors.offline") }), "it says H is not connected");
+  const why = await u.t("files.error", { computer: "H-FILES", message: await u.t("errors.offline") });
+  const said = await u.t("files.toast.failed", { name: "huge.bin", reason: why });
+  await until(async () => (await app.ev("__ft.toasts()")).some(x => x.error && x.text === said), "the failure is said while the dialog is closed", 20000, 100);
   await until(() => parts(downloads).length === 0, "the unfinished file is removed", 10000);
   assert.equal(fs.existsSync(path.join(downloads, "huge.bin")), false);
-  await u.click("__ft.view().querySelector('[data-fa=\"close\"]')", "Close");
   await until(async () => (await app.ev("window.manager.getNodes()")).find(n => n.id === H)?.status === "offline", "H is offline");
   await u.click(filesBtn(tH), "the Files button, H away");
   const offHead = await until(async () => { const x = await app.ev("__ft.head('right')"); return x?.note ? x : null; }, "the remote pane says H is away");
   assert.equal(offHead.note, await u.t("files.offline", { name: "H-FILES" }));
+  const lost = await u.queueRow("huge.bin", r => r.state === "failed", "the queue has the failed transfer");
+  assert.equal(lost.detail.split(" · ").at(-1), why, "it says H is not connected");
+  // Refresh is there to ask again; H is still away, so the pane says so again.
+  assert.equal(await app.ev(`__ft.pane('right').querySelector('[data-fa="refresh"]').disabled`), false, "Refresh can be pressed on a pane whose computer is away");
+  await u.click(`__ft.pane('right').querySelector('[data-fa="refresh"]')`, "Refresh, H away");
+  await sleep(300);
+  await until(async () => (await app.ev("__ft.head('right')"))?.note === offHead.note, "asked again, the pane says again that H is away", 10000, 100);
   await u.shot("07-offline");
-  say(`H went away during a transfer: "${lost.detail}"; nothing unfinished left; the dialog says "${offHead.note}"`);
+  say(`H went away during a transfer with the dialog closed: "${said}"; nothing unfinished left; the dialog says "${offHead.note}", Refresh asks again`);
 
   // ---------- 13. the end ----------
   assert.deepEqual(app.pageErrors, [], "the page logged no error");
@@ -772,7 +908,7 @@ async function finish(error) {
   await cleanup();
   if (!error) {
     console.log(`\n  screenshots: ${shots}`);
-    console.log("files in the real app: the button on remote panes only, send to phone (none linked, then declined and done), which pane is which computer, download (double click, taken name), Stop, a folder tree, upload (arrow, drag), rename (taken name offered as (2)), copy, delete (for good on H, the bin here, with confirmations), previews, a computer too old, H going away - passed");
+    console.log("files in the real app: the button on remote panes only, send to phone (none linked, then declined and done), which pane is which computer, download (double click, taken name), Stop, a folder tree, upload (arrow, drag), rename (taken name offered as (2)), copy, delete (for good on H, the bin here, with confirmations naming the folder), previews, a computer too old, H going away with the dialog closed; Shift+arrows, the window's keys kept out, a slow link (no action while a folder opens, a delete confirmed late, a late answer of an earlier opening) - passed");
   }
   process.exit(error ? 1 : 0);
 }

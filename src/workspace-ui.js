@@ -635,11 +635,27 @@ function getPortsButtonHtml(x) {
   return `<button class="icon-btn ${n ? "on counted" : ""}" data-ws="ports" title="${esc(title)}" aria-label="${esc(title)}" aria-haspopup="menu">${icon("globe")}${n ? `<span class="port-count">${n}</span>` : ""}</button>`;
 }
 // A remote terminal's "Files" button: the files of this computer and of the terminal's, side by side (files-ui.js).
-// A terminal of this computer has none - there is no other side to it.
+// A terminal of this computer has none - there is no other side to it. It counts the transfers under way to or from
+// its terminal's computer, on every pane as "Ports" does its forwards: a transfer goes on after the dialog is closed,
+// and this is where it is still seen. files-ui.js tells them (the queue's rows that have not ended), and which
+// terminal's dialog is being opened - its computer is asked first, and the button waits meanwhile.
+let fileTransfers = [], filesOpeningTerm = "";
+const redrawPaneHeads = () => { const tab = getShownTab(); if (tab && !isPageLoading()) renderPaneHeads(tab); };
+function setFileTransfers(list) {
+  const next = Array.isArray(list) ? list : [], sig = rows => rows.map(r => `${r.from.node}>${r.to.node}`).join("|");
+  const same = sig(next) === sig(fileTransfers);
+  fileTransfers = next;
+  if (!same) redrawPaneHeads();
+}
+function setFilesOpening(term) {
+  filesOpeningTerm = term;
+  redrawPaneHeads();
+}
 function getFilesButtonHtml(x) {
   if (!x?.node) return "";
-  const title = t("files.button", { name: nodeNameOf(x.node) });
-  return `<button class="icon-btn" data-ws="files" title="${esc(title)}" aria-label="${esc(title)}" aria-haspopup="dialog">${icon("folder")}</button>`;
+  const n = fileTransfers.filter(r => r.from.node === x.node || r.to.node === x.node).length, name = nodeNameOf(x.node);
+  const title = n ? t("files.button.active", { name, n }) : t("files.button", { name });
+  return `<button class="icon-btn ${n ? "on counted" : ""}" data-ws="files" title="${esc(title)}" aria-label="${esc(title)}" aria-haspopup="dialog"${filesOpeningTerm === x.id ? ` aria-busy="true" disabled` : ""}>${icon("folder")}${n ? `<span class="port-count">${n}</span>` : ""}</button>`;
 }
 const isPortNumber = v => Number.isInteger(v) && v >= 1 && v <= 65535;
 // "Other port…": a port number asked for in a dialog of AgentDeck's own (as common.js confirmDialog). Answers the
