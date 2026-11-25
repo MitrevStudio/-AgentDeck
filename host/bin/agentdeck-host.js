@@ -268,7 +268,10 @@ async function run() {
     links.stop();
     host?.stop();
     host?.terminals.detachAll();
-    process.exit(0);
+    // A copy or an upload still going leaves no half of itself under a real name; a moment for it, not more.
+    const exit = () => process.exit(0);
+    setTimeout(exit, 3000).unref();
+    Promise.resolve(served?.files.dispose()).catch(() => {}).then(exit);
   };
   process.on("SIGTERM", stop);
   process.on("SIGINT", stop);

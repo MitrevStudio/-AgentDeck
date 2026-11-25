@@ -1,0 +1,129 @@
+/* "Files" (files-ui.js): two panes - this computer, the remote one - and the queue under them. The overlay is under the
+   app's menus (z-index 50), messages (70) and dialogs (the top layer), so those of the app work over it. */
+.files-back { position: fixed; inset: 0; z-index: 45; display: flex; justify-content: center; align-items: center; padding: 24px; background: var(--backdrop); }
+.files-back[hidden] { display: none; }
+.files-dlg {
+  display: flex; flex-direction: column; width: min(1180px, 100%); height: min(780px, 100%); min-height: 0;
+  border: 1px solid var(--line-2); border-radius: var(--r-xl); background: var(--panel); box-shadow: var(--shadow-dialog);
+  animation: rise var(--dur) var(--ease-out); overflow: hidden;
+}
+.files-head { display: flex; align-items: center; gap: 8px; padding: 12px 14px 10px 18px; border-bottom: 1px solid var(--line); }
+.files-head h2 { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; margin: 0; font-size: 15px; font-weight: 650; }
+.files-head h2 span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.files-head h2 .i { width: 16px; height: 16px; color: var(--accent); flex: none; }
+.files-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 10px; padding: 12px 14px; }
+
+/* A pane. Its head says which computer it is: this one (neutral) or the remote one (in the accent colour, as a
+   remote terminal's mark is in its pane - terminals.css .term-node.remote). */
+.fpane { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; border: 1px solid var(--line-2); border-radius: var(--r-lg); background: var(--bg); overflow: hidden; }
+.fpane-head { display: flex; align-items: center; gap: 8px; padding: 7px 8px 7px 10px; border-bottom: 1px solid var(--line); background: var(--panel-2); }
+.fpane.remote .fpane-head { background: var(--accent-weak); border-bottom-color: var(--accent-line); }
+.fpane.remote { border-color: var(--accent-line); }
+.fpane-badge { display: inline-flex; align-items: center; gap: 5px; flex: none; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line-2); background: var(--panel); color: var(--muted); font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .04em; }
+.fpane-badge .i { width: 12px; height: 12px; }
+.fpane.remote .fpane-badge { border-color: var(--accent-line); color: var(--accent-strong); }
+.fpane.remote .fpane-badge .i { color: var(--accent); }
+.fpane-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.fpane-tools { display: flex; gap: 2px; flex: none; }
+.fpane-tools .icon-btn { width: 28px; height: 28px; }
+.fpane-crumbs { display: flex; align-items: center; gap: 1px; flex-wrap: wrap; min-height: 32px; padding: 4px 8px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.fcrumb { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 5px; border: 0; border-radius: var(--r-xs); background: none; color: var(--muted); font: inherit; cursor: pointer; }
+.fcrumb:hover { background: var(--panel-2); color: var(--text); }
+.fcrumb:last-child { color: var(--text); font-weight: 600; }
+.fcrumb-sep { color: var(--faint); }
+.frow { display: grid; grid-template-columns: minmax(0, 1fr) 84px 132px; align-items: center; gap: 8px; padding: 3px 10px; font-size: 13px; user-select: none; }
+.frow.fhead { padding-top: 4px; padding-bottom: 4px; border-bottom: 1px solid var(--line); color: var(--faint); font-size: 11.5px; }
+/* The order (a column's head, its arrow) and the search by name, where that computer can do them (files-ui.js). */
+.fpane-find { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-bottom: 1px solid var(--line); }
+.fpane-find[hidden] { display: none; }
+.fpane-search { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; }
+.fpane-search > .i { position: absolute; left: 8px; width: 14px; height: 14px; color: var(--faint); pointer-events: none; }
+.fpane-filter { width: 100%; height: 28px; padding: 3px 30px 3px 28px; font-size: 12.5px; }
+.fpane-search .icon-btn { position: absolute; right: 2px; width: 24px; height: 24px; }
+.fpane-count { flex: none; color: var(--faint); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fcol { display: flex; align-items: center; gap: 4px; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: inherit; cursor: default; }
+.fcol.fsize, .fcol.ftime { justify-content: flex-end; }
+.fcol > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fpane.sortable .fcol { cursor: pointer; }
+.fpane.sortable .fcol:hover, .fcol.on { color: var(--text); }
+.fsort { font-style: normal; font-size: 9px; color: var(--accent); }
+.fpane-list { flex: 1; min-height: 0; overflow: auto; outline: none; padding: 2px 0 6px; }
+.fpane-list .frow { cursor: default; border-radius: 0; }
+.fpane-list .frow:hover { background: var(--card-hover); }
+.fpane-list .frow.sel { background: var(--accent-weak); box-shadow: inset 2px 0 0 var(--accent); }
+.fpane-list:focus .frow.sel { background: color-mix(in srgb, var(--accent) 24%, transparent); }
+.fname { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.fname > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fname .i { width: 15px; height: 15px; flex: none; color: var(--muted); }
+.frow.dir .fname .i { color: var(--accent); }
+.frow.hidden-file .fname > span { color: var(--muted); }
+.flink { color: var(--faint); }
+.fsize, .ftime { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fpane-note { display: flex; align-items: center; gap: 8px; padding: 16px 12px; color: var(--muted); font-size: 13px; }
+.fpane-note .i { width: 15px; height: 15px; flex: none; color: var(--warn); }
+.fmore { display: block; margin: 6px auto; }
+/* A drag over the pane it would land in: the pane says where. */
+.fpane.drop { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
+.fpane.drop::after {
+  content: attr(data-drop); position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); padding: 6px 12px;
+  border-radius: 999px; background: var(--accent); color: var(--on-accent); font-size: 12.5px; font-weight: 600; pointer-events: none; white-space: nowrap;
+}
+.fpane.off .fpane-list { background: var(--panel); }
+/* Between the panes: the direction of a transfer. */
+.files-mid { display: flex; flex-direction: column; justify-content: center; gap: 10px; }
+.files-send { width: 44px; height: 40px; padding: 0; justify-content: center; }
+.files-arrow { font-size: 15px; color: var(--accent); }
+/* The menu of a row is opened where the pointer is: an empty element there is its anchor. */
+.files-anchor { position: fixed; width: 0; height: 0; pointer-events: none; }
+
+/* The queue: one row a transfer, "from → to" by name. */
+.files-queue { display: flex; flex-direction: column; max-height: 30%; min-height: 92px; border-top: 1px solid var(--line); }
+.fq-head { display: flex; align-items: center; gap: 8px; padding: 8px 14px 4px 18px; }
+.fq-head h3 { flex: 1; margin: 0; font-size: 13px; font-weight: 650; }
+.fq-list { flex: 1; min-height: 0; overflow: auto; padding: 0 14px 10px; }
+.fq-empty { padding: 6px 4px; color: var(--faint); font-size: 12.5px; }
+.fq-row {
+  display: grid; grid-template-columns: 18px minmax(80px, 1.2fr) minmax(140px, 1.3fr) minmax(80px, 1fr) 76px 64px; grid-template-rows: auto auto;
+  align-items: center; column-gap: 10px; padding: 5px 4px; border-bottom: 1px solid var(--line); font-size: 13px;
+}
+.fq-icon .i { width: 15px; height: 15px; color: var(--accent); }
+.fq-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.fq-route { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted); white-space: nowrap; overflow: hidden; }
+/* A long name is cut, never the short one beside it: each gets at most a share. */
+.fq-route b { flex: 0 1 auto; min-width: 0; max-width: 45%; overflow: hidden; text-overflow: ellipsis; color: var(--text); font-weight: 600; }
+.fq-to { color: var(--accent); font-weight: 700; }
+.fq-here { flex: none; color: var(--muted); font-size: 11.5px; }
+.fq-bar { height: 6px; border-radius: 999px; background: var(--panel-2); overflow: hidden; }
+.fq-bar i { display: block; height: 100%; background: var(--accent); }
+.fq-row.done .fq-bar i { background: var(--busy); }
+.fq-row.failed .fq-bar i { background: var(--danger); }
+.fq-row.stopped .fq-bar i { background: var(--faint); }
+.fq-state { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fq-row.done .fq-state { color: var(--busy); }
+.fq-row.failed .fq-state { color: var(--danger); }
+.fq-detail { grid-column: 2 / -1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font-size: 11.5px; }
+.fq-row.failed .fq-detail { color: var(--danger); }
+/* A file sent to a phone (an offer): no answer said in the colour of what waits for the user; declined quietly. */
+.fq-row.noAnswer .fq-state, .fq-row.expired .fq-state, .fq-row.noAnswer .fq-detail, .fq-row.expired .fq-detail { color: var(--wait); }
+.fq-row.declined .fq-bar i, .fq-row.expired .fq-bar i { background: var(--faint); }
+
+/* A text, .md or picture shown in the dialog. */
+.files-preview { width: min(900px, calc(100vw - 48px)); height: min(760px, calc(100vh - 48px)); }
+.files-preview[open] { display: flex; flex-direction: column; }
+.files-preview header { display: flex; align-items: center; gap: 8px; padding: 12px 12px 10px 18px; border-bottom: 1px solid var(--line); }
+.files-preview h2 { flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 650; }
+.fpv-body { flex: 1; min-height: 0; overflow: auto; padding: 14px 18px; }
+.fpv-body pre { margin: 0; font: 12.5px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.fpv-body.image { display: grid; place-items: center; background: var(--bg); }
+.fpv-body.image img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.fpv-md { max-width: 760px; font-size: 14px; line-height: 1.6; }
+.fpv-md h3, .fpv-md h4, .fpv-md h5, .fpv-md h6 { margin: 1.1em 0 .4em; line-height: 1.3; }
+.fpv-md h3 { font-size: 20px; } .fpv-md h4 { font-size: 17px; } .fpv-md h5, .fpv-md h6 { font-size: 15px; }
+.fpv-md p, .fpv-md ul, .fpv-md ol, .fpv-md blockquote { margin: .5em 0; }
+.fpv-md blockquote { padding-left: 12px; border-left: 3px solid var(--line-2); color: var(--muted); }
+.fpv-md code { padding: 1px 4px; border-radius: var(--r-xs); background: var(--panel-2); font: 12.5px var(--mono); }
+.fpv-md pre { padding: 10px 12px; border-radius: var(--r-sm); background: var(--panel-2); overflow: auto; }
+.fpv-md pre code { padding: 0; background: none; }
+.fpv-md hr { border: 0; border-top: 1px solid var(--line); }
+.files-ask .input { width: 100%; }
+@media (prefers-reduced-motion: reduce) { .files-dlg { animation: none; } }

@@ -21,6 +21,7 @@
 		AD0000012F00000000AD0003 /* PhonePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000022F00000000AD0003 /* PhonePlugin.swift */; };
 		AD0000012F00000000AD0007 /* ForwardPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000022F00000000AD0007 /* ForwardPlugin.swift */; };
 		AD0000012F00000000AD0008 /* ForwardViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000022F00000000AD0008 /* ForwardViewController.swift */; };
+		AD0000012F00000000AD0009 /* FilesPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000022F00000000AD0009 /* FilesPlugin.swift */; };
 		AD0000012F00000000AD0004 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = AD0000032F00000000AD0004 /* InfoPlist.strings */; };
 /* End PBXBuildFile section */
 
@@ -41,6 +42,7 @@
 		AD0000022F00000000AD0003 /* PhonePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhonePlugin.swift; sourceTree = "<group>"; };
 		AD0000022F00000000AD0007 /* ForwardPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForwardPlugin.swift; sourceTree = "<group>"; };
 		AD0000022F00000000AD0008 /* ForwardViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForwardViewController.swift; sourceTree = "<group>"; };
+		AD0000022F00000000AD0009 /* FilesPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilesPlugin.swift; sourceTree = "<group>"; };
 		AD0000022F00000000AD0005 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		AD0000022F00000000AD0006 /* bg */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = bg; path = bg.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -85,6 +87,7 @@
 				AD0000022F00000000AD0003 /* PhonePlugin.swift */,
 				AD0000022F00000000AD0007 /* ForwardPlugin.swift */,
 				AD0000022F00000000AD0008 /* ForwardViewController.swift */,
+				AD0000022F00000000AD0009 /* FilesPlugin.swift */,
 				AD0000032F00000000AD0004 /* InfoPlist.strings */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
 				504EC30E1FED79650016851F /* Assets.xcassets */,
@@ -186,6 +189,7 @@
 				AD0000012F00000000AD0003 /* PhonePlugin.swift in Sources */,
 				AD0000012F00000000AD0007 /* ForwardPlugin.swift in Sources */,
 				AD0000012F00000000AD0008 /* ForwardViewController.swift in Sources */,
+				AD0000012F00000000AD0009 /* FilesPlugin.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

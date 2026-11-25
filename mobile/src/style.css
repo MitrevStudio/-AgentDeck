@@ -5,6 +5,65 @@
    height of what is visible above the soft keyboard (--vvh, set by main.js from visualViewport). */
 @import "@xterm/xterm/css/xterm.css";
 
+/* A computer's files (screens/files.js): the folders on the way as a row that scrolls sideways, the list as the
+   terminals' rows (the row opens, the button at its end has the rest), a transfer's progress under the list, the
+   viewer over the whole app, the folder dialog as a sheet that scrolls. A long press selects nothing. */
+.files-crumbs { flex: none; display: flex; align-items: center; overflow-x: auto; padding: 0 8px 2px; scrollbar-width: none; }
+.files-crumbs::-webkit-scrollbar { display: none; }
+.crumb { flex: none; display: inline-flex; align-items: center; min-height: 36px; padding: 0 6px; border: 0; background: none; color: var(--muted); font-size: 13px; white-space: nowrap; }
+.crumb .ic { width: 16px; height: 16px; }
+.crumb[aria-current] { color: var(--text); font-weight: 600; }
+.crumb-sep { flex: none; font-style: normal; color: var(--faint); }
+.frow { display: flex; align-items: center; gap: 2px; border-radius: var(--r-md); -webkit-touch-callout: none; }
+.frow-open {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 6px 4px 6px 10px; text-align: left;
+  background: transparent; border: 0; border-radius: var(--r-md); color: var(--text); -webkit-touch-callout: none;
+}
+.frow-open:active { background: var(--panel-2); }
+.frow-open > .ic { width: 20px; height: 20px; color: var(--muted); }
+.frow-open > .ic.dir { color: var(--accent); }
+.frow.dotted .row-title { color: var(--muted); font-weight: 500; }
+.frow .row-meta { font-variant-numeric: tabular-nums; }
+/* Above the list: the search (only the names that hold it) and the order (screens/files.js). */
+.files-tools { flex: none; display: flex; align-items: center; gap: 8px; padding: 2px 12px 6px; }
+.files-search { flex: 1; min-width: 0; margin: 0; }
+.files-search input { padding-right: 40px; }
+.files-search input::-webkit-search-cancel-button { display: none; }
+.files-search .icon-btn { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); }
+.files-search .icon-btn .ic { position: static; transform: none; pointer-events: none; }
+.files-order { flex: none; max-width: 46%; }
+.files-order span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.files-count { margin: 6px 16px 2px; color: var(--muted); font-size: 12.5px; }
+.files-again { display: flex; justify-content: center; gap: 8px; }
+.files-task { flex: none; display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 12px; border-top: 1px solid var(--line); background: var(--panel); }
+.task-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.task-text b { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task-text small { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.task-bar { display: block; height: 4px; border-radius: 2px; background: var(--panel-2); overflow: hidden; }
+.task-bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+.sheet-backdrop.files-viewer { align-items: stretch; background: var(--bg); } /* over .sheet-backdrop, defined below */
+.viewer { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: var(--sat) var(--sar) var(--sab) var(--sal); }
+.viewer-body { flex: 1; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+.viewer-text { margin: 0; padding: 8px 12px 20px; font: 12.5px/1.45 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.viewer-md { padding: 8px 14px 20px; font-size: 14.5px; line-height: 1.5; user-select: text; -webkit-user-select: text; overflow-wrap: anywhere; }
+.viewer-md pre { overflow-x: auto; }
+.viewer-image { min-height: 100%; display: flex; align-items: center; justify-content: center; background: #090b10; }
+.viewer-image img { display: block; max-width: 100%; height: auto; }
+.sheet.files-pick { display: flex; flex-direction: column; max-height: min(84%, 680px); }
+.pick-head { flex: none; display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 2px 12px 4px; }
+.pick-head > .ic { width: 18px; height: 18px; color: var(--muted); }
+.pick-head b { min-width: 0; font-size: 15px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pick-head small { flex: none; max-width: 40%; color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pick-where { flex: none; display: flex; align-items: center; gap: 2px; min-height: var(--tap); padding-left: 12px; }
+.pick-where:has(> .icon-btn) { padding-left: 0; }
+.pick-path { flex: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pick-body { flex: 1; min-height: 80px; overflow-y: auto; overscroll-behavior: contain; }
+.pick-body .menu-item > .ic { color: var(--accent); }
+.files-pick .sheet-actions { flex: none; padding: 8px 8px 0; }
+.pick-new { padding: 6px 8px 0; }
+.pick-new .sheet-actions { padding: 0; }
+.files-pick .sheet-actions .btn[data-act="new"] { margin-right: auto; gap: 6px; }
+
 :root {
   color-scheme: dark;
   --bg: #0d1015;
@@ -629,11 +688,17 @@ button.node-row:active { background: var(--card-hover); border-color: var(--line
 .banner-text b { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .banner-text small { color: var(--muted); font-size: 12px; line-height: 1.35; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
 @keyframes drop { from { transform: translateY(-120%); opacity: 0; } }
+/* A file a computer sent, being saved (main.js offerBar): over every screen, where the banner comes. */
+.offer-task {
+  position: fixed; z-index: 31; left: calc(8px + var(--sal)); right: calc(8px + var(--sar)); top: calc(6px + var(--sat));
+  display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 14px; color: var(--text);
+  border: 1px solid var(--line-2); border-radius: var(--r-lg); background: var(--raised); box-shadow: var(--shadow-pop); animation: drop .28s ease-out;
+}
 
 .toast {
   position: fixed; z-index: 40; left: 50%; transform: translateX(-50%); bottom: calc(66px + var(--sab));
   max-width: calc(100% - 32px); padding: 9px 14px; border-radius: var(--r-md); background: var(--raised); border: 1px solid var(--line-2); color: var(--text);
-  box-shadow: var(--shadow-pop); font-size: 13.5px; pointer-events: none;
+  box-shadow: var(--shadow-pop); font-size: 13.5px; pointer-events: none; overflow-wrap: anywhere; /* a file's long name */
 }
 .kb-open .toast { bottom: auto; top: calc(58px + var(--sat)); }
 /* Where there is no tab bar the toast sits lower; over a session, above its reply box; over a terminal, above its
@@ -645,7 +710,7 @@ button.node-row:active { background: var(--card-hover); border-color: var(--line
 
 .sheet-backdrop { position: fixed; z-index: 50; inset: 0; background: var(--backdrop); display: flex; align-items: flex-end; justify-content: center; }
 .sheet { width: 100%; max-width: 520px; padding: 18px 16px calc(14px + var(--sab)); background: var(--panel); border-radius: var(--r-xl) var(--r-xl) 0 0; border-top: 1px solid var(--line-2); animation: rise .2s ease-out; }
-.sheet p { font-size: 14.5px; line-height: 1.5; margin-bottom: 16px; }
+.sheet p { font-size: 14.5px; line-height: 1.5; margin-bottom: 16px; overflow-wrap: anywhere; } /* a file's long name breaks */
 .sheet-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
 .sheet-actions .btn { height: var(--tap); min-width: 88px; }
 .sheet-input { margin-bottom: 14px; }

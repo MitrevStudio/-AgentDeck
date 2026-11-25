@@ -154,16 +154,31 @@
 
   // ---------- phones (docs/MOBILE.md 4, 5) ----------
   // A paired phone: its name, when it was paired and last seen, and Forget - here and on every computer (main asks
-  // them all; those offline now are named, the phone may still be paired there).
+  // them all; those offline now are named, the phone may still be paired there). One linked now also has "Send
+  // file…" (docs/FILES.md 3.6): a file of this computer chosen in the system's picker, offered to it; the last one sent
+  // and what the phone did with it shows on its row (main's state.sends), as the Files dialog's queue would show it.
   function phoneRow(n) {
     const online = n.status === "online";
     const seen = online ? "" : n.lastSeen ? t("settings.phones.lastSeen", { time: since(n.lastSeen) }) : t("settings.phones.neverSeen");
+    const sent = state.sends?.[n.id], who = n.name || n.id.slice(0, 8);
+    // As the Files dialog's queue says it (files-ui.js): taken - saving there; no answer - what to do about it.
+    const how = !sent ? "" : sent.state === "running" ? t("files.state.saving") : sent.state === "noAnswer" || sent.state === "expired" ? t("files.toPhone.noAnswer", { name: who }) : t(`files.state.${sent.state}`);
+    const last = sent ? t("settings.phones.last", { file: sent.name, state: [how, sent.error].filter(Boolean).join(": ") }) : "";
     return `<div class="vs-node" data-id="${esc(n.id)}">${icon("phone")}
-      <span class="who"><b title="${esc(n.id)}">${esc(n.name || n.id.slice(0, 8))}</b><small>${esc([t("settings.phones.pairedAt", { time: since(n.pairedAt) }), seen].filter(Boolean).join(" · "))}</small></span>
+      <span class="who"><b title="${esc(n.id)}">${esc(n.name || n.id.slice(0, 8))}</b><small>${esc([t("settings.phones.pairedAt", { time: since(n.pairedAt) }), seen].filter(Boolean).join(" · "))}</small>${last ? `<small class="vs-sent" data-sent-state="${esc(sent.state)}">${esc(last)}</small>` : ""}</span>
       <span class="tag${online ? " ok" : ""}">${esc(t(online ? "settings.nodes.online" : "settings.nodes.offline"))}</span>
+      ${online ? `<button type="button" class="btn sm" data-send-phone="${esc(n.id)}" title="${esc(t("settings.phones.sendHint", { name: who }))}">${icon("upload")}<span>${esc(t("settings.phones.send"))}</span></button>` : ""}
       <button type="button" class="btn sm" data-forget-phone="${esc(n.id)}">${icon("x")}<span>${esc(t("settings.nodes.forget"))}</span></button></div>`;
   }
   $("nodesPhones").addEventListener("click", async e => {
+    const to = e.target.closest("[data-send-phone]")?.dataset.sendPhone;
+    if (to) {
+      const n = (state.phones || []).find(x => x.id === to);
+      const r = await mesh.sendFile(to);
+      if (r?.ok) result($("phoneResult"), t("settings.phones.sent", { file: r.name, name: n?.name || to.slice(0, 8) }), true);
+      else if (!r?.cancelled) result($("phoneResult"), r?.error || t("errors.unreachable"), false);
+      return;
+    }
     const id = e.target.closest("[data-forget-phone]")?.dataset.forgetPhone;
     if (!id) return;
     const n = (state.phones || []).find(x => x.id === id);

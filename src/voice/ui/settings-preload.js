@@ -81,6 +81,9 @@ contextBridge.exposeInMainWorld("voiceSettings", {
     // forgetPhone(id) -> { still: [names of computers that may still know it], state }.
     invitePhone: args => ipcRenderer.invoke("mesh:invite-phone", args),
     forgetPhone: id => ipcRenderer.invoke("mesh:forget-phone", id),
+    // sendFile(id): a file of this computer, picked in the system's picker, offered to that phone -> { ok, name } |
+    // { ok: false, cancelled } | { ok: false, error }.
+    sendFile: id => ipcRenderer.invoke("mesh:send-file", id),
     // A node's readiness (git, SSH key, agents) and its fixes: generateKey | addKnownHost {host} | setGitIdentity {name, email}.
     setup: id => ipcRenderer.invoke("mesh:setup", id),
     setupAction: (id, action, args) => ipcRenderer.invoke("mesh:setup-action", id, action, args),

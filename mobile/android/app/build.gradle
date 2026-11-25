@@ -35,6 +35,15 @@ android {
         }
     }
     buildTypes {
+        debug {
+            // Test artifacts can coexist with the signed release without replacing its pairing or app data.
+            if (System.getenv("AGENTDECK_PREVIEW") == "true") {
+                applicationIdSuffix ".preview"
+                versionNameSuffix "-preview"
+                resValue "string", "app_name", "AgentDeck Preview"
+                resValue "string", "title_activity_main", "AgentDeck Preview"
+            }
+        }
         release {
             if (keystoreFile) signingConfig signingConfigs.release
             minifyEnabled false

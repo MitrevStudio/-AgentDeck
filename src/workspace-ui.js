@@ -587,7 +587,7 @@ function renderPaneHeads(tab) {
         <button class="icon-btn" data-ws="split-down" title="${esc(t("ws.splitDown"))}">${icon("splitDown")}</button>
         ${many ? `<button class="icon-btn" data-ws="reset-panes" title="${esc(t("ws.resetPanes"))}" aria-label="${esc(t("ws.resetPanes"))}">${icon("equal")}</button>` : ""}
         ${many ? `<button class="icon-btn ${tab.zoom ? "on" : ""}" data-ws="zoom" title="${esc(t(tab.zoom ? "ws.unzoom" : "ws.zoom"))}">${icon("maximize")}</button>` : ""}
-        ${getPortsButtonHtml(x)}
+        ${getPortsButtonHtml(x)}${getFilesButtonHtml(x)}
         ${foreign ? `<button class="icon-btn on" data-ws="take-size" title="${esc(t("term.useMySize"))}" aria-label="${esc(t("term.useMySize"))}">${icon("fit")}</button>` : ""}
         <button class="icon-btn danger" data-ws="stop" title="${esc(t("term.stopAll"))}" aria-label="${esc(t("term.stopAll"))}">${icon("stop")}</button>
         <button class="icon-btn" data-ws="close-pane" title="${esc(t("ws.closePane"))}" aria-label="${esc(t("ws.closePane"))}">${icon("x")}</button>`);
@@ -610,6 +610,13 @@ function getPortsButtonHtml(x) {
   const n = getForwardsOf(x?.node).length;
   const title = n ? t("term.ports.active", { n }) : t("term.ports.title");
   return `<button class="icon-btn ${n ? "on counted" : ""}" data-ws="ports" title="${esc(title)}" aria-label="${esc(title)}" aria-haspopup="menu">${icon("globe")}${n ? `<span class="port-count">${n}</span>` : ""}</button>`;
+}
+// A remote terminal's "Files" button: the files of this computer and of the terminal's, side by side (files-ui.js).
+// A terminal of this computer has none - there is no other side to it.
+function getFilesButtonHtml(x) {
+  if (!x?.node) return "";
+  const title = t("files.button", { name: nodeNameOf(x.node) });
+  return `<button class="icon-btn" data-ws="files" title="${esc(title)}" aria-label="${esc(title)}" aria-haspopup="dialog">${icon("folder")}</button>`;
 }
 const isPortNumber = v => Number.isInteger(v) && v >= 1 && v <= 65535;
 // "Other port…": a port number asked for in a dialog of AgentDeck's own (as common.js confirmDialog). Answers the
@@ -818,6 +825,7 @@ $("panes").addEventListener("click", e => {
   if (!btn) { if (tab?.focus !== term) runWorkspace("focus", { term }); return; }
   // The menu is of this pane whichever has the focus, and keeps the keyboard: nothing is focused for it.
   if (btn.dataset.ws === "ports") return openPortsMenu(btn, term).catch(err => toast(err.message, true));
+  if (btn.dataset.ws === "files") return openFilesDialog(term).catch(err => toast(err.message, true));
   focusAfterRender = true;
   const run = () => {
     if (btn.dataset.ws === "split-right") return runWorkspace("split", { dir: "right" });

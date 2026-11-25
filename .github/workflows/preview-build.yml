@@ -1,0 +1,110 @@
+# Installable test builds of the files feature. Artifacts only: no release, store upload, or updater metadata.
+name: Preview test builds
+
+on:
+  push:
+    branches: [atanas/files]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preview-build-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  BUILD_VERSION: 1.32.1-files.${{ github.run_number }}
+
+jobs:
+  windows:
+    name: Windows installer
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run test:files
+      - run: npm run test:mobile-files
+      - run: npm run test:mobile-i18n
+      - name: Set test version
+        run: npm version "$env:BUILD_VERSION" --no-git-tag-version --allow-same-version
+      - name: Build Windows installer
+        run: npx electron-builder --win --publish never --config.directories.output=dist/agentdeck-preview-windows
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - name: Checksums and source revision
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem -LiteralPath dist/agentdeck-preview-windows -Filter '*.exe'
+          if ($files.Count -ne 1) { throw 'Expected exactly one Windows installer' }
+          $files | ForEach-Object { $hash = Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256; "$($hash.Hash.ToLower())  $($_.Name)" } | Set-Content -Encoding utf8 dist/agentdeck-preview-windows/SHA256SUMS.txt
+          @("AgentDeck files test build", "Version: $env:BUILD_VERSION", "Source: $env:GITHUB_SHA", "Repository: $env:GITHUB_REPOSITORY") | Set-Content -Encoding utf8 dist/agentdeck-preview-windows/BUILD-INFO.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: agentdeck-preview-windows
+          path: |
+            dist/agentdeck-preview-windows/*.exe
+            dist/agentdeck-preview-windows/SHA256SUMS.txt
+            dist/agentdeck-preview-windows/BUILD-INFO.txt
+          if-no-files-found: error
+          retention-days: 30
+
+  android:
+    name: Android preview APK
+    runs-on: ubuntu-26.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            mobile/package-lock.json
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci --ignore-scripts
+      - run: npm ci
+        working-directory: mobile
+      - run: npm run test:files
+      - run: npm run test:mobile-files
+      - run: npm run test:mobile-i18n
+      - name: Build side-by-side test APK
+        working-directory: mobile
+        run: npm run apk
+        env:
+          AGENTDECK_VERSION: ${{ env.BUILD_VERSION }}
+          AGENTDECK_PREVIEW: "true"
+      - name: Verify APK, checksum and source revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="mobile/android/app/build/outputs/apk/debug/app-debug.apk"
+          tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          "$tools/apksigner" verify "$apk"
+          "$tools/aapt" dump badging "$apk" > "$RUNNER_TEMP/apk-info.txt"
+          grep "package: name='com.mitrevstudio.agentdeck.preview'" "$RUNNER_TEMP/apk-info.txt"
+          grep "application-label:'AgentDeck Preview'" "$RUNNER_TEMP/apk-info.txt"
+          mkdir -p dist/agentdeck-preview-android
+          cp "$apk" "dist/agentdeck-preview-android/AgentDeck-Preview-$BUILD_VERSION.apk"
+          cd dist/agentdeck-preview-android
+          sha256sum ./*.apk > SHA256SUMS.txt
+          printf 'AgentDeck files test build\nVersion: %s\nSource: %s\nRepository: %s\nAndroid package: com.mitrevstudio.agentdeck.preview\n' "$BUILD_VERSION" "$GITHUB_SHA" "$GITHUB_REPOSITORY" > BUILD-INFO.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: agentdeck-preview-android
+          path: |
+            dist/agentdeck-preview-android/*.apk
+            dist/agentdeck-preview-android/SHA256SUMS.txt
+            dist/agentdeck-preview-android/BUILD-INFO.txt
+          if-no-files-found: error
+          retention-days: 30

@@ -442,8 +442,14 @@ Install and authenticate agents on the host itself, using a remote terminal for 
 
 A dev server started in a remote terminal listens on that computer's `localhost`. The **Ports** button in the terminal's header lists what listens there — the terminal's own ports first — and **Other port…** takes a number by hand. Choosing a port forwards it through the same encrypted link, also through a relay, and opens `http://localhost:<port>` in your browser; the phone app has the same list under **More → Ports** and shows the page inside the app. Only `localhost` of that computer is reachable this way, the forward lives while the link does, and both computers need a version that has the menu.
 
+### Files of the other computer
+
+The **Files** button in a remote terminal's header opens two panes: this computer on the left, starting in Downloads, and the terminal's computer on the right, starting in the terminal's folder — each pane says which computer it is. Drag between the panes, double-click a file or use the arrows to copy files and whole folders either way; the queue shows every transfer as "from → to" with progress and **Stop**. Right-click for preview (text, Markdown, pictures; PDFs open in your PDF program), rename, copy, move, new folder and delete (always confirmed, into the Recycle Bin where that computer has one). Click a column's head to sort by name, size or date (again for the other way round), and type in a pane's **Filter by name…** to list only the matching names; the phone has the same search and a sort button. Nothing is ever overwritten: a taken name becomes `name (2)`, and an unfinished file never carries its real name. Both computers need a version that has the button.
+
+To get a file of this computer onto your phone, right-click it in the left pane and choose **Send to** the phone, or use **Send file…** on the phone's row in **Settings → Computers → Phones**. The phone must be connected and the app open: it asks every time before it saves the file to Downloads, and the transfer's row on the computer shows whether it was saved, declined or not answered.
+
 > [!IMPORTANT]
-> Pairing grants meaningful control: a paired computer or phone can launch terminals and sessions on the host, type into the ones running there and open the ports that listen on its `localhost`. Pair only your own devices, and keep a desktop's mesh port off the public internet — the port meant to be reachable from outside is the relay's.
+> Pairing grants meaningful control: a paired computer or phone can launch terminals and sessions on the host, type into the ones running there, open the ports that listen on its `localhost`, and read, copy, change and delete its files wherever its user may. Pair only your own devices, and keep a desktop's mesh port off the public internet — the port meant to be reachable from outside is the relay's.
 
 ## Linux headless host
 

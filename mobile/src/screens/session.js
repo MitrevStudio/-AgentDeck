@@ -48,6 +48,7 @@ export function render(el, ctx, p) {
     const canStop = x?.online && (x.term || (x.status !== "stopped" && store.stopKind(p.node, p.agent, p.id)));
     const canResume = x && !x.term && x.online && x.status === "stopped";
     const actions = [
+      x?.online ? iconBtn("folder", t("files.title"), 'data-act="files"') : "",
       x?.online && x.cwd ? iconBtn("termPlus", t("session.shell"), 'data-act="shell"') : "",
       x?.online && x.term ? iconBtn("terminal", t("session.terminal"), 'data-act="term"') : "",
       canStop ? iconBtn("stop", t("session.stop"), 'data-act="stop"', "danger") : "",
@@ -61,6 +62,8 @@ export function render(el, ctx, p) {
     // Opened from its terminal (the chat view of a running session): the terminal is one step back.
     on("term", () => (p.from === "terminal" ? ctx.back() : ctx.go("terminal", { node: x.node, term: x.term, title: x.title })));
     on("shell", openShell);
+    // The session's folder there (its home when the folder is not known).
+    on("files", () => ctx.go("files", { node: p.node, path: x.cwd || "~" }));
     on("stop", stop);
     on("resume", resume);
     conn.innerHTML = connNote(store);
