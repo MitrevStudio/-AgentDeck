@@ -1,16 +1,20 @@
 // The files of a computer for a paired one (src/host/files.js, docs/FILES.md): what must never happen is a file
 // written over, a file put together from two versions, an unfinished file under its real name, a copy that never
 // ends, and a drive or the home deleted. First the module by itself in a temporary folder (with a home that is a
-// temporary folder too - nothing here can reach the real one), then the same through a real phone, relay and host,
-// and a file of the host offered to a phone (src/host/file-offers.js) and answered by it.
+// temporary folder too - nothing here can reach the real one), then the desktop's queue (src/file-transfers.js)
+// against scripted computers, then the same through a real phone, relay and host, and a file of the host offered to a
+// phone (src/host/file-offers.js) and answered by it.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const fsp = fs.promises;
 const os = require("node:os");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { createFiles, writeAll, CHUNK, PAGE, PART } = require("../src/host/files");
-const { withPhone, waitFor } = require("./phone-test-rig");
+const { createFiles, writeAll, CHUNK, PAGE, PART, LISTS_KEPT } = require("../src/host/files");
+const { createFileOffers } = require("../src/host/file-offers");
+const { createFileTransfers, goodName } = require("../src/file-transfers");
+const { HostError, MESSAGES } = require("../src/host/errors");
+const { withPhone, waitFor, sleep } = require("./phone-test-rig");
 
 const code = c => ({ code: c });
 const b64 = b => b.toString("base64");
@@ -241,9 +245,9 @@ async function alone(root) {
   await files.dispose();
 }
 
-// A real phone -> relay -> host: the methods are served, to a peer with control only, and a 1 MB file comes whole.
-// What a review found and a test did not: two things going for one name, a move whose source cannot all go, another
-// spelling of a path, and requests sent together.
+// The module by itself again, where two things meet: two going for one name, a move whose source cannot all go (or
+// that skipped something), a write that takes less than it was given, a peer's limits under requests sent together,
+// and another spelling of a path (a blank at a name's end, a link, the letters' case).
 async function hard(root) {
   const home = path.join(root, "users", "me"), work = path.join(root, "work");
   await fsp.mkdir(home, { recursive: true }); await fsp.mkdir(work);
@@ -383,6 +387,324 @@ async function hard(root) {
   await files.dispose(); await stubborn.dispose();
 }
 
+// What must stay where it is, and the paths Windows reads in ways of its own: the home and the folders that hold it
+// are not renamed or moved away either; a share is refused under every spelling, typed or led to; a path there begins
+// with a drive's letter, has no ":" after it, and no new name is a device's.
+async function guarded(root) {
+  const home = path.join(root, "users", "me"), work = path.join(root, "work");
+  await fsp.mkdir(home, { recursive: true }); await fsp.mkdir(work);
+  await fsp.writeFile(path.join(home, "kept.txt"), "kept");
+  const at = (...p) => path.join(work, ...p);
+  const files = createFiles({ home });
+  const win = process.platform === "win32";
+
+  // ---------- the home, and what holds it ----------
+  for (const p of [home, "~", path.dirname(home)]) {
+    await assert.rejects(files.rename({ from: p, to: at("taken-away") }), code("rootRefused"));
+    await assert.rejects(files.copy("A", { from: p, to: at("taken-away"), move: true }), code("rootRefused"));
+    await assert.rejects(files.remove({ path: p }), code("rootRefused"));
+  }
+  await assert.rejects(files.copy("A", { from: path.parse(work).root, to: at("drive"), move: true }), code("rootRefused"));
+  assert.deepEqual([fs.existsSync(at("taken-away")), await fsp.readFile(path.join(home, "kept.txt"), "utf8")], [false, "kept"], "the home is where it was");
+  const copied = await finished(files, "A", (await files.copy("A", { from: home, to: at("home-copy") })).job);
+  assert.equal(copied.state, "done", "a copy takes nothing away: the home may be copied");
+  let links = true;
+  try { await fsp.symlink(path.dirname(home), at("via"), "junction"); } catch { links = false; }
+  if (links) {
+    // Another spelling of the home: through a link to the folder above it.
+    await assert.rejects(files.rename({ from: at("via", "me"), to: at("taken-away") }), code("rootRefused"));
+    await assert.rejects(files.copy("A", { from: at("via", "me"), to: at("taken-away"), move: true }), code("rootRefused"));
+    await assert.rejects(files.remove({ path: at("via", "me") }), code("rootRefused"));
+    assert.equal(fs.existsSync(at("taken-away")), false);
+    // A link to the home is only itself: it is renamed, and moved away, and the home stays.
+    await fsp.symlink(home, at("home-link"), "junction");
+    await files.rename({ from: at("home-link"), to: at("home-link-2") });
+    const moved = await finished(files, "A", (await files.copy("A", { from: at("home-link-2"), to: at("link-moved"), move: true })).job);
+    assert.equal(moved.state, "done", moved.error);
+    assert.equal(fs.existsSync(at("home-link-2")), false);
+    assert.equal(await fsp.readFile(at("link-moved", "kept.txt"), "utf8"), "kept");
+    assert.equal(await fsp.readFile(path.join(home, "kept.txt"), "utf8"), "kept", "the link went, the home stays");
+  } else console.log("   (no links can be made here: the link checks are left out)");
+  console.log("ok: the home and the folders that hold it are neither renamed nor moved away, under any spelling; a link to it is only itself");
+
+  // ---------- shares, drive letters, streams, devices ----------
+  if (!win) { console.log("   (not Windows: its shares, drive letters, streams and device names are left out)"); await files.dispose(); return; }
+  const asShare = (server, p) => `\\\\${server}\\${p.replace(":", "$")}`;
+  await fsp.writeFile(at("plain.txt"), "plain");
+  for (const share of [asShare("localhost", home), asShare("127.0.0.1", home), asShare("LOCALHOST", home).replace(/\\/g, "/"), "\\\\192.0.2.7\\share\\folder"]) {
+    const asked = [
+      () => files.remove({ path: share }), () => files.stat({ path: share }), () => files.list({ path: share }), () => files.read({ path: share, pos: 0, len: 10 }),
+      () => files.rename({ from: share, to: at("from-share") }), () => files.rename({ from: at("plain.txt"), to: share + "\\in.txt" }),
+      () => files.copy("A", { from: share, to: at("from-share") }), () => files.copy("A", { from: at("plain.txt"), to: share + "\\in.txt" }),
+      () => files.copy("A", { from: share, to: at("from-share"), move: true }), () => files.mkdir({ path: share + "\\new" }), () => files.begin("A", { path: share + "\\up.bin", size: 1 })
+    ];
+    for (const ask of asked) await assert.rejects(ask(), code("networkPath"), share);
+  }
+  assert.equal(await fsp.readFile(path.join(home, "kept.txt"), "utf8"), "kept", "the home under its network name is not deleted");
+  // A folder of this computer that leads to a share (a mapped drive, a link): refused where what it leads to is looked at.
+  await fsp.mkdir(at("mapped")); await fsp.writeFile(at("mapped", "f.txt"), "f");
+  const leads = createFiles({ home, io: { realpath: async p => (p.toLowerCase().startsWith(at("mapped").toLowerCase()) ? "\\\\192.0.2.7\\share" + p.slice(at("mapped").length) : fsp.realpath(p)) } });
+  await assert.rejects(leads.remove({ path: at("mapped") }), code("networkPath"));
+  await assert.rejects(leads.rename({ from: at("mapped", "f.txt"), to: at("mapped", "g.txt") }), code("networkPath"));
+  await assert.rejects(leads.copy("A", { from: at("mapped"), to: at("mapped-copy") }), code("networkPath"));
+  await assert.rejects(leads.copy("A", { from: at("plain.txt"), to: at("mapped", "plain.txt") }), code("networkPath"));
+  assert.equal(await fsp.readFile(at("mapped", "f.txt"), "utf8"), "f");
+  await leads.dispose();
+  console.log("ok: a share is refused under every spelling, typed or led to - this computer's own disk under its network name too");
+
+  const noDrive = work.slice(2);
+  for (const p of [noDrive, noDrive.replace(/\\/g, "/"), work.slice(0, 2) + work.slice(3)]) await assert.rejects(files.stat({ path: p }), code("folderNotAbsolute"), p);
+  await assert.rejects(files.stat({ path: at("plain.txt:stream") }), code("invalidData"));
+  await assert.rejects(files.begin("A", { path: at("plain.txt:stream"), size: 1 }), code("invalidData"));
+  for (const name of ["NUL", "nul.txt", "COM1", "con.tar.gz", "LPT9.log", "aux", "Prn .txt"]) {
+    await assert.rejects(files.mkdir({ path: at(name) }), code("invalidData"), name);
+    await assert.rejects(files.begin("A", { path: at(name), size: 1 }), code("invalidData"), name);
+    await assert.rejects(files.rename({ from: at("plain.txt"), to: at(name) }), code("invalidData"), name);
+    await assert.rejects(files.copy("A", { from: at("plain.txt"), to: at(name) }), code("invalidData"), name);
+  }
+  await files.mkdir({ path: at("console") }); await files.mkdir({ path: at("com10") }); await files.mkdir({ path: at("nul-files") });
+  assert.deepEqual((await fsp.readdir(work)).filter(n => /^(nul|com1|con|lpt9|aux|prn)\b/i.test(n) && !["console", "com10", "nul-files"].includes(n)), [], "no file of a device's name was made");
+  assert.equal(await fsp.readFile(at("plain.txt"), "utf8"), "plain");
+  console.log("ok: a path begins with a drive's letter; no stream of another file; no new name of a device's");
+  await files.dispose();
+}
+
+// What goes wrong around the edges: an unfinished file a crash left, a long folder in another order, a drive that
+// does not answer, a volume without links or without numbers for its files, and what an error says.
+async function sturdy(root) {
+  const home = path.join(root, "home"), work = path.join(root, "work");
+  await fsp.mkdir(home, { recursive: true }); await fsp.mkdir(work);
+  const at = (...p) => path.join(work, ...p);
+  const files = createFiles({ home });
+  const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+
+  // ---------- an unfinished file nobody writes any more ----------
+  await fsp.writeFile(at("crashed.bin") + PART, "half of an older upload");
+  await fsp.utimes(at("crashed.bin") + PART, hourAgo, hourAgo);
+  const again = await files.begin("A", { path: at("crashed.bin"), size: 3 });
+  assert.equal(again.path, at("crashed.bin"), "what a crash left does not hold the name for ever");
+  await files.write("A", { upload: again.upload, pos: 0, data: b64(Buffer.from("new")) });
+  await files.commit("A", { upload: again.upload });
+  assert.equal(await fsp.readFile(at("crashed.bin"), "utf8"), "new");
+  await fsp.writeFile(at("theirs.bin") + PART, "someone is writing this");
+  const beside = await files.begin("A", { path: at("theirs.bin"), size: 1 });
+  assert.equal(beside.path, at("theirs (2).bin"), "one written to a moment ago is someone's: it keeps its name");
+  await files.abort("A", { upload: beside.upload });
+  assert.equal(await fsp.readFile(at("theirs.bin") + PART, "utf8"), "someone is writing this");
+  // An upload of this process that has been quiet for long is still this process's.
+  const quiet = await files.begin("A", { path: at("quiet.bin"), size: 5 });
+  await fsp.utimes(quiet.path + PART, hourAgo, hourAgo);
+  const second = await files.begin("A", { path: at("quiet.bin"), size: 5 });
+  assert.equal(second.path, at("quiet (2).bin"), "an upload under way is not taken over, however old its file looks");
+  await files.abort("A", { upload: second.upload }); await files.abort("A", { upload: quiet.upload });
+  await fsp.writeFile(at("src.txt"), "source");
+  await fsp.writeFile(at("copied.txt") + PART, "half of an older copy");
+  await fsp.utimes(at("copied.txt") + PART, hourAgo, hourAgo);
+  const c = await files.copy("A", { from: at("src.txt"), to: at("copied.txt") });
+  assert.equal(c.to, at("copied.txt"));
+  assert.equal((await finished(files, "A", c.job)).state, "done");
+  assert.equal(await fsp.readFile(at("copied.txt"), "utf8"), "source");
+  // A name let go of is free again, for the same and for the next one.
+  const freed = await files.begin("A", { path: at("quiet.bin"), size: 1 });
+  assert.equal(freed.path, at("quiet.bin"));
+  await files.abort("A", { upload: freed.upload });
+  assert.deepEqual((await tree(work)).filter(x => x.endsWith(PART)), ["theirs.bin" + PART]);
+  console.log("ok: an unfinished file left by a crash is taken over; a fresh one, and one this process still writes, are not");
+
+  // ---------- another order, a page at a time: one look for all the pages ----------
+  const long = at("long");
+  await fsp.mkdir(long);
+  const names = Array.from({ length: 700 }, (_, i) => `f${String(i).padStart(3, "0")}.bin`);
+  await Promise.all(names.map((n, i) => fsp.writeFile(path.join(long, n), Buffer.alloc(i % 40))));
+  const q = { path: long, sort: "size", desc: true, limit: 300 };
+  const p1 = await files.list(q, "A");
+  await fsp.writeFile(path.join(long, "late.bin"), Buffer.alloc(5000));          // the biggest: first in a new look
+  const p2 = await files.list({ ...q, after: p1.next }, "A"), p3 = await files.list({ ...q, after: p2.next }, "A");
+  assert.deepEqual([p1.total, p2.total, p3.total, p3.next], [700, 700, 700, ""]);
+  assert.deepEqual([...p1.entries, ...p2.entries, ...p3.entries].map(e => e.name).sort(), names, "the pages are of one look: every entry once, though the folder changed");
+  const anew = await files.list(q, "A");
+  assert.deepEqual([anew.total, anew.entries[0].name], [701, "late.bin"], "a first page always looks anew");
+  await fsp.writeFile(path.join(long, "later.bin"), Buffer.alloc(6000));
+  assert.equal((await files.list({ ...q, after: "#300" }, "B")).total, 702, "one peer's look is not another's");
+  assert.equal((await files.list({ ...q, after: "#300" }, "A")).total, 701);
+  await assert.rejects(files.list({ ...q, after: "ffoo" }, "A"), code("invalidData"));
+  // Few looks are kept: the oldest goes, and its next page looks anew.
+  for (let i = 0; i < LISTS_KEPT; i++) {
+    await fsp.mkdir(at(`small-${i}`));
+    await files.list({ path: at(`small-${i}`), sort: "mtime" }, "A");
+  }
+  assert.equal((await files.list({ ...q, after: "#300" }, "A")).total, 702, "a look that is no longer kept is made again");
+  assert.equal((await files.list(q, "B")).total, 702);
+  await fsp.writeFile(path.join(long, "latest.bin"), Buffer.alloc(7000));
+  assert.equal((await files.list({ ...q, after: "#300" }, "B")).total, 702);
+  await files.drop("B");
+  assert.equal((await files.list({ ...q, after: "#300" }, "B")).total, 703, "a peer's looks go with its link");
+  console.log("ok: another order is looked at once for all its pages, per peer, and only a few are kept");
+
+  // ---------- a drive that does not answer ----------
+  if (process.platform === "win32") {
+    let asked = 0, answer;
+    const hangs = new Promise(res => { answer = res; });
+    const slow = createFiles({ home, rootMs: 150, io: { probe: r => (r === "Q:\\" ? (asked++, hangs) : r === "K:\\" ? Promise.resolve() : Promise.reject(new Error("no such drive"))) } });
+    let t = Date.now();
+    assert.deepEqual((await slow.list({ path: "" })).entries.map(e => e.name), ["K:\\"], "a drive that does not answer is left out");
+    assert.ok(Date.now() - t < 2000, "and is not waited for");
+    t = Date.now();
+    assert.deepEqual((await slow.list({ path: "" })).entries.map(e => e.name), ["K:\\"]);
+    assert.ok(asked === 1 && Date.now() - t < 120, "a look still out is not begun again, nor waited for again");
+    answer();
+    await waitFor(async () => (await slow.list({ path: "" })).entries.length === 2, "the drive is listed once it answers");
+    await slow.dispose();
+    console.log("ok: a drive's letter that does not answer in time is left out, and asked once at a time");
+  }
+
+  // ---------- a volume without hard links ----------
+  const noLinks = createFiles({ home, io: { link: async () => { throw Object.assign(new Error("no links on this volume"), { code: "EPERM" }); } } });
+  await fsp.mkdir(at("fat"));
+  const up = await noLinks.begin("A", { path: at("fat", "up.txt"), size: 3 });
+  await noLinks.write("A", { upload: up.upload, pos: 0, data: b64(Buffer.from("new")) });
+  await fsp.writeFile(at("fat", "up.txt"), "theirs");
+  assert.equal((await noLinks.commit("A", { upload: up.upload })).path, at("fat", "up (2).txt"));
+  assert.deepEqual([await fsp.readFile(at("fat", "up.txt"), "utf8"), await fsp.readFile(at("fat", "up (2).txt"), "utf8")], ["theirs", "new"], "without links too a late name is not written over");
+  const fc = await noLinks.copy("A", { from: at("src.txt"), to: at("fat", "up.txt") });
+  assert.equal(fc.to, at("fat", "up (3).txt"));
+  assert.equal((await finished(noLinks, "A", fc.job)).state, "done");
+  assert.equal(await fsp.readFile(at("fat", "up (3).txt"), "utf8"), "source");
+  await fsp.writeFile(at("fat", "r1.txt"), "one");
+  await assert.rejects(noLinks.rename({ from: at("fat", "r1.txt"), to: at("fat", "up.txt") }), code("exists"));
+  await noLinks.rename({ from: at("fat", "r1.txt"), to: at("fat", "r2.txt") });
+  assert.deepEqual([fs.existsSync(at("fat", "r1.txt")), await fsp.readFile(at("fat", "r2.txt"), "utf8")], [false, "one"]);
+  // A name that appears between the first look and the rename is seen by the look right before it.
+  let looks = 0;
+  const late = createFiles({ home, io: {
+    link: async () => { throw Object.assign(new Error("no links on this volume"), { code: "EPERM" }); },
+    lstat: async (p, o) => { if (p === at("fat", "appears.txt") && looks++ === 0) throw Object.assign(new Error("not there yet"), { code: "ENOENT" }); return fsp.lstat(p, o); }
+  } });
+  await fsp.writeFile(at("fat", "appears.txt"), "appeared");
+  await assert.rejects(late.rename({ from: at("fat", "r2.txt"), to: at("fat", "appears.txt") }), code("exists"));
+  assert.deepEqual([await fsp.readFile(at("fat", "appears.txt"), "utf8"), await fsp.readFile(at("fat", "r2.txt"), "utf8")], ["appeared", "one"]);
+  assert.ok(!(await tree(at("fat"))).some(x => x.endsWith(PART)), "no unfinished file is left");
+  console.log("ok: a volume without links - a copy that refuses a taken name; a rename looks again right before it");
+
+  // ---------- a volume that numbers no files: the letters' case by the names ----------
+  const blind = createFiles({ home, io: { lstat: async (p, o) => { const st = await fsp.lstat(p, o); st.ino = typeof st.ino === "bigint" ? 0n : 0; return st; } } });
+  await fsp.writeFile(at("case.txt"), "lower");
+  let twoCases = true;
+  try { await fsp.writeFile(at("Case.txt"), "upper", { flag: "wx" }); } catch { twoCases = false; }
+  if (twoCases) await assert.rejects(blind.rename({ from: at("case.txt"), to: at("Case.txt") }), code("exists"), "two files are two files");
+  else {
+    await blind.rename({ from: at("case.txt"), to: at("Case.txt") });
+    assert.ok((await fsp.readdir(work)).includes("Case.txt") && await fsp.readFile(at("Case.txt"), "utf8") === "lower", "only the letters' case changed");
+  }
+  await fsp.writeFile(at("another.txt"), "another");
+  await assert.rejects(blind.rename({ from: at("another.txt"), to: at("Case.txt") }), code("exists"));
+  if (!twoCases) await assert.rejects(blind.rename({ from: at("another.txt"), to: at("CASE.TXT") }), code("exists"), "another file's name in another case is taken as well");
+  assert.equal(await fsp.readFile(at("another.txt"), "utf8"), "another");
+  console.log("ok: where the disk numbers no files, a rename that only changes the letters' case is still told from a taken name");
+
+  // ---------- what an error says ----------
+  for (const c of ["tooBig", "cancelled", "networkPath", "tooManyFiles", "fileFailed"]) assert.ok(MESSAGES[c] && MESSAGES[c] !== c, `${c} has words`);
+  const told = () => Object.assign(new Error(`EINVAL: invalid argument, lstat '${at("private", "plan.txt")}'`), { code: "EINVAL" });
+  const odd = createFiles({ home, io: { lstat: async () => { throw told(); } }, trash: async () => { throw told(); } });
+  const bare = e => e.code === "fileFailed" && e.message === "EINVAL";
+  await assert.rejects(odd.rename({ from: at("another.txt"), to: at("named.txt") }), bare, "the system's name for it, not its text");
+  await assert.rejects(odd.remove({ path: at("another.txt") }), bare);
+  const wordy = createFiles({ home, trash: async () => { throw new Error(`The bin refused ${at("another.txt")}`); } });
+  await assert.rejects(wordy.remove({ path: at("another.txt") }), e => e.code === "fileFailed" && !e.message.includes(work) && !e.message.includes("another"));
+  console.log("ok: every code has words; a failure of the file system is said by its name, never with a path of this computer");
+  for (const f of [files, noLinks, late, blind, odd, wordy]) await f.dispose();
+}
+
+// The desktop's queue (src/file-transfers.js) against computers that are scripted here: a list that never ends, a
+// side that refuses, a phone that goes quiet. `far` is a second instance of the files, as another computer's.
+async function queued(root) {
+  const home = path.join(root, "home"), near = path.join(root, "near"), there = path.join(root, "far");
+  for (const d of [home, near, there]) await fsp.mkdir(d, { recursive: true });
+  const local = createFiles({ home }), far = createFiles({ home });
+  const remote = {
+    list: p => far.list(p, "near"), stat: p => far.stat(p), read: p => far.read(p), mkdir: p => far.mkdir(p), begin: p => far.begin("near", p),
+    write: p => far.write("near", p), commit: p => far.commit("near", p), abort: p => far.abort("near", p)
+  };
+  let page = 0;
+  const entries = n => Array.from({ length: 10 }, (_, i) => ({ name: `f${n}-${i}.bin`, dir: false, link: false, size: 1, mtime: 1 }));
+  const folder = { name: "endless", dir: true, link: false, size: 0, mtime: 1 };
+  const nodes = {
+    far: remote,
+    // The same next page for ever; ever new pages for ever; a page already given, two pages on.
+    stuck: { stat: async () => folder, list: async () => ({ path: "/endless", sep: "/", entries: entries(page++), next: "fsame" }) },
+    endless: { stat: async () => folder, list: async () => ({ path: "/endless", sep: "/", entries: entries(page), next: `f${page++}` }) },
+    circle: { stat: async () => folder, list: async () => ({ path: "/endless", sep: "/", entries: [], next: `f${page++ % 3}` }) },
+    full: { ...remote, begin: async () => { throw new HostError("diskFull"); } }
+  };
+  const links = { call: async (node, method, p) => {
+    const fn = nodes[node]?.[method.replace(/^files\./, "")];
+    if (!fn) throw new HostError("unknownMethod");
+    return fn(p);
+  } };
+  const offers = createFileOffers({ files: local, isPhone: peer => peer === "phone", idleMs: 400 });
+  const told = [];
+  const transfers = createFileTransfers({ links, local, offers, nameOf: n => n || "this one", onChange: list => told.push(list), maxEntries: 55 });
+  const ended = async id => {
+    let r;
+    await waitFor(() => { r = transfers.list().find(x => x.id === id); return !["queued", "running", "waiting", "noAnswer"].includes(r.state); }, "the row ends");
+    return r;
+  };
+  const sent = async (from, to) => ended(transfers.send({ from, to }).id);
+
+  // ---------- names another computer lists ----------
+  for (const name of ["NUL", "nul.txt", "Com1", "con.tar.gz", "lpt9.log", "AUX"]) assert.deepEqual([goodName(name, "\\"), goodName(name, "/")], [false, true], name);
+  for (const name of ["console.log", "com10", "nul-files", "report.txt"]) assert.equal(goodName(name, "\\"), true, name);
+
+  // ---------- a list that does not end ----------
+  const s1 = await sent({ node: "stuck", path: "/endless" }, { node: "", folder: near });
+  assert.deepEqual([s1.state, s1.error, s1.failedAt], ["failed", "invalidData", "from"], "a next page that is the same one ends the transfer");
+  const s2 = await sent({ node: "endless", path: "/endless" }, { node: "", folder: near });
+  assert.deepEqual([s2.state, s2.error, s2.failedAt], ["failed", "tooManyFiles", "from"], "ever new pages end at the most one transfer holds");
+  const s3 = await sent({ node: "circle", path: "/endless" }, { node: "", folder: near });
+  assert.deepEqual([s3.state, s3.error, s3.failedAt], ["failed", "invalidData", "from"], "a page given before, and empty pages, end it too");
+  assert.deepEqual(await fsp.readdir(near), [], "nothing was made for a folder that could not be listed");
+  console.log("ok: a folder whose list repeats, or never ends, fails its transfer instead of going on for ever");
+
+  // ---------- which side failed ----------
+  await fsp.writeFile(path.join(near, "note.txt"), "note");
+  await fsp.mkdir(path.join(there, "box")); await fsp.writeFile(path.join(there, "box", "in.txt"), "in");
+  const ok = await sent({ node: "far", path: path.join(there, "box") }, { node: "", folder: near });
+  assert.deepEqual([ok.state, ok.failedAt, await fsp.readFile(path.join(near, "box", "in.txt"), "utf8")], ["done", "", "in"]);
+  const gone = await sent({ node: "far", path: path.join(there, "no-such.txt") }, { node: "", folder: near });
+  assert.deepEqual([gone.state, gone.error, gone.failedAt], ["failed", "fileMissing", "from"]);
+  const noRoom = await sent({ node: "", path: path.join(near, "note.txt") }, { node: "full", folder: there });
+  assert.deepEqual([noRoom.state, noRoom.error, noRoom.failedAt], ["failed", "diskFull", "to"]);
+  const noFolder = await sent({ node: "", path: path.join(near, "note.txt") }, { node: "far", folder: path.join(there, "no-such-folder") });
+  assert.deepEqual([noFolder.state, noFolder.error, noFolder.failedAt], ["failed", "fileMissing", "to"]);
+  const noSource = await sent({ node: "", path: path.join(near, "no-such.txt") }, { node: "far", folder: there });
+  assert.deepEqual([noSource.state, noSource.failedAt], ["failed", "from"]);
+  const copy = await ended(transfers.copy({ node: "", from: path.join(near, "no-such.txt"), to: path.join(near, "copy.txt") }).id);
+  assert.deepEqual([copy.state, copy.error, copy.failedAt], ["failed", "fileMissing", "from"]);
+  assert.equal(told.at(-1).find(r => r.id === noRoom.id).failedAt, "to", "the window is told the side with the row");
+  console.log("ok: a failed row says which side failed - the source's list, stat or read, or the target's folder, begin or write");
+
+  // ---------- a phone that took a file and went quiet; Stop for one it took ----------
+  const row = await transfers.offer({ node: "phone", path: path.join(near, "note.txt") });
+  const o1 = offers.list().find(o => o.state === "waiting");
+  offers.answer("phone", { offer: o1.offer, state: "accepted" });
+  for (let i = 0; i < 8; i++) { await sleep(100); offers.reading("phone", o1.path); }
+  assert.equal(transfers.list().find(r => r.id === row.id).state, "running", "while the phone reads, the offer is under way");
+  offers.reading("another-phone", o1.path); offers.reading("phone", path.join(near, "other.txt"));
+  const quiet = await ended(row.id);
+  assert.deepEqual([quiet.state, quiet.error, quiet.failedAt], ["failed", "timeout", "to"], "a phone that neither reads nor answers ends the offer");
+  assert.throws(() => offers.answer("phone", { offer: o1.offer, state: "done" }), code("jobMissing"));
+  const row2 = await transfers.offer({ node: "phone", path: path.join(near, "note.txt") });
+  const o2 = offers.list().find(o => o.state === "waiting");
+  offers.answer("phone", { offer: o2.offer, state: "accepted" });
+  assert.equal(transfers.stop(row2.id), true, "Stop ends an offer the phone has taken");
+  assert.deepEqual([(await ended(row2.id)).state, offers.get(o2.offer).state], ["stopped", "withdrawn"]);
+  assert.throws(() => offers.answer("phone", { offer: o2.offer, state: "done" }), code("jobMissing"), "its later answer finds nothing");
+  assert.equal(transfers.stop(row2.id), false, "an offer that ended is not taken back again");
+  console.log("ok: an accepted offer ends when the phone goes quiet, and when the computer stops it");
+  await transfers.dispose(); offers.dispose(); await local.dispose(); await far.dispose();
+}
+
+// A real phone -> relay -> host: the methods are served, to a peer with control only, and a 1 MB file comes whole.
 async function served(root) {
   const work = path.join(root, "served");
   await fsp.mkdir(work);
@@ -414,6 +736,8 @@ async function served(root) {
     await waitFor(async () => (await call("files.job", { job: job.job })).state === "done", "the copy ends on the host");
     assert.deepEqual(await call("files.delete", { path: path.join(work, "copied") }), { trashed: false });
     assert.equal(fs.existsSync(path.join(work, "copied")), false);
+    // A share is refused with a code of its own, which the phone gets as it is.
+    if (process.platform === "win32") await assert.rejects(call("files.list", { path: "\\\\192.0.2.7\\share\\folder" }), code("networkPath"));
 
     // An upload left unfinished goes with the phone's link.
     const left = await call("files.begin", { path: path.join(work, "left.bin"), size: 10 });
@@ -425,7 +749,7 @@ async function served(root) {
     const resource = await node("resource", { kind: "host" });
     await resource.pair("127.0.0.1", host.self().port, host.self().code);
     await waitFor(() => resource.online(host.self().id), "resource host -> desktop");
-    await assert.rejects(resource.call(host.self().id, "files.list", { path: work }));
+    await assert.rejects(resource.call(host.self().id, "files.list", { path: work }), code("relayOnly"));
   }, { host: { home: path.join(root, "home") } });
   console.log("ok: real phone -> relay -> host: listed, read whole, uploaded, changed; cleaned up with the link; refused to a resource host");
 }
@@ -451,6 +775,9 @@ async function offered(root) {
     other.on("notify", n => { if (n.event === "files.offer") otherHeard.push(n); });
     const answer = (p, offer, state, extra = {}) => p.request(hostId, "files.answer", { offer, state, ...extra }, { timeout: 10000 });
     const phoneId = phone.id;
+    // What the served files.read tells the offers: who read, and which file.
+    const read = [], reading = served.offers.reading;
+    served.offers.reading = (peer, file) => { read.push([peer, file]); return reading(peer, file); };
 
     // ---------- the offer reaches the phone it was made to ----------
     const o = await served.offers.make(phoneId, { path: file });
@@ -471,6 +798,7 @@ async function offered(root) {
     // The phone pulls it with the existing download (here: by hand), then says so.
     const first = await phone.request(hostId, "files.read", { path: file, pos: 0, len: CHUNK, size: heard[0].payload.size, mtime: heard[0].payload.mtime });
     assert.equal(first.size, body.length);
+    assert.deepEqual(read, [[phoneId, file]], "a read is told to the offers: the phone is still pulling the file");
     assert.equal(await answer(phone, o.offer, "done"), true);
     await assert.rejects(answer(phone, o.offer, "done"), code("jobMissing"), "an offer that ended is not answered again");
     assert.equal(served.offers.get(o.offer).state, "done");
@@ -521,6 +849,9 @@ async function offered(root) {
   try {
     await alone(root);
     await hard(path.join(root, "hard"));
+    await guarded(path.join(root, "guarded"));
+    await sturdy(path.join(root, "sturdy"));
+    await queued(path.join(root, "queued"));
     await served(root);
     await offered(root);
     console.log("files: all checks passed");

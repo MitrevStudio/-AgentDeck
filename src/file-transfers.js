@@ -13,15 +13,21 @@
 //
 // A folder is walked here, a page of its list at a time, before anything is written: its total is the progress's.
 // Links to folders inside it are not followed - this side cannot see where one leads, so one to a parent would go
-// round for ever - and are counted as skipped, with names the target's file system cannot hold.
+// round for ever - and are counted as skipped, with names the target's file system cannot hold. What the other side
+// lists is not trusted to end: a folder of more than MAX_ENTRIES is refused ("tooManyFiles"), and so is a list whose
+// next page is one it already gave ("invalidData").
+//
+// A row that failed says on which side: failedAt is "from" (the source would not list, tell or read) or "to" (the
+// target would not take it), "" for a row that did not fail. The window names that computer.
 //
 // A file of this computer sent to a phone is a row too, but nothing moves from here: the phone is offered the file and
 // pulls it itself (host/file-offers.js, docs/FILES.md 3.6). Its row follows the phone's answers: waiting for it, no
-// answer (yet), saving on the phone, done, declined, failed, or expired; Stop takes back an offer not taken yet.
+// answer (yet), saving on the phone, done, declined, failed, or expired; Stop takes the offer back, taken or not.
 //
-// createFileTransfers({ links, local, offers, nameOf, onChange }) - links: mesh/links.js; local: this computer's files
-// (host/files.js); offers: this computer's offers to phones (mesh/serve.js offers); nameOf(node): a computer's or a
-// phone's name ("" this one); onChange(list): the queue changed (called at most every CHANGE_MS while bytes move).
+// createFileTransfers({ links, local, offers, nameOf, onChange, maxEntries }) - links: mesh/links.js; local: this
+// computer's files (host/files.js); offers: this computer's offers to phones (mesh/serve.js offers); nameOf(node): a
+// computer's or a phone's name ("" this one); onChange(list): the queue changed (called at most every CHANGE_MS while
+// bytes move); maxEntries: a test's smaller MAX_ENTRIES.
 //   side(node) -> { call(method, params) }: one side's files.* ("delete" is host/files.js remove).
 //   send({ from: { node, path }, to: { node, folder } }) -> the row: a file or a folder (with all in it) into a folder.
 //   copy({ node, from, to, move }) -> the row: a copy (or a move across volumes) on one computer, done there.
@@ -36,6 +42,7 @@ const CHUNK = 256 * 1024;        // a files.read / files.write piece (host/files
 const CHANGE_MS = 200;
 const JOB_POLL_MS = 500;         // a copy's progress is asked, not pushed (docs/FILES.md 3.2)
 const MAX_DEPTH = 64;            // folders inside folders, in one transfer
+const MAX_ENTRIES = 200000;      // files and folders listed for one transfer (each is remembered until it is sent)
 const ROWS_KEPT = 50;            // finished rows the queue keeps
 const TIMEOUT_MS = { delete: 120000, cancel: 120000 }; // the rest: the link's own 30 s
 // Each request of host/files.js, called on this computer's own instance as the peer "".
@@ -45,7 +52,15 @@ const LOCAL = {
   cancel: (f, p) => f.cancel("", p), begin: (f, p) => f.begin("", p), write: (f, p) => f.write("", p),
   commit: (f, p) => f.commit("", p), abort: (f, p) => f.abort("", p)
 };
-const fail = code => { throw new HostError(code); };
+// at: the side whose answer was not one ("from" | "to"), for the row's failedAt.
+const fail = (code, at = "") => { throw Object.assign(new HostError(code), at ? { failedAt: at } : {}); };
+// One side's requests, with every failure of theirs marked as that side's.
+const marked = (s, at) => ({ call: async (method, p) => {
+  try { return await s.call(method, p); } catch (e) {
+    if (e !== null && typeof e === "object" && !e.failedAt) e.failedAt = at;
+    throw e;
+  }
+} });
 const isObj = v => v !== null && typeof v === "object" && !Array.isArray(v);
 // A row that has not ended: it is not cleared, and Stop applies to it.
 const LIVE = new Set(["queued", "running", "waiting", "noAnswer"]);
@@ -54,13 +69,14 @@ const OFFER_STATE = { accepted: "running", done: "done", declined: "declined", f
 // A path on that side: its own separator, whatever this computer's is (the other one may be Linux).
 const join = (sep, dir, name) => (dir.endsWith(sep) ? dir + name : dir + sep + name);
 // A name the other side listed, as a name inside a folder here: never a path, never one that leaves the folder. On a
-// Windows target also none it cannot hold (a ":" there would write into a stream of another file).
+// Windows target also none it cannot hold (a ":" there would write into a stream of another file), and none of a
+// device's (NUL, COM1, con.txt - host/files.js DEVICE): a file its own file manager could not remove.
 function goodName(name, sep) {
   if (typeof name !== "string" || !name || name.length > 255 || name === "." || name === ".." || /[\\/\0]/.test(name)) return false;
-  return sep !== "\\" || !/[<>:"|?*\x00-\x1f]|[. ]$/.test(name);
+  return sep !== "\\" || !(/[<>:"|?*\x00-\x1f]|[. ]$/.test(name) || /^(?:con|prn|aux|nul|com[0-9]|lpt[0-9]) *(?:\.|$)/i.test(name));
 }
 
-function createFileTransfers({ links, local, offers = null, nameOf = () => "", onChange = () => {} }) {
+function createFileTransfers({ links, local, offers = null, nameOf = () => "", onChange = () => {}, maxEntries = MAX_ENTRIES }) {
   const rows = new Map(); // id -> row, in the order they were made
   const waiting = [];     // transfers not begun yet
   let running = null, disposed = false, changeTimer = null;
@@ -72,7 +88,7 @@ function createFileTransfers({ links, local, offers = null, nameOf = () => "", o
 
   // ---------- the queue as the window sees it ----------
   const view = r => ({
-    id: r.id, kind: r.kind, move: r.move, name: r.name, state: r.state, error: r.error, message: r.message,
+    id: r.id, kind: r.kind, move: r.move, name: r.name, state: r.state, error: r.error, message: r.message, failedAt: r.failedAt,
     from: { node: r.from.node, name: nameOf(r.from.node) }, to: { node: r.to.node, name: nameOf(r.to.node) },
     path: r.path, bytes: r.bytes, total: r.total, files: r.files, count: r.count, skipped: r.skipped, current: r.current
   });
@@ -90,13 +106,17 @@ function createFileTransfers({ links, local, offers = null, nameOf = () => "", o
     const done = [...rows.values()].filter(x => !LIVE.has(x.state));
     for (const x of done.slice(0, Math.max(0, rows.size - ROWS_KEPT))) rows.delete(x.id);
   }
-  function end(r, state, e) {
+  // at: the side that failed, where the error does not say it itself.
+  function end(r, state, e, at = "") {
     r.state = state;
     if (e) { r.error = e.code || "fileFailed"; r.message = e.code ? "" : String(e.message || e); }
+    r.failedAt = state === "failed" ? (e?.failedAt === "from" || e?.failedAt === "to" ? e.failedAt : at) : "";
     r.current = "";
     changed(true);
   }
-  const newRow = (kind, from, to, name) => ({ id: crypto.randomUUID(), kind, move: false, name, state: "queued", error: "", message: "", from, to, path: "", bytes: 0, total: 0, files: 0, count: 0, skipped: 0, current: "", stopping: false });
+  // A link that closed under a request is said as "offline", on the side whose request it was.
+  const offline = e => (e?.code === "closed" ? Object.assign(new HostError("offline"), { failedAt: e.failedAt }) : e);
+  const newRow = (kind, from, to, name) => ({ id: crypto.randomUUID(), kind, move: false, name, state: "queued", error: "", message: "", failedAt: "", from, to, path: "", bytes: 0, total: 0, files: 0, count: 0, skipped: 0, current: "", stopping: false });
 
   // ---------- one file ----------
   // src: { path, size, mtime } on side S; into: the path it is to have on side D (or "name (2)" there).
@@ -109,7 +129,7 @@ function createFileTransfers({ links, local, offers = null, nameOf = () => "", o
         const piece = await S.call("read", { path: src.path, pos, len: Math.min(CHUNK, src.size - pos), size: src.size, mtime: src.mtime });
         // What the other side answered is checked, not trusted: a piece that is not one ends the transfer.
         const bytes = isObj(piece) && typeof piece.data === "string" ? Buffer.byteLength(piece.data, "base64") : 0;
-        if (!bytes || pos + bytes > src.size) fail("changed");
+        if (!bytes || pos + bytes > src.size) fail("changed", "from");
         await D.call("write", { upload, pos, data: piece.data });
         pos += bytes;
         r.bytes += bytes;
@@ -127,10 +147,16 @@ function createFileTransfers({ links, local, offers = null, nameOf = () => "", o
   // ---------- a folder: what is in it, then the folders, then file by file ----------
   async function walk(r, S, dir, rel, out, depth) {
     if (depth > MAX_DEPTH) { r.skipped++; return; }
+    // The pages this folder gave: one given again would be followed round for ever.
+    const given = new Set();
     for (let after = ""; ;) {
       if (r.stopping) fail("stopped");
       const page = await S.call("list", after ? { path: dir, after } : { path: dir });
-      if (!isObj(page) || !Array.isArray(page.entries) || typeof page.sep !== "string" || typeof page.path !== "string") fail("invalidData");
+      if (!isObj(page) || !Array.isArray(page.entries) || typeof page.sep !== "string" || typeof page.path !== "string") fail("invalidData", "from");
+      // Every entry counts, sent or skipped, and a page with none counts as one: neither a folder without end nor
+      // pages without end keep this going or fill the memory.
+      r.listed += Math.max(1, page.entries.length);
+      if (r.listed > maxEntries) fail("tooManyFiles", "from");
       for (const e of page.entries) {
         if (!isObj(e) || !goodName(e.name, page.sep) || !goodName(e.name, r.toSep)) { r.skipped++; continue; }
         const src = join(page.sep, page.path, e.name), at = [...rel, e.name];
@@ -146,20 +172,23 @@ function createFileTransfers({ links, local, offers = null, nameOf = () => "", o
       }
       changed();
       if (!page.next || typeof page.next !== "string") return;
+      if (page.next === after || given.has(page.next)) fail("invalidData", "from");
+      given.add(page.next);
       after = page.next;
     }
   }
 
   async function runTransfer(r) {
-    const S = side(r.from.node), D = side(r.to.node);
+    const S = marked(side(r.from.node), "from"), D = marked(side(r.to.node), "to");
+    r.listed = 0;
     // The target folder, and its computer's separator: asked of it, as the window's word is not enough.
     const into = await D.call("list", { path: r.to.folder, limit: 1 });
-    if (!isObj(into) || typeof into.sep !== "string" || typeof into.path !== "string") fail("invalidData");
+    if (!isObj(into) || typeof into.sep !== "string" || typeof into.path !== "string") fail("invalidData", "to");
     r.toSep = into.sep;
     const st = await S.call("stat", { path: r.from.path });
-    if (!isObj(st)) fail("invalidData");
+    if (!isObj(st)) fail("invalidData", "from");
     // A whole drive is no file or folder to send (its name is its path).
-    if (!goodName(st.name, into.sep)) fail(st.dir ? "rootRefused" : "invalidData");
+    if (!goodName(st.name, into.sep)) fail(st.dir ? "rootRefused" : "invalidData", "from");
     if (!st.dir) {
       r.total = st.size;
       r.count = 1;
@@ -200,7 +229,7 @@ function createFileTransfers({ links, local, offers = null, nameOf = () => "", o
       end(r, "done");
     } catch (e) {
       if (r.stopping) end(r, "stopped");
-      else end(r, "failed", e?.code === "closed" ? new HostError("offline") : e);
+      else end(r, "failed", offline(e));
     }
     running = null;
     pump();
@@ -235,7 +264,7 @@ function createFileTransfers({ links, local, offers = null, nameOf = () => "", o
     Object.assign(r, { bytes: Number(j.bytes) || 0, total: Number(j.total) || 0, files: Number(j.files) || 0, skipped: Number(j.skipped) || 0 });
     if (j.state === "done") end(r, "done");
     else if (j.state === "cancelled") end(r, "stopped");
-    else end(r, "failed", new HostError(typeof j.error === "string" && j.error ? j.error : "fileFailed"));
+    else end(r, "failed", new HostError(typeof j.error === "string" && j.error ? j.error : "fileFailed"), "from");
   }
   function copy({ node, from, to, move = false }) {
     const r = newRow("copy", { node, path: from }, { node, folder: "" }, from.split(/[\\/]/).filter(Boolean).pop() || from);
@@ -243,7 +272,8 @@ function createFileTransfers({ links, local, offers = null, nameOf = () => "", o
     addRow(r);
     changed(true);
     // A copy on the other computer goes on there when the link drops (docs/FILES.md 1); here it is only no longer seen.
-    runCopy(r, { from, to, move: r.move }).catch(e => end(r, r.stopping ? "stopped" : "failed", e?.code === "closed" ? new HostError("offline") : e));
+    // Both of its sides are that one computer: its failure is said as the source's.
+    runCopy(r, { from, to, move: r.move }).catch(e => end(r, r.stopping ? "stopped" : "failed", offline(e), "from"));
     return view(r);
   }
 
@@ -279,6 +309,8 @@ function createFileTransfers({ links, local, offers = null, nameOf = () => "", o
     if (!r) return;
     r.state = o.state === "waiting" ? (o.noAnswer ? "noAnswer" : "waiting") : OFFER_STATE[o.state] || "failed";
     r.error = o.state === "failed" ? o.error || "fileFailed" : "";
+    // What fails of an offer fails on the phone, or on the way to it: this computer only answers its reads.
+    r.failedAt = r.state === "failed" ? "to" : "";
     if (r.state === "done") { r.bytes = r.total; r.files = 1; }
     changed(true);
   });
@@ -287,7 +319,8 @@ function createFileTransfers({ links, local, offers = null, nameOf = () => "", o
   function stop(id) {
     const r = rows.get(id);
     if (!r) return false;
-    // An offer is taken back while the phone has not taken it; once it has, the phone's own Stop is the one.
+    // An offer is taken back, whether the phone took it or not: one it took and then went quiet about must not stay
+    // under way here. The phone's own Stop ends what it is saving.
     if (r.kind === "offer") return offers.withdraw(r.offer);
     if (r.state === "queued" && r.kind === "transfer") {
       waiting.splice(waiting.indexOf(r), 1);
@@ -309,9 +342,9 @@ function createFileTransfers({ links, local, offers = null, nameOf = () => "", o
     for (const r of [...waiting]) {
       if (r.from.node !== node && r.to.node !== node) continue;
       waiting.splice(waiting.indexOf(r), 1);
-      end(r, "failed", new HostError("offline"));
+      end(r, "failed", new HostError("offline"), r.from.node === node ? "from" : "to");
     }
-    for (const r of rows.values()) if (r.kind === "copy" && r.from.node === node && r.state === "running") { r.stopping = false; end(r, "failed", new HostError("offline")); }
+    for (const r of rows.values()) if (r.kind === "copy" && r.from.node === node && r.state === "running") { r.stopping = false; end(r, "failed", new HostError("offline"), "from"); }
   }
   // Quitting: what waits is dropped, the transfer under way stops after its piece and removes its unfinished file.
   async function dispose() {

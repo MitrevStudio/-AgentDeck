@@ -69,7 +69,7 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
   // The files of this computer for the peers (docs/FILES.md); trash: the system's bin, where there is one.
   const files = createFiles({ home: host.home, trash, notify: (peer, name, data) => links?.notify(peer, name, data) });
   // A file of this computer offered to a paired phone, which pulls it itself (host/file-offers.js); offerTimes: its
-  // answerMs / expireMs (a test's are short).
+  // answerMs / expireMs / idleMs (a test's are short).
   const offers = createFileOffers({
     files, ...offerTimes,
     notify: (peer, name, data) => links?.notify(peer, name, data),
@@ -276,10 +276,11 @@ function createServed({ host, env = async () => terminalEnv(process.env), info =
     "ports.open": (p, peer) => ports.open(peer.id, p?.stream, p?.port),
     "ports.close": (p, peer) => { ports.close(peer.id, str(p?.stream, 36)); return true; },
     // This computer's files (host/files.js says what each takes and answers). A copy is a job of the peer that began
-    // it; an upload is that peer's too and goes with its link.
-    "files.list": p => files.list(p),
+    // it; an upload is that peer's too and goes with its link, and so is a folder's order kept for its next pages. A
+    // read is told to the offers: a phone that pulls a file offered to it is still at it.
+    "files.list": (p, peer) => files.list(p, peer.id),
     "files.stat": p => files.stat(p),
-    "files.read": p => files.read(p),
+    "files.read": (p, peer) => { offers.reading(peer.id, p?.path); return files.read(p); },
     "files.mkdir": p => files.mkdir(p),
     "files.rename": p => files.rename(p),
     "files.delete": p => files.remove(p),

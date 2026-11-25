@@ -10,11 +10,15 @@
 // Nobody answered within answerMs: the offer says "noAnswer" - an app too old to know the event drops it silently, and
 // that must not look like success - but stays answerable (a person may take longer to tap Save) until expireMs from
 // when it was made; then it is gone. An accepted offer has no such end: a large file takes as long as it takes. It
-// ends with the phone's answer, or as `failed` ("offline") when the phone's link drops.
+// ends with the phone's answer, as `failed` ("offline") when the phone's link drops, or as `failed` ("timeout") when
+// the phone neither reads the file nor says anything for idleMs - an app that was closed in the middle while its link
+// stayed must not leave the offer under way for ever. The computer may also take back an accepted offer (withdraw):
+// that ends it here, and the phone's later answer finds nothing. What the phone already holds is its own to finish.
 //
-// createFileOffers({ files, notify, isPhone, answerMs, expireMs, keepMs }) - files: host/files.js (its stat); notify(peer,
-// name, data); isPhone(peer): a paired phone, linked now. -> { make, answer, withdraw, get, list, drop, dispose, on }:
-// "change" (view) for each step of each offer.
+// createFileOffers({ files, notify, isPhone, answerMs, expireMs, idleMs, keepMs }) - files: host/files.js (its stat);
+// notify(peer, name, data); isPhone(peer): a paired phone, linked now. -> { make, answer, reading, withdraw, get, list,
+// drop, dispose, on }: "change" (view) for each step of each offer; reading(peer, path): that peer asked for a piece of
+// that file (mesh/serve.js "files.read").
 const { EventEmitter } = require("node:events");
 const crypto = require("node:crypto");
 const path = require("node:path");
@@ -22,13 +26,16 @@ const { HostError } = require("./errors");
 
 const ANSWER_MS = 20 * 1000;      // no word from the phone by then: "noAnswer"
 const EXPIRE_MS = 2 * 60 * 1000;  // an offer nobody took is gone by then
+// An accepted offer the phone neither reads nor answers for this long has failed. Generous: after the last piece an
+// iPhone shows the system's sheet, and says `done` only when its user has closed it.
+const IDLE_MS = 10 * 60 * 1000;
 const KEEP_MS = 10 * 60 * 1000;   // an offer that ended can still be read (not answered) this long
 const STEPS = { waiting: ["accepted", "declined", "failed"], accepted: ["done", "failed"] };
 const ENDED = new Set(["done", "declined", "failed", "expired", "withdrawn"]);
 
 const fail = code => { throw new HostError(code); };
 
-function createFileOffers({ files, notify = () => {}, isPhone = () => false, answerMs = ANSWER_MS, expireMs = EXPIRE_MS, keepMs = KEEP_MS } = {}) {
+function createFileOffers({ files, notify = () => {}, isPhone = () => false, answerMs = ANSWER_MS, expireMs = EXPIRE_MS, idleMs = IDLE_MS, keepMs = KEEP_MS } = {}) {
   const ev = new EventEmitter();
   const offers = new Map(); // id -> offer
   const later = (ms, fn) => { const t = setTimeout(fn, ms); t.unref?.(); return t; };
@@ -41,8 +48,19 @@ function createFileOffers({ files, notify = () => {}, isPhone = () => false, ans
     o.error = error;
     clearTimeout(o.quiet);
     clearTimeout(o.expire);
+    clearTimeout(o.idle);
     changed(o);
     o.forget = later(keepMs, () => offers.delete(o.id));
+  }
+  // An accepted offer is alive from now for idleMs more.
+  function awake(o) {
+    clearTimeout(o.idle);
+    o.idle = later(idleMs, () => { if (o.state === "accepted") end(o, "failed", "timeout"); });
+  }
+  // That peer asked for a piece of that file: the offers of it which it accepted are still being pulled.
+  function reading(peer, file) {
+    if (typeof file !== "string") return;
+    for (const o of offers.values()) if (o.state === "accepted" && o.peer === peer && o.path === file) awake(o);
   }
 
   // peer: a phone linked now; p: { path } of a file here. -> the offer's view, once the phone was told.
@@ -70,15 +88,17 @@ function createFileOffers({ files, notify = () => {}, isPhone = () => false, ans
       o.noAnswer = false;
       clearTimeout(o.quiet);
       clearTimeout(o.expire);
+      awake(o);
       changed(o);
     } else end(o, p.state, error);
     return true;
   }
 
-  // The computer takes it back before the phone took it: a later answer finds nothing.
+  // The computer takes it back - before the phone took it, or while the phone is (or was last known to be) pulling
+  // it: a later answer finds nothing.
   function withdraw(id) {
     const o = offers.get(id);
-    if (!o || o.state !== "waiting") return false;
+    if (!o || ENDED.has(o.state)) return false;
     end(o, "withdrawn");
     return true;
   }
@@ -87,13 +107,13 @@ function createFileOffers({ files, notify = () => {}, isPhone = () => false, ans
     for (const o of offers.values()) if (o.peer === peer && !ENDED.has(o.state)) end(o, "failed", "offline");
   }
   function dispose() {
-    for (const o of offers.values()) { clearTimeout(o.quiet); clearTimeout(o.expire); clearTimeout(o.forget); }
+    for (const o of offers.values()) { clearTimeout(o.quiet); clearTimeout(o.expire); clearTimeout(o.idle); clearTimeout(o.forget); }
     offers.clear();
   }
   const get = id => (offers.has(id) ? view(offers.get(id)) : null);
   const list = () => [...offers.values()].map(view);
 
-  return { make, answer, withdraw, get, list, drop, dispose, on: (name, fn) => { ev.on(name, fn); return () => ev.off(name, fn); } };
+  return { make, answer, reading, withdraw, get, list, drop, dispose, on: (name, fn) => { ev.on(name, fn); return () => ev.off(name, fn); } };
 }
 
-module.exports = { createFileOffers, ANSWER_MS, EXPIRE_MS };
+module.exports = { createFileOffers, ANSWER_MS, EXPIRE_MS, IDLE_MS };
