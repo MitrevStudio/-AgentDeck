@@ -10,6 +10,10 @@
 //
 // There is no native plugin in a browser: download and PDF must say "update the app" (files-native.js), while text,
 // pictures and uploads work.
+//
+// Also what only the real page shows: the prompt for a sent file comes up with the focus on "Not now" and answers
+// nothing in its first moment (a click or Escape that was on its way); Back closes the sheet on top when two lie one
+// over the other; a finger held on a row while the list is read again opens no sheet, and a sheet names its file.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const fsp = fs.promises;
@@ -245,9 +249,30 @@ async function main() {
       const offerStates = new Map();
       served.offers.on("change", v => offerStates.set(v.offer, v));
       const notes = Buffer.byteLength(NOTES);
-      const askOf = async () => { await page.until("document.querySelector('.offer-ask .sheet p')", "the prompt for the sent file"); return page.text("document.querySelector('.offer-ask .sheet p')"); };
+      // The prompt answers nothing in its first moment (main.js OFFER_QUIET_MS): a tap is made after it.
+      const QUIET_MS = 450;
+      const askOf = async () => { await page.until("document.querySelector('.offer-ask .sheet p')", "the prompt for the sent file"); await sleep(QUIET_MS); return page.text("document.querySelector('.offer-ask .sheet p')"); };
+      // The moment the prompt is in the page: where the focus is, then a click on Save, a click beside the sheet and
+      // Escape - what a tap or a key already on its way to the screen under it would do.
+      await page.eval(`(() => {
+        window.__early = null;
+        const seen = new MutationObserver(() => {
+          const sheet = document.querySelector('.offer-ask');
+          if (!sheet || window.__early) return;
+          seen.disconnect();
+          window.__early = { focus: document.activeElement?.dataset.v ?? null };
+          sheet.querySelector('[data-v="1"]').click();
+          sheet.click();
+          sheet.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+          window.__early.still = !!document.querySelector('.offer-ask');
+        });
+        seen.observe(document.body, { childList: true });
+      })()`);
       let sentOffer = await served.offers.make(pagePhone.id, { path: path.join(fx.project, "notes.txt") });
       assert.equal(await askOf(), `${NODE_NAME} sends you “notes.txt” (${notes} B). Save it in Downloads on this phone?`, "the prompt names the computer, the file and its size");
+      assert.deepEqual(await page.eval("window.__early"), { focus: "0", still: true }, "the prompt comes up with the focus on Not now, and a click or Escape in its first moment answers nothing");
+      assert.equal(await page.eval("document.activeElement?.dataset.v"), "0", "Not now still has the focus");
+      assert.equal(offerStates.get(sentOffer.offer)?.state ?? "waiting", "waiting", "the computer heard no answer from them");
       assert.ok(await page.has("document.querySelector('.node-head [data-act=files]')"), "over the computer's screen, not the Files screen");
       assert.deepEqual(await page.eval("[...document.querySelectorAll('.offer-ask .sheet-actions .btn')].map(b => b.textContent.trim())"), ["Not now", "Save"]);
       await page.fits("sent file prompt");
@@ -393,6 +418,7 @@ async function main() {
       await page.eval("history.back()");
       await page.until("document.querySelector('.offer-ask .sheet p')?.textContent.includes('README.md')", "the prompt once the sheet closed");
       assert.ok(await page.has("__row('notes.txt')"), "over the Files screen");
+      await sleep(QUIET_MS);
       await page.tap("document.querySelector('.offer-ask [data-v=\"0\"]')");
       await waitFor(() => offerStates.get(third.offer)?.state === "declined", "declined from the Files screen");
 
@@ -401,6 +427,7 @@ async function main() {
       await page.until("document.querySelector('.sheet.menu')", "sheet after a long press");
       await sleep(400);
       assert.equal(await page.eval("document.querySelectorAll('.sheet-backdrop').length"), 1, "one sheet, still open after the finger is lifted");
+      assert.equal(await page.text("document.querySelector('.sheet.menu .menu-title')"), "notes.txt", "the sheet names its file");
       assert.deepEqual(await page.eval("[...document.querySelectorAll('.sheet.menu .menu-label')].map(x => x.textContent)"),
         ["Download: update the app", "Copy to…", "Move to…", "Rename", "Delete"]);
       assert.ok(await page.has("document.querySelector('.sheet.menu .menu-item.danger .menu-label')?.textContent === 'Delete'"), "Delete marked as dangerous");
@@ -412,9 +439,38 @@ async function main() {
       await page.tap("__row('docs').querySelector('[data-more]')");
       await page.until("document.querySelector('.sheet.menu')", "folder's sheet");
       assert.deepEqual(await page.eval("[...document.querySelectorAll('.sheet.menu .menu-label')].map(x => x.textContent)"), ["Copy to…", "Move to…", "Rename", "Delete"]);
+      // Two sheets one over the other (a second one put over the folder's sheet here, as any part of the app might):
+      // Back closes the one on top, then the one under it, and the screen stays.
+      await page.eval(`(() => {
+        const over = document.createElement('div');
+        over.className = 'sheet-backdrop test-over';
+        over.innerHTML = '<div class="sheet"><p>on top</p></div>';
+        over.addEventListener('click', e => { if (e.target === over) over.remove(); });
+        document.body.append(over);
+      })()`);
+      assert.equal(await page.eval("document.querySelectorAll('.sheet-backdrop').length"), 2, "two sheets");
+      await page.eval("history.back()");
+      await page.until("!document.querySelector('.test-over')", "Back closed the sheet on top");
+      assert.ok(await page.has("document.querySelector('.sheet.menu')"), "the sheet under it is still open");
       await page.eval("history.back()");
       await page.until("!document.querySelector('.sheet-backdrop')", "sheet closed by Back");
       assert.ok(await page.has("__row('docs')"), "still on the Files screen");
+
+      // ---------- a finger held on a row while the list is read again ----------
+      // A search typed just before: the list is asked for again a moment later, in the middle of the press. The row's
+      // place is another file's by then - no sheet may open for it. A row at the top of a list that is not scrolled:
+      // a list that jumps back to its top ends the press by itself, as any scroll does.
+      await page.eval("document.querySelector('.files-list').scrollTop = 0");
+      await sleep(100);
+      await page.tap("document.querySelector('.files-tools input')");
+      await page.type("txt");
+      await page.hold("__row('deep').querySelector('.frow-open')", 900);
+      await page.until("__rows().length && __rows().every(x => x.name.includes('txt'))", "the list was read again under the finger");
+      await sleep(300);
+      assert.equal(await page.has("document.querySelector('.sheet-backdrop')"), false, "a press that began on the old list opens no sheet on the new one");
+      assert.equal(await page.has("document.querySelector('.files-viewer')"), false, "and no file");
+      await page.tap("document.querySelector('.files-tools [data-act=unfilter]')");
+      await page.until("__row('README.md') && __row('docs')", "the search cleared after the press");
 
       const sheetPick = async (name, label) => {
         await page.tap(`__row(${JSON.stringify(name)}).querySelector('[data-more]')`);
@@ -494,6 +550,7 @@ async function main() {
       await sheetPick(SOLID, "Delete");
       await page.until("document.querySelector('.sheet .btn.danger-solid')", "delete confirmation for the long name");
       await page.settle();
+      assert.equal(await page.eval("document.querySelector('.sheet p').textContent"), `Delete “${SOLID}” on ${NODE_NAME} for good? ${NODE_NAME} has no bin: this cannot be undone.`, "a file's prompt");
       assert.ok(await textFits(".sheet p"), "a long name wraps inside the delete confirmation");
       await page.shot("files-live-delete-long.png");
       await page.tap("document.querySelector('.sheet [data-v=\"0\"]')");
@@ -513,7 +570,7 @@ async function main() {
       await sheetPick("old-build", "Delete");
       await page.until("document.querySelector('.sheet .btn.danger-solid')", "delete confirmation");
       const ask = await page.eval("document.querySelector('.sheet p').textContent");
-      assert.equal(ask, `Delete “old-build” on ${NODE_NAME} for good? ${NODE_NAME} has no bin: this cannot be undone.`);
+      assert.equal(ask, `Delete the folder “old-build” on ${NODE_NAME} for good, with everything in it? ${NODE_NAME} has no bin: this cannot be undone.`, "a folder's prompt says what goes with it");
       assert.equal(await page.text("document.querySelector('.sheet .btn.danger-solid')"), "Delete for good");
       assert.equal(await page.eval("document.activeElement?.dataset.v"), "0", "Cancel has the focus, not Delete");
       await page.fits("delete confirmation");
@@ -611,7 +668,7 @@ async function main() {
       await chrome.control.send("Target.closeTarget", { targetId: bg.targetId });
       assert.deepEqual(errors, [], "no page errors");
     }, { host: hostOpts });
-    console.log("mobile files live: the real phone app in a test Chrome (390x844, touch) paired through an encrypted relay with a served host: Files from a computer and from a session; Newest first and a search by name with its clear; a file the computer sends asked for on the computer's screen and on Files (not over an open sheet), Not now -> declined, Save without the plugin -> \"update the app\" and failed; folders first with hidden ones; breadcrumb; 620 entries in two pages; text, markdown and picture viewers; no-plugin download/PDF note; long-press sheet; rename with \"(2)\"; copy and move through the folder dialog with New folder; delete for good with its confirmation; an upload stopped half-way leaving nothing, two uploads compared byte for byte; the drives without actions; English and Bulgarian; no page errors");
+    console.log("mobile files live: the real phone app in a test Chrome (390x844, touch) paired through an encrypted relay with a served host: Files from a computer and from a session; Newest first and a search by name with its clear; a file the computer sends asked for on the computer's screen and on Files (not over an open sheet), Not now -> declined, Save without the plugin -> \"update the app\" and failed; folders first with hidden ones; breadcrumb; 620 entries in two pages; text, markdown and picture viewers; no-plugin download/PDF note; long-press sheet naming its file; Back closing the upper of two sheets; no sheet for a press the list was read again under; the sent file's prompt focused on Not now and deaf in its first moment; rename with \"(2)\"; copy and move through the folder dialog with New folder; delete for good with its confirmation; an upload stopped half-way leaving nothing, two uploads compared byte for byte; the drives without actions; English and Bulgarian; no page errors");
     console.log("Screenshots: .tmp/files-live-{node,offer,order,filter,list,preview,image,sheet,chooser,new-folder,delete,delete-long,toast-long,progress,session,list-bg,sheet-bg}.png (synthetic files only)");
   } catch (e) {
     // What the phone showed when it failed: a screenshot and its text.

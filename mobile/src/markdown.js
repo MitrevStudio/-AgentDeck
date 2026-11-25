@@ -116,6 +116,9 @@ function blocks(lines, depth) {
       // than its mark (and blank lines between such lines) is the item's own - a paragraph more, a nested list, code.
       const base = m[1].length, ordered = /\d/.test(m[2]), items = [];
       const start = ordered ? Number(m[2].slice(0, -1)) : 1;
+      // Where the next line that is not blank is, looked for once for a run of blank ones: a file of a megabyte is
+      // rendered here too, and looking from every blank line to the end of the text would take its length squared.
+      let filled = -1;
       for (; i < lines.length; ) {
         // Blank lines between two items of the list part nothing.
         let at = i;
@@ -128,7 +131,8 @@ function blocks(lines, depth) {
           const l = lines[i];
           if (!l.trim()) {
             // A blank line stays in the item only when what follows is the item's too.
-            const after = lines.slice(i + 1).find(x => x.trim());
+            if (filled <= i) for (filled = i + 1; filled < lines.length && !lines[filled].trim();) filled++;
+            const after = lines[filled];
             if (after === undefined || after.search(/\S/) < base + 2) break;
             body.push("");
           } else if (l.search(/\S/) >= base + 2) body.push(l.slice(Math.min(offset, l.search(/\S/))));

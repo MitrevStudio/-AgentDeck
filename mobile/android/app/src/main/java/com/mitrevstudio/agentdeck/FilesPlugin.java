@@ -3,11 +3,13 @@ package com.mitrevstudio.agentdeck;
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.ContentResolver;
+import android.content.ContentUris;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.Environment;
 import android.provider.MediaStore;
 import android.util.Base64;
@@ -41,19 +43,22 @@ import java.util.concurrent.atomic.AtomicLong;
  * temporary one (a PDF to look at) goes to the app's cache and is shown by the system's viewer.
  *
  * begin({ name, size, keep }) -> { file }, write({ file, data }), finish({ file }) -> { shown }, open({ file, type }),
- * cancel({ file }).
+ * cancel({ file }), canKeep() -> { keep, reason }.
  *
  * keep: true -> a pending MediaStore.Downloads entry (IS_PENDING=1, invisible to other apps), its stream open between
  * the writes, published on finish (IS_PENDING=0). A name that is taken gets " (2)", " (3)"... before the extension;
  * what the entry is really called afterwards is read back from it ("shown"). Android 10 (API 29) and newer only: below
- * that Downloads needs WRITE_EXTERNAL_STORAGE, which the app does not ask for - begin() is rejected ("needsAndroid10").
+ * that Downloads needs WRITE_EXTERNAL_STORAGE, which the app does not ask for - begin() is rejected ("needsAndroid10"),
+ * and canKeep() says so beforehand ({ keep: false, reason: "needsAndroid10" }), so that the page offers no download
+ * it would fetch for nothing.
  * keep: false -> a file in the app's cache (cache/agentdeck-files/<file>/<name>), for open(): ACTION_VIEW through the
  * app's FileProvider with a read grant.
  *
  * All file work is on one thread of the plugin's own, in the order the calls came: the writes of a file are written
  * in order, and Capacitor's plugin thread (shared with the other plugins) never waits for the disk. When the activity
  * is destroyed every stream is closed and every unfinished file removed (a pending row too). The cache folder of an
- * earlier run is removed when the plugin loads.
+ * earlier run is removed when the plugin loads, and so are the pending rows an earlier run left in Downloads (a
+ * process that was killed never got to remove them).
  *
  * Rejection codes: invalidData, unknownFile, needsAndroid10, sizeMismatch, finished, notFinished, noViewer,
  * diskFull, createFailed, writeFailed, finishFailed, openFailed, shutDown.
@@ -98,8 +103,14 @@ public class FilesPlugin extends Plugin {
     @Override
     public void load() {
         File old = new File(getContext().getCacheDir(), DIR);
-        // A file of an earlier run is nobody's any more ("file" ids are for one run).
-        onDisk(() -> deleteTree(old));
+        ContentResolver resolver = getContext().getContentResolver();
+        String owner = getContext().getPackageName();
+        // A file of an earlier run is nobody's any more ("file" ids are for one run). First on the plugin's thread:
+        // no file of this run is begun before it.
+        onDisk(() -> {
+            deleteTree(old);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) dropPending(resolver, owner);
+        });
     }
 
     // ---- the calls ----------------------------------------------------------------------------------------------
@@ -232,6 +243,16 @@ public class FilesPlugin extends Plugin {
         });
     }
 
+    /** Whether begin() with keep can work on this phone, said before anything is fetched for it. */
+    @PluginMethod
+    public void canKeep(PluginCall call) {
+        boolean keep = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q;
+        JSObject ret = new JSObject();
+        ret.put("keep", keep);
+        if (!keep) ret.put("reason", "needsAndroid10");
+        call.resolve(ret);
+    }
+
     @PluginMethod
     public void cancel(PluginCall call) {
         String id = call.getString("file");
@@ -301,6 +322,44 @@ public class FilesPlugin extends Plugin {
             }
         } catch (RuntimeException ignored) { }
         return e.name;
+    }
+
+    // The rows of this app that are still pending when the plugin loads: downloads a killed process was writing. No
+    // app shows them and nothing would finish them, and their bytes stay on the phone until the system clears them
+    // out itself. A plain query leaves pending rows out; they are asked for by name.
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private static void dropPending(ContentResolver resolver, String owner) {
+        Uri downloads = MediaStore.Downloads.EXTERNAL_CONTENT_URI;
+        try (Cursor c = pendingRows(resolver, downloads, owner)) {
+            if (c == null) return;
+            while (c.moveToNext()) {
+                Uri row = ContentUris.withAppendedId(downloads, c.getLong(0));
+                try {
+                    resolver.delete(row, null, null);
+                } catch (RuntimeException ex) {
+                    Log.w(TAG, "could not remove an unfinished download", ex);
+                }
+            }
+        } catch (RuntimeException ex) {
+            Log.w(TAG, "could not look for unfinished downloads", ex);
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.Q)
+    @SuppressWarnings("deprecation")
+    private static Cursor pendingRows(ContentResolver resolver, Uri downloads, String owner) {
+        String[] columns = new String[] { MediaStore.MediaColumns._ID };
+        String where = MediaStore.MediaColumns.IS_PENDING + "=1 AND " + MediaStore.MediaColumns.OWNER_PACKAGE_NAME + "=?";
+        String[] args = new String[] { owner };
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Bundle query = new Bundle();
+            query.putString(ContentResolver.QUERY_ARG_SQL_SELECTION, where);
+            query.putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, args);
+            query.putInt(MediaStore.QUERY_ARG_MATCH_PENDING, MediaStore.MATCH_INCLUDE);
+            return resolver.query(downloads, columns, query, null);
+        }
+        // Android 10 has no such argument yet: its own way, which later versions no longer honour.
+        return resolver.query(MediaStore.setIncludePending(downloads), columns, where, args, null);
     }
 
     // ---- the viewer ---------------------------------------------------------------------------------------------
@@ -400,14 +459,21 @@ public class FilesPlugin extends Plugin {
 
     /**
      * The name comes from another computer: no folder separators, no control characters, none of the characters
-     * Downloads refuses, never "." or "..", not too long (its extension kept). null when there is no name at all.
+     * Downloads refuses, none that is not seen but changes what is (the ones that turn the text round would show
+     * "gpj.exe" as "exe.jpg"; a line's or a paragraph's end), never "." or "..", not too long (its extension kept).
+     * null when there is no name at all.
      */
     static String cleanName(String raw) {
         if (raw == null) return null;
         StringBuilder b = new StringBuilder(raw.length());
-        for (int i = 0; i < raw.length(); i++) {
-            char ch = raw.charAt(i);
-            b.append(ch < 0x20 || ch == 0x7f || "/\\:*?\"<>|".indexOf(ch) >= 0 ? '_' : ch);
+        for (int i = 0; i < raw.length(); ) {
+            int cp = raw.codePointAt(i);
+            i += Character.charCount(cp);
+            int type = Character.getType(cp);
+            boolean bad = cp < 0x20 || cp == 0x7f || "/\\:*?\"<>|".indexOf(cp) >= 0
+                    || type == Character.CONTROL || type == Character.FORMAT
+                    || type == Character.LINE_SEPARATOR || type == Character.PARAGRAPH_SEPARATOR;
+            if (bad) b.append('_'); else b.appendCodePoint(cp);
         }
         String s = b.toString().trim();
         if (s.isEmpty()) return null;

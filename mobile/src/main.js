@@ -107,9 +107,12 @@ function sheetKeys(el, cancel) {
   });
 }
 
-// confirmSheet(text, okLabel, { danger, extra: [label], cancelLabel, cls }) -> true | false | the extra button's index
-// (2, 3, ...). cls: a class of the backdrop's own (what it is, for a test).
-function confirmSheet(text, okLabel, { danger = false, extra = [], cancelLabel = t("common.cancel"), cls = "" } = {}) {
+// confirmSheet(text, okLabel, { danger, extra: [label], cancelLabel, cls, focusCancel, quietMs }) -> true | false | the
+// extra button's index (2, 3, ...). cls: a class of the backdrop's own (what it is, for a test). For a sheet nobody
+// asked for (it comes up over whatever the user is doing): focusCancel - the focus is on Cancel, so a hardware Enter
+// or Space meant for the screen under it does not confirm; quietMs - for that long after it came up nothing answers
+// it, neither a tap that was already on its way to what was there before, nor a key, nor Back.
+function confirmSheet(text, okLabel, { danger = false, extra = [], cancelLabel = t("common.cancel"), cls = "", focusCancel = false, quietMs = 0 } = {}) {
   return new Promise(resolve => {
     const el = document.createElement("div");
     el.className = `sheet-backdrop${cls ? ` ${cls}` : ""}`;
@@ -117,14 +120,17 @@ function confirmSheet(text, okLabel, { danger = false, extra = [], cancelLabel =
       <div class="sheet-actions"><button class="btn" data-v="0">${esc(cancelLabel)}</button>
       ${extra.map((label, i) => `<button class="btn" data-v="${i + 2}">${esc(label)}</button>`).join("")}
       <button class="btn ${danger ? "danger-solid" : "primary"}" data-v="1">${esc(okLabel)}</button></div></div>`;
-    const focusOn = danger ? "0" : "1"; // a hardware Enter never confirms what cannot be undone
+    const focusOn = danger || focusCancel ? "0" : "1"; // a hardware Enter never confirms what cannot be undone
     const done = v => { el.remove(); resolve(v); };
+    const shownAt = performance.now();
+    const quiet = () => performance.now() - shownAt < quietMs;
     el.addEventListener("click", e => {
+      if (quiet()) return;
       const b = e.target.closest("button");
       if (b) done(b.dataset.v === "1" ? true : b.dataset.v === "0" ? false : Number(b.dataset.v));
       else if (e.target === el) done(false);
     });
-    sheetKeys(el, () => done(false));
+    sheetKeys(el, () => { if (!quiet()) done(false); });
     document.body.append(el);
     el.querySelector(`[data-v='${focusOn}']`).focus();
   });
@@ -132,12 +138,13 @@ function confirmSheet(text, okLabel, { danger = false, extra = [], cancelLabel =
 
 // menuSheet(items) -> the chosen item's key, or null: a list of things to do, each a row with its icon. An item is
 // { key, icon, label, danger, on } - or { stepper: true, label, value(), minus(), plus(), minusLabel, plusLabel }, a
-// row whose two buttons act at once and leave the sheet open (the text size).
-function menuSheet(items) {
+// row whose two buttons act at once and leave the sheet open (the text size). title: what the things are done to (a
+// file's name), at the top - the sheet says itself what it is about, whatever the list under it shows by now.
+function menuSheet(items, { title = "" } = {}) {
   return new Promise(resolve => {
     const el = document.createElement("div");
     el.className = "sheet-backdrop";
-    el.innerHTML = `<div class="sheet menu" role="dialog" aria-modal="true" aria-label="${esc(t("term.more"))}">${items.map((it, i) => (it.stepper
+    el.innerHTML = `<div class="sheet menu" role="dialog" aria-modal="true" aria-label="${esc(t("term.more"))}">${title ? `<p class="menu-title">${esc(title)}</p>` : ""}${items.map((it, i) => (it.stepper
       ? `<div class="menu-item menu-step" data-i="${i}">${icon("textSize")}<span class="menu-label">${esc(it.label)}</span>${iconBtn("minus", it.minusLabel, 'data-step="minus"')}<b class="menu-value">${esc(it.value())}</b>${iconBtn("plus", it.plusLabel, 'data-step="plus"')}</div>`
       : `<button class="menu-item${it.danger ? " danger" : ""}${it.on ? " on" : ""}" data-i="${i}">${icon(it.icon)}<span class="menu-label">${esc(it.label)}</span></button>`)).join("")}</div>`;
     const done = v => { el.remove(); resolve(v); };
@@ -212,10 +219,26 @@ function banner({ node, item }) {
 // Files screen's own download (files.js takeOffer) into Downloads, its progress and Stop in a bar of its own; Not now
 // tells the computer so. Without the Files plugin (a browser, an app whose native part is older) Save says the app
 // must be updated, and the computer hears that it failed. One prompt at a time and never over another sheet: an offer
-// that comes meanwhile waits until that closes (the computer keeps it a couple of minutes). A save may run beside a
-// transfer of the Files screen: two pieces on the link then, each at most 256 KB.
+// that comes meanwhile waits until that closes (the computer keeps it a couple of minutes), and so it does while a
+// screen is in the middle of something whose answer it may ask about in a sheet of its own (ctx.hold() - a rename
+// whose name may be taken) - two sheets from two sources would lie one over the other, and Back would close one the
+// user is not looking at. The prompt comes unasked, so its focus is on "Not now" and it answers nothing for its first
+// moment (confirmSheet focusCancel, quietMs). A save may run beside a transfer of the Files screen: two pieces on the
+// link then, each at most 256 KB.
 const offersWaiting = [];
-let offerBusy = false, sheetWatch = null;
+const OFFER_QUIET_MS = 400;
+let offerBusy = false, sheetWatch = null, holds = 0;
+// A screen's "wait with your sheet": -> release() (once). The offers go on when the last one is released.
+function hold() {
+  holds++;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    holds--;
+    nextOffer();
+  };
+}
 function offerHeard({ node, event, payload }) {
   if (event !== "files.offer" || !store) return;
   const offer = checkOffer(payload);
@@ -225,7 +248,7 @@ function offerHeard({ node, event, payload }) {
   nextOffer();
 }
 function nextOffer() {
-  if (offerBusy || !offersWaiting.length) return;
+  if (offerBusy || holds || !offersWaiting.length) return;
   if ($(".sheet-backdrop")) {
     // Asked again once no sheet is open.
     sheetWatch ||= new MutationObserver(() => {
@@ -243,11 +266,14 @@ function nextOffer() {
 }
 async function askOffer(node, offer) {
   if (!store) return;
-  const computer = store.nodeName(node), provider = store.provider;
+  const from = store, computer = from.nodeName(node), provider = from.provider;
   buzz();
-  const save = (await confirmSheet(t("offer.ask", { computer, name: offer.name, size: bytesText(offer.size) }), t("offer.save"), { cancelLabel: t("offer.notNow"), cls: "offer-ask" })) === true;
+  // On an iPhone the file goes where the user says in the system's sheet, not into a Downloads folder.
+  const save = (await confirmSheet(t(isIos ? "offer.askIos" : "offer.ask", { computer, name: offer.name, size: bytesText(offer.size) }), t("offer.save"),
+    { cancelLabel: t("offer.notNow"), cls: "offer-ask", focusCancel: true, quietMs: OFFER_QUIET_MS })) === true;
   const plugin = nativeFiles();
-  if (!save || !plugin) {
+  // Nothing to keep it with (no plugin, or one that keeps no file on this phone): said, and the computer hears why.
+  if (!save || !plugin || plugin.noKeep) {
     try { await takeOffer({ provider, node, plugin, offer, save }); }
     catch (e) { if (e?.code === "needsApp") toast(t("offer.needsApp"), 6000); else fail(e); }
     return;
@@ -255,8 +281,8 @@ async function askOffer(node, offer) {
   const stop = new AbortController();
   const bar = offerBar(t("offer.saving", { name: offer.name, computer }), () => stop.abort());
   try {
-    const r = await takeOffer({ provider, node, plugin, offer, save, signal: stop.signal, onProgress: bar.progress });
-    toast(t("files.downloaded", { name: r.shown }));
+    const r = await takeOffer({ provider, node, plugin, offer, save, signal: stop.signal, onProgress: bar.progress, whenOnline: ms => from.whenOnline(node, ms) });
+    toast(t(r.shown.startsWith(".") ? "files.downloadedHidden" : "files.downloaded", { name: r.shown }));
   } catch (e) {
     if (e?.code === "cancelled") toast(t("files.stopped"));
     else if (e?.code === "jobMissing") toast(t("offer.gone", { computer }), 5000);
@@ -335,11 +361,13 @@ function go(name, params = {}, { replace = false, root = false } = {}) {
 function back() {
   if (stack.length > 1) history.back();
 }
+// The sheet on top: of two that lie one over the other, the later one in the page is the one the user sees.
+const topSheet = () => [...document.querySelectorAll(".sheet-backdrop")].at(-1) || null;
 window.addEventListener("popstate", () => {
   if (stack.length <= 1) return;
   // A swipe back on an iPhone with a sheet open (the Android back button is told below): the sheet goes, the screen
   // stays - its place in the history is taken again.
-  const sheet = $(".sheet-backdrop");
+  const sheet = topSheet();
   if (sheet) { history.pushState({ depth: stack.length - 1 }, ""); sheet.click(); return; }
   stack.pop();
   render();
@@ -410,6 +438,10 @@ async function unpair() {
   ctx.forwards = null;
   offOffers?.();
   offOffers = null;
+  // What the forgotten computers offered and nobody was asked about yet is nobody's now.
+  offersWaiting.length = 0;
+  sheetWatch?.disconnect();
+  sheetWatch = null;
   store?.disconnect();
   store = null;
   ctx.store = null;
@@ -426,7 +458,7 @@ async function phoneName() {
   return link?.name || (await keystore.getName()) || (await deviceModel()) || t("phone.name");
 }
 
-const ctx = { store: null, forwards: null, go, back, toast, fail, confirm: confirmSheet, prompt: promptSheet, menu: menuSheet, unpair, relay, rename, phoneName, secure: () => keystore.secure, version: pkg.version };
+const ctx = { store: null, forwards: null, go, back, toast, fail, confirm: confirmSheet, prompt: promptSheet, menu: menuSheet, hold, unpair, relay, rename, phoneName, secure: () => keystore.secure, version: pkg.version };
 
 // ---------- the lifecycle ----------
 // The links do not survive the background reliably (and not at all on iOS): back in the foreground, or when the
@@ -448,9 +480,11 @@ async function boot() {
   setupPhone();
   trackViewport();
   document.body.classList.toggle("native", Boolean(window.Capacitor?.isNativePlatform?.()));
+  nativeFiles(); // asked now whether it can keep files (files-native.js), so that it is known when one is offered
   await lock.unlock();
   App.addListener("backButton", () => {
-    if ($(".sheet-backdrop")) return $(".sheet-backdrop").click();
+    const sheet = topSheet();
+    if (sheet) return sheet.click();
     if (stack.length > 1) back();
     else App.minimizeApp();
   }).catch(() => {});

@@ -4,8 +4,9 @@
 // through, each a step back up, the computer's drives at the start. The list: folders first, hidden ones too, a
 // file's size and time. A tap opens: a folder, text and markdown (rendered) and a picture here, a PDF in the system's
 // viewer through the app's Files plugin; anything else asks "Download". A long press - or the button at a row's end -
-// opens a sheet with Download, Copy to…, Move to…, Rename, Delete; Delete always asks, naming the computer and saying
-// "to the bin" or "for good" (host.info `trash`). "Copy to…" and "Move to…" choose a folder in a dialog of the
+// opens a sheet with the entry's name over Download, Copy to…, Move to…, Rename, Delete; Delete always asks, naming the
+// computer and saying "to the bin" or "for good" (host.info `trash`), and of a folder that everything in it goes too.
+// On a phone whose plugin keeps no files (an Android older than 10) Download says so instead. "Copy to…" and "Move to…" choose a folder in a dialog of the
 // computer's folders, which has "New folder". "Upload file" in the header takes a file from the phone's picker into
 // the open folder. A transfer - one at a time - shows its progress under the list, with Stop; leaving the screen stops
 // a download or an upload, while a copy goes on on the computer.
@@ -26,10 +27,13 @@ import { esc, baseName } from "../util.js";
 import { icon, iconBtn } from "../icons.js";
 import { header, wireBack } from "./parts.js";
 import { renderMarkdown } from "../markdown.js";
-import { createRemoteFiles, crumbs, entryPath, tapAction, actionsFor, bytesText, filesOutdated, ORDERS, orderOf } from "../files.js";
+import { createRemoteFiles, crumbs, entryPath, tapAction, actionsFor, bytesText, filesOutdated, failure, ORDERS, orderOf } from "../files.js";
 import { nativeFiles } from "../files-native.js";
 
 const LONG_MS = 500, MOVE_PX = 10;
+// A picture is capped by its bytes (files.js IMAGE_MAX), and a few bytes can stand for a great many pixels: one of
+// more than this is not drawn (64 megapixels are 256 MB once decoded - above any phone camera's photo).
+const IMAGE_PIXELS = 64e6;
 const HOME = "~";
 const ORDER_KEY = "agentdeck.files.order"; // the order chosen last (ORDERS key), on this phone only
 const FILTER_MS = 350;                       // the pause in typing after which the computer is asked
@@ -44,7 +48,10 @@ function when(ms) {
 
 export function render(el, ctx, p) {
   const { store } = ctx, name = store.nodeName(p.node);
-  const files = createRemoteFiles({ provider: store.provider, node: p.node, plugin: nativeFiles() });
+  const files = createRemoteFiles({ provider: store.provider, node: p.node, plugin: nativeFiles(), whenOnline: ms => store.whenOnline(p.node, ms) });
+  // What files.js's choices go by: is there a plugin, and does it keep files on this phone (asked each time: the
+  // plugin's answer comes a moment after the app starts).
+  const can = () => ({ canDownload: files.canDownload, noKeep: files.noKeep });
   let left = false, folder = null, loading = false, error = null, gen = 0, task = null, wasOnline = null;
   let order = savedOrder(), filter = "", filterTimer = 0;
   const overlays = new Set();
@@ -80,9 +87,10 @@ export function render(el, ctx, p) {
       error = null;
     } catch (e) {
       if (left || my !== gen) return;
-      // The folder it was opened for is gone (a session's folder deleted since): the home instead.
-      if (start && path !== HOME && (e?.code === "fileMissing" || e?.code === "notFolder")) {
-        ctx.toast(t("files.startMissing"));
+      // The folder it was opened for is gone (a session's folder deleted since): the home instead. So for one the
+      // computer opens for nobody else (a terminal whose folder is a network share) - said in its own words.
+      if (start && path !== HOME && (e?.code === "fileMissing" || e?.code === "notFolder" || e?.code === "networkPath")) {
+        ctx.toast(e.code === "networkPath" ? errorText(e) : t("files.startMissing"), e.code === "networkPath" ? 6000 : undefined);
         return load(HOME);
       }
       // A folder that could not be opened (no permission there): said, and the one shown stays.
@@ -96,7 +104,7 @@ export function render(el, ctx, p) {
 
   function rowHtml(e, i) {
     const meta = [e.dir ? "" : bytesText(e.size), e.mtime ? when(e.mtime) : "", e.link ? t("files.link") : ""].filter(Boolean).join(" · ");
-    const more = actionsFor(e, { canDownload: files.canDownload, atRoots: folder.path === "" }).length;
+    const more = actionsFor(e, { ...can(), atRoots: folder.path === "" }).length;
     return `<div class="frow${e.name.startsWith(".") ? " dotted" : ""}">
       <button class="frow-open" data-i="${i}">${icon(e.dir ? "folder" : "file", e.dir ? "dir" : "")}
         <span class="row-main"><span class="row-title">${esc(e.name)}</span>${meta ? `<span class="row-meta">${esc(meta)}</span>` : ""}</span></button>
@@ -104,6 +112,11 @@ export function render(el, ctx, p) {
   }
   function draw() {
     if (left) return;
+    // The rows are made again: a finger held on one of the old ones is not a long press on a new one - neither by
+    // the timer here nor by the system's own long press, which would find the new row under it - and its lift is not
+    // a tap on the row that is there now.
+    if (press) redrawnUnder = true;
+    unpress();
     const up = online();
     const outdated = filesOutdated({ info: info(), error });
     uploadBtn.hidden = !folder || !folder.path || !up || outdated;
@@ -191,29 +204,33 @@ export function render(el, ctx, p) {
 
   // ---------- what a tap and the sheet do ----------
   async function tap(e) {
-    const what = tapAction(e, { canDownload: files.canDownload });
+    const what = tapAction(e, can());
     if (what === "open") return load(entryPath(folder, e));
     if (what === "view") return view(e);
     if (what === "pdf") return openPdf(e);
     if (what === "needsApp") return ctx.toast(t("files.needsApp"), 5000);
+    if (what === "noKeep") return ctx.toast(errorText({ code: files.noKeep }), 5000);
     if (await ctx.confirm(t("files.downloadAsk", { name: e.name, size: bytesText(e.size) }), t("files.download")) === true && !left) download(e);
   }
   const SHEET = {
     download: { icon: "download", label: () => t("files.download") },
     needsApp: { icon: "alert", label: () => t("files.needsAppShort") },
+    noKeep: { icon: "alert", label: () => t("files.noKeepShort") },
     copy: { icon: "copy", label: () => t("files.copyTo") },
     move: { icon: "move", label: () => t("files.moveTo") },
     rename: { icon: "pencil", label: () => t("files.rename") },
     delete: { icon: "trash", label: () => t("files.delete"), danger: true }
   };
+  // The sheet names its entry: it is that one whatever the list under it shows by the time something is chosen.
   async function actions(e) {
     if (!folder || !online()) return;
-    const keys = actionsFor(e, { canDownload: files.canDownload, atRoots: folder.path === "" });
+    const keys = actionsFor(e, { ...can(), atRoots: folder.path === "" });
     if (!keys.length) return;
-    const pick = await ctx.menu(keys.map(key => ({ key, icon: SHEET[key].icon, label: SHEET[key].label(), danger: SHEET[key].danger })));
+    const pick = await ctx.menu(keys.map(key => ({ key, icon: SHEET[key].icon, label: SHEET[key].label(), danger: SHEET[key].danger })), { title: e.name });
     if (left || !pick) return;
     if (pick === "download") download(e);
     else if (pick === "needsApp") ctx.toast(t("files.needsApp"), 5000);
+    else if (pick === "noKeep") ctx.toast(errorText({ code: files.noKeep }), 5000);
     else if (pick === "copy" || pick === "move") transfer(e, pick === "move");
     else if (pick === "rename") rename(e);
     else if (pick === "delete") remove(e);
@@ -221,7 +238,8 @@ export function render(el, ctx, p) {
 
   async function download(e) {
     const r = await run(t("files.downloading", { name: e.name }), opts => files.download(entryPath(folder, e), e.name, opts));
-    if (r && !left) ctx.toast(t("files.downloaded", { name: r.shown }));
+    // A name that begins with a dot is kept as it is, and file apps hide such a file: said, or "Saved" reads as lost.
+    if (r && !left) ctx.toast(t(r.shown.startsWith(".") ? "files.downloadedHidden" : "files.downloaded", { name: r.shown }));
   }
   const openPdf = e => run(t("files.opening", { name: e.name }), opts => files.openFile(entryPath(folder, e), e.name, opts));
 
@@ -238,18 +256,21 @@ export function render(el, ctx, p) {
   async function rename(e) {
     const next = await ctx.prompt(t("files.renameTitle", { name: e.name }), e.name, t("files.rename"), { maxLength: 255 });
     if (!next || next === e.name || left) return;
+    // Its answer may be a question in a sheet (the name is taken): no sheet of another source comes up meanwhile.
+    const release = ctx.hold();
     try {
       const r = await files.rename(entryPath(folder, e), folder.path, folder.sep, next, {
         dir: e.dir,
         offer: async ({ taken, next: other }) => (await ctx.confirm(t("files.renameTaken", { name: taken, next: other }), t("files.rename"))) === true
       });
       if (r && !left) { ctx.toast(t("files.renamed", { name: baseName(r.path) })); reload(); }
-    } catch (err) { if (!left) ctx.fail(err); }
+    } catch (err) { if (!left) ctx.fail(err); } finally { release(); }
   }
   async function remove(e) {
     // What happens there decides the words: into its bin, or - a host without one - for good. Not known: for good.
+    // A folder goes with everything in it, which its name alone does not say.
     const bin = info()?.trash === 1;
-    const ask = t(bin ? "files.deleteAskBin" : "files.deleteAskForGood", { name: e.name, computer: name });
+    const ask = t(e.dir ? (bin ? "files.deleteFolderAskBin" : "files.deleteFolderAskForGood") : bin ? "files.deleteAskBin" : "files.deleteAskForGood", { name: e.name, computer: name });
     if (await ctx.confirm(ask, t(bin ? "files.toBin" : "files.deleteForGood"), { danger: true }) !== true || left) return;
     try {
       const r = await files.remove(entryPath(folder, e));
@@ -302,7 +323,7 @@ export function render(el, ctx, p) {
     const stop = new AbortController();
     let url = "";
     const v = overlay("files-viewer", `<div class="viewer" role="dialog" aria-modal="true" aria-label="${esc(e.name)}">
-      ${header(e.name, { back: true, sub: esc(`${bytesText(e.size)} · ${name}`), actions: files.canDownload ? iconBtn("download", t("files.download"), 'data-act="download"') : "" })}
+      ${header(e.name, { back: true, sub: esc(`${bytesText(e.size)} · ${name}`), actions: files.canDownload && !files.noKeep ? iconBtn("download", t("files.download"), 'data-act="download"') : "" })}
       <div class="viewer-body"><p class="empty"><i class="spinner accent"></i> <span>${esc(t("files.loading"))}</span></p></div></div>`,
     () => { stop.abort(); if (url) URL.revokeObjectURL(url); });
     const out = v.ov.querySelector(".viewer-body");
@@ -317,9 +338,16 @@ export function render(el, ctx, p) {
       });
       if (v.closed) return;
       if (r.kind === "image") {
+        // Loaded apart from the page first: its size in pixels is known once its head is read, and one that is too
+        // many of them is never put where it would be drawn.
         url = URL.createObjectURL(r.blob);
-        out.innerHTML = `<div class="viewer-image"><img alt="${esc(e.name)}"></div>`;
-        out.querySelector("img").src = url;
+        const img = new Image();
+        img.alt = e.name;
+        await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = () => reject(failure("notPicture")); img.src = url; });
+        if (v.closed) return;
+        if (img.naturalWidth * img.naturalHeight > IMAGE_PIXELS) throw failure("tooBigToView");
+        out.innerHTML = `<div class="viewer-image"></div>`;
+        out.firstElementChild.append(img);
       } else if (r.kind === "markdown") out.innerHTML = `<div class="md viewer-md">${renderMarkdown(r.text)}</div>`;
       else {
         out.innerHTML = `<pre class="viewer-text"></pre>`;
@@ -402,10 +430,13 @@ export function render(el, ctx, p) {
   // ---------- touches ----------
   // A long press opens the sheet (and the tap that ends it opens nothing); so does a right click or the system's own
   // long press (contextmenu). A finger that moves is scrolling.
-  let press = null, quietUntil = 0;
+  // The entry is the one under the finger when it came down: by the time the press is long the list may have been
+  // read again, and the row's place in it is then another entry's (draw() ends a press for the same reason). Nor does
+  // its sheet come up over one that came meanwhile (a file a computer sends).
+  let press = null, quietUntil = 0, redrawnUnder = false;
   const entryAt = b => folder?.entries[Number(b.dataset.i)];
-  const unpress = () => { if (press) { clearTimeout(press.timer); press = null; } };
-  const longPress = b => { unpress(); quietUntil = Date.now() + 700; const e = entryAt(b); if (e) actions(e); };
+  function unpress() { if (press) { clearTimeout(press.timer); press = null; } }
+  const longPress = e => { unpress(); quietUntil = Date.now() + 700; if (e && !document.querySelector(".sheet-backdrop")) actions(e); };
   // The finger that held the row is still down when the sheet comes up under it: the click its lift makes lands on
   // what is there now - an item of the sheet, or its backdrop, which closes it. That one click is swallowed.
   function swallowLift() {
@@ -426,20 +457,25 @@ export function render(el, ctx, p) {
     const b = e.target.closest(".frow-open");
     if (!b) return;
     unpress();
-    press = { x: e.clientX, y: e.clientY, timer: setTimeout(() => { swallowLift(); longPress(b); }, LONG_MS) };
+    const held = entryAt(b);
+    redrawnUnder = false;
+    press = { x: e.clientX, y: e.clientY, timer: setTimeout(() => { swallowLift(); longPress(held); }, LONG_MS) };
   });
   body.addEventListener("pointermove", e => { if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > MOVE_PX) unpress(); });
   for (const ev of ["pointerup", "pointercancel", "scroll"]) body.addEventListener(ev, unpress, { passive: true });
+  // The finger that was held through a redraw is up: the click of that lift, if one comes, comes at once.
+  for (const ev of ["pointerup", "pointercancel"]) body.addEventListener(ev, () => { if (redrawnUnder) setTimeout(() => { redrawnUnder = false; }, 400); }, { passive: true });
   body.addEventListener("contextmenu", e => {
     const b = e.target.closest(".frow-open");
     if (!b) return;
     e.preventDefault();
-    if (Date.now() >= quietUntil) longPress(b);
+    if (Date.now() >= quietUntil && !redrawnUnder) longPress(entryAt(b));
   });
   body.addEventListener("click", e => {
     const b = e.target.closest("button");
     if (!b || b.disabled) return;
     if (b.classList.contains("frow-open")) {
+      if (redrawnUnder) { redrawnUnder = false; return; }
       if (Date.now() < quietUntil) return;
       const x = entryAt(b);
       if (x) tap(x);

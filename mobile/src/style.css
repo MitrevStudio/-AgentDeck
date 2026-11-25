@@ -716,6 +716,7 @@ button.node-row:active { background: var(--card-hover); border-color: var(--line
 .sheet-input { margin-bottom: 14px; }
 /* A sheet that is a list of things to do. */
 .sheet.menu { padding: 8px 8px calc(8px + var(--sab)); }
+.sheet.menu .menu-title { margin: 6px 12px 8px; color: var(--muted); font-size: 13px; font-weight: 650; line-height: 1.4; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 .menu-item { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 48px; padding: 0 12px; text-align: left; border: 0; border-radius: var(--r-md); background: none; color: var(--text); font-size: 14.5px; }
 button.menu-item:active { background: var(--panel-2); }
 .menu-item > .ic { color: var(--muted); }

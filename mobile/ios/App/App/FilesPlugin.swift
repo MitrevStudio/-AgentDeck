@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 /// receives a file a piece at a time and hands each piece here, so 50 MB never sit in the page's memory.
 ///
 /// begin({ name, size, keep }) -> { file }, write({ file, data }), finish({ file }) -> { shown }, open({ file, type }),
-/// cancel({ file }).
+/// cancel({ file }), canKeep() -> { keep } (always true here; an Android older than 10 answers false).
 ///
 /// Every file is written to the app's temporary folder (tmp/agentdeck-files/<file>/<name>) through a FileHandle that
 /// stays open between the writes. keep: true -> finish() shows the system's export sheet (UIDocumentPickerViewController
@@ -34,11 +34,13 @@ public class FilesPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "write", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "finish", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "open", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "cancel", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "cancel", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "canKeep", returnType: CAPPluginReturnPromise)
     ]
 
     private static let maxWrite = 256 * 1024   // the bytes of one write()
     private static let maxName = 80            // a longer name is shortened, its extension kept
+    private static let maxBytes = 255          // what one name may take on the disk, in UTF-8
 
     private final class Entry {
         let id: String
@@ -254,6 +256,10 @@ public class FilesPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    @objc func canKeep(_ call: CAPPluginCall) {
+        call.resolve(["keep": true])
+    }
+
     // ---- the sheets (main thread) -------------------------------------------------------------------------------
 
     private static func top(_ root: UIViewController) -> UIViewController {
@@ -343,6 +349,15 @@ public class FilesPlugin: CAPPlugin, CAPBridgedPlugin {
             } else {
                 out = String(out.prefix(maxName))
             }
+        }
+        // 80 characters may still be more bytes than a name may have: one character can be many of them.
+        if out.utf8.count > maxBytes {
+            let ext = (out as NSString).pathExtension
+            let keepExt = !ext.isEmpty && ext.utf8.count <= 64
+            var base = keepExt ? (out as NSString).deletingPathExtension : out
+            let room = maxBytes - (keepExt ? ext.utf8.count + 1 : 0)
+            while base.utf8.count > room { base.removeLast() }
+            out = keepExt ? base + "." + ext : base
         }
         return out
     }

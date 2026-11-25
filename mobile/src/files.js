@@ -8,7 +8,9 @@
 // files-native.js on a phone; the real phone provider and a fake plugin over a temporary folder in
 // scripts/test-mobile-files.js), so all of it runs in Node. Without the plugin (a browser, an app whose native part
 // is older than the page) nothing is brought to the phone as a file: `canDownload` is false, download and PDF are not
-// offered and say "needsApp"; looking at text and pictures and uploading work all the same.
+// offered and say "needsApp"; looking at text and pictures and uploading work all the same. A plugin that cannot keep
+// a file on this phone (`noKeep`: the code of why - an Android older than 10 has no Downloads an app may write to
+// without a permission) opens a PDF all the same; Download says why instead, before anything is read.
 //
 // What must never happen: a file on the phone put together from two versions (the size and time the first piece of a
 // download answered go back with every later one, and the host refuses a file that is no longer that one: `changed`;
@@ -17,9 +19,18 @@
 // removes the host's `.agentdeck-part`). Nothing is written over: the host gives a copy, an upload and a moved thing
 // whose name is taken "name (2)"; a rename whose name is taken is offered "name (2)" here.
 //
-// createRemoteFiles({ provider, node, plugin }) - provider: request(node, method, params, { timeout }) and
-//   on("notify", fn) (provider-relay.js); plugin: the `Files` plugin, or null ->
-//   canDownload; folder(path, order?) -> a Folder (below; order: { sort, desc, filter } - ORDERS); download(path, name, opts) -> { file, shown, size } (opts.expect:
+// A link that goes while a file comes or goes ("offline", "timeout", "closed") is waited for and the same piece asked
+// again, a few times (RETRIES, each wait at most ONLINE_MS): a read is by its place and the host checks the size and
+// time again; a write is taken by the host only at the place where its last one ended, so a piece is never written
+// twice - one whose answer was lost is refused the second time and counted as there. The host forgets an upload whose
+// link dropped: that one starts again from its first byte (RESTARTS). Stop does not wait for an answer on a link that
+// stalled: every request for a piece is given up the moment it is pressed.
+//
+// createRemoteFiles({ provider, node, plugin, whenOnline }) - provider: request(node, method, params, { timeout }),
+//   on("notify", fn) and online(node) (provider-relay.js); plugin: the `Files` plugin (files-native.js), or null;
+//   whenOnline(ms): settles once the computer is linked again, rejects after ms (the store's; without it the
+//   provider's online() is asked) ->
+//   canDownload, noKeep ("" or the code of why nothing is kept on this phone); folder(path, order?) -> a Folder (below; order: { sort, desc, filter } - ORDERS); download(path, name, opts) -> { file, shown, size } (opts.expect:
 //   { size, mtime } the file must still have - a file offered to the phone is the one its user agreed to take);
 //   openFile(path, name, opts) -> the same, opened in the system's viewer; preview(path, entry, opts) ->
 //   { kind: "text" | "markdown", text } | { kind: "image", type, blob }; upload(dir, sep, blob, name, opts) -> { path };
@@ -46,9 +57,29 @@ const PIECE_MS = 60000;                       // one piece through the relay on 
 const POLL_MS = 700;                          // how often a running copy is asked about
 const TRIES = 100;                            // "name (2)" ... "name (99)"
 const LINK_GONE = new Set(["offline", "timeout", "closed"]);
+const RETRIES = 4;                            // how many times one piece is asked again after the link went
+const RESTARTS = 2;                           // how many times an upload the host forgot begins again
+const ONLINE_MS = 30000;                      // how long the computer is waited for before one of those
+const RETRY_MS = 400;                         // a breath before asking again (a link that is up but answers nothing)
+const ONLINE_POLL_MS = 250;
+const SOON_MS = 2000;                         // what is told the computer after Stop is not waited for longer
 
 export const failure = (code, message = code) => Object.assign(new Error(message), { code });
 const stopped = signal => { if (signal?.aborted) throw failure("cancelled"); };
+// The promise's own end, or `cancelled` the moment the signal fires: Stop does not wait for an answer that may take
+// a minute on a stalled link. What the promise ends with afterwards is nobody's.
+function raced(promise, signal) {
+  if (!signal) return promise;
+  if (signal.aborted) { promise.catch(() => {}); return Promise.reject(failure("cancelled")); }
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(failure("cancelled"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
+}
+const pause = (ms, signal) => raced(new Promise(resolve => setTimeout(resolve, ms)), signal);
+// Best effort and at most SOON_MS: what the computer is told once the user has already stopped.
+const soon = promise => Promise.race([Promise.resolve(promise).catch(() => {}), new Promise(resolve => { const timer = setTimeout(resolve, SOON_MS); timer.unref?.(); })]);
 
 // ---------- paths, names, kinds ----------
 // A child of a folder there: dir + sep + name, without a second sep after a root ("C:\", "/"). In the list of the
@@ -126,20 +157,23 @@ export const filesOutdated = ({ info = null, error = null } = {}) => error?.code
 
 // What a tap on an entry does: "open" (a folder), "view" (text, markdown, a picture small enough to look at here),
 // "pdf" (the system's viewer), "download" (asked first), "needsApp" (that takes the plugin, and there is none).
-export function tapAction(entry, { canDownload = false } = {}) {
+// "noKeep": the plugin is there but keeps no file on this phone (noKeep: why) - said instead of asking; a PDF is a
+// temporary file and opens all the same.
+export function tapAction(entry, { canDownload = false, noKeep = "" } = {}) {
   if (entry.dir) return "open";
   const kind = kindOf(entry.name);
   if ((kind === "text" || kind === "markdown") && entry.size <= TEXT_MAX) return "view";
   if (kind === "image" && entry.size <= IMAGE_MAX) return "view";
   if (!canDownload) return "needsApp";
-  return kind === "pdf" ? "pdf" : "download";
+  if (kind === "pdf") return "pdf";
+  return noKeep ? "noKeep" : "download";
 }
 // What the sheet of an entry offers, in order. Only files come to the phone (docs/FILES.md 1: no folders through the
 // system's picker or Downloads); in the list of the roots (the drives) nothing is offered - a drive is neither copied,
 // moved, renamed nor deleted.
-export function actionsFor(entry, { canDownload = false, atRoots = false } = {}) {
+export function actionsFor(entry, { canDownload = false, noKeep = "", atRoots = false } = {}) {
   if (atRoots) return [];
-  return [entry.dir ? "" : canDownload ? "download" : "needsApp", "copy", "move", "rename", "delete"].filter(Boolean);
+  return [entry.dir ? "" : !canDownload ? "needsApp" : noKeep ? "noKeep" : "download", "copy", "move", "rename", "delete"].filter(Boolean);
 }
 
 // The bytes a base64 text stands for, without decoding it.
@@ -172,8 +206,25 @@ export function listParams({ sort = "name", desc = false, filter = "" } = {}) {
 }
 
 // ---------- the computer ----------
-export function createRemoteFiles({ provider, node, plugin = null }) {
+export function createRemoteFiles({ provider, node, plugin = null, whenOnline = null }) {
   const call = (method, params, timeout = 30000) => provider.request(node, method, params, { timeout });
+  const noKeep = () => (plugin && typeof plugin.noKeep === "string" ? plugin.noKeep : "");
+
+  // The computer linked again, or "offline" after ONLINE_MS - "cancelled" at once when Stop is pressed meanwhile.
+  async function linked(signal) {
+    if (whenOnline) return raced(Promise.resolve().then(() => whenOnline(ONLINE_MS)), signal);
+    for (const until = Date.now() + ONLINE_MS; provider.online && !provider.online(node);) {
+      if (Date.now() >= until) throw failure("offline");
+      await pause(ONLINE_POLL_MS, signal);
+    }
+  }
+  // Before a piece is asked again after `error` (the link went): a breath, then the computer is waited for. Not back
+  // in time - the failure is the one the piece had.
+  async function again(error, signal) {
+    await pause(RETRY_MS, signal);
+    await linked(signal).catch(e => { throw e?.code === "cancelled" ? e : error; });
+    stopped(signal);
+  }
 
   // ---------- folders ----------
   // order: { sort, desc, filter } (listParams). A page's `next` is valid only with the same order and filter: a new
@@ -204,21 +255,36 @@ export function createRemoteFiles({ provider, node, plugin = null }) {
   // changed meanwhile (`changed`). first(answer): before the first piece is taken (a plugin file is begun with the
   // size). max: a file bigger than this is refused before anything is taken.
   // expect: { size, mtime } the first piece already asks with (a file that is no longer that one: `changed`).
+  // The size is the first answer's and nothing is taken on trust after it: a size that is no size, another size than
+  // the one expected or answered before, and a piece that would go past the size (or past max) stop the reading - a
+  // computer that never says "eof" cannot fill the phone. A piece whose link went is asked for again (again()).
   async function readPieces(path, take, { onProgress, signal, max = Infinity, first, expect } = {}) {
     let pos = 0, size, mtime, begun = false;
-    for (;;) {
+    for (let tries = 0; ;) {
       stopped(signal);
       const known = begun ? { size, mtime } : expect ? { size: expect.size, mtime: expect.mtime } : null;
-      const r = await call("files.read", known ? { path, pos, len: CHUNK, ...known } : { path, pos, len: CHUNK }, PIECE_MS);
-      stopped(signal);
+      let r;
+      try {
+        r = await raced(call("files.read", known ? { path, pos, len: CHUNK, ...known } : { path, pos, len: CHUNK }, PIECE_MS), signal);
+      } catch (e) {
+        if (!LINK_GONE.has(e?.code) || tries >= RETRIES) throw e;
+        tries++;
+        await again(e, signal);
+        continue;
+      }
+      tries = 0;
+      if (!r || !Number.isSafeInteger(r.size) || r.size < 0) throw failure("fileFailed");
       if (!begun) {
+        if (expect && (r.size !== expect.size || (expect.mtime !== undefined && r.mtime !== expect.mtime))) throw failure("changed");
+        if (r.size > max) throw failure("tooBigToView");
         begun = true;
         ({ size, mtime } = r);
-        if (size > max) throw failure("tooBigToView");
         await first?.(r);
-      }
+      } else if (r.size !== size) throw failure("changed");
       const n = base64Bytes(r.data);
       if (n > CHUNK || (!n && !r.eof)) throw failure("fileFailed");
+      if (pos + n > max) throw failure("tooBigToView");
+      if (pos + n > size) throw failure("changed");
       if (n) await take(r.data, n);
       pos += n;
       onProgress?.({ bytes: pos, total: size });
@@ -236,6 +302,7 @@ export function createRemoteFiles({ provider, node, plugin = null }) {
   // the file still there to remove).
   async function download(path, name, { keep = true, onProgress, signal, expect } = {}) {
     if (!plugin) throw failure("needsApp");
+    if (keep && noKeep()) throw failure(noKeep());
     let file = null;
     try {
       const { size } = await readPieces(path, data => plugin.write({ file, data }), {
@@ -250,15 +317,22 @@ export function createRemoteFiles({ provider, node, plugin = null }) {
       throw e;
     }
   }
-  // A PDF (or another file the system has a viewer for): a temporary file, then the system's viewer on it.
+  // A PDF (or another file the system has a viewer for): a temporary file, then the system's viewer on it. A file
+  // no viewer took (none for its kind, or it could not be started) is of no use on the phone and goes.
   async function openFile(path, name, { type = "application/pdf", ...opts } = {}) {
     const r = await download(path, name, { ...opts, keep: false });
-    await plugin.open({ file: r.file, type });
+    try {
+      await plugin.open({ file: r.file, type });
+    } catch (e) {
+      await Promise.resolve().then(() => plugin.cancel({ file: r.file })).catch(() => {});
+      throw e;
+    }
     return r;
   }
 
   // A file read whole for a look at it here: text and markdown up to TEXT_MAX (decoded as UTF-8), a picture up to
-  // IMAGE_MAX (a Blob of its type, for a blob: URL). A file over the cap is refused before anything is read.
+  // IMAGE_MAX (a Blob of its type, for a blob: URL). A file over the cap is refused before anything is read, and
+  // no more than the cap is ever held, whatever the computer answers (readPieces' max).
   async function preview(path, entry, { onProgress, signal } = {}) {
     const kind = kindOf(entry.name);
     const max = kind === "image" ? IMAGE_MAX : kind === "text" || kind === "markdown" ? TEXT_MAX : 0;
@@ -280,26 +354,82 @@ export function createRemoteFiles({ provider, node, plugin = null }) {
   // A file of the phone (a File from <input type="file">, or any Blob) into a folder there, read a piece at a time with
   // slice(), one piece in flight. The host writes it under `.agentdeck-part` and gives it its name - "name (2)" when
   // that is taken - only once it is whole; anything that fails here, or Stop, aborts it, which removes the part.
+  // A link that went: the same piece again (sendPiece), and an upload the host forgot with its link from the first
+  // byte again, under a new files.begin.
   async function upload(dir, sep, blob, name, { onProgress, signal } = {}) {
     if (!dir) throw failure("invalidData");
-    const size = blob.size;
-    stopped(signal);
-    const up = await call("files.begin", { path: join(dir, sep, checkName(name)), size });
-    try {
-      for (let pos = 0; pos < size;) {
-        stopped(signal);
-        const bytes = new Uint8Array(await blob.slice(pos, Math.min(size, pos + CHUNK)).arrayBuffer());
-        if (!bytes.length) throw failure("fileFailed"); // the phone's file is shorter than it said
-        stopped(signal);
-        await call("files.write", { upload: up.upload, pos, data: toBase64(bytes) }, PIECE_MS);
-        pos += bytes.length;
-        onProgress?.({ bytes: pos, total: size });
-      }
+    const size = blob.size, target = join(dir, sep, checkName(name));
+    for (let restarts = 0; ; restarts++) {
       stopped(signal);
-      return await call("files.commit", { upload: up.upload });
-    } catch (e) {
-      await call("files.abort", { upload: up.upload }).catch(() => {});
-      throw e;
+      const beginning = call("files.begin", { path: target, size });
+      let up;
+      try {
+        up = await raced(beginning, signal);
+      } catch (e) {
+        // Stopped while it was being begun: an upload the host began all the same is not left to its idle time.
+        if (e?.code === "cancelled") beginning.then(u => call("files.abort", { upload: u.upload })).catch(() => {});
+        throw e;
+      }
+      try {
+        const done = await sendAll(up, blob, size, { onProgress, signal });
+        if (done) return done;
+        if (restarts >= RESTARTS) throw failure("jobMissing");
+      } catch (e) {
+        const aborting = call("files.abort", { upload: up.upload }).catch(() => {});
+        await (signal?.aborted ? soon(aborting) : aborting);
+        throw e;
+      }
+    }
+  }
+  // The pieces of an upload the host began, then its commit -> { path }, or null when the host no longer knows the
+  // upload (its link dropped: what had come is gone there).
+  async function sendAll(up, blob, size, { onProgress, signal }) {
+    for (let pos = 0; pos < size;) {
+      stopped(signal);
+      const bytes = new Uint8Array(await blob.slice(pos, Math.min(size, pos + CHUNK)).arrayBuffer());
+      if (!bytes.length) throw failure("fileFailed"); // the phone's file is shorter than it said
+      stopped(signal);
+      if (!(await sendPiece(up, pos, toBase64(bytes), signal))) return null;
+      pos += bytes.length;
+      onProgress?.({ bytes: pos, total: size });
+    }
+    stopped(signal);
+    return commit(up, size, signal);
+  }
+  // One piece at `pos` -> true once the host has it, false when the host no longer knows the upload. Asked again
+  // after a link that went, the host answers one of three things: it takes the piece (the first never arrived);
+  // `invalidData` - the first did arrive and only its answer was lost, the host is past `pos` and writes nothing
+  // twice (were that guess wrong, the next piece or the commit is refused the same way and the upload fails whole);
+  // `jobMissing` - the upload went with the link.
+  async function sendPiece(up, pos, data, signal) {
+    for (let tries = 0; ; tries++) {
+      try {
+        await raced(call("files.write", { upload: up.upload, pos, data }, PIECE_MS), signal);
+        return true;
+      } catch (e) {
+        if (tries && e?.code === "invalidData") return true;
+        if (tries && e?.code === "jobMissing") return false;
+        if (!LINK_GONE.has(e?.code) || tries >= RETRIES) throw e;
+        await again(e, signal);
+      }
+    }
+  }
+  // The file gets its name there. Not given up on Stop while it is asked: past this point the file may be there, and
+  // "stopped" must not be said of a file that stays. Asked again after a link that went, `jobMissing` is either a
+  // commit that was taken with its answer lost - then the name files.begin gave is a file of that size now - or an
+  // upload that went with the link (null).
+  async function commit(up, size, signal) {
+    for (let tries = 0; ; tries++) {
+      try {
+        return await call("files.commit", { upload: up.upload });
+      } catch (e) {
+        if (tries && e?.code === "jobMissing") {
+          const there = await call("files.stat", { path: up.path }).catch(() => null);
+          return there && !there.dir && there.size === size ? { path: up.path } : null;
+        }
+        if (!LINK_GONE.has(e?.code) || tries >= RETRIES) throw e;
+        await again(e, signal);
+      }
     }
   }
 
@@ -393,7 +523,7 @@ export function createRemoteFiles({ provider, node, plugin = null }) {
     return follow(job, opts);
   }
 
-  return { canDownload: Boolean(plugin), folder, download, openFile, preview, upload, rename, mkdir, remove, transfer };
+  return { canDownload: Boolean(plugin), get noKeep() { return noKeep(); }, folder, download, openFile, preview, upload, rename, mkdir, remove, transfer };
 }
 
 // ---------- a file a computer sends ----------
@@ -408,34 +538,40 @@ export function checkOffer(p) {
   if (!Number.isSafeInteger(p.size) || p.size < 0 || (p.mtime !== undefined && !Number.isSafeInteger(p.mtime))) return null;
   let name;
   try { name = checkName(p.name); } catch { return null; }
-  if (name !== p.name || /[\x00-\x1f\x7f]/.test(name)) return null;
+  // Nor a character that is not seen but changes what is: one that turns the text round (U+202E) shows "gpj.exe" as
+  // "exe.jpg", and the user is asked about a name the file does not have.
+  if (name !== p.name || /[\x00-\x1f\x7f]/.test(name) || /[\p{Cf}\u2028\u2029]/u.test(name)) return null;
   return { offer: p.offer, path: p.path, name, size: p.size, mtime: p.mtime };
 }
 
 // The user's choice on an offer of computer `node`: save false - "declined", nothing read; no plugin - "failed" with
-// needsApp, nothing read (and needsApp thrown); else "accepted", and only when the computer took it (an offer withdrawn
+// needsApp, nothing read (and needsApp thrown); a plugin that keeps no file on this phone - "failed" with its reason
+// the same way, the computer is never told "accepted" first; else "accepted", and only when the computer took it (an offer withdrawn
 // or expired there is refused: that is thrown, nothing read) the download into Downloads, with the size and time the
 // offer named - a file that changed since is refused - then "done", or "failed" with the code of what went wrong (Stop:
 // cancelled). The answers after the choice are best effort: a link that went meanwhile loses them, the computer's
 // row then says the phone went away.
 // -> { state: "declined" } | { state: "done", file, shown, size }
-export async function takeOffer({ provider, node, plugin = null, offer, save, onProgress, signal }) {
+export async function takeOffer({ provider, node, plugin = null, whenOnline = null, offer, save, onProgress, signal }) {
   const answer = (state, error) => provider.request(node, "files.answer", error ? { offer: offer.offer, state, error } : { offer: offer.offer, state }, { timeout: ANSWER_MS });
   if (!save) {
     await answer("declined").catch(() => {});
     return { state: "declined" };
   }
-  if (!plugin) {
-    await answer("failed", "needsApp").catch(() => {});
-    throw failure("needsApp");
+  const cannot = !plugin ? "needsApp" : typeof plugin.noKeep === "string" ? plugin.noKeep : "";
+  if (cannot) {
+    await answer("failed", cannot).catch(() => {});
+    throw failure(cannot);
   }
   await answer("accepted");
   try {
-    const got = await createRemoteFiles({ provider, node, plugin }).download(offer.path, offer.name, { onProgress, signal, expect: { size: offer.size, mtime: offer.mtime } });
+    const got = await createRemoteFiles({ provider, node, plugin, whenOnline }).download(offer.path, offer.name, { onProgress, signal, expect: { size: offer.size, mtime: offer.mtime } });
     await answer("done").catch(() => {});
     return { state: "done", ...got };
   } catch (e) {
-    await answer("failed", typeof e?.code === "string" && /^[A-Za-z0-9]{1,40}$/.test(e.code) ? e.code : "fileFailed").catch(() => {});
+    const told = answer("failed", typeof e?.code === "string" && /^[A-Za-z0-9]{1,40}$/.test(e.code) ? e.code : "fileFailed").catch(() => {});
+    // After Stop the user is not kept waiting for a link that stalled to carry the answer.
+    await (e?.code === "cancelled" ? soon(told) : told);
     throw e;
   }
 }
