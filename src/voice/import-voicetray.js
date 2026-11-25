@@ -38,6 +38,7 @@ function mapSettings(vt) {
   if (typeof vt.MicrophoneName === "string") patch.microphoneName = vt.MicrophoneName;
   if (typeof vt.UseClipboardFallback === "boolean") patch.useClipboardPaste = vt.UseClipboardFallback;
   if (Number.isFinite(vt.MaxRecordingMinutes)) patch.maxRecordingMinutes = vt.MaxRecordingMinutes;
+  // VoiceTray read aloud with Gemini only: its model and its voice are Gemini's.
   if (typeof vt.ReadAloudModel === "string") readAloud.models.Gemini = vt.ReadAloudModel;
   if (typeof vt.ReadAloudVoice === "string") patch.readAloudVoice = vt.ReadAloudVoice;
   if (Number.isFinite(vt.ReadAloudSpeed)) patch.readAloudSpeed = vt.ReadAloudSpeed;

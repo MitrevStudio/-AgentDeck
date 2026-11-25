@@ -9,15 +9,13 @@ const { wavDurationMs, BYTES_PER_SECOND, HEADER_BYTES } = require("./wav");
 const { providerName, resolveTask } = require("./catalog");
 const { t } = require("../i18n");
 
-const PROVIDERS = { OpenAI: require("./providers/openai"), Gemini: require("./providers/gemini") };
+const PROVIDERS = { OpenAI: require("./providers/openai"), Gemini: require("./providers/gemini"), Soniox: require("./providers/soniox") };
 
 const BASE_TIMEOUT_MS = 60_000;
 const MAX_TIMEOUT_MS = 10 * 60_000;
 
-const isGemini = p => providerName(p) === "Gemini";
-
-const providerByteCap = provider =>
-  isGemini(provider) ? PROVIDERS.Gemini.MAX_INLINE_BYTES : PROVIDERS.OpenAI.MAX_UPLOAD_BYTES;
+// The largest recording each provider takes (its MAX_RECORDING_BYTES); for a name nobody knows, OpenAI's.
+const providerByteCap = provider => (PROVIDERS[providerName(provider)] || PROVIDERS.OpenAI).MAX_RECORDING_BYTES;
 
 // Whole minutes that fit inside the provider's limit, with a second of slack: recording stops on a chunk
 // boundary and the WAV carries a header, so landing exactly on the limit would still be rejected.
@@ -32,7 +30,7 @@ function maxRecordingBytes(settings = {}, provider = resolveTask(settings, "dict
 }
 
 // A fixed budget drops long recordings on ordinary uplinks: a 10 minute WAV is 19 MB, and a third more once
-// Gemini base64-encodes it inline.
+// Gemini base64-encodes it inline. Soniox's waiting for its job is inside it too.
 function attemptTimeoutMs(wavPath) {
   let ms = wavDurationMs(wavPath);
   if (!ms) try { ms = Math.max(0, fs.statSync(wavPath).size - HEADER_BYTES) / BYTES_PER_SECOND * 1000; } catch {}

@@ -24,6 +24,7 @@ const INTERACTIONS = `${API}/v1beta/interactions`;
 const GENERATE = /:generateContent$/;
 const TRANSCRIPTIONS = "https://api.openai.com/v1/audio/transcriptions";
 const CHAT = "https://api.openai.com/v1/chat/completions";
+const SONIOX = "https://api.soniox.com/v1";
 const SECOND = 1000, MINUTE = 60 * SECOND, RATE = 16; // samples a ms
 const FRAME = 20;
 
@@ -62,6 +63,20 @@ function wordsAnswer(heard) {
   return { status: "completed", steps: heard.length ? [{ type: "model_output", content: [{ type: "text", text: heard.map(h => h.text).join(" "), annotations }] }] : [] };
 }
 const mmss = ms => `${String(Math.floor(ms / MINUTE)).padStart(2, "0")}:${String(Math.floor(ms / SECOND) % 60).padStart(2, "0")}`;
+// Soniox's tokens: pieces of words, a space before the first piece of each word but the very first.
+function tokensAnswer(heard) {
+  const tokens = [];
+  for (const { start, end, text } of heard) {
+    const list = text.split(" "), each = Math.floor((end - start) / list.length);
+    list.forEach((word, i) => {
+      const from = start + i * each, to = i + 1 === list.length ? end : start + (i + 1) * each, middle = Math.floor((from + to) / 2);
+      const lead = tokens.length ? " " : "", cut = word.length > 4 ? 3 : word.length;
+      tokens.push({ text: lead + word.slice(0, cut), start_ms: from, end_ms: cut < word.length ? middle : to, confidence: 0.9, language: "en" });
+      if (cut < word.length) tokens.push({ text: word.slice(cut), start_ms: middle, end_ms: to, confidence: 0.9, language: "en" });
+    });
+  }
+  return { id: "job", text: tokens.map(token => token.text).join(""), tokens };
+}
 const segmentsAnswer = heard => ({
   candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify({ segments: heard.map(h => ({ start: mmss(h.start), end: mmss(h.end), text: h.text })) }) }] } }]
 });
@@ -90,6 +105,21 @@ async function fakeFetch(url, options = {}) {
   const forced = await override(request);
   if (forced) return forced;
 
+  // Soniox: what it heard stays under the file, the file under its transcription.
+  if (url.startsWith(SONIOX)) {
+    const name = url.slice(SONIOX.length + 1);
+    if (request.method === "DELETE") return new Response(null, { status: 204 });
+    if (name === "files") {
+      uploads.set(`file-${sent.length}`, { heard: request.heard });
+      return reply({ id: `file-${sent.length}`, filename: "part.wav", size: wav.length, created_at: "2026-11-25T00:00:00Z" }, 201);
+    }
+    if (name === "transcriptions") {
+      uploads.set(`job-${sent.length}`, uploads.get(request.body.file_id));
+      return reply({ id: `job-${sent.length}`, status: "queued", model: request.body.model, error_type: null, error_message: null }, 201);
+    }
+    const [, job, transcript] = name.split("/");
+    return reply(transcript ? tokensAnswer(uploads.get(job).heard) : { id: job, status: "completed", audio_duration_ms: 1000, error_type: null, error_message: null });
+  }
   if (url === UPLOAD) return reply({}, 200, { "x-goog-upload-url": `${UPLOAD}?upload_id=${sent.length}` });
   if (url.startsWith(`${UPLOAD}?`)) {
     const n = new URL(url).searchParams.get("upload_id");
@@ -133,12 +163,13 @@ const summaries = meetings("summary");
 const { clock, escapeText, unescapeText } = meetings("text");
 
 const only = test => sent.filter(test);
-const asked = () => only(r => r.url === INTERACTIONS || r.url === TRANSCRIPTIONS || (GENERATE.test(r.url) && r.heard));
+const asked = () => only(r => r.url === INTERACTIONS || r.url === TRANSCRIPTIONS || (GENERATE.test(r.url) && r.heard)
+  || (r.url === `${SONIOX}/transcriptions` && r.method === "POST"));
 const summarised = () => only(r => r.url === CHAT || (GENERATE.test(r.url) && !r.heard));
 const deleted = () => only(r => r.method === "DELETE");
 
 // ---------- a meeting ----------
-const KEYS = { Gemini: "test-key-gemini", OpenAI: "test-key-openai" };
+const KEYS = { Gemini: "test-key-gemini", OpenAI: "test-key-openai", Soniox: "test-key-soniox" };
 const START = new Date(2026, 10, 22, 14, 30, 15);
 
 // script: [{ start, end, text }] in ms; each is a square wave of an amplitude of its own.
@@ -214,6 +245,7 @@ const rejects = (code, promise) => assert.rejects(promise, error => {
 });
 const OPENAI = { transcription: { provider: "OpenAI" }, summary: { provider: "OpenAI" } };
 const GENERAL = { transcription: { provider: "Gemini", model: "gemini-3.8-flash" } };
+const BY_SONIOX = { transcription: { provider: "Soniox" } };
 
 // Everything under a folder, as text.
 function allText(dir) {
@@ -449,6 +481,87 @@ test("OpenAI: the exact requests", async () => {
     response_format: { type: "json_schema", json_schema: { name: "answer", strict: true, schema: summaries.SCHEMA } }
   }, "effort medium, so no temperature");
   assert.deepEqual(messages.map(m => [m.role, typeof m.content]), [["system", "string"], ["user", "string"]]);
+});
+
+test("Soniox: the exact requests", async () => {
+  const w = await world({ system: [line(5000, 9000, "the delivery check moves to the server")], channels: ["system"], durationMs: MINUTE, languages: ["bg", "en"] });
+  const done = await w.start(BY_SONIOX);
+  const [upload, create, state, transcript, removeJob, removeFile, summary, ...rest] = sent;
+  assert.deepEqual(rest, []);
+  const key = { Authorization: `Bearer ${KEYS.Soniox}` };
+  assert.deepEqual([upload.method, upload.url], ["POST", `${SONIOX}/files`]);
+  assert.deepEqual(upload.headers, key, "the form sets its own content type");
+  assert.deepEqual(upload.body, [["file", "part.wav audio/wav"]]);
+  assert.deepEqual([create.method, create.url], ["POST", `${SONIOX}/transcriptions`]);
+  assert.deepEqual(create.headers, { ...key, "content-type": "application/json" });
+  const file = create.body.file_id;
+  assert.deepEqual(create.body, { model: "stt-async-v6", file_id: file, language_hints: ["bg", "en"], enable_language_identification: true });
+  assert.doesNotMatch(JSON.stringify(create.body), /diarization|translation|webhook|context/);
+  const job = /\/transcriptions\/([\w-]+)$/.exec(state.url)[1];
+  assert.deepEqual([state.method, state.url, state.headers], ["GET", `${SONIOX}/transcriptions/${job}`, key]);
+  assert.deepEqual(w.waits, [2000], "asked about after a wait, not at once");
+  assert.deepEqual([transcript.method, transcript.url], ["GET", `${SONIOX}/transcriptions/${job}/transcript`]);
+  assert.deepEqual([removeJob.method, removeJob.url, removeJob.headers], ["DELETE", `${SONIOX}/transcriptions/${job}`, key], "the transcription first");
+  assert.deepEqual([removeFile.method, removeFile.url], ["DELETE", `${SONIOX}/files/${file}`]);
+  assert.deepEqual(JSON.parse(fs.readFileSync(w.workPath("uploads.json"), "utf8")), [], "nothing is left there");
+  assert.equal(summary.url, `${API}/v1beta/models/gemini-3.8-flash:generateContent`, "the summary stays where it was");
+
+  assert.equal(done.state, "ready");
+  assert.deepEqual([done.transcription.provider, done.transcription.model, Boolean(done.transcription.approximate)], ["Soniox", "stt-async-v6", false]);
+  const [said] = w.lines();
+  assert.deepEqual([said.start, said.text, Boolean(said.approximate)], [5000, "the delivery check moves to the server", false], "the pieces are words again, at their times");
+  assert.deepEqual(partLimits("Soniox", catalog.modelInfo("Soniox", "stt-async-v6")), partLimits("Gemini", catalog.modelInfo("Gemini", "gemini-3.5-transcribe")));
+});
+
+test("Soniox: a detected language is no hint, and a job is waited for", async () => {
+  const w = await world({ system: talk(1), channels: ["system"], durationMs: MINUTE });
+  let asks = 0;
+  override = r => (r.method === "GET" && /\/transcriptions\/[\w-]+$/.test(r.url) && ++asks < 3 ? reply({ status: asks === 1 ? "queued" : "processing" }) : undefined);
+  assert.equal((await w.start(BY_SONIOX)).state, "ready");
+  assert.deepEqual(asked()[0].body, { model: "stt-async-v6", file_id: asked()[0].body.file_id, enable_language_identification: true });
+  assert.deepEqual(w.waits, [2000, 2000, 2000]);
+  assert.equal(asked().length, 1, "asking about a job is not starting one");
+});
+
+test("Soniox: a job that fails says why, and nothing stays there", async () => {
+  const failures = [
+    [{ status: "error", error_type: "organization_balance_exhausted", error_message: "the provider's own words" }, "meetingsQuota"],
+    [{ status: "failed", error_type: "invalid_audio_file", error_message: "the provider's own words" }, "meetingsRequestRefused"],
+    [{ status: "error", error_type: "internal_error", error_message: "the provider's own words" }, "meetingsProviderDown"]
+  ];
+  for (const [job, code] of failures) {
+    sent.length = 0;
+    const w = await world({ system: talk(1), channels: ["system"], durationMs: MINUTE });
+    override = r => (r.method === "GET" && /\/transcriptions\/[\w-]+$/.test(r.url) ? reply(job) : undefined);
+    await rejects(code, w.start(BY_SONIOX));
+    assert.equal(asked().length, 1, `${code}: a failed job is not started again`);
+    assert.deepEqual(deleted().map(r => r.url.slice(SONIOX.length + 1).split("/")[0]), ["transcriptions", "files"], code);
+    assert.deepEqual(JSON.parse(fs.readFileSync(w.workPath("uploads.json"), "utf8")), []);
+    assert.doesNotMatch(allText(w.project), /provider's own words|test-key/);
+  }
+
+  // Refused before anything was started: its own error shape, and the file is still deleted.
+  sent.length = 0;
+  const w = await world({ system: talk(1), channels: ["system"], durationMs: MINUTE });
+  override = r => (r.url === `${SONIOX}/transcriptions` ? reply({ status_code: 401, error_type: "unauthenticated", message: "the provider's own words" }, 401) : undefined);
+  await rejects("meetingsKeyRefused", w.start(BY_SONIOX));
+  assert.deepEqual(deleted().map(r => r.url), [`${SONIOX}/files/${asked()[0].body.file_id}`]);
+});
+
+test("Soniox writes no summary, whatever the model is called", async () => {
+  const w = await world({ system: talk(1), channels: ["system"], durationMs: MINUTE });
+  await rejects("meetingsModelUnsuitable", w.start({ summary: { provider: "Soniox", model: "my-own-model" } }));
+  await rejects("meetingsModelUnsuitable", w.start({ summary: { provider: "Soniox", model: "stt-async-v6" } }));
+  assert.equal(sent.length, 0, "refused before anything is sent");
+});
+
+test("Soniox: what a crash left there is deleted by the next run", async () => {
+  const w = await world({ system: talk(1), channels: ["system"], durationMs: MINUTE });
+  fs.mkdirSync(w.workPath(), { recursive: true });
+  fs.writeFileSync(w.workPath("uploads.json"), JSON.stringify(["soniox/transcriptions/job-old", "soniox/files/file-old"]));
+  assert.equal((await w.start(BY_SONIOX)).state, "ready");
+  assert.deepEqual(deleted().slice(0, 2).map(r => r.url), [`${SONIOX}/transcriptions/job-old`, `${SONIOX}/files/file-old`]);
+  assert.deepEqual(JSON.parse(fs.readFileSync(w.workPath("uploads.json"), "utf8")), []);
 });
 
 test("the summary's schema is strict", () => {
@@ -931,6 +1044,23 @@ test("the answers as the providers give them", () => {
   assert.deepEqual(general.read(candidate("MAX_TOKENS", '{"segments":[{"sta'), part), { readable: false, truncated: true, spans: [] });
   assert.equal(general.read(candidate("SAFETY", ""), part).readable, false);
   assert.equal(general.read('{"promptFeedback":{"blockReason":"OTHER"}}', part).readable, false);
+
+  const soniox = createTranscriber({ provider: "Soniox", model: "stt-async-v6" });
+  assert.deepEqual([soniox.grain, typeof soniox.removeFile], ["word", "function"]);
+  const token = (text, start_ms, end_ms, language = "en") => ({ text, start_ms, end_ms, confidence: 0.9, language });
+  const pieces = [token("Hel", 10, 90), token("lo", 110, 160), token(",", 160, 170), token(" wor", 500, 700), token("ld", 700, 1000), token("!", 1000, 1010),
+    token(" Здра", 2000, 2300, "bg"), token("вей", 2300, 2600, "bg"), { text: "[laughter]", start_ms: 2700, end_ms: 2900, is_audio_event: true }];
+  const heard = soniox.read(JSON.stringify({ id: "job", text: "Hello, world! Здравей", tokens: pieces }), part);
+  assert.deepEqual(heard.spans, [{ start: 60_010, end: 60_170, text: "Hello," }, { start: 60_500, end: 61_010, text: " world!" }, { start: 62_000, end: 62_600, text: " Здравей" }],
+    "pieces become words, punctuation with them, the space before");
+  assert.deepEqual([heard.readable, heard.truncated, heard.languages], [true, false, ["en", "bg"]]);
+  const unspaced = soniox.read(JSON.stringify({ text: "会議です", tokens: [token("会", 0, 100, "ja"), token("議", 100, 200, "ja"), token("です", 200, 400, "ja")] }), part);
+  assert.equal(unspaced.spans.length, 3, "not one endless word where nobody writes spaces");
+  assert.deepEqual(soniox.read(JSON.stringify({ text: "", tokens: [] }), part), { readable: true, truncated: false, languages: [], spans: [] }, "silence");
+  assert.deepEqual(soniox.read(JSON.stringify({ text: "no tokens at all", tokens: [] }), part).spans, [{ start: null, end: null, text: "no tokens at all" }]);
+  for (const body of ["<html>", "{}", JSON.stringify({ text: "x" }), JSON.stringify({ status_code: 409, error_type: "transcription_invalid_state" })]) {
+    assert.equal(soniox.read(body, part).readable, false, body);
+  }
 });
 
 // Two minutes of talk in one part.
@@ -1375,6 +1505,11 @@ test("the estimate", () => {
   close(other.transcription.cost.min, 0.54, "the least");
   assert.deepEqual(other.requests, { min: 81, max: 481 });
 
+  const soniox = on({ ...gemini, transcription: { provider: "Soniox", model: "stt-async-v6" } }, "2026-11-25");
+  close(soniox.transcription.cost.max, 0.4, "$0.10 an hour of each channel");
+  close(soniox.transcription.cost.min, 0.2, "the least");
+  assert.deepEqual(soniox.requests, { min: 10, max: 31 }, "parts as long as the speech model's");
+
   const custom = on({ ...gemini, summary: { provider: "Gemini", model: "my-own-model" } }, "2026-11-22");
   assert.equal(custom.cost, null);
   assert.ok(custom.transcription.cost, "what is known stays");
@@ -1384,6 +1519,7 @@ test("the estimate", () => {
   const pipeline = createPipeline({ store: {}, workDir: temp, getSettings: () => ({}), getApiKey: async () => "", openAudio: async () => ({}) });
   assert.equal(pipeline.estimate(meeting).transcription.model, "gemini-3.5-transcribe");
   assert.equal(pipeline.estimate(meeting, { transcription: { provider: "OpenAI" } }).transcription.model, "gpt-transcribe");
+  assert.equal(pipeline.estimate(meeting, { transcription: { provider: "Soniox" } }).transcription.model, "stt-async-v6");
 });
 
 test("every code and text in both languages", () => {

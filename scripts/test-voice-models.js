@@ -17,14 +17,21 @@ const ANSWERS = [
   [/audio\/transcriptions$/, { text: "hello world" }],
   [/chat\/completions$/, { choices: [{ message: { content: "answer" } }] }],
   [/:generateContent$/, { candidates: [{ content: { parts: [{ text: "answer" }] } }] }],
-  [/\/interactions$/, { steps: [{ type: "model_output", content: [{ type: "text", text: "hello world" }] }] }]
+  [/\/interactions$/, { steps: [{ type: "model_output", content: [{ type: "text", text: "hello world" }] }] }],
+  // Soniox: a file, a job that is over at the first question, its transcript; a DELETE gets the same 200.
+  [/soniox\.com\/v1\/files$/, { id: "file-1", filename: "speech.wav", size: 3244, created_at: "2026-11-25T00:00:00Z" }],
+  [/soniox\.com\/v1\/transcriptions$/, { id: "job-1", status: "queued", error_type: null, error_message: null }],
+  [/soniox\.com\/v1\/transcriptions\/job-1$/, { id: "job-1", status: "completed", error_type: null, error_message: null }],
+  [/soniox\.com\/v1\/transcriptions\/job-1\/transcript$/, { id: "job-1", text: "hello world", tokens: [] }],
+  [/soniox\.com\/v1\/files\/file-1$/, {}]
 ];
 let reply = null;
 async function fakeFetch(url, options) {
+  options.signal?.throwIfAborted();
   const body = options.body instanceof FormData
     ? [...options.body.entries()].filter(([name]) => name !== "file")
-    : JSON.parse(options.body);
-  sent.push({ url: String(url), headers: options.headers, body });
+    : options.body === undefined ? undefined : JSON.parse(options.body);
+  sent.push({ url: String(url), method: options.method || "GET", headers: options.headers, body });
   const answer = reply?.(url, body) ?? ANSWERS.find(([re]) => re.test(url))?.[1];
   assert.ok(answer, `a stubbed answer for ${url}`);
   return answer instanceof Response ? answer : new Response(JSON.stringify(answer), { status: 200 });
@@ -42,7 +49,7 @@ Module._load = function (request, parent, isMain) {
 
 const voice = name => require(path.join(VOICE, name));
 const catalog = voice("catalog"), settings = voice("settings"), store = voice("job-store");
-const gemini = voice("providers/gemini"), openai = voice("providers/openai");
+const gemini = voice("providers/gemini"), openai = voice("providers/openai"), soniox = voice("providers/soniox");
 const { transcribeJob, transcribeFile, maxRecordingBytes } = voice("transcription");
 const { createQueue, jobSettings } = voice("queue");
 const rewrite = voice("rewrite");
@@ -194,6 +201,32 @@ test("an unknown id gets only what is safe", () => {
   assert.equal(modelInfo("OpenAI", "gpt-6-luna-2099-01-01").thinking, undefined, "nothing is read out of a name");
 });
 
+test("Soniox hears and speaks, and writes nothing", () => {
+  assert.deepEqual(PROVIDERS, ["OpenAI", "Gemini", "Soniox"]);
+  assert.deepEqual(Object.fromEntries(Object.entries(TASKS).map(([id, spec]) => [id, spec.models.Soniox])), {
+    dictation: "stt-async-v6", commands: "stt-async-v6", rewrite: undefined, edit: undefined, ask: undefined,
+    readAloud: "tts-rt-v2", meetingTranscription: "stt-async-v6", meetingSummary: undefined
+  });
+  assert.deepEqual(choices("rewrite", "Soniox"), []);
+  assert.deepEqual(choices("meetingTranscription", "Soniox"), ["stt-async-v6"]);
+  assert.equal(modelInfo("Soniox", "stt-async-v6").timestamps, "word", "a meeting's times are exact");
+  assert.equal(currentModel("Soniox", "stt-async-v5", "2026-12-14"), "stt-async-v5");
+  assert.equal(currentModel("Soniox", "stt-async-v5", "2026-12-15"), "stt-async-v6");
+  assert.deepEqual(modelInfo("Soniox", "my-own-model"), { api: "async", language: "language_hints", vocabulary: "context", timestamps: "word" });
+});
+
+test("every provider that reads has voices of its own", () => {
+  const { VOICES, VOICE_STYLES, voiceFor } = catalog;
+  assert.deepEqual(Object.keys(VOICES).sort(), Object.keys(TASKS.readAloud.models).sort());
+  const all = Object.values(VOICES).flat();
+  assert.equal(new Set(all).size, all.length, "a name says whose voice it is");
+  for (const name of all) assert.ok(VOICE_STYLES[name], `${name} is described`);
+  assert.deepEqual([voiceFor({}, "Gemini"), voiceFor({}, "Soniox"), voiceFor({}, "OpenAI")], ["Kore", "Maya", ""]);
+  const s = { readAloudVoice: "Puck", readAloudVoices: { Soniox: " Nina " } };
+  assert.deepEqual([voiceFor(s, "Gemini"), voiceFor(s, "Soniox")], ["Puck", "Nina"]);
+  assert.equal(voiceFor({ readAloudVoice: "Puck" }, "Soniox"), "Maya", "never Gemini's voice at another provider");
+});
+
 // ---------- resolver ----------
 test("with nothing saved every task has the plan's default", () => {
   assert.equal(chosen({}, "dictation"), "OpenAI gpt-transcribe");
@@ -214,6 +247,18 @@ test("tasks follow the dictation, meetings do not", () => {
   assert.equal(chosen(openAi, "meetingSummary"), "Gemini gemini-3.8-flash");
   s.tasks.commands = { provider: "OpenAI", models: { OpenAI: "my-speech" } };
   assert.equal(chosen(s, "commands"), "OpenAI my-speech");
+});
+
+test("a task that follows the dictation to Soniox is done by its own first provider", () => {
+  const s = { tasks: { dictation: { provider: "Soniox" }, edit: { provider: "", models: { OpenAI: "gpt-6.1-terra" } }, ask: { provider: "Gemini" } } };
+  assert.equal(chosen(s, "dictation"), "Soniox stt-async-v6");
+  assert.equal(chosen(s, "commands"), "Soniox stt-async-v6", "commands are heard, Soniox can");
+  assert.equal(chosen(s, "rewrite"), "OpenAI gpt-6-luna", "text is written, Soniox cannot");
+  assert.equal(chosen(s, "edit"), "OpenAI gpt-6.1-terra", "with the model saved for that provider");
+  assert.equal(chosen(s, "ask"), "Gemini gemini-3.5-flash-lite", "a provider of its own stays");
+  assert.deepEqual(resolveTask(s, "rewrite", { provider: "Soniox" }), { provider: "Soniox", model: "" }, "named for one run: not swapped, refused");
+  assert.deepEqual(jobSettings(s), { Provider: "Soniox", Model: "stt-async-v6", Language: "auto", TextProvider: "OpenAI", TextModel: "gpt-6-luna" });
+  assert.equal(chosen(s, "meetingTranscription"), "Gemini gemini-3.5-transcribe", "meetings do not follow");
 });
 
 test("an override changes one run, never the provider behind one's back", () => {
@@ -368,6 +413,29 @@ test("a provider a task cannot have is refused, not reset", async () => {
   assert.equal(settings.load().tasks.ask.provider, "");
 });
 
+test("Soniox in the settings: its tasks, a key, a voice beside Gemini's", async () => {
+  const { dir, loaded } = settingsFrom({ provider: "Gemini", models: { Gemini: "gemini-3.5-transcribe" }, readAloudVoice: "Puck", readAloudVoices: 7, apiKeysEnc: GEMINI_KEY });
+  assert.deepEqual(loaded.readAloudVoices, { Soniox: "" });
+  assert.deepEqual(loaded.tasks.dictation.models, { OpenAI: "", Gemini: "gemini-3.5-transcribe", Soniox: "" }, "older settings get the new provider");
+  await settings.save({ tasks: { dictation: { provider: "Soniox" }, readAloud: { provider: "Soniox" }, meetingTranscription: { provider: "Soniox" } }, readAloudVoices: { Soniox: "Nina" } });
+  await settings.setApiKey("Soniox", "test-soniox");
+  await assert.rejects(settings.save({ tasks: { rewrite: { provider: "Soniox" } } }), /Unknown provider for rewrite/);
+  const s = reload(dir);
+  assert.equal(chosen(s, "dictation"), "Soniox stt-async-v6");
+  assert.equal(chosen(s, "readAloud"), "Soniox tts-rt-v2");
+  assert.equal(chosen(s, "meetingTranscription"), "Soniox stt-async-v6");
+  assert.equal(chosen(s, "rewrite"), "OpenAI gpt-6-luna");
+  assert.equal(await settings.getApiKey("Soniox"), "test-soniox");
+  assert.deepEqual([catalog.voiceFor(s, "Gemini"), catalog.voiceFor(s, "Soniox")], ["Puck", "Nina"]);
+  assert.equal(onDisk(dir).voice.readAloudVoice, "Puck", "what an older version sends to Gemini is still Gemini's");
+  assert.deepEqual(changed(s), changed(loaded), "nothing to tell about a provider that is new");
+
+  // An old file that names it by hand: no default of that time to tell about.
+  const named = settingsFrom({ provider: "Soniox", models: {}, apiKeysEnc: { Soniox: enc("test-soniox") } }).loaded;
+  assert.equal(chosen(named, "dictation"), "Soniox stt-async-v6");
+  assert.deepEqual(named.modelChanges, []);
+});
+
 test("a dated id typed by hand works like its model; a preview without a date stays", () => {
   const dated = catalog.modelInfo("Gemini", "gemini-3.5-transcribe-2026-08-01");
   assert.deepEqual([dated.api, dated.timestamps, dated.tasks.includes("meetingTranscription")], ["interactions", "word", true]);
@@ -475,6 +543,22 @@ test("what the Settings page sends is checked", () => {
   bad.apiKeys = { OpenAI: { set: "has space" } };
   assert.deepEqual(Object.keys(validateSettings(bad, PROVIDERS).errors).sort(),
     ["apiKey.OpenAI", "tasks.ask", "tasks.dictation", "tasks.edit", "tasks.meetingSummary", "tasks.readAloud"]);
+
+  const third = pagePayload();
+  third.tasks.dictation.provider = third.tasks.readAloud.provider = "Soniox";
+  third.readAloudVoices = { Soniox: "Nina", Elsewhere: "x" };
+  third.apiKeys = { Soniox: { set: "test-key" } };
+  const taken = validateSettings(third, PROVIDERS);
+  assert.deepEqual(taken.errors, {});
+  assert.deepEqual([taken.patch.readAloudVoice, taken.patch.readAloudVoices], ["Kore", { Soniox: "Nina" }], "each provider's voice under its own key");
+  assert.deepEqual(taken.keys, { Soniox: { value: "test-key" } });
+  assert.equal(validateSettings(pagePayload(), PROVIDERS).patch.readAloudVoices, undefined, "not sent: not changed");
+  for (const voices of [{ Soniox: "two words" }, { Soniox: 7 }, "Nina"]) {
+    assert.deepEqual(Object.keys(validateSettings({ ...pagePayload(), readAloudVoices: voices }, PROVIDERS).errors), ["readAloudVoice"]);
+  }
+  const text = pagePayload();
+  text.tasks.rewrite.provider = "Soniox";
+  assert.deepEqual(Object.keys(validateSettings(text, PROVIDERS).errors), ["tasks.rewrite"], "no text task at Soniox");
 });
 
 // ---------- requests ----------
@@ -594,6 +678,182 @@ test("read aloud asks for the task's model", async () => {
     input: [{ type: "user_input", content: [{ type: "text", text: "Hello." }] }],
     response_format: { type: "audio" }, generation_config: { speech_config: [{ voice: "Kore" }] }
   });
+});
+
+// ---------- Soniox ----------
+const SONIOX = "https://api.soniox.com/v1/";
+const calls = () => sent.map(r => `${r.method} ${r.url.replace(SONIOX, "")}`);
+const SONIOX_KEY = { Authorization: "Bearer test-key" };
+const jobState = url => /\/transcriptions\/job-1$/.test(url);
+
+test("Soniox dictation: a file, a job, its transcript, and nothing left there", async () => {
+  const text = await soniox.transcribe({ wavPath: wav, model: "stt-async-v6", language: "bg", vocabulary: ["Acme", "Widget CLI"], apiKey: "test-key" });
+  assert.equal(text, "hello world");
+  assert.deepEqual(calls(), ["POST files", "POST transcriptions", "GET transcriptions/job-1", "GET transcriptions/job-1/transcript",
+    "DELETE transcriptions/job-1", "DELETE files/file-1"]);
+  const [upload, create, state] = sent;
+  assert.deepEqual([upload.headers, upload.body], [SONIOX_KEY, []], "the form sets its own content type; the file is its only field");
+  assert.deepEqual(create.headers, { ...SONIOX_KEY, "content-type": "application/json" });
+  assert.deepEqual(create.body, { model: "stt-async-v6", file_id: "file-1", language_hints: ["bg"], context: { terms: ["Acme", "Widget CLI"] } });
+  assert.deepEqual([state.headers, state.body], [SONIOX_KEY, undefined]);
+
+  sent.length = 0;
+  await soniox.transcribe({ wavPath: wav, model: "stt-async-v6", language: "auto", apiKey: "test-key" });
+  assert.deepEqual(sent[1].body, { model: "stt-async-v6", file_id: "file-1" }, "detected: no hint, and no empty context");
+
+  sent.length = 0;
+  const many = Array.from({ length: 2000 }, (_, i) => `term-number-${i}`);
+  await soniox.transcribe({ wavPath: wav, model: "stt-async-v6", language: "auto", vocabulary: many, apiKey: "test-key" });
+  const { terms } = sent[1].body.context;
+  assert.ok(terms.length > 100 && terms.join(" ").length <= 5000, "a dictionary larger than the context is cut, in order");
+  assert.deepEqual(terms.slice(0, 2), ["term-number-0", "term-number-1"]);
+});
+
+test("Soniox dictation through the settings: its model, its key, a job that takes a while", async () => {
+  const states = ["queued", "processing", "something new", "completed"];
+  reply = url => (jobState(url) && sent.at(-1).method === "GET" ? { status: states.shift() } : null);
+  const keys = [];
+  const text = await transcribeFile({ wavPath: wav, provider: "soniox", model: "", language: "auto", getApiKey: async p => { keys.push(p); return "test-key"; } });
+  assert.equal(text, "hello world");
+  assert.deepEqual(keys, ["Soniox"]);
+  assert.equal(sent[1].body.model, "stt-async-v6");
+  assert.equal(sent.filter(r => r.method === "GET" && jobState(r.url)).length, 4, "asked until it is over; an unknown state is not an end");
+  reply = null;
+  await onDay("2026-12-16", async () => {
+    sent.length = 0;
+    await transcribeFile({ wavPath: wav, provider: "Soniox", model: "stt-async-v5", language: "auto", getApiKey });
+    assert.equal(sent[1].body.model, "stt-async-v6", "a model that stopped gives way");
+  });
+});
+
+test("Soniox dictation: a failed job, a refused key, a refused context, a cancel", async () => {
+  const errors = voice("errors");
+  for (const [job, kind, retryable] of [
+    [{ status: "error", error_type: "organization_balance_exhausted", error_message: "no balance" }, "QuotaExhausted", false],
+    [{ status: "failed", error_type: "invalid_audio_file", error_message: "not audio" }, "BadRequest", false],
+    [{ status: "error", error_type: "internal_error", error_message: "oops" }, "ServerError", true],
+    [{ status: "error" }, "ServerError", true]
+  ]) {
+    sent.length = 0;
+    reply = url => (jobState(url) && sent.at(-1).method === "GET" ? job : null);
+    await assert.rejects(soniox.transcribe({ wavPath: wav, model: "stt-async-v6", language: "auto", apiKey: "test-key" }), error => {
+      assert.ok(error instanceof errors.VoiceError);
+      assert.deepEqual([error.kind, error.retryable], [kind, retryable], JSON.stringify(job));
+      if (job.error_message) assert.ok(error.longMessage.includes(job.error_message), "with what Soniox said");
+      return true;
+    });
+    assert.deepEqual(calls().slice(-2), ["DELETE transcriptions/job-1", "DELETE files/file-1"], "deleted after a failure too");
+  }
+
+  sent.length = 0;
+  reply = () => new Response(JSON.stringify({ status_code: 401, error_type: "unauthenticated", message: "Incorrect API key provided." }), { status: 401 });
+  await assert.rejects(soniox.transcribe({ wavPath: wav, model: "stt-async-v6", language: "auto", apiKey: "test-key" }),
+    error => error.kind === "Auth" && error.providerCode === "unauthenticated" && error.longMessage.includes("Incorrect API key provided."));
+  assert.deepEqual(calls(), ["POST files"], "nothing was made there, nothing to delete");
+
+  sent.length = 0;
+  let refused = 0;
+  reply = url => (/\/transcriptions$/.test(url) && !refused++
+    ? new Response(JSON.stringify({ status_code: 400, error_type: "invalid_request", message: "Invalid context." }), { status: 400 }) : null);
+  assert.equal(await soniox.transcribe({ wavPath: wav, model: "stt-async-v6", language: "en", vocabulary: ["Acme"], apiKey: "test-key" }), "hello world");
+  assert.deepEqual(sent.filter(r => r.url.endsWith("/transcriptions")).map(r => r.body.context), [{ terms: ["Acme"] }, undefined], "the dictionary never costs a dictation");
+
+  sent.length = 0;
+  const stop = new AbortController();
+  reply = url => { if (jobState(url) && sent.at(-1).method === "GET") { stop.abort(); return { status: "processing" }; } return null; };
+  await assert.rejects(soniox.transcribe({ wavPath: wav, model: "stt-async-v6", language: "auto", apiKey: "test-key", signal: stop.signal }), error => error.kind === "Cancelled");
+  assert.deepEqual(calls().slice(-2), ["DELETE transcriptions/job-1", "DELETE files/file-1"], "a cancelled dictation is not left there either");
+});
+
+test("Soniox's errors are read in both of their shapes", () => {
+  const { classify } = voice("errors");
+  const api = (status, error_type, message = "its own words") => classify({ status, provider: "Soniox", body: JSON.stringify({ status_code: status, error_type, message, validation_errors: [] }) });
+  const speech = (status, error_type) => classify({ status, provider: "Soniox", body: JSON.stringify({ error_code: status, error_type, error_message: "its own words" }) });
+  const told = e => [e.kind, e.retryable, e.providerCode];
+  assert.deepEqual(told(api(401, "unauthenticated")), ["Auth", false, "unauthenticated"]);
+  assert.deepEqual(told(api(402, "organization_balance_exhausted")), ["QuotaExhausted", false, "organization_balance_exhausted"]);
+  assert.deepEqual(told(api(429, "limit_exceeded")), ["RateLimited", true, "limit_exceeded"]);
+  assert.deepEqual(told(api(400, "model_not_available")), ["ModelNotFound", false, "model_not_available"]);
+  assert.deepEqual(told(api(400, "invalid_request")), ["BadRequest", false, "invalid_request"]);
+  assert.deepEqual(told(api(500, "internal_error")), ["ServerError", true, "internal_error"]);
+  assert.deepEqual(told(speech(401, "unauthenticated")), ["Auth", false, "unauthenticated"]);
+  assert.deepEqual(told(speech(402, "project_monthly_budget_exhausted")), ["QuotaExhausted", false, "project_monthly_budget_exhausted"]);
+  assert.deepEqual(told(speech(408, "request_timeout")), ["Timeout", true, "request_timeout"]);
+  assert.deepEqual(told(speech(503, "service_unavailable")), ["ServerError", true, "service_unavailable"]);
+  for (const e of [api(401, "unauthenticated"), speech(503, "service_unavailable")]) assert.ok(e.longMessage.includes("its own words"));
+  assert.equal(classify({ status: 401, provider: "OpenAI", body: JSON.stringify({ error: { message: "bad key", code: "invalid_api_key" } }) }).providerCode, "invalid_api_key", "the others' shape as before");
+});
+
+const audio = (...pieces) => new Response(new ReadableStream({
+  start(stream) { for (const bytes of pieces) stream.enqueue(new Uint8Array(bytes)); stream.close(); }
+}), { status: 200 });
+
+test("Soniox speech: the request, whole samples, and silence is a failure", async () => {
+  const said = { model: "tts-rt-v2", voice: "Nina", apiKey: "test-key" };
+  reply = () => audio([1, 2, 3], [4, 5, 6], [7]);
+  const heard = [];
+  const r = await request(async () => { for await (const pcm of soniox.speak({ ...said, text: "Hello.", language: "en" })) heard.push([...pcm]); });
+  assert.equal(r.url, "https://tts-rt.soniox.com/tts");
+  assert.deepEqual(r.headers, { ...SONIOX_KEY, "content-type": "application/json" });
+  assert.deepEqual(r.body, { model: "tts-rt-v2", language: "en", voice: "Nina", audio_format: "pcm_s16le", sample_rate: 24000, text: "Hello." });
+  assert.deepEqual(heard, [[1, 2], [3, 4, 5, 6]], "never half a sample, however the network cut it");
+
+  // The language it has to be told: the dictation's when one is set, else by the script.
+  for (const [language, text, expected] of [["bg", "Hello.", "bg"], ["pt-BR", "Olá.", "pt"], ["auto", "Hello there.", "en"], ["auto", "Здравей, как си?", "bg"],
+    ["auto", "Виж README.md и package.json в проекта", "bg"], ["auto", "The word “здравей” means hello in Bulgarian, as everybody here knows.", "en"],
+    [undefined, "12345", "en"]]) {
+    reply = () => audio([0, 0]);
+    const sentAs = await request(async () => { for await (const _ of soniox.speak({ ...said, text, language })); });
+    assert.equal(sentAs.body.language, expected, `${language}: ${text}`);
+  }
+
+  reply = () => audio();
+  await assert.rejects((async () => { for await (const _ of soniox.speak({ ...said, text: "Hello.", language: "en" })); })(),
+    error => error.kind === "ServerError" && error.retryable, "a 200 with no audio");
+  reply = () => new Response(JSON.stringify({ error_code: 402, error_type: "organization_balance_exhausted", error_message: "no balance" }), { status: 402 });
+  await assert.rejects((async () => { for await (const _ of soniox.speak({ ...said, text: "Hello.", language: "en" })); })(),
+    error => error.kind === "QuotaExhausted" && error.longMessage.includes("no balance"));
+});
+
+test("read aloud goes to the task's provider, with that provider's voice, key and chunks", async () => {
+  const overlay = new EventEmitter();
+  overlay.player = { begin() {}, push() {}, end() {}, stop() {} };
+  const text = Array.from({ length: 40 }, (_, i) => `Sentence number ${i} is here to be read aloud by somebody.`).join(" ");
+  const read = async (tasks, speak) => {
+    const asked = [], keys = [], states = [];
+    const s = { ...settingsFrom({}).loaded, language: "bg", readAloudVoice: "Puck", readAloudVoices: { Soniox: "Nina" } };
+    Object.assign(s.tasks.readAloud, tasks);
+    const reader = voice("tts").createReadAloud({
+      overlay, getSettings: () => s, getApiKey: async provider => { keys.push(provider); return "test-key"; },
+      ...(speak !== null && { speak: async function* (options) { asked.push(options); yield Buffer.alloc(4); } })
+    });
+    reader.on("state", state => states.push(state));
+    const done = new Promise(resolve => reader.once("done", resolve));
+    reader.start(text);
+    const record = await done;
+    reader.stop();
+    return { asked, keys, record, states };
+  };
+
+  const bySoniox = await read({ provider: "Soniox" });
+  assert.deepEqual(bySoniox.keys, ["Soniox"]);
+  assert.deepEqual([bySoniox.record.provider, bySoniox.record.model, bySoniox.record.voice], ["Soniox", "tts-rt-v2", "Nina"]);
+  assert.ok(bySoniox.asked.length >= 3 && bySoniox.asked.every(a => a.text.length <= 900), "under the two minutes a request speaks");
+  assert.ok(bySoniox.asked.every(a => a.voice === "Nina" && a.model === "tts-rt-v2" && a.language === "bg" && a.apiKey === "test-key"));
+  assert.equal(bySoniox.asked.map(a => a.text).join(" "), text, "all of it, in order");
+  assert.equal(bySoniox.states[0].provider, "Soniox", "the panel names who is preparing it");
+
+  const byGemini = await read({ provider: "Gemini" });
+  assert.deepEqual(byGemini.keys, ["Gemini"]);
+  assert.deepEqual([byGemini.record.provider, byGemini.record.voice], ["Gemini", "Puck"]);
+  assert.ok(byGemini.asked.length < bySoniox.asked.length && byGemini.asked.some(a => a.text.length > 900), "Gemini's chunks as before");
+
+  // With nothing replaced, the request is Soniox's own.
+  sent.length = 0;
+  reply = () => audio([0, 0, 0, 0]);
+  const real = await read({ provider: "Soniox", models: { Soniox: "tts-rt-v2" } }, null);
+  assert.ok(sent.length >= 3 && sent.every(r => r.url === "https://tts-rt.soniox.com/tts" && r.body.voice === "Nina" && r.body.language === "bg"));
+  assert.equal(real.record.completed, true);
 });
 
 test("text tasks take their own settings when the caller names none", async () => {
@@ -798,6 +1058,8 @@ test("the recording limit is the provider's", () => {
   const openAi = maxRecordingBytes({ maxRecordingMinutes: 60 });
   assert.equal(gemini7 / 32000 / 60, 7);
   assert.equal(openAi / 32000 / 60, 13);
+  assert.equal(maxRecordingBytes({ maxRecordingMinutes: 60, tasks: { dictation: { provider: "Soniox" } } }) / 32000 / 60, 60, "Soniox takes hours: the user's own limit");
+  assert.equal(maxRecordingBytes({ maxRecordingMinutes: 60 }, "Elsewhere") / 32000 / 60, 13, "a name nobody knows: the least generous file limit");
 });
 
 // ---------- texts ----------
@@ -806,6 +1068,8 @@ test("every task and text in both languages", () => {
   const page = fs.readFileSync(path.join(VOICE, "ui", "settings-models.js"), "utf8");
   const keys = [
     "settings.models", "voice.balloon.modelsReplaced", "voice.settings.models.keys", "voice.settings.models.tasks",
+    "voice.errors.tooLarge.soniox", "voice.settings.readAloudHint",
+    ...[...new Set(Object.values(catalog.VOICE_STYLES).flat())].map(style => `voice.catalog.style.${style}`),
     ...Object.keys(TASKS).map(task => `voice.task.${task}`),
     ...[...page.matchAll(/"(voice\.settings\.[\w.]+)"/g)].map(m => m[1])
   ];
@@ -815,8 +1079,13 @@ test("every task and text in both languages", () => {
     texts[language] = keys.map(key => i18n.t(key));
     texts[language].forEach((text, i) => assert.notEqual(text, keys[i], `${language}: ${keys[i]}`));
   }
-  const untranslated = keys.filter((key, i) => key.startsWith("voice.task.") && texts.en[i] === texts.bg[i]);
+  const untranslated = keys.filter((key, i) => /^voice\.(task|catalog|errors)\./.test(key) && texts.en[i] === texts.bg[i]);
   assert.deepEqual(untranslated, []);
+  for (const language of ["en", "bg"]) {
+    i18n.setLanguage(language);
+    assert.match(i18n.t("voice.settings.readAloudHint", { hotkey: "Ctrl+Shift+Space", provider: "Soniox" }), /Soniox/, "the key the reading uses is named");
+    assert.doesNotMatch(i18n.t("voice.settings.readAloudHint", { hotkey: "x", provider: "Soniox" }), /Gemini/);
+  }
 });
 
 (async () => {

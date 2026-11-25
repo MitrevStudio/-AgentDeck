@@ -27,15 +27,18 @@ class VoiceError extends Error {
 const configuration = message => new VoiceError("Configuration", t("voice.errors.notConfigured"), message);
 const tooLarge = message => new VoiceError("PayloadTooLarge", t("voice.errors.tooLarge.short"), message);
 
-// Both providers answer {"error":{"message","code","status"}}; Gemini puts the useful code in error.details[].reason.
+// OpenAI and Gemini answer {"error":{"message","code","status"}}; Gemini puts the useful code in error.details[].reason.
+// Soniox answers flat, its code in error_type: {"error_type","message"} from its API, {"error_type","error_message"}
+// from where it speaks.
 function parseErrorBody(body) {
   let root;
   try { root = JSON.parse(body); } catch { return {}; }
   if (Array.isArray(root)) root = root[0]; // a streamed request (TTS) is answered with a one-element array
+  const str = v => (typeof v === "string" ? v : undefined);
+  if (str(root?.error_type)) return { message: str(root.message) ?? str(root.error_message), code: root.error_type };
   const error = root && typeof root === "object" ? root.error : undefined;
   if (typeof error === "string") return { message: error };
   if (!error || typeof error !== "object") return {};
-  const str = v => (typeof v === "string" ? v : undefined);
   let code = str(error.code);
   if (code === undefined && Array.isArray(error.details)) code = error.details.map(d => str(d?.reason)).find(Boolean);
   if (code === undefined) code = str(error.status);
@@ -65,17 +68,18 @@ function classifyResponse({ status, statusText = "", body = "", provider, retryA
     providerMessage && providerMessage.trim() ? `${hint}\n\n${t("voice.errors.providerSays", { provider, message: providerMessage })}` : hint,
     { retryable, status, retryAfterMs, providerCode: providerCode ?? null });
   const invalidKey = () => make("Auth", t("voice.errors.auth.short"), t("voice.errors.auth.long", { provider }), false);
+  const noModel = () => make("ModelNotFound", t("voice.errors.modelNotFound.short"), t("voice.errors.modelNotFound.long", { provider }), false);
+  const quota = () => make("QuotaExhausted", t("voice.errors.quota.short"), t("voice.errors.quota.long", { provider }), false);
 
   switch (status) {
     case 401: return invalidKey();
+    case 402: return quota(); // Soniox: the balance or a monthly budget is used up
     case 403: return make("Auth", t("voice.errors.forbidden.short"), t("voice.errors.forbidden.long", { provider }), false);
-    case 404: return make("ModelNotFound", t("voice.errors.modelNotFound.short"), t("voice.errors.modelNotFound.long", { provider }), false);
+    case 404: return noModel();
     case 413: return make("PayloadTooLarge", t("voice.errors.tooLarge.short"), t("voice.errors.tooLarge.long", { provider }), false);
     case 408: return make("Timeout", t("voice.errors.timeout.short"), t("voice.errors.timeout.upload", { provider }), true);
     case 429: {
-      if (isQuotaExhausted(providerCode, body)) {
-        return make("QuotaExhausted", t("voice.errors.quota.short"), t("voice.errors.quota.long", { provider }), false);
-      }
+      if (isQuotaExhausted(providerCode, body)) return quota();
       const hint = retryAfterMs > 0
         ? t("voice.errors.rateLimited.after", { provider, seconds: Math.max(1, Math.ceil(retryAfterMs / 1000)) })
         : t("voice.errors.rateLimited.long", { provider });
@@ -85,6 +89,7 @@ function classifyResponse({ status, statusText = "", body = "", provider, retryA
     case 422:
       // Gemini answers 400 (not 401) with API_KEY_INVALID when the key is wrong.
       if (String(providerCode || "").toUpperCase() === "API_KEY_INVALID") return invalidKey();
+      if (providerCode === "model_not_available") return noModel(); // Soniox says it with a 400
       return make("BadRequest", t("voice.errors.badRequest.short", { status }), t("voice.errors.badRequest.long", { provider }), false);
     default:
       if (status >= 500) {

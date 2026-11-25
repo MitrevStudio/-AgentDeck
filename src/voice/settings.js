@@ -11,7 +11,7 @@ const atomic = require("../shared/atomic-file");
 const { isObj } = require("../shared/util");
 const dictation = require("./dictation-options");
 const commandOptions = require("./command-options");
-const { PROVIDERS, TASKS, REVISION, LAST_DAY, providerName, currentModel } = require("./catalog");
+const { PROVIDERS, TASKS, VOICES, REVISION, LAST_DAY, providerName, currentModel } = require("./catalog");
 const { DEFAULT_SHORTCUT } = require("../meetings/capture/shortcut");
 
 const defaults = Object.freeze({
@@ -26,7 +26,10 @@ const defaults = Object.freeze({
   microphoneDeviceId: "",
   useClipboardPaste: true, // paste with Ctrl+V; false = type the text as Unicode keystrokes
   maxRecordingMinutes: 10, // safety net against a recording left running by accident
+  // Gemini's voice, under the name it had while only Gemini read (a version from then shares this file and sends it
+  // to Gemini), and the voice of every provider that came after; empty = the provider's first (catalog.js voiceFor).
   readAloudVoice: "",
+  readAloudVoices: Object.freeze(Object.fromEntries(Object.keys(VOICES).filter(p => p !== "Gemini").map(p => [p, ""]))),
   readAloudSpeed: 1.0, // remembered from the last reading
   hotkeys: Object.freeze({ dictate: "Control+Space", readAloud: "Control+Shift+Space", editSelection: "Control+Alt+Space", ask: "Control+Shift+/", meetingScreenshot: DEFAULT_SHORTCUT }),
   importedFromVoiceTray: null,
@@ -113,8 +116,9 @@ function migrate(v) {
     for (const p of PROVIDERS) dictation.models[p] = str(v.models?.[p], "").trim() || dictation.models[p];
     readAloud.models.Gemini = str(v.readAloudModel, "").trim() || readAloud.models.Gemini;
     const p = dictation.provider;
+    // Those versions knew the two providers of OLD_DEFAULTS; a third one named by hand had no default to move.
     for (const [task, models] of Object.entries(OLD_DEFAULTS)) {
-      if (hasKey(p) && !tasks[task].models[p]) tell(models[p], TASKS[task].models[p]);
+      if (models[p] && hasKey(p) && !tasks[task].models[p]) tell(models[p], TASKS[task].models[p]);
     }
   }
   const outdated = old || !(v.modelsVersion >= REVISION);
@@ -135,6 +139,7 @@ function normalize(v) {
   out.hotkeys = { ...defaults.hotkeys, ...(isObj(v.hotkeys) ? v.hotkeys : {}) };
   out.language = str(v.language, "").trim() || defaults.language;
   for (const k of ["microphoneName", "microphoneDeviceId", "readAloudVoice"]) out[k] = str(v[k], defaults[k]);
+  out.readAloudVoices = Object.fromEntries(Object.keys(defaults.readAloudVoices).map(p => [p, str(v.readAloudVoices?.[p], "").trim()]));
   out.useClipboardPaste = typeof v.useClipboardPaste === "boolean" ? v.useClipboardPaste : defaults.useClipboardPaste;
   const minutes = Math.round(Number(v.maxRecordingMinutes));
   out.maxRecordingMinutes = Number.isFinite(minutes) ? Math.min(60, Math.max(1, minutes)) : defaults.maxRecordingMinutes;
@@ -189,7 +194,8 @@ function mergeTasks(current, patch) {
   return out;
 }
 
-// Shallow patch; `tasks` and `hotkeys` merge deeper so a partial object does not wipe the other entries.
+// Shallow patch; `tasks`, `hotkeys` and `readAloudVoices` merge deeper so a partial object does not wipe the other
+// entries.
 async function save(patch = {}) {
   const cur = stored();
   const p = withoutPrivate(isObj(patch) ? patch : {});
@@ -197,6 +203,7 @@ async function save(patch = {}) {
     ...cur, ...p,
     tasks: mergeTasks(cur.tasks, p.tasks),
     hotkeys: { ...cur.hotkeys, ...(isObj(p.hotkeys) ? p.hotkeys : {}) },
+    readAloudVoices: { ...cur.readAloudVoices, ...(isObj(p.readAloudVoices) ? p.readAloudVoices : {}) },
     apiKeysEnc: cur.apiKeysEnc
   }));
   return load();

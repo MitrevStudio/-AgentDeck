@@ -475,8 +475,8 @@ async function initVoice({ balloon = () => {}, onTrayChanged = () => {}, icon, p
     if (!tts.start(text)) throw new Error(t("voice.errors.nothingToRead"));
   }
 
-  tts.on("state", ({ phase, title, speed, truncated }) => {
-    if (phase === "preparing") freshPanel("preparing", { detail: "Gemini" }, READ_ALOUD);
+  tts.on("state", ({ phase, title, speed, truncated, provider }) => {
+    if (phase === "preparing") freshPanel("preparing", { detail: provider }, READ_ALOUD);
     else if (phase === "playing") {
       if (overlay.state === "speaking") { owner = READ_ALOUD; overlay.update({ paused: false }); return; }
       panel("speaking", { title, speed, paused: false }, READ_ALOUD);

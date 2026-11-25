@@ -1112,10 +1112,43 @@ app.whenReady().then(async () => {
   const check = shot => validateSettings({ ...base, hotkeys: { ...base.hotkeys, meetingScreenshot: shot } }, settings.PROVIDERS, inUse);
   for (const taken of ['Control+Space', 'Control+Shift+Space', 'Control+Alt+Space', 'Control+Shift+/', 'Alt+`', 'shift+a', '']) assert.ok(check(taken).errors['hotkeys.meetingScreenshot'], `refused: ${taken}`);
   assert.equal(check('ctrl+shift+f8').patch.hotkeys.meetingScreenshot, 'Control+Shift+F8');
+
+  // The third provider on the page: a key of its own, the tasks it can do, and what it cannot is shown as done by
+  // who really does it. Saved by the Save below.
+  step('Soniox in Settings');
+  const row = (task, part) => `document.querySelector('[data-task="${task}"] [data-part="${part}"]')`;
+  const choose = (target, value) => inSettings(`(() => { const el = ${target}; el.value = ${js(value)}; el.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  assert.equal(await inSettings("Boolean(document.getElementById('apiKey.Soniox'))"), true, 'a key field of its own');
+  await choose(row('dictation', 'provider'), 'Soniox');
+  assert.equal(await inSettings(`${row('dictation', 'model')}.value`), 'stt-async-v6');
+  assert.equal(await inSettings(`${row('commands', 'model')}.value`), 'stt-async-v6', 'commands are heard by it too');
+  assert.equal(await inSettings(`${row('rewrite', 'provider')}.value`), '', 'rewriting still follows the dictation');
+  assert.equal(await inSettings(`${row('rewrite', 'model')}.value`), 'gpt-6-luna', 'and shows who really writes');
+  assert.match(await inSettings(`${row('rewrite', 'warning')}.textContent`), /Soniox.+OpenAI/);
+  assert.equal(await inSettings(`${row('rewrite', 'warning')}.hidden`), false);
+  assert.equal(await inSettings(`[...${row('rewrite', 'provider')}.options].some(o => o.value === 'Soniox')`), false, 'not offered for text');
+  assert.equal(await inSettings(`[...${row('meetingTranscription', 'provider')}.options].some(o => o.value === 'Soniox')`), true);
+  assert.match(await inSettings("document.getElementById('lengthHint').textContent"), /Soniox/);
+  assert.equal(await inSettings("document.getElementById('raVoice').value"), 'Kore', "Gemini's voice while Gemini reads");
+  assert.match(await inSettings("document.getElementById('raHint').textContent"), /Gemini/);
+  await choose(row('readAloud', 'provider'), 'Soniox');
+  assert.equal(await inSettings(`${row('readAloud', 'model')}.value`), 'tts-rt-v2');
+  assert.equal(await inSettings("document.getElementById('raVoice').value"), 'Maya', "Soniox's own voices, its first");
+  assert.match(await inSettings("document.getElementById('raVoice').selectedOptions[0].textContent"), /женски/, 'each with what tells it apart');
+  assert.match(await inSettings("document.getElementById('raHint').textContent"), /Soniox/, 'the key the reading uses');
+  await choose("document.getElementById('raVoice')", 'Nina');
+  await choose(row('readAloud', 'provider'), 'Gemini');
+  assert.equal(await inSettings("document.getElementById('raVoice').value"), 'Kore', 'each provider keeps its voice');
+  await choose(row('readAloud', 'provider'), 'Soniox');
+  assert.equal(await inSettings("document.getElementById('raVoice').value"), 'Nina');
+  assert.deepEqual(errors, [], 'no error on the way');
   await inSettings(`(() => { const el = document.getElementById('hkMeetingShot');
     el.dispatchEvent(new KeyboardEvent('keydown', { key: 'F8', code: 'F8', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }));
     document.getElementById('save').click(); })()`).catch(() => {});
   await until(() => settings.load().hotkeys.meetingScreenshot === 'Control+Shift+F8', 'the saved key');
+  const saved = settings.load();
+  assert.deepEqual([saved.tasks.dictation.provider, saved.tasks.readAloud.provider, saved.tasks.rewrite.provider], ['Soniox', 'Soniox', '']);
+  assert.deepEqual([saved.readAloudVoice, saved.readAloudVoices], ['Kore', { Soniox: 'Nina' }], "Gemini's voice is still Gemini's");
 
   assert.deepEqual(errors, [], 'no error in Settings either');
   // ---------- leaving ----------
