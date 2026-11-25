@@ -102,7 +102,9 @@ async function attachView(id, view) {
   if (!a || termViews.get(id) !== view) return; // its pane went meanwhile, and the view with it
   // The terminal's size first, so the scrollback wraps as it was written.
   setTermSize(id, a);
-  view.term.write(a.scrollback);
+  // What a program copied in the scrollback is old: written again here, its OSC 52 must not take the clipboard.
+  view.replaying = true;
+  view.term.write(a.scrollback, () => { view.replaying = false; });
   view.attachedEnd = a.end;
   view.queue.forEach(chunk => writeAfter(view, chunk.data, chunk.end));
   view.queue = [];
@@ -134,7 +136,7 @@ function createTermView(id) {
   // query ("?") is not answered, so a program cannot read the clipboard.
   term.parser.registerOscHandler(52, data => {
     const payload = data.slice(data.indexOf(";") + 1);
-    if (!payload || payload === "?" || payload.length > 1_400_000) return true;
+    if (termViews.get(id)?.replaying || !payload || payload === "?" || payload.length > 1_400_000) return true;
     try {
       const bytes = Uint8Array.from(atob(payload), c => c.charCodeAt(0));
       window.manager.copyText(new TextDecoder().decode(bytes));
