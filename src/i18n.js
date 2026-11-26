@@ -876,7 +876,7 @@
       "voice.errors.proxy.authRequired": "The proxy server asks for a user name and password. Enter them in Settings\u00a0→\u00a0Network.",
       "voice.errors.proxy.authRejected": "The proxy server rejected the user name and password. Check them in Settings\u00a0→\u00a0Network.",
       "voice.errors.proxy.authUnsupported": "The proxy server asks for a kind of sign-in AgentDeck cannot do.",
-      "voice.errors.proxy.signInPage": "The request to {provider} was sent on to {host} instead of being answered. A proxy or a network sign-in page is intercepting it: sign in there in a browser, or ask your IT department to let {provider} through.",
+      "voice.errors.proxy.signInPage": "The request to {provider} was redirected to {host} instead of being answered. A proxy or a network sign-in page is intercepting it: sign in there in a browser, or ask your IT department to let {provider} through.",
       "voice.errors.proxy.pac": "The proxy configuration script (PAC) could not be loaded or run. Check its address in Settings\u00a0→\u00a0Network.",
       "voice.errors.cancelled.short": "Cancelled",
       "voice.errors.cancelled.long": "The transcription was cancelled.",
