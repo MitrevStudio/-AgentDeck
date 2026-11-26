@@ -15,7 +15,13 @@
 // asking forever. net.fetch cannot answer such a challenge (it cancels it), so fetch() below is a small fetch over
 // net.request, which can. The password is kept like the API keys - safeStorage (DPAPI) ciphertext, base64, in
 // passwordEnc - and never goes to a page.
-const { net, session, safeStorage } = require("electron");
+//
+// Every request names AgentDeck as its User-Agent, not Chromium's browser one. A filtering proxy (Trend Micro's TMWS
+// for one) takes "Mozilla/5.0 ... Chrome" for somebody browsing and answers with a redirect to its sign-in page,
+// unless the address is on its list of exceptions; a program that says what it is gets through. No request is sent on
+// to another site either: an API does not redirect, a sign-in page does, and the API key would travel with it. Such a
+// redirect fails as REDIRECTED (code), with the site's name in `host`.
+const { app, net, session, safeStorage } = require("electron");
 const settings = require("./voice/settings");
 const { isObj } = require("./shared/util");
 const { t } = require("./i18n");
@@ -234,11 +240,24 @@ const explain = (error, login) => {
 // Header values must be byte strings; Chromium hands over UTF-8 as is.
 const byteString = v => (/[^\x00-\xff]/.test(v) ? Buffer.from(v, "utf8").toString("latin1") : v);
 
+const userAgent = () => `AgentDeck/${app.getVersion()}`;
+
+// Where a redirect leads, when that is another site than the one asked: its host. null when it stays on the same one.
+function otherSite(from, to) {
+  try {
+    const a = new URL(from), b = new URL(to, from);
+    return a.origin === b.origin ? null : b.host || b.protocol;
+  } catch { return "?"; }
+}
+const redirectError = (status, host) =>
+  Object.assign(new Error(`The request was redirected to ${host} (${status})`), { code: "REDIRECTED", host, status });
+
 // fetch(url, {method, headers, body, signal}) -> Response, over net.request: the body streams (pull-driven, so a
 // slow reader holds the download back), and `signal` aborts before or during it with its reason - as Node's fetch
 // does, which keeps "cancelled" and "timed out" apart. A FormData body is sent as the multipart bytes Node's fetch
-// would send, with a Content-Length. Failures are Chromium's Error("net::ERR_..."), or PROXY_AUTH_REQUIRED /
-// PROXY_AUTH_REJECTED (code) when the proxy wanted a sign-in.
+// would send, with a Content-Length. Failures are Chromium's Error("net::ERR_..."), PROXY_AUTH_REQUIRED /
+// PROXY_AUTH_REJECTED (code) when the proxy wanted a sign-in, or REDIRECTED when the answer was a redirect to
+// another site.
 async function request(url, { method = "GET", headers, body = null, signal, session: ses = session.defaultSession, login = loginHandler() } = {}) {
   const head = new Headers(headers);
   if (body instanceof FormData) {
@@ -246,9 +265,10 @@ async function request(url, { method = "GET", headers, body = null, signal, sess
     head.set("content-type", encoded.headers.get("content-type"));
     body = Buffer.from(await encoded.arrayBuffer());
   }
+  if (!head.has("user-agent")) head.set("user-agent", userAgent());
   signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
-    const req = net.request({ url, method, session: ses, cache: "no-store" });
+    const req = net.request({ url, method, session: ses, cache: "no-store", redirect: "manual" });
     for (const [k, v] of head) req.setHeader(k, v);
     let controller = null; // the response body's, once there is one
     let settled = false;
@@ -263,6 +283,13 @@ async function request(url, { method = "GET", headers, body = null, signal, sess
     signal?.addEventListener("abort", onAbort, { once: true });
 
     req.on("login", login);
+    // Followed now or never: a redirect left alone in this event is cancelled.
+    req.on("redirect", (status, _method, to) => {
+      const host = otherSite(url, to);
+      if (!host) { req.followRedirect(); return; }
+      fail(redirectError(status, host));
+      req.abort();
+    });
     req.on("error", e => fail(explain(e, login)));
     req.on("response", res => {
       try {
