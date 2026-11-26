@@ -125,10 +125,11 @@ function errorCode(error) {
 }
 
 // Chromium's network stack (Electron's net, ../network.js) fails with a bare Error("net::ERR_..."); network.js adds
-// PROXY_AUTH_REQUIRED / PROXY_AUTH_REJECTED (as `code`) when the proxy wanted a sign-in it did not get.
+// PROXY_AUTH_REQUIRED / PROXY_AUTH_REJECTED (as `code`) when the proxy wanted a sign-in it did not get, and REDIRECTED
+// (with the other site in `host`) when the answer was a redirect away from the provider.
 function chromiumCode(error) {
   for (let e = error, depth = 0; e && depth < 5; e = e.cause, depth++) {
-    if (e.code === "PROXY_AUTH_REQUIRED" || e.code === "PROXY_AUTH_REJECTED") return e.code;
+    if (e.code === "PROXY_AUTH_REQUIRED" || e.code === "PROXY_AUTH_REJECTED" || e.code === "REDIRECTED") return e.code;
     const m = /\bnet::(ERR_[A-Z0-9_]+)/.exec(String(e.message || ""));
     if (m) return m[1];
   }
@@ -139,6 +140,7 @@ const CHROMIUM = [
   ["voice.errors.proxy.authRequired", false, /^(PROXY_AUTH_REQUIRED|ERR_PROXY_AUTH_REQUESTED(_WITH_NO_CONNECTION)?|ERR_UNEXPECTED_PROXY_AUTH)$/],
   ["voice.errors.proxy.authRejected", false, /^PROXY_AUTH_REJECTED$/],
   ["voice.errors.proxy.authUnsupported", false, /^ERR_PROXY_AUTH_UNSUPPORTED$/],
+  ["voice.errors.proxy.signInPage", false, /^REDIRECTED$/],
   ["voice.errors.proxy.pac", true, /^ERR_(MANDATORY_PROXY_CONFIGURATION_FAILED|PAC_\w+)$/],
   ["voice.errors.proxy.unreachable", true, /^ERR_(PROXY_CONNECTION_FAILED|PROXY_CERTIFICATE_INVALID|PROXY_HTTP_1_1_REQUIRED|SOCKS_CONNECTION_FAILED|SOCKS_\w+)$/],
   ["voice.errors.proxy.refused", true, /^ERR_(TUNNEL_CONNECTION_FAILED|PROXY_UNABLE_TO_CONNECT_TO_DESTINATION|SOCKS_CONNECTION_HOST_UNREACHABLE)$/],
@@ -154,7 +156,9 @@ function classifyChromium(error, code, provider) {
   const [key, retryable] = CHROMIUM.find(([, , re]) => re.test(code)) || ["voice.errors.network.failed", true];
   const short = key.includes(".proxy.") ? t("voice.errors.proxy.short") : t("voice.errors.network.short");
   const detail = String(error?.cause?.message || error?.message || code);
-  return new VoiceError("Network", short, t(key, { provider, error: detail }), { retryable, cause: error });
+  let host = "";
+  for (let e = error, depth = 0; e && depth < 5 && !host; e = e.cause, depth++) if (typeof e.host === "string") host = e.host;
+  return new VoiceError("Network", short, t(key, { provider, error: detail, host }), { retryable, cause: error });
 }
 
 function classifyNetwork(error, provider) {

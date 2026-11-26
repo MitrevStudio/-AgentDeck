@@ -44,6 +44,7 @@ jobs:
       - run: npm run test:taskbar-ui
       - run: npm run test:meetings-recorder
       - run: npm run test:meetings-ui
+      - run: npm run test:network
       - run: npm run test:noise
       - run: npm run test:terminal-viewers
       - run: npm run test:desktop-terminals

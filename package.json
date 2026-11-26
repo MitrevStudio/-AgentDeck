@@ -49,6 +49,7 @@
     "test:desktop-terminals": "node scripts/test-desktop-terminals.js",
     "test:limits": "node scripts/test-limits.js",
     "test:updater": "node scripts/test-updater.js",
+    "test:network": "node scripts/test-network-electron.cjs",
     "test:live": "node scripts/test-live-jobs.js && node scripts/test-live-shared.js && node scripts/test-live-status.js && node scripts/test-live-subagents.js",
     "test:drag-scroll": "node scripts/test-drag-scroll.js",
     "test:codex-links": "node scripts/test-codex-links.js",
