@@ -36,32 +36,47 @@ const POLL_MS = [300, 300, 500, 700, 1000];
 // "Maximum 8,000 tokens (about 10,000 characters)" for the whole context; Cyrillic takes more tokens a character.
 const CONTEXT_CHARS = 5000;
 
-const malformed = (retryable = false) => new VoiceError(retryable ? "ServerError" : "MalformedResponse",
-  t("voice.errors.malformed.short"), t("voice.errors.malformed.unreadable", { provider: PROVIDER }), { retryable });
-
 const auth = apiKey => ({ Authorization: `Bearer ${apiKey}` });
 
-// One request of the file API, answered with its body as text. `json` is sent as JSON, `body` as it is.
-async function send(name, { apiKey, signal, method = "GET", json, body }) {
+// An answer that came with a 2xx and is not what the step answers with: said with the step, the status, the type and
+// how it begins, because between here and Soniox there may be a proxy that answers in its place, and only this tells
+// which request it was and what came instead. A page is named as one, like a page that comes with an error status.
+const START_CHARS = 200;
+function unexpected(step, res, text, retryable = false) {
+  const status = res.status, start = String(text).replace(/\s+/g, " ").trim().slice(0, START_CHARS);
+  const long = start.startsWith("<")
+    ? t("voice.errors.malformed.html", { provider: PROVIDER, status })
+    : t("voice.errors.malformed.unexpected", {
+      provider: PROVIDER, step, status, type: res.headers?.get("content-type") || "-", start: start || "-"
+    });
+  return new VoiceError(retryable ? "ServerError" : "MalformedResponse", t("voice.errors.malformed.short"), long, { retryable, status });
+}
+
+// One request of the file API, answered with its body as text: a JSON object, or it is not an answer of the API's.
+// `step` is the request's name in an error; `again`: asking once more is free, so such an answer may be asked again.
+// `json` is sent as JSON, `body` as it is.
+async function send(step, name, { apiKey, signal, method = "GET", json, body, again = false }) {
   const headers = json ? { ...auth(apiKey), "content-type": "application/json" } : auth(apiKey);
   const res = await network.fetch(`${API}/${name}`, { method, headers, body: json ? JSON.stringify(json) : body, signal });
   const text = await res.text();
   // Status before parsing: a proxy 502 answers with HTML, not JSON.
   if (!res.ok) throw fromResponse(res, text, PROVIDER);
-  return text;
+  let root = null;
+  try { root = JSON.parse(text); } catch {}
+  if (!root || typeof root !== "object") throw unexpected(step, res, text, again);
+  return { text, root, res };
 }
 
-function idOf(text) {
-  const id = JSON.parse(text)?.id;
-  if (typeof id !== "string" || !ID.test(id)) throw malformed();
-  return id;
+function idOf(step, { text, root, res }) {
+  if (typeof root.id !== "string" || !ID.test(root.id)) throw unexpected(step, res, text);
+  return root.id;
 }
 
 // -> the file's id. No Content-Type of ours: the form sets it, with its boundary.
 async function upload(audio, name, apiKey, signal) {
   const form = new FormData();
   form.append("file", new Blob([audio], { type: "audio/wav" }), name);
-  return idOf(await send("files", { method: "POST", body: form, apiKey, signal }));
+  return idOf("upload", await send("upload", "files", { method: "POST", body: form, apiKey, signal }));
 }
 
 // The dictionary's terms, as many as fit: the context has a size, and a request over it is refused whole.
@@ -83,7 +98,7 @@ async function create({ model, file, languages = [], terms = [], identify = fals
   if (languages.length) json.language_hints = languages;
   if (terms.length) json.context = { terms };
   if (identify) json.enable_language_identification = true;
-  return idOf(await send("transcriptions", { method: "POST", json, apiKey, signal }));
+  return idOf("start", await send("start", "transcriptions", { method: "POST", json, apiKey, signal }));
 }
 
 // A job that failed says so in its own fields, with a 200: read as the status that kind of failure comes with
@@ -97,14 +112,17 @@ function jobError(job) {
 // Whether a transcription is over: true, false while it is queued or worked on, a throw when it failed. The
 // reference names the failure "error", the errors page "failed"; any other word is a job still on its way.
 async function finished(id, apiKey, signal) {
-  const job = JSON.parse(await send(`transcriptions/${id}`, { apiKey, signal }));
-  if (!job || typeof job !== "object") throw malformed(true);
+  const job = (await send("status", `transcriptions/${id}`, { apiKey, signal, again: true })).root;
   if (job.status === "error" || job.status === "failed") throw jobError(job);
   return job.status === "completed";
 }
 
 // The transcript exactly as it came: {text, tokens: [{text, start_ms, end_ms, confidence, language?}]}.
-const transcript = (id, apiKey, signal) => send(`transcriptions/${id}/transcript`, { apiKey, signal });
+async function transcript(id, apiKey, signal) {
+  const answer = await send("transcript", `transcriptions/${id}/transcript`, { apiKey, signal });
+  if (typeof answer.root.text !== "string") throw unexpected("transcript", answer.res, answer.text);
+  return answer.text;
+}
 
 // Deletes a file or a transcription there, with a budget of its own: what it follows may have been cancelled.
 // -> whether it is gone; never throws. A transcription still being worked on is refused (409) and stays.
@@ -144,9 +162,7 @@ async function transcribe({ wavPath, model, language, vocabulary = [], apiKey, s
       await timers.setTimeout(POLL_MS[Math.min(asked, POLL_MS.length - 1)], undefined, { signal });
       if (await finished(job, apiKey, signal)) break;
     }
-    const text = JSON.parse(await transcript(job, apiKey, signal))?.text;
-    if (typeof text !== "string") throw malformed();
-    return text;
+    return JSON.parse(await transcript(job, apiKey, signal)).text;
   } catch (error) {
     throw classify({ error, provider: PROVIDER, signal });
   } finally {
@@ -207,7 +223,7 @@ async function* speak({ text, model, voice, language, apiKey, signal, timeoutMs 
       bytes += pcm.length;
       yield pcm;
     }
-    if (!bytes) throw malformed(true);
+    if (!bytes) throw unexpected("speech", res, "", true);
   } catch (error) {
     throw classify({ error, provider: PROVIDER, signal: attempt });
   }

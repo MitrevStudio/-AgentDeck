@@ -765,6 +765,29 @@ test("Soniox dictation: a failed job, a refused key, a refused context, a cancel
   assert.deepEqual(calls().slice(-2), ["DELETE transcriptions/job-1", "DELETE files/file-1"], "a cancelled dictation is not left there either");
 });
 
+test("Soniox dictation: a 200 that is not the API's says which request it was and what came", async () => {
+  const dictate = () => soniox.transcribe({ wavPath: wav, model: "stt-async-v6", language: "auto", apiKey: "test-key" });
+  const plain = (text, type = "text/plain") => new Response(text, { status: 200, headers: { "content-type": type } });
+  for (const [step, at, answer, told] of [
+    ["upload", /\/files$/, () => plain("Upload blocked by policy 7"), ["upload", "HTTP 200", "text/plain", "Upload blocked by policy 7"]],
+    ["start", /\/transcriptions$/, () => ({ status: "queued" }), ["start", "HTTP 200", '{"status":"queued"}']],
+    ["transcript", /\/transcript$/, () => ({ id: "job-1", tokens: [] }), ["transcript", '{"id":"job-1","tokens":[]}']]
+  ]) {
+    reply = url => (at.test(url) && sent.at(-1).method !== "DELETE" ? answer() : null);
+    await assert.rejects(dictate(), error => {
+      assert.deepEqual([error.kind, error.retryable, error.status], ["MalformedResponse", false, 200], step);
+      for (const part of told) assert.ok(error.longMessage.includes(part), `${step}: "${part}" in "${error.longMessage}"`);
+      return true;
+    });
+  }
+  reply = url => (/\/files$/.test(url) ? plain("<html><body>Sign in to the network</body></html>", "text/html") : null);
+  await assert.rejects(dictate(), error => /HTML/.test(error.longMessage) && !error.longMessage.includes("Sign in"), "a page is named, not quoted");
+  // The question about the job costs nothing to ask again.
+  reply = url => (jobState(url) && sent.at(-1).method === "GET" ? plain("gateway busy") : null);
+  await assert.rejects(dictate(), error => error.kind === "ServerError" && error.retryable && error.longMessage.includes("status"));
+  reply = null;
+});
+
 test("Soniox's errors are read in both of their shapes", () => {
   const { classify } = voice("errors");
   const api = (status, error_type, message = "its own words") => classify({ status, provider: "Soniox", body: JSON.stringify({ status_code: status, error_type, message, validation_errors: [] }) });
