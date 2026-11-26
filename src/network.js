@@ -16,11 +16,11 @@
 // net.request, which can. The password is kept like the API keys - safeStorage (DPAPI) ciphertext, base64, in
 // passwordEnc - and never goes to a page.
 //
-// Every request names AgentDeck as its User-Agent, not Chromium's browser one. A filtering proxy (Trend Micro's TMWS
-// for one) takes "Mozilla/5.0 ... Chrome" for somebody browsing and answers with a redirect to its sign-in page,
-// unless the address is on its list of exceptions; a program that says what it is gets through. No request is sent on
-// to another site either: an API does not redirect, a sign-in page does, and the API key would travel with it. Such a
-// redirect fails as REDIRECTED (code), with the site's name in `host`.
+// Every request names AgentDeck as its User-Agent, not Chromium's browser one. A filtering proxy can take
+// "Mozilla/5.0 ... Chrome" for somebody browsing and answer with a redirect to its sign-in page, unless the address is
+// on its list of exceptions; a program that says what it is gets through. No request is sent on to another site
+// either: an API does not redirect, a sign-in page does, and the API key would travel with it. Such a redirect fails
+// as REDIRECTED (code), with the site's name in `host`.
 const { app, net, session, safeStorage } = require("electron");
 const settings = require("./voice/settings");
 const { isObj } = require("./shared/util");
