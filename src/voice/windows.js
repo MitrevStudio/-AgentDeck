@@ -9,6 +9,7 @@ const { MODELS, TASKS, VOICES, VOICE_STYLES, choices } = require("./catalog");
 const { SAFE_ID, isObj, sleep } = require("../shared/util");
 const { classify } = require("./errors");
 const dictation = require("./dictation-options");
+const { builtIn } = require("./rewrite");
 const { t } = require("../i18n");
 
 const UI = path.join(__dirname, "ui");
@@ -228,6 +229,9 @@ function createVoiceWindows({ settings, store, queue, listDevices, onReread, onS
   // Apart from the rest: the first listing starts the recorder and can take seconds, and the window waits for the
   // page's first fit before it shows - with the microphones in it, it was shown unfitted (the timer above) and resized.
   handle("voice:settings:devices", settingsOwner, () => devices());
+  // The built-in instruction of each rewriting mode ({clean, prompt}) as the page's choices make it, saved or not:
+  // what its instructions field shows while the user has no text of their own. It lives in rewrite.js alone.
+  handle("voice:settings:instructions", settingsOwner, choice => builtInFor(choice));
 
   handle("voice:settings:fit", settingsOwner, height => {
     const win = settingsWin;
@@ -349,6 +353,12 @@ function createVoiceWindows({ settings, store, queue, listDevices, onReread, onS
   return { openHistory, openSettings, onPrefsChanged };
 }
 
+// The built-in rewriting instructions for the page's dictation language and prompt language (whatever else it sent).
+const builtInFor = p => builtIn({
+  language: typeof p?.language === "string" ? p.language.trim() : undefined,
+  promptLanguage: typeof p?.promptLanguage === "string" ? p.promptLanguage : undefined
+});
+
 // Everything the Settings page sends is checked here; the page is not trusted to have offered only valid choices.
 // inUse: { hotkeys: the saved ones, edge: the edge menu's as shown } - the screenshot key may be none of them.
 function validateSettings(p, providers, inUse = {}) {
@@ -427,6 +437,12 @@ function validateSettings(p, providers, inUse = {}) {
   const dict = dictation.validate(p);
   Object.assign(patch, dict.patch);
   Object.assign(errors, dict.errors);
+  // The built-in text sent back as it was shown is no text of the user's: stored empty, it follows the settings and
+  // the app's later wording.
+  if (patch.rewriteInstructions) {
+    const shown = builtInFor(p);
+    for (const [mode, text] of Object.entries(patch.rewriteInstructions)) if (text === shown[mode]) patch.rewriteInstructions[mode] = "";
+  }
 
   // {set: "key"} replaces, {clear: true} removes; a provider that is absent keeps whatever is saved.
   for (const [provider, k] of Object.entries(isObj(p.apiKeys) ? p.apiKeys : {})) {

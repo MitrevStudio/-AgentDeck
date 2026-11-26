@@ -6,7 +6,7 @@
 // a schema), with the timeout and the error classification every voice request gets. Voice commands build on it.
 const { classify, configuration, VoiceError } = require("./errors");
 const { providerName, resolveTask } = require("./catalog");
-const { MODES } = require("./dictation-options");
+const { MODES, instructionText } = require("./dictation-options");
 const { t } = require("../i18n");
 
 // The providers that write text.
@@ -77,15 +77,24 @@ const PROMPT_LANGUAGE = {
 };
 
 // The system instruction for a mode. vocabulary: terms the transcript may contain (dictionary.js); language: the
-// dictation language setting ("bg", "auto"...); promptLanguage: "spoken" | "en" (prompt mode only).
-function instructions(mode, { vocabulary = [], language = "auto", promptLanguage = "spoken" } = {}) {
+// dictation language setting ("bg", "auto"...); promptLanguage: "spoken" | "en" (prompt mode only). custom: the user's
+// own instruction for the mode (the rewriteInstructions setting) - it is then the whole instruction, exactly as
+// written: what the built-in one gets from the settings and the dictionary is the user's to write there.
+function instructions(mode, { vocabulary = [], language = "auto", promptLanguage = "spoken", custom = "" } = {}) {
   if (!TASKS[mode]) throw new Error(`no instructions for mode "${mode}"`);
+  const own = instructionText(custom);
+  if (own) return own;
   const lines = [...COMMON, "", ...TASKS[mode]];
   if (mode === "prompt") lines.push(PROMPT_LANGUAGE[promptLanguage] || PROMPT_LANGUAGE.spoken);
   if (LANGUAGE_NAMES[language]) lines.push("", `The speaker usually dictates in ${LANGUAGE_NAMES[language]}, often with English technical terms mixed in.`);
   if (vocabulary.length) lines.push("", `Vocabulary - names and terms that may occur, spelled correctly (the transcript may have misheard them): ${vocabulary.join(", ")}.`);
   return lines.join("\n");
 }
+
+// The built-in instruction of each rewriting mode under these settings, without the vocabulary (long, and it changes
+// with the dictionary and the projects): what Settings shows until the user writes their own.
+const builtIn = ({ language, promptLanguage } = {}) =>
+  Object.fromEntries(Object.keys(TASKS).map(mode => [mode, instructions(mode, { language, promptLanguage })]));
 
 // The transcript cannot close its own tag early.
 const wrap = text => `<transcript>\n${String(text).replace(/<\/?transcript>/gi, m => m.replace("<", "< "))}\n</transcript>`;
@@ -102,18 +111,22 @@ function unwrap(answer, source) {
 }
 
 // The transcript as `mode` wants it: "verbatim" (returned as is), "clean" or "prompt". dictionary: terms the transcript
-// may contain (dictionary.vocabulary()); language: the dictation language; promptLanguage defaults to the setting;
-// provider, model, signal and getApiKey as for generate(). An empty answer is an error, never an empty paste.
-async function rewrite(text, { mode = "verbatim", dictionary = [], language = "auto", promptLanguage, provider, model, signal, getApiKey } = {}) {
+// may contain (dictionary.vocabulary()); language: the dictation language; promptLanguage and custom (the user's own
+// instruction for the mode, see instructions()) default to the settings; provider, model, signal and getApiKey as for
+// generate(). An empty answer is an error, never an empty paste.
+async function rewrite(text, { mode = "verbatim", dictionary = [], language = "auto", promptLanguage, custom, provider, model, signal, getApiKey } = {}) {
   const source = String(text ?? "").trim();
   if (!MODES.includes(mode)) throw new Error(`unknown dictation mode "${mode}"`);
   if (!source || mode === "verbatim") return source;
   const use = target("rewrite", provider, model);
-  const system = instructions(mode, { vocabulary: dictionary, language, promptLanguage: promptLanguage ?? settings().load().promptLanguage });
+  const saved = promptLanguage == null || custom == null ? settings().load() : {};
+  const system = instructions(mode, {
+    vocabulary: dictionary, language, promptLanguage: promptLanguage ?? saved.promptLanguage, custom: custom ?? saved.rewriteInstructions?.[mode]
+  });
   const answer = await generate({ system, text: wrap(source), ...use, temperature: mode === "prompt" ? 0.3 : 0.1, signal, getApiKey });
   const out = unwrap(answer, source);
   if (!out) throw new VoiceError("MalformedResponse", t("voice.errors.rewrite.empty.short"), t("voice.errors.rewrite.empty.long", { provider: use.provider }));
   return out;
 }
 
-module.exports = { rewrite, generate, instructions, unwrap, MODES };
+module.exports = { rewrite, generate, instructions, builtIn, unwrap, MODES };

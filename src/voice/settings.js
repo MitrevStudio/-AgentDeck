@@ -33,7 +33,7 @@ const defaults = Object.freeze({
   readAloudSpeed: 1.0, // remembered from the last reading
   hotkeys: Object.freeze({ dictate: "Control+Space", readAloud: "Control+Shift+Space", editSelection: "Control+Alt+Space", ask: "Control+Shift+/", meetingScreenshot: DEFAULT_SHORTCUT }),
   importedFromVoiceTray: null,
-  // dictationMode, promptLanguage, pushToTalk and the dictionary (dictation-options.js).
+  // dictationMode, promptLanguage, rewriteInstructions, pushToTalk and the dictionary (dictation-options.js).
   ...dictation.DEFAULTS,
   // Voice commands (command-options.js).
   ...commandOptions.DEFAULTS
@@ -194,8 +194,8 @@ function mergeTasks(current, patch) {
   return out;
 }
 
-// Shallow patch; `tasks`, `hotkeys` and `readAloudVoices` merge deeper so a partial object does not wipe the other
-// entries.
+// Shallow patch; `tasks`, `hotkeys`, `readAloudVoices` and `rewriteInstructions` merge deeper so a partial object does
+// not wipe the other entries.
 async function save(patch = {}) {
   const cur = stored();
   const p = withoutPrivate(isObj(patch) ? patch : {});
@@ -204,6 +204,7 @@ async function save(patch = {}) {
     tasks: mergeTasks(cur.tasks, p.tasks),
     hotkeys: { ...cur.hotkeys, ...(isObj(p.hotkeys) ? p.hotkeys : {}) },
     readAloudVoices: { ...cur.readAloudVoices, ...(isObj(p.readAloudVoices) ? p.readAloudVoices : {}) },
+    rewriteInstructions: { ...cur.rewriteInstructions, ...(isObj(p.rewriteInstructions) ? p.rewriteInstructions : {}) },
     apiKeysEnc: cur.apiKeysEnc
   }));
   return load();

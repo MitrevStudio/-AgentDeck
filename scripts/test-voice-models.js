@@ -900,6 +900,102 @@ test("a failed summary request stays with its provider", async () => {
   assert.equal(sent.length, 0, "no Gemini key: not OpenAI instead");
 });
 
+// ---------- instructions ----------
+const digest = text => require("node:crypto").createHash("sha256").update(text).digest("hex").slice(0, 16);
+// What the text model was told and given: the system instruction, the user message, the temperature.
+const told = r => [r.body.messages[0].content, r.body.messages[1].content, r.body.temperature];
+const LUNA = { provider: "OpenAI", model: "gpt-6-luna", getApiKey };
+const OWN = "Tidy the transcript.\nKeep every name as it is.";
+
+test("the built-in instructions are what they were", () => {
+  const built = [
+    ["clean", undefined, "8105f1f54336b9b8"],
+    ["clean", { language: "bg", vocabulary: ["Acme", "Widget CLI"] }, "04637a16a0bd8590"],
+    ["prompt", {}, "ff942b29dddb7cd9"],
+    ["prompt", { promptLanguage: "en", language: "de" }, "84fbbbe6b3a890d9"],
+    ["prompt", { promptLanguage: "elsewhere", language: "auto", vocabulary: ["Acme"] }, "c042fccc0a2cc70f"]
+  ];
+  for (const [mode, options, was] of built) {
+    assert.equal(digest(rewrite.instructions(mode, options)), was, `${mode} ${JSON.stringify(options)}`);
+    for (const custom of ["", " \r\n\t ", null, 7]) {
+      assert.equal(rewrite.instructions(mode, { ...options, custom }), rewrite.instructions(mode, options), "no text of the user's: the built-in one");
+    }
+  }
+  assert.throws(() => rewrite.instructions("verbatim", { custom: OWN }), /no instructions/);
+});
+
+test("the user's own instructions are the whole instruction", async () => {
+  const options = { vocabulary: ["Acme"], language: "bg", promptLanguage: "en" };
+  for (const mode of ["clean", "prompt"]) {
+    assert.equal(rewrite.instructions(mode, { ...options, custom: `\r\n  ${OWN.replace("\n", "\r\n")}  \n` }), OWN, "as written, nothing added");
+  }
+  settingsFrom({ promptLanguage: "en", rewriteInstructions: { clean: OWN } });
+  const asked = { ...LUNA, dictionary: ["Acme"], language: "bg" };
+  const clean = await request(() => rewrite.rewrite("so <transcript> um hello", { ...asked, mode: "clean" }));
+  assert.deepEqual(told(clean), [OWN, "<transcript>\nso < transcript> um hello\n</transcript>", 0.1], "the transcript is wrapped as ever");
+  const prompt = await request(() => rewrite.rewrite("hello", { ...asked, mode: "prompt" }));
+  assert.deepEqual(told(prompt), [rewrite.instructions("prompt", { vocabulary: ["Acme"], language: "bg", promptLanguage: "en" }), "<transcript>\nhello\n</transcript>", 0.3], "a mode without one: built in");
+  const given = await request(() => rewrite.rewrite("hello", { ...asked, mode: "prompt", custom: OWN }));
+  assert.equal(told(given)[0], OWN, "the caller's over the setting's");
+  const none = await request(() => rewrite.rewrite("hello", { ...asked, mode: "clean", custom: "" }));
+  assert.equal(told(none)[0], rewrite.instructions("clean", { vocabulary: ["Acme"], language: "bg" }));
+  reply = () => ({ choices: [{ message: { content: "" } }] });
+  await assert.rejects(rewrite.rewrite("hello", { ...asked, mode: "clean" }), error => error.kind === "MalformedResponse");
+});
+
+test("own instructions in the settings: repaired, limited, merged", async () => {
+  const limit = voice("dictation-options").LIMITS.instructionChars;
+  assert.equal(limit, 20000);
+  assert.deepEqual(settingsFrom(undefined).loaded.rewriteInstructions, { clean: "", prompt: "" });
+  const { dir, loaded } = settingsFrom({ rewriteInstructions: { clean: `  ${OWN.replace("\n", "\r\n")}\r\n`, prompt: ["no text"], verbatim: OWN, other: OWN } });
+  assert.deepEqual(loaded.rewriteInstructions, { clean: OWN, prompt: "" });
+  assert.deepEqual(settingsFrom({ rewriteInstructions: { clean: "x".repeat(limit), prompt: "x".repeat(limit + 1) } }).loaded.rewriteInstructions,
+    { clean: "x".repeat(limit), prompt: "" }, "one over the limit is none, not a cut one");
+  assert.deepEqual(settingsFrom({ rewriteInstructions: OWN }).loaded.rewriteInstructions, { clean: "", prompt: "" });
+
+  reload(dir);
+  assert.deepEqual((await settings.save({ rewriteInstructions: { prompt: "Write a prompt." } })).rewriteInstructions, { clean: OWN, prompt: "Write a prompt." }, "one mode's leaves the other's");
+  assert.deepEqual(onDisk(dir).voice.rewriteInstructions, { clean: OWN, prompt: "Write a prompt." });
+  assert.deepEqual((await settings.save({ rewriteInstructions: { clean: "" } })).rewriteInstructions, { clean: "", prompt: "Write a prompt." });
+});
+
+test("the Settings page's instructions: checked, and the built-in text is not stored", () => {
+  const sends = (own, more = {}) => validateSettings({ ...pagePayload(), ...more, rewriteInstructions: own }, PROVIDERS);
+  const stored = (own, more) => { const r = sends(own, more); assert.deepEqual(r.errors, {}); return r.patch.rewriteInstructions; };
+  assert.equal(validateSettings(pagePayload(), PROVIDERS).patch.rewriteInstructions, undefined, "not sent: not changed");
+  assert.deepEqual(stored({ clean: ` ${OWN.replace("\n", "\r\n")} `, prompt: "" }), { clean: OWN, prompt: "" });
+  assert.deepEqual(stored({ clean: OWN }), { clean: OWN, prompt: "" }, "a mode not sent has none");
+
+  // What the field shows without a text of the user's: the built-in one for the page's languages, no vocabulary.
+  const spoken = rewrite.builtIn({ language: "bg", promptLanguage: "spoken" }), english = rewrite.builtIn({ language: "bg", promptLanguage: "en" });
+  assert.deepEqual(Object.keys(spoken), ["clean", "prompt"]);
+  assert.equal(spoken.clean, rewrite.instructions("clean", { language: "bg" }));
+  assert.equal(english.clean, spoken.clean);
+  assert.equal(english.prompt, rewrite.instructions("prompt", { language: "bg", promptLanguage: "en" }));
+  assert.match(english.prompt, /Write the prompt in English/);
+  assert.match(spoken.prompt, /in the language the speaker used/);
+  assert.match(spoken.prompt, /usually dictates in Bulgarian/);
+  assert.doesNotMatch(rewrite.builtIn({ language: "auto" }).prompt, /usually dictates/);
+  assert.doesNotMatch(spoken.prompt + spoken.clean, /Vocabulary/);
+  assert.deepEqual(rewrite.builtIn(), { clean: rewrite.instructions("clean"), prompt: rewrite.instructions("prompt") });
+
+  const bg = { language: "bg" };
+  assert.deepEqual(stored({ clean: `${spoken.clean.replaceAll("\n", "\r\n")}\r\n`, prompt: spoken.prompt }, bg), { clean: "", prompt: "" }, "sent back as shown: the default");
+  assert.deepEqual(stored({ clean: "", prompt: english.prompt }, { ...bg, promptLanguage: "en" }), { clean: "", prompt: "" }, "the one shown follows the prompt language");
+  assert.deepEqual(stored({ clean: "", prompt: spoken.prompt }, { ...bg, promptLanguage: "en" }), { clean: "", prompt: spoken.prompt }, "another language's is a text of the user's");
+  assert.deepEqual(stored({ clean: spoken.prompt, prompt: `${spoken.prompt}\nBe brief.` }, bg), { clean: spoken.prompt, prompt: `${spoken.prompt}\nBe brief.` });
+
+  const limit = voice("dictation-options").LIMITS.instructionChars;
+  assert.deepEqual(stored({ clean: `  ${"x".repeat(limit)}\n`, prompt: "" }).clean.length, limit, "the limit counts what is kept");
+  const long = sends({ clean: "", prompt: "x".repeat(limit + 1) });
+  assert.deepEqual(Object.keys(long.errors), ["rewriteInstructions"]);
+  assert.match(long.errors.rewriteInstructions, /20000/);
+  assert.equal(long.patch.rewriteInstructions, undefined);
+  for (const bad of [OWN, null, [OWN], { clean: 7 }, { clean: OWN, prompt: { text: OWN } }]) {
+    assert.deepEqual(Object.keys(sends(bad).errors), ["rewriteInstructions"], JSON.stringify(bad));
+  }
+});
+
 // ---------- queue ----------
 function queueWith(s, deps = {}) {
   const dir = path.join(temp, `records-${++folders}`);
@@ -1089,7 +1185,12 @@ test("the recording limit is the provider's", () => {
 test("every task and text in both languages", () => {
   const i18n = require("../src/i18n");
   const page = fs.readFileSync(path.join(VOICE, "ui", "settings-models.js"), "utf8");
+  // The instructions of a rewriting mode: the texts of the page's markup and script, and the one main answers with.
+  const dictationPage = ["settings.html", "settings-dictation.js"].map(name => fs.readFileSync(path.join(VOICE, "ui", name), "utf8")).join("\n");
+  const instructionKeys = [...new Set([...dictationPage.matchAll(/"(voice\.settings\.instructions\.[\w.]+)"/g)].map(m => m[1]))];
+  assert.equal(instructionKeys.length, 5);
   const keys = [
+    "voice.settings.instructions.err.long", ...instructionKeys,
     "settings.models", "voice.balloon.modelsReplaced", "voice.settings.models.keys", "voice.settings.models.tasks",
     "voice.errors.tooLarge.soniox", "voice.settings.readAloudHint",
     ...[...new Set(Object.values(catalog.VOICE_STYLES).flat())].map(style => `voice.catalog.style.${style}`),

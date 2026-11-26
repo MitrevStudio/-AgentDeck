@@ -1,5 +1,6 @@
-/* Settings -> Dictionary: terms as chips in one field, replacements as "spoken -> written" rows; and the start with
-   Windows switch (General), which can be shown off and disabled (a copy run from source). Tokens from ../../theme.css. */
+/* Settings -> Dictionary: terms as chips in one field, replacements as "spoken -> written" rows; Dictation: the
+   instructions of a rewriting mode, closed until asked for; and the start with Windows switch (General), which can be
+   shown off and disabled (a copy run from source). Tokens from ../../theme.css. */
 
 /* ---------- terms ---------- */
 .vd-terms {
@@ -42,6 +43,16 @@
 }
 .vd-add:hover { color: var(--accent); border-color: var(--accent-line); background: var(--accent-weak); }
 .vd-add .i { width: 13px; height: 13px; }
+
+/* ---------- the instructions of a rewriting mode ---------- */
+.vi { margin-top: 8px; }
+.vi-mark { font-weight: 500; color: var(--accent); }
+.vi-body { margin-top: 6px; }
+.vs .vi .textarea { display: block; min-height: 96px; padding: 8px 10px; font: 12.5px/1.5 var(--mono); user-select: text; }
+.vi .textarea.invalid { border-color: var(--danger); }
+.vi-foot { display: flex; align-items: flex-start; gap: 12px; }
+.vi-foot .vs-hint { flex: 1; min-width: 0; }
+.vi-foot .btn { flex: none; margin-top: 6px; }
 
 /* ---------- a switch that cannot be used here ---------- */
 .vs-toggle:has(.switch:disabled) { cursor: default; }

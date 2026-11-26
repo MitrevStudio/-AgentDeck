@@ -293,11 +293,24 @@
             <div class="seg" id="dictMode" role="radiogroup" aria-labelledby="dictModeLabel"></div>
             <div class="vs-hint" id="dictModeHint"></div>
             <div class="vs-err" data-err="dictationMode"></div>
+            <!-- What the text model is told in the selected mode (none for Verbatim): closed until asked for. -->
+            <div class="vi" id="instr" hidden>
+              <button type="button" class="vd-add" id="instrToggle" aria-expanded="false" aria-controls="instrBody"></button>
+              <div class="vi-body" id="instrBody" hidden>
+                <textarea class="textarea" id="rewriteInstructions" rows="12" spellcheck="false" maxlength="20000" aria-labelledby="instrToggle"></textarea>
+                <div class="vi-foot">
+                  <div class="vs-hint" data-i18n="voice.settings.instructions.hint"></div>
+                  <button type="button" class="btn sm" id="instrReset"><span data-icon="undo"></span><span data-i18n="voice.settings.instructions.reset"></span></button>
+                </div>
+              </div>
+              <div class="vs-err" data-err="rewriteInstructions"></div>
+            </div>
           </div>
 
           <span class="vs-label" id="promptLangLabel" data-i18n="voice.settings.promptLanguage"></span>
           <div class="vs-field">
             <div class="seg" id="promptLang" role="radiogroup" aria-labelledby="promptLangLabel"></div>
+            <div class="vs-hint" id="promptLangHint" data-i18n="voice.settings.instructions.promptLanguage" hidden></div>
             <div class="vs-err" data-err="promptLanguage"></div>
           </div>
         </div>

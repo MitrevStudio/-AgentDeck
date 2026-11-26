@@ -31,6 +31,8 @@ contextBridge.exposeInMainWorld("voiceSettings", {
   // A tab asked for while the window is open.
   onShow: cb => ipcRenderer.on("voice:settings:show", (_e, pane) => cb(pane)),
   devices: () => ipcRenderer.invoke("voice:settings:devices"),
+  // The built-in rewriting instructions under these choices: {language, promptLanguage} -> {clean, prompt}.
+  instructions: choice => ipcRenderer.invoke("voice:settings:instructions", choice),
   save: payload => ipcRenderer.invoke("voice:settings:save", payload),
   // true while a hotkey field has the focus: main lets go of the voice hotkeys so they reach the field.
   capture: on => ipcRenderer.invoke("voice:settings:capture", on === true),

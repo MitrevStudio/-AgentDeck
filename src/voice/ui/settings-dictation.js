@@ -1,7 +1,7 @@
-// Settings -> Dictation and Dictionary: the dictation mode, the language of a prompt, how the dictation key behaves,
-// and the dictionary (terms, replacements, project names). Loaded before settings.js, which calls dictationUi.fill()
-// once the settings are in and spreads dictationUi.payload() into what it saves; edits inside those tabs already
-// count as unsaved there.
+// Settings -> Dictation and Dictionary: the dictation mode, the instructions of the modes that rewrite, the language
+// of a prompt, how the dictation key behaves, and the dictionary (terms, replacements, project names). Loaded
+// before settings.js, which calls dictationUi.fill() once the settings are in and spreads dictationUi.payload() into
+// what it saves; edits inside those tabs already count as unsaved there.
 // Uses $, esc, icon, t and tn from common.js and modelsUi from settings-models.js.
 const dictationUi = (() => {
   // As dictation-options.js has them (the modes: VOICE_MODES in common.js).
@@ -11,15 +11,18 @@ const dictationUi = (() => {
   const TERM_CHARS = 80;
   const SHOWN_PROJECTS = 6;
 
-  const st = { mode: "verbatim", promptLanguage: "spoken", talk: "hybrid", terms: [], reps: [], data: null };
+  // custom: the user's own instructions per rewriting mode ("" = the built-in one); builtIn: the built-in ones under
+  // the page's dictation language and prompt language, as main has them (null until it answers); open: the field.
+  const st = { mode: "verbatim", promptLanguage: "spoken", talk: "hybrid", terms: [], reps: [], data: null,
+    custom: { clean: "", prompt: "" }, builtIn: null, open: false };
   const fold = s => s.toLocaleLowerCase();
   // The window follows the page's height: chips and rows add lines.
   const refit = () => window.voiceSettings.fit();
 
   // ---------- segmented controls ----------
   const SEGS = {
-    dictMode: { values: MODES, label: v => t(`voice.mode.${v}`), get: () => st.mode, set: v => { st.mode = v; modeHint(); } },
-    promptLang: { values: PROMPT_LANGUAGES, label: v => t(`voice.settings.promptLanguage.${v}`), get: () => st.promptLanguage, set: v => { st.promptLanguage = v; } },
+    dictMode: { values: MODES, label: v => t(`voice.mode.${v}`), get: () => st.mode, set: v => { st.mode = v; modeHint(); renderInstructions(); } },
+    promptLang: { values: PROMPT_LANGUAGES, label: v => t(`voice.settings.promptLanguage.${v}`), get: () => st.promptLanguage, set: v => { st.promptLanguage = v; loadBuiltIn(); } },
     talkMode: { values: TALK_MODES, label: v => t(`voice.settings.talk.${v}`), get: () => st.talk, set: v => { st.talk = v; talkHint(); } }
   };
   function renderSeg(id) {
@@ -54,6 +57,67 @@ const dictationUi = (() => {
     $("dictModeHint").textContent = `${t(`voice.settings.modeHint.${st.mode}`)}${extra} ${t("voice.settings.modeChip")}`;
   }
   const talkHint = () => { $("talkModeHint").textContent = t(`voice.settings.talkHint.${st.talk}`); };
+
+  // ---------- the instructions of a rewriting mode ----------
+  const instrField = $("rewriteInstructions");
+  const instrText = s => s.replace(/\r\n?/g, "\n").trim(); // as dictation-options.js keeps one
+  const instrErr = () => {
+    instrField.classList.remove("invalid");
+    document.querySelector('[data-err="rewriteInstructions"]').textContent = "";
+  };
+  // keep: the field is under the user's hands and stays as typed.
+  function renderInstructions(keep = false) {
+    const on = st.mode !== "verbatim", own = on && Boolean(st.custom[st.mode]);
+    $("instr").hidden = !on;
+    $("instrBody").hidden = !st.open;
+    $("instrToggle").setAttribute("aria-expanded", String(st.open));
+    // Said on the closed button too: a text of the user's is in effect whether it is looked at or not.
+    $("instrToggle").innerHTML = `${icon(st.open ? "down" : "right")}<span>${esc(t("voice.settings.instructions.edit"))}</span>` +
+      (own ? `<span class="vi-mark">· ${esc(t("voice.settings.instructions.custom"))}</span>` : "");
+    $("instrReset").disabled = !own;
+    $("promptLangHint").hidden = !st.custom.prompt;
+    if (on && !keep) instrField.value = st.custom[st.mode] || st.builtIn?.[st.mode] || "";
+  }
+  // The built-in texts follow the dictation language and the prompt language, so they are asked for again when
+  // either changes; an answer for choices that have changed since is dropped.
+  let asked = "";
+  async function loadBuiltIn() {
+    const choice = { language: $("language").value, promptLanguage: st.promptLanguage }, key = JSON.stringify(choice);
+    if (key === asked) return;
+    asked = key;
+    const texts = await window.voiceSettings.instructions(choice).catch(() => null);
+    if (!texts || key !== asked) return;
+    st.builtIn = texts;
+    // The built-in text is nobody's own, whichever way it got into the field.
+    for (const mode of Object.keys(st.custom)) if (instrText(st.custom[mode]) === texts[mode]) st.custom[mode] = "";
+    renderInstructions(Boolean(st.custom[st.mode]));
+    refit();
+  }
+  $("language").addEventListener("change", loadBuiltIn);
+  // Opening and closing changes nothing that Save would store.
+  $("instrToggle").addEventListener("click", e => {
+    e.stopPropagation();
+    st.open = !st.open;
+    renderInstructions(true);
+    refit();
+    if (st.open) instrField.focus();
+  });
+  instrField.addEventListener("input", () => {
+    const text = instrText(instrField.value), was = st.custom[st.mode];
+    st.custom[st.mode] = !text || text === st.builtIn?.[st.mode] ? "" : instrField.value;
+    instrErr();
+    renderInstructions(true);
+    if (!was !== !st.custom[st.mode]) refit(); // the prompt language's note comes and goes
+  });
+  // Emptied: the built-in text is what will be sent, so the field shows it.
+  instrField.addEventListener("blur", () => { if (!instrField.value.trim()) instrField.value = st.builtIn?.[st.mode] || ""; });
+  $("instrReset").addEventListener("click", () => {
+    st.custom[st.mode] = "";
+    instrErr();
+    renderInstructions();
+    refit();
+    instrField.focus();
+  });
 
   // ---------- terms: chips in front of a text field ----------
   const termInput = $("termInput");
@@ -155,12 +219,15 @@ const dictationUi = (() => {
     st.mode = s.dictationMode;
     st.promptLanguage = s.promptLanguage;
     st.talk = s.pushToTalk;
+    for (const mode of Object.keys(st.custom)) st.custom[mode] = s.rewriteInstructions?.[mode] || "";
     st.terms = [...(s.dictionary?.terms || [])];
     st.reps = (s.dictionary?.replacements || []).map(r => ({ ...r }));
     $("dictProjects").checked = s.dictionary?.projectNames !== false;
     for (const id of Object.keys(SEGS)) renderSeg(id);
     modeHint();
     talkHint();
+    renderInstructions();
+    loadBuiltIn();
     renderTerms();
     renderReps();
     renderProjects();
@@ -173,6 +240,7 @@ const dictationUi = (() => {
     return {
       dictationMode: st.mode,
       promptLanguage: st.promptLanguage,
+      rewriteInstructions: { ...st.custom },
       pushToTalk: st.talk,
       dictionary: {
         terms: [...st.terms],
